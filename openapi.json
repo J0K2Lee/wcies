@@ -131,6 +131,2628 @@
         "tags": ["auth"]
       }
     },
+    "/api/v1/platforms": {
+      "get": {
+        "operationId": "PlatformController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List platforms (OZON / WB / YANDEX)",
+        "tags": ["platforms"]
+      }
+    },
+    "/api/v1/platforms/{id}": {
+      "get": {
+        "operationId": "PlatformController_getById",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get a platform by id",
+        "tags": ["platforms"]
+      }
+    },
+    "/api/v1/stores": {
+      "get": {
+        "operationId": "StoreController_list",
+        "parameters": [
+          {
+            "name": "platformId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["ACTIVE", "INACTIVE"]
+            }
+          },
+          {
+            "name": "keyword",
+            "required": false,
+            "in": "query",
+            "description": "Matches store_code / name",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List stores (paged, with credential + binding counts)",
+        "tags": ["stores"]
+      },
+      "post": {
+        "operationId": "StoreController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateStoreRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create a store on a platform",
+        "tags": ["stores"]
+      }
+    },
+    "/api/v1/stores/{id}": {
+      "get": {
+        "operationId": "StoreController_getById",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get store detail",
+        "tags": ["stores"]
+      },
+      "patch": {
+        "operationId": "StoreController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateStoreRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Update store fields (code and platform immutable)",
+        "tags": ["stores"]
+      }
+    },
+    "/api/v1/stores/{id}/activate": {
+      "post": {
+        "operationId": "StoreController_activate",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Activate a store",
+        "tags": ["stores"]
+      }
+    },
+    "/api/v1/stores/{id}/deactivate": {
+      "post": {
+        "operationId": "StoreController_deactivate",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Deactivate a store (no hard delete)",
+        "tags": ["stores"]
+      }
+    },
+    "/api/v1/stores/{storeId}/credentials": {
+      "get": {
+        "operationId": "StoreCredentialController_list",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List credential metadata for a store (no secrets)",
+        "tags": ["store-credentials"]
+      },
+      "post": {
+        "operationId": "StoreCredentialController_create",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertCredentialRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create a credential (payload encrypted at rest)",
+        "tags": ["store-credentials"]
+      }
+    },
+    "/api/v1/stores/{storeId}/credentials/{id}": {
+      "patch": {
+        "operationId": "StoreCredentialController_updatePayload",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertCredentialRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Replace the credential payload (re-encrypted)",
+        "tags": ["store-credentials"]
+      }
+    },
+    "/api/v1/stores/{storeId}/credentials/{id}/disable": {
+      "post": {
+        "operationId": "StoreCredentialController_disable",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Disable a credential",
+        "tags": ["store-credentials"]
+      }
+    },
+    "/api/v1/brands": {
+      "get": {
+        "operationId": "CatalogController_listBrands",
+        "parameters": [
+          {
+            "name": "keyword",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrandListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List brands (filterable by keyword)",
+        "tags": ["catalog"]
+      },
+      "post": {
+        "operationId": "CatalogController_createBrand",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBrandRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrandEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create a brand",
+        "tags": ["catalog"]
+      }
+    },
+    "/api/v1/brands/{id}": {
+      "patch": {
+        "operationId": "CatalogController_updateBrand",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBrandRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrandEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Update a brand",
+        "tags": ["catalog"]
+      }
+    },
+    "/api/v1/categories": {
+      "get": {
+        "operationId": "CatalogController_listCategoryTree",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryTreeEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List the category tree",
+        "tags": ["catalog"]
+      },
+      "post": {
+        "operationId": "CatalogController_createCategory",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCategoryRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create a category (tree node)",
+        "tags": ["catalog"]
+      }
+    },
+    "/api/v1/categories/{id}": {
+      "patch": {
+        "operationId": "CatalogController_updateCategory",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCategoryRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Update a category (cycle-safe parent changes)",
+        "tags": ["catalog"]
+      }
+    },
+    "/api/v1/products": {
+      "get": {
+        "operationId": "ProductController_list",
+        "parameters": [
+          {
+            "name": "keyword",
+            "required": false,
+            "in": "query",
+            "description": "Matches product_code / name_zh / name_ru",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "brandId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "categoryId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["DRAFT", "ACTIVE", "INACTIVE"]
+            }
+          },
+          {
+            "name": "sortBy",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "createdAt",
+              "type": "string",
+              "enum": ["createdAt", "updatedAt", "productCode", "nameZh"]
+            }
+          },
+          {
+            "name": "sortOrder",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "desc",
+              "type": "string",
+              "enum": ["asc", "desc"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List products (paged, keyword/brand/category/status filters)",
+        "tags": ["products"]
+      },
+      "post": {
+        "operationId": "ProductController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProductRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create a product (code auto-generated when omitted)",
+        "tags": ["products"]
+      }
+    },
+    "/api/v1/products/{id}": {
+      "get": {
+        "operationId": "ProductController_getById",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductDetailEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Product detail incl. its SKUs",
+        "tags": ["products"]
+      },
+      "patch": {
+        "operationId": "ProductController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProductRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Update product fields (business code editable, UUID immutable)",
+        "tags": ["products"]
+      }
+    },
+    "/api/v1/products/{id}/activate": {
+      "post": {
+        "operationId": "ProductController_activate",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Activate a product",
+        "tags": ["products"]
+      }
+    },
+    "/api/v1/products/{id}/deactivate": {
+      "post": {
+        "operationId": "ProductController_deactivate",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Deactivate a product (no hard delete once referenced)",
+        "tags": ["products"]
+      }
+    },
+    "/api/v1/skus": {
+      "get": {
+        "operationId": "SkuController_list",
+        "parameters": [
+          {
+            "name": "keyword",
+            "required": false,
+            "in": "query",
+            "description": "Matches sku_code / name_zh / name_ru / model",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "productId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "brandId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "categoryId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["DRAFT", "ACTIVE", "INACTIVE"]
+            }
+          },
+          {
+            "name": "hasListing",
+            "required": false,
+            "in": "query",
+            "description": "Filter SKUs with/without platform listings",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "platformId",
+            "required": false,
+            "in": "query",
+            "description": "SKU linked to a listing of this platform",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "storeId",
+            "required": false,
+            "in": "query",
+            "description": "SKU linked to a listing of this store",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "serialTracking",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            }
+          },
+          {
+            "name": "sortBy",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "createdAt",
+              "type": "string",
+              "enum": ["createdAt", "updatedAt", "skuCode", "nameZh"]
+            }
+          },
+          {
+            "name": "sortOrder",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "desc",
+              "type": "string",
+              "enum": ["asc", "desc"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkuListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List SKUs (paged; filters incl. hasListing/platformId/storeId)",
+        "tags": ["skus"]
+      },
+      "post": {
+        "operationId": "SkuController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSkuRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkuEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create an internal SKU (code auto-generated when omitted)",
+        "tags": ["skus"]
+      }
+    },
+    "/api/v1/skus/{id}": {
+      "get": {
+        "operationId": "SkuController_getById",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkuEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get SKU detail",
+        "tags": ["skus"]
+      },
+      "patch": {
+        "operationId": "SkuController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSkuRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkuEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Update SKU fields (volume always recomputed server-side)",
+        "tags": ["skus"]
+      }
+    },
+    "/api/v1/skus/{id}/activate": {
+      "post": {
+        "operationId": "SkuController_activate",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkuEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Activate a SKU",
+        "tags": ["skus"]
+      }
+    },
+    "/api/v1/skus/{id}/deactivate": {
+      "post": {
+        "operationId": "SkuController_deactivate",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkuEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Deactivate a SKU",
+        "tags": ["skus"]
+      }
+    },
+    "/api/v1/skus/{skuId}/barcodes": {
+      "get": {
+        "operationId": "SkuController_listBarcodes",
+        "parameters": [
+          {
+            "name": "skuId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BarcodeListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List barcodes of a SKU",
+        "tags": ["skus"]
+      },
+      "post": {
+        "operationId": "SkuController_createBarcode",
+        "parameters": [
+          {
+            "name": "skuId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBarcodeRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BarcodeEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Add a barcode (globally unique; first becomes primary)",
+        "tags": ["skus"]
+      }
+    },
+    "/api/v1/skus/{skuId}/barcodes/generate-internal": {
+      "post": {
+        "operationId": "SkuController_generateInternalBarcode",
+        "parameters": [
+          {
+            "name": "skuId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BarcodeEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Generate an INTERNAL barcode (WCSKU%08d) for the SKU",
+        "tags": ["skus"]
+      }
+    },
+    "/api/v1/skus/{skuId}/barcodes/{barcodeId}": {
+      "patch": {
+        "operationId": "SkuController_updateBarcode",
+        "parameters": [
+          {
+            "name": "skuId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "barcodeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBarcodeRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BarcodeEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Update a barcode (type/primary/status)",
+        "tags": ["skus"]
+      },
+      "delete": {
+        "operationId": "SkuController_deleteBarcode",
+        "parameters": [
+          {
+            "name": "skuId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "barcodeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Delete an unreferenced barcode",
+        "tags": ["skus"]
+      }
+    },
+    "/api/v1/skus/{skuId}/images": {
+      "get": {
+        "operationId": "SkuController_listImages",
+        "parameters": [
+          {
+            "name": "skuId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List SKU images (signed URLs)",
+        "tags": ["skus"]
+      },
+      "post": {
+        "operationId": "SkuController_uploadImage",
+        "parameters": [
+          {
+            "name": "skuId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Upload a SKU image (png/jpeg/webp/gif, max 5MB)",
+        "tags": ["skus"]
+      }
+    },
+    "/api/v1/skus/{skuId}/images/{imageId}": {
+      "patch": {
+        "operationId": "SkuController_updateImage",
+        "parameters": [
+          {
+            "name": "skuId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "imageId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSkuImageRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Update image sort order / primary flag",
+        "tags": ["skus"]
+      },
+      "delete": {
+        "operationId": "SkuController_deleteImage",
+        "parameters": [
+          {
+            "name": "skuId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "imageId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Delete an image (DB row + object)",
+        "tags": ["skus"]
+      }
+    },
+    "/api/v1/warehouses": {
+      "get": {
+        "operationId": "WarehouseController_list",
+        "parameters": [
+          {
+            "name": "keyword",
+            "required": false,
+            "in": "query",
+            "description": "Matches warehouse_code / name / city",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "warehouseType",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["SELF", "PLATFORM", "THIRD_PARTY", "RETURN_TEMP"]
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["ACTIVE", "INACTIVE"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WarehouseListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List warehouses (with bin + bound store counts)",
+        "tags": ["warehouses"]
+      },
+      "post": {
+        "operationId": "WarehouseController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWarehouseRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WarehouseEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create a warehouse",
+        "tags": ["warehouses"]
+      }
+    },
+    "/api/v1/warehouses/{id}": {
+      "get": {
+        "operationId": "WarehouseController_getById",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WarehouseEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get warehouse detail",
+        "tags": ["warehouses"]
+      },
+      "patch": {
+        "operationId": "WarehouseController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateWarehouseRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WarehouseEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Update warehouse fields",
+        "tags": ["warehouses"]
+      }
+    },
+    "/api/v1/warehouses/{id}/activate": {
+      "post": {
+        "operationId": "WarehouseController_activate",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WarehouseEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Activate a warehouse",
+        "tags": ["warehouses"]
+      }
+    },
+    "/api/v1/warehouses/{id}/deactivate": {
+      "post": {
+        "operationId": "WarehouseController_deactivate",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WarehouseEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Deactivate a warehouse (no hard delete)",
+        "tags": ["warehouses"]
+      }
+    },
+    "/api/v1/warehouses/{warehouseId}/bins": {
+      "get": {
+        "operationId": "WarehouseBinController_list",
+        "parameters": [
+          {
+            "name": "warehouseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "keyword",
+            "required": false,
+            "in": "query",
+            "description": "Matches bin_code / barcode / zone / rack",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["ACTIVE", "INACTIVE"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BinListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List bins of a warehouse (paged)",
+        "tags": ["warehouse-bins"]
+      },
+      "post": {
+        "operationId": "WarehouseBinController_create",
+        "parameters": [
+          {
+            "name": "warehouseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBinRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BinEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create a single bin",
+        "tags": ["warehouse-bins"]
+      }
+    },
+    "/api/v1/warehouses/{warehouseId}/bins/batch": {
+      "post": {
+        "operationId": "WarehouseBinController_batchCreate",
+        "parameters": [
+          {
+            "name": "warehouseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchCreateBinsRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchBinsEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Batch-create bins (rack A01~A05 x level 01~04)",
+        "tags": ["warehouse-bins"]
+      }
+    },
+    "/api/v1/warehouses/{warehouseId}/bins/{binId}": {
+      "patch": {
+        "operationId": "WarehouseBinController_update",
+        "parameters": [
+          {
+            "name": "warehouseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "binId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBinRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BinEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Update a bin",
+        "tags": ["warehouse-bins"]
+      }
+    },
+    "/api/v1/warehouses/{warehouseId}/bins/{binId}/disable": {
+      "post": {
+        "operationId": "WarehouseBinController_disable",
+        "parameters": [
+          {
+            "name": "warehouseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "binId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BinEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Disable a bin",
+        "tags": ["warehouse-bins"]
+      }
+    },
+    "/api/v1/warehouses/{warehouseId}/bins/{binId}/enable": {
+      "post": {
+        "operationId": "WarehouseBinController_enable",
+        "parameters": [
+          {
+            "name": "warehouseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "binId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BinEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Enable a bin",
+        "tags": ["warehouse-bins"]
+      }
+    },
+    "/api/v1/warehouse-bindings": {
+      "get": {
+        "operationId": "StoreWarehouseBindingController_list",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "warehouseId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["ACTIVE", "DISABLED"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BindingListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List bindings across stores (paged, filterable)",
+        "tags": ["store-warehouse-bindings"]
+      }
+    },
+    "/api/v1/stores/{storeId}/warehouse-bindings": {
+      "get": {
+        "operationId": "StoreWarehouseBindingController_listByStore",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BindingListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List bindings of a store",
+        "tags": ["store-warehouse-bindings"]
+      },
+      "post": {
+        "operationId": "StoreWarehouseBindingController_create",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBindingRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BindingEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Bind a warehouse to a store with a fulfillment mode",
+        "tags": ["store-warehouse-bindings"]
+      }
+    },
+    "/api/v1/stores/{storeId}/warehouse-bindings/{id}": {
+      "patch": {
+        "operationId": "StoreWarehouseBindingController_update",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBindingRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BindingEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Update a binding",
+        "tags": ["store-warehouse-bindings"]
+      }
+    },
+    "/api/v1/stores/{storeId}/warehouse-bindings/{id}/disable": {
+      "post": {
+        "operationId": "StoreWarehouseBindingController_disable",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BindingEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Disable a binding",
+        "tags": ["store-warehouse-bindings"]
+      }
+    },
+    "/api/v1/stores/{storeId}/warehouse-bindings/{id}/enable": {
+      "post": {
+        "operationId": "StoreWarehouseBindingController_enable",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BindingEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Enable a binding",
+        "tags": ["store-warehouse-bindings"]
+      }
+    },
+    "/api/v1/listings": {
+      "get": {
+        "operationId": "ListingController_list",
+        "parameters": [
+          {
+            "name": "platformId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "storeId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "skuId",
+            "required": false,
+            "in": "query",
+            "description": "Listings mapping this internal SKU",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["ACTIVE", "INACTIVE"]
+            }
+          },
+          {
+            "name": "mappingState",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["MAPPED", "UNMAPPED"]
+            }
+          },
+          {
+            "name": "keyword",
+            "required": false,
+            "in": "query",
+            "description": "Matches platform_product_id / title",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List listings (platform/store/sku/status/mappingState filters)",
+        "tags": ["listings"]
+      },
+      "post": {
+        "operationId": "ListingController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateListingRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingDetailEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create a listing with variant SKU mappings in one submit",
+        "tags": ["listings"]
+      }
+    },
+    "/api/v1/listings/resolve": {
+      "get": {
+        "operationId": "ListingController_resolve",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "query",
+            "description": "MANDATORY store scope (task §52)",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "platformSkuId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maxLength": 255,
+              "type": "string"
+            }
+          },
+          {
+            "name": "sellerSku",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maxLength": 255,
+              "type": "string"
+            }
+          },
+          {
+            "name": "offerId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maxLength": 255,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Resolve an internal SKU by platform identifiers (STRICTLY store-scoped)",
+        "tags": ["listings"]
+      }
+    },
+    "/api/v1/listings/skus/{skuId}/mappings": {
+      "get": {
+        "operationId": "ListingController_listMappingsOfSku",
+        "parameters": [
+          {
+            "name": "skuId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkuMappingsEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "All platform mappings of an internal SKU",
+        "tags": ["listings"]
+      }
+    },
+    "/api/v1/listings/{id}": {
+      "get": {
+        "operationId": "ListingController_getById",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingDetailEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Listing detail incl. variant mappings",
+        "tags": ["listings"]
+      },
+      "patch": {
+        "operationId": "ListingController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateListingRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingDetailEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Update listing title/url/rawData",
+        "tags": ["listings"]
+      }
+    },
+    "/api/v1/listings/{id}/activate": {
+      "post": {
+        "operationId": "ListingController_activate",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingDetailEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Activate a listing",
+        "tags": ["listings"]
+      }
+    },
+    "/api/v1/listings/{id}/deactivate": {
+      "post": {
+        "operationId": "ListingController_deactivate",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingDetailEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Deactivate a listing",
+        "tags": ["listings"]
+      }
+    },
+    "/api/v1/listings/{listingId}/skus": {
+      "post": {
+        "operationId": "ListingController_addMapping",
+        "parameters": [
+          {
+            "name": "listingId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddListingSkuRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingSkuEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Add a variant mapping to an existing listing",
+        "tags": ["listings"]
+      }
+    },
+    "/api/v1/listings/{listingId}/skus/{id}": {
+      "patch": {
+        "operationId": "ListingController_updateMapping",
+        "parameters": [
+          {
+            "name": "listingId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateListingSkuRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingSkuEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Update a variant mapping",
+        "tags": ["listings"]
+      },
+      "delete": {
+        "operationId": "ListingController_deleteMapping",
+        "parameters": [
+          {
+            "name": "listingId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Delete a mapping without order history",
+        "tags": ["listings"]
+      }
+    },
+    "/api/v1/imports/upload": {
+      "post": {
+        "operationId": "ImportController_upload",
+        "parameters": [
+          {
+            "name": "type",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportJobEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Upload a fixed-template Excel, parse + validate, return the error report",
+        "tags": ["imports"]
+      }
+    },
+    "/api/v1/imports/{id}/confirm": {
+      "post": {
+        "operationId": "ImportController_confirm",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportJobEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Confirm import: enqueues the job to the import worker",
+        "tags": ["imports"]
+      }
+    },
+    "/api/v1/imports": {
+      "get": {
+        "operationId": "ImportController_list",
+        "parameters": [
+          {
+            "name": "importType",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["SKU", "BARCODE", "WAREHOUSE", "BIN", "LISTING_MAPPING"]
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["VALIDATED", "PENDING_IMPORT", "IMPORTING", "COMPLETED", "FAILED"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List import jobs",
+        "tags": ["imports"]
+      }
+    },
+    "/api/v1/imports/{id}": {
+      "get": {
+        "operationId": "ImportController_getById",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportJobEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Import job detail incl. row-level errors",
+        "tags": ["imports"]
+      }
+    },
     "/api/v1/dev/test-job": {
       "post": {
         "operationId": "DevController_createTestJob",
@@ -231,6 +2853,958 @@
         "properties": {}
       },
       "LogoutResponseDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "PlatformListEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "PlatformEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "StoreListEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateStoreRequestDto": {
+        "type": "object",
+        "properties": {
+          "platformId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Platform the store belongs to"
+          },
+          "storeCode": {
+            "type": "string",
+            "example": "OZON-A",
+            "maxLength": 100
+          },
+          "name": {
+            "type": "string",
+            "example": "OZON 店铺 A",
+            "maxLength": 200
+          },
+          "sellerId": {
+            "type": "string",
+            "example": "123456",
+            "maxLength": 255
+          },
+          "defaultCurrency": {
+            "type": "string",
+            "example": "RUB",
+            "maxLength": 10
+          },
+          "settings": {
+            "type": "object",
+            "description": "Free-form store settings"
+          }
+        },
+        "required": ["platformId", "storeCode", "name"]
+      },
+      "StoreEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateStoreRequestDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "OZON 店铺 A（新）",
+            "maxLength": 200
+          },
+          "sellerId": {
+            "type": "string",
+            "example": "123456",
+            "maxLength": 255
+          },
+          "defaultCurrency": {
+            "type": "string",
+            "example": "RUB",
+            "maxLength": 10
+          },
+          "settings": {
+            "type": "object"
+          }
+        }
+      },
+      "CredentialListEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpsertCredentialRequestDto": {
+        "type": "object",
+        "properties": {
+          "credentialType": {
+            "type": "string",
+            "enum": ["MAIN_API"],
+            "example": "MAIN_API"
+          },
+          "payload": {
+            "type": "object",
+            "description": "Plain credential payload (e.g. apiKey/clientId); encrypted at rest"
+          }
+        },
+        "required": ["credentialType", "payload"]
+      },
+      "CredentialEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "BrandListEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateBrandRequestDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "VALKYRIE",
+            "maxLength": 100
+          },
+          "nameZh": {
+            "type": "string",
+            "example": "VALKYRIE",
+            "maxLength": 200
+          },
+          "nameEn": {
+            "type": "string",
+            "example": "Valkyrie",
+            "maxLength": 200
+          },
+          "nameRu": {
+            "type": "string",
+            "example": "VALKYRIE",
+            "maxLength": 200
+          }
+        },
+        "required": ["code", "nameZh"]
+      },
+      "BrandEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateBrandRequestDto": {
+        "type": "object",
+        "properties": {
+          "nameZh": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "nameEn": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "nameRu": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ACTIVE", "INACTIVE"]
+          }
+        }
+      },
+      "CategoryTreeEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateCategoryRequestDto": {
+        "type": "object",
+        "properties": {
+          "parentId": {
+            "type": "object",
+            "format": "uuid",
+            "nullable": true
+          },
+          "code": {
+            "type": "string",
+            "example": "KEYBOARD",
+            "maxLength": 100
+          },
+          "nameZh": {
+            "type": "string",
+            "example": "键盘",
+            "maxLength": 200
+          },
+          "nameRu": {
+            "type": "string",
+            "example": "Клавиатуры",
+            "maxLength": 200
+          },
+          "sortOrder": {
+            "type": "number",
+            "example": 0
+          }
+        },
+        "required": ["code", "nameZh"]
+      },
+      "CategoryEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateCategoryRequestDto": {
+        "type": "object",
+        "properties": {
+          "parentId": {
+            "type": "object",
+            "format": "uuid",
+            "nullable": true
+          },
+          "nameZh": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "nameRu": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "sortOrder": {
+            "type": "number",
+            "example": 0
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ACTIVE", "INACTIVE"]
+          }
+        }
+      },
+      "ProductListEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateProductRequestDto": {
+        "type": "object",
+        "properties": {
+          "productCode": {
+            "type": "string",
+            "example": "PRD000001",
+            "description": "Auto-generated (PRD%06d) when omitted"
+          },
+          "nameZh": {
+            "type": "string",
+            "example": "VALKYRIE VK87 MAX V2 机械键盘",
+            "maxLength": 500
+          },
+          "nameRu": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "categoryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "brandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "remark": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": ["nameZh"]
+      },
+      "ProductEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ProductDetailEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateProductRequestDto": {
+        "type": "object",
+        "properties": {
+          "productCode": {
+            "type": "string",
+            "description": "Business code is editable; the UUID never changes (task §16)"
+          },
+          "nameZh": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "nameRu": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "categoryId": {
+            "type": "object",
+            "format": "uuid"
+          },
+          "brandId": {
+            "type": "object",
+            "format": "uuid"
+          },
+          "mainImageId": {
+            "type": "object",
+            "format": "uuid",
+            "description": "Must reference one of this product SKU images"
+          },
+          "remark": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        }
+      },
+      "SkuListEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateSkuRequestDto": {
+        "type": "object",
+        "properties": {
+          "skuCode": {
+            "type": "string",
+            "example": "VK87-BLK",
+            "description": "Auto-generated (SKU%06d) when omitted"
+          },
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "nameZh": {
+            "type": "string",
+            "example": "VK87 MAX V2 黑色",
+            "maxLength": 500
+          },
+          "nameRu": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "model": {
+            "type": "string",
+            "example": "VK87MAX",
+            "maxLength": 200
+          },
+          "color": {
+            "type": "string",
+            "example": "黑色",
+            "maxLength": 100
+          },
+          "size": {
+            "type": "string",
+            "example": "87键",
+            "maxLength": 100
+          },
+          "weightKg": {
+            "type": "number",
+            "example": 0.95
+          },
+          "lengthCm": {
+            "type": "number",
+            "example": 35.5,
+            "description": "Provide with width and height or not at all"
+          },
+          "widthCm": {
+            "type": "number",
+            "example": 12.2
+          },
+          "heightCm": {
+            "type": "number",
+            "example": 3.4
+          },
+          "latestPurchasePrice": {
+            "type": "number",
+            "example": 299,
+            "description": "Manually maintained in Sprint 1"
+          },
+          "costCurrency": {
+            "type": "string",
+            "example": "CNY",
+            "default": "CNY",
+            "maxLength": 10
+          },
+          "serialTracking": {
+            "type": "boolean",
+            "example": false,
+            "description": "SN tracking config only (task §25)"
+          },
+          "remark": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": ["productId", "nameZh"]
+      },
+      "SkuEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateSkuRequestDto": {
+        "type": "object",
+        "properties": {
+          "skuCode": {
+            "type": "string",
+            "description": "Business code is editable; the UUID never changes"
+          },
+          "nameZh": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "nameRu": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "color": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "size": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "weightKg": {
+            "type": "number"
+          },
+          "lengthCm": {
+            "type": "number",
+            "description": "Provide with width and height or not at all"
+          },
+          "widthCm": {
+            "type": "number"
+          },
+          "heightCm": {
+            "type": "number"
+          },
+          "latestPurchasePrice": {
+            "type": "number"
+          },
+          "costCurrency": {
+            "type": "string",
+            "maxLength": 10
+          },
+          "serialTracking": {
+            "type": "boolean"
+          },
+          "remark": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        }
+      },
+      "BarcodeListEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateBarcodeRequestDto": {
+        "type": "object",
+        "properties": {
+          "barcode": {
+            "type": "string",
+            "example": "6971234567890",
+            "maxLength": 255
+          },
+          "barcodeType": {
+            "type": "string",
+            "enum": ["EAN", "GTIN", "MANUFACTURER", "INTERNAL", "OTHER"],
+            "example": "EAN",
+            "description": "69码 uses EAN/GTIN (task §29)"
+          },
+          "isPrimary": {
+            "type": "boolean",
+            "example": true,
+            "description": "First barcode of a SKU becomes primary automatically"
+          }
+        },
+        "required": ["barcode", "barcodeType"]
+      },
+      "BarcodeEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateBarcodeRequestDto": {
+        "type": "object",
+        "properties": {
+          "barcodeType": {
+            "type": "string",
+            "enum": ["EAN", "GTIN", "MANUFACTURER", "INTERNAL", "OTHER"]
+          },
+          "isPrimary": {
+            "type": "boolean",
+            "description": "DB keeps at most one primary per SKU"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ACTIVE", "INACTIVE"]
+          }
+        }
+      },
+      "ImageListEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ImageEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateSkuImageRequestDto": {
+        "type": "object",
+        "properties": {
+          "sortOrder": {
+            "type": "number",
+            "example": 0
+          },
+          "isPrimary": {
+            "type": "boolean",
+            "description": "DB keeps at most one primary per SKU"
+          }
+        }
+      },
+      "WarehouseListEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateWarehouseRequestDto": {
+        "type": "object",
+        "properties": {
+          "warehouseCode": {
+            "type": "string",
+            "example": "SZ01",
+            "maxLength": 100
+          },
+          "name": {
+            "type": "string",
+            "example": "深圳自管仓",
+            "maxLength": 200
+          },
+          "warehouseType": {
+            "type": "string",
+            "enum": ["SELF", "PLATFORM", "THIRD_PARTY", "RETURN_TEMP"],
+            "example": "SELF"
+          },
+          "countryCode": {
+            "type": "string",
+            "example": "CN",
+            "maxLength": 10
+          },
+          "province": {
+            "type": "string",
+            "example": "广东",
+            "maxLength": 100
+          },
+          "city": {
+            "type": "string",
+            "example": "深圳",
+            "maxLength": 100
+          },
+          "address": {
+            "type": "string",
+            "example": "深圳市宝安区...",
+            "maxLength": 500
+          },
+          "contactName": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "contactPhone": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "remark": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": ["warehouseCode", "name", "warehouseType"]
+      },
+      "WarehouseEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateWarehouseRequestDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ACTIVE", "INACTIVE"]
+          },
+          "countryCode": {
+            "type": "string",
+            "maxLength": 10
+          },
+          "province": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "address": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "contactName": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "contactPhone": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "remark": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        }
+      },
+      "BinListEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateBinRequestDto": {
+        "type": "object",
+        "properties": {
+          "binCode": {
+            "type": "string",
+            "example": "SZ01-A01-01",
+            "maxLength": 100
+          },
+          "zone": {
+            "type": "string",
+            "example": "A"
+          },
+          "rack": {
+            "type": "string",
+            "example": "A01"
+          },
+          "level": {
+            "type": "string",
+            "example": "01"
+          },
+          "position": {
+            "type": "string",
+            "example": "01"
+          },
+          "barcode": {
+            "type": "string",
+            "example": "BIN-SZ01-A01-01",
+            "description": "Auto-generated when omitted"
+          },
+          "remark": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": ["binCode"]
+      },
+      "BinEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "BatchCreateBinsRequestDto": {
+        "type": "object",
+        "properties": {
+          "zone": {
+            "type": "string",
+            "example": "A",
+            "description": "Stored on every generated bin"
+          },
+          "rackFrom": {
+            "type": "string",
+            "example": "A01"
+          },
+          "rackTo": {
+            "type": "string",
+            "example": "A05"
+          },
+          "levelFrom": {
+            "type": "string",
+            "example": "01"
+          },
+          "levelTo": {
+            "type": "string",
+            "example": "04"
+          },
+          "positionFrom": {
+            "type": "string",
+            "example": "01",
+            "description": "Position range; omit for no position suffix"
+          },
+          "positionTo": {
+            "type": "string",
+            "example": "02"
+          }
+        },
+        "required": ["rackFrom", "rackTo", "levelFrom", "levelTo"]
+      },
+      "BatchBinsEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateBinRequestDto": {
+        "type": "object",
+        "properties": {
+          "zone": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "rack": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "level": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "position": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "barcode": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ACTIVE", "INACTIVE"]
+          },
+          "remark": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        }
+      },
+      "BindingListEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateBindingRequestDto": {
+        "type": "object",
+        "properties": {
+          "warehouseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fulfillmentMode": {
+            "type": "string",
+            "enum": [
+              "OZON_RFBS",
+              "OZON_FBS",
+              "OZON_FBO",
+              "OZON_FBP",
+              "WB_FBS",
+              "WB_FBW",
+              "YANDEX_FBS",
+              "YANDEX_FBY"
+            ],
+            "example": "OZON_RFBS"
+          },
+          "platformWarehouseId": {
+            "type": "string",
+            "example": "123456",
+            "description": "Warehouse id on the platform side"
+          },
+          "isInventorySource": {
+            "type": "boolean",
+            "default": true
+          },
+          "isInventoryPushEnabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "priority": {
+            "type": "number",
+            "example": 100
+          },
+          "settings": {
+            "type": "object"
+          }
+        },
+        "required": ["warehouseId", "fulfillmentMode"]
+      },
+      "BindingEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateBindingRequestDto": {
+        "type": "object",
+        "properties": {
+          "platformWarehouseId": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "isInventorySource": {
+            "type": "boolean"
+          },
+          "isInventoryPushEnabled": {
+            "type": "boolean"
+          },
+          "priority": {
+            "type": "number"
+          },
+          "settings": {
+            "type": "object"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ACTIVE", "DISABLED"]
+          }
+        }
+      },
+      "ListingListEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ListingSkuVariantDto": {
+        "type": "object",
+        "properties": {
+          "skuId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "platformSkuId": {
+            "type": "string",
+            "example": "152987456",
+            "maxLength": 255
+          },
+          "sellerSku": {
+            "type": "string",
+            "example": "VK87-BLK",
+            "maxLength": 255
+          },
+          "offerId": {
+            "type": "string",
+            "example": "ABC",
+            "maxLength": 255
+          }
+        },
+        "required": ["skuId"]
+      },
+      "CreateListingRequestDto": {
+        "type": "object",
+        "properties": {
+          "platformId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "storeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "platformProductId": {
+            "type": "string",
+            "example": "152987456001",
+            "maxLength": 255
+          },
+          "title": {
+            "type": "string",
+            "example": "VK87 MAX V2 机械键盘",
+            "maxLength": 1000
+          },
+          "url": {
+            "type": "string",
+            "example": "https://ozon.ru/product/152987456001",
+            "maxLength": 2000
+          },
+          "rawData": {
+            "type": "object"
+          },
+          "skuVariants": {
+            "description": "Variant rows mapped in one submit",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ListingSkuVariantDto"
+            }
+          }
+        },
+        "required": ["platformId", "storeId", "platformProductId", "skuVariants"]
+      },
+      "ListingDetailEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ResolveEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "SkuMappingsEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateListingRequestDto": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "rawData": {
+            "type": "object"
+          }
+        }
+      },
+      "AddListingSkuRequestDto": {
+        "type": "object",
+        "properties": {
+          "skuId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "platformSkuId": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "sellerSku": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "offerId": {
+            "type": "string",
+            "maxLength": 255
+          }
+        },
+        "required": ["skuId"]
+      },
+      "ListingSkuEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateListingSkuRequestDto": {
+        "type": "object",
+        "properties": {
+          "platformSkuId": {
+            "type": "object",
+            "maxLength": 255,
+            "nullable": true
+          },
+          "sellerSku": {
+            "type": "object",
+            "maxLength": 255,
+            "nullable": true
+          },
+          "offerId": {
+            "type": "object",
+            "maxLength": 255,
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ACTIVE", "INACTIVE"]
+          }
+        }
+      },
+      "ImportJobEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ImportListEnvelopeDto": {
         "type": "object",
         "properties": {}
       },
