@@ -1,0 +1,125 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsIn, IsObject, IsOptional, IsString, IsUUID, Length, MaxLength } from 'class-validator';
+import { STORE_STATUSES } from '../constants/store.constants';
+
+export class CreateStoreRequestDto {
+  @ApiProperty({ format: 'uuid', description: 'Platform the store belongs to' })
+  @IsUUID()
+  platformId!: string;
+
+  @ApiProperty({ example: 'OZON-A', maxLength: 100 })
+  @IsString()
+  @Length(1, 100)
+  storeCode!: string;
+
+  @ApiProperty({ example: 'OZON 店铺 A', maxLength: 200 })
+  @IsString()
+  @Length(1, 200)
+  name!: string;
+
+  @ApiPropertyOptional({ example: '123456', maxLength: 255 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  sellerId?: string;
+
+  @ApiPropertyOptional({ example: 'RUB', maxLength: 10 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  defaultCurrency?: string;
+
+  @ApiPropertyOptional({ type: Object, description: 'Free-form store settings' })
+  @IsOptional()
+  @IsObject()
+  settings?: Record<string, unknown>;
+}
+
+export class UpdateStoreRequestDto {
+  @ApiPropertyOptional({ example: 'OZON 店铺 A（新）', maxLength: 200 })
+  @IsOptional()
+  @IsString()
+  @Length(1, 200)
+  name?: string;
+
+  @ApiPropertyOptional({ example: '123456', maxLength: 255 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  sellerId?: string;
+
+  @ApiPropertyOptional({ example: 'RUB', maxLength: 10 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  defaultCurrency?: string;
+
+  @ApiPropertyOptional({ type: Object })
+  @IsOptional()
+  @IsObject()
+  settings?: Record<string, unknown>;
+}
+
+export class StoreListQueryDto {
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsString()
+  platformId?: string;
+
+  @ApiPropertyOptional({ enum: STORE_STATUSES })
+  @IsOptional()
+  @IsIn(STORE_STATUSES)
+  status?: (typeof STORE_STATUSES)[number];
+
+  @ApiPropertyOptional({ description: 'Matches store_code / name' })
+  @IsOptional()
+  @IsString()
+  keyword?: string;
+}
+
+export class StoreResponseDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ format: 'uuid' })
+  platformId!: string;
+
+  @ApiProperty({ example: 'OZON' })
+  platformCode!: string;
+
+  @ApiProperty({ example: 'OZON' })
+  platformName!: string;
+
+  @ApiProperty({ example: 'OZON-A' })
+  storeCode!: string;
+
+  @ApiProperty({ example: 'OZON 店铺 A' })
+  name!: string;
+
+  @ApiProperty({ example: '123456', nullable: true })
+  sellerId!: string | null;
+
+  @ApiProperty({ example: 'RUB', nullable: true })
+  defaultCurrency!: string | null;
+
+  @ApiProperty({ example: 'ACTIVE' })
+  status!: string;
+
+  @ApiProperty({ type: Object, nullable: true })
+  settings!: Record<string, unknown> | null;
+
+  @ApiProperty({ format: 'date-time' })
+  createdAt!: Date;
+
+  @ApiProperty({ format: 'date-time' })
+  updatedAt!: Date;
+}
+
+/** List row with aggregated counts (single query, no N+1). */
+export class StoreListItemDto extends StoreResponseDto {
+  @ApiProperty({ example: true })
+  credentialConfigured!: boolean;
+
+  @ApiProperty({ example: 2 })
+  bindingCount!: number;
+}

@@ -26,3 +26,12 @@ export class UnauthorizedError extends DomainError {
     super(message);
   }
 }
+
+export class ForbiddenError extends DomainError {
+  readonly code = 'AUTH_FORBIDDEN';
+  readonly httpStatus = 403;
+
+  constructor(message = 'Admin permission required') {
+    super(message);
+  }
+}

@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthController } from './controllers/auth.controller';
 import { UserEntity } from './entities/user.entity';
+import { AdminGuard } from './guards/admin.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { UserRepository } from './repositories/user.repository';
 import { AuthService, parseDurationToMs } from './services/auth.service';
@@ -28,7 +29,7 @@ const DEFAULT_JWT_TTL_MS = 8 * 3_600_000; // 8h
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, UserService, UserRepository, JwtAuthGuard],
-  exports: [UserService],
+  providers: [AuthService, UserService, UserRepository, JwtAuthGuard, AdminGuard],
+  exports: [UserService, AdminGuard],
 })
 export class AuthModule {}
