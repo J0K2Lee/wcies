@@ -79,19 +79,33 @@ function checkRule1(): void {
 
 function checkRule2(): void {
   const webFiles = listFiles(join(ROOT, 'apps/web/src'), ['.ts', '.tsx']);
+  const webRoot = join(ROOT, 'apps/web');
+  const backendApiRoot = join(ROOT, 'apps', 'api');
   for (const file of webFiles) {
-    const specs = importSpecifiers(readFileSync(file, 'utf8'));
+    const specs = importSpecifiers(readFileSync(file, 'utf-8'));
     for (const spec of specs) {
-      if (
-        spec.startsWith('@wcies/api/') ||
-        spec.includes('apps/api/') ||
-        /\.\.\/\.\.\/api\//.test(spec)
-      ) {
+      if (spec.startsWith('@wcies/api/')) {
         violations.push({
           rule: 'Rule 2: web must not import backend entities / api internals',
           file: relative(ROOT, file),
           detail: `import "${spec}"`,
         });
+        continue;
+      }
+      if (spec.startsWith('.')) {
+        // Resolve the relative import and flag only paths that LEAVE apps/web
+        // (e.g. reach apps/api). A raw "../../api/" string pattern also
+        // matched the web app's own src/api folder - a false positive.
+        const resolved = resolve(file, '..', spec);
+        const insideWeb = resolved.startsWith(webRoot);
+        const reachesBackendApi = resolved.startsWith(backendApiRoot);
+        if (!insideWeb || reachesBackendApi) {
+          violations.push({
+            rule: 'Rule 2: web must not import backend entities / api internals',
+            file: relative(ROOT, file),
+            detail: `import "${spec}"`,
+          });
+        }
       }
     }
   }
