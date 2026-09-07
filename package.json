@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build:packages": "pnpm --filter @wcies/shared --filter @wcies/platform-contracts --filter @wcies/api-client run build",
-    "dev": "pnpm build:packages && pnpm run --parallel dev:api dev:web",
+    "dev": "pnpm build:packages && pnpm --filter @wcies/api --filter @wcies/web --parallel run dev",
     "dev:web": "pnpm build:packages && pnpm --filter @wcies/web dev",
     "dev:api": "pnpm build:packages && pnpm --filter @wcies/api dev",
     "dev:worker": "pnpm --filter @wcies/api dev:worker",
