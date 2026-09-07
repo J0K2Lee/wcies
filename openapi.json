@@ -1,0 +1,251 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "HealthController_getLiveAlias",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LivenessResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Liveness probe (alias of /health/live)",
+        "tags": ["health"]
+      }
+    },
+    "/health/live": {
+      "get": {
+        "operationId": "HealthController_getLive",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LivenessResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Liveness probe - API process only",
+        "tags": ["health"]
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "HealthController_getReady",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Readiness probe - checks PostgreSQL and Redis",
+        "tags": ["health"]
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "operationId": "AuthController_login",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Login with username/email + password (sets HttpOnly session cookie)",
+        "tags": ["auth"]
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "operationId": "AuthController_me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Current authenticated user",
+        "tags": ["auth"]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "AuthController_logout",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogoutResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Clear the session cookie",
+        "tags": ["auth"]
+      }
+    },
+    "/api/v1/dev/test-job": {
+      "post": {
+        "operationId": "DevController_createTestJob",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTestJobDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestJobResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "[DEV ONLY] Enqueue a test job into wcies.test queue",
+        "tags": ["dev"]
+      }
+    },
+    "/api/v1/dev/storage-test": {
+      "post": {
+        "operationId": "StorageTestController_runStorageTest",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageTestResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "[DEV ONLY] Upload a test file and read it back via signed URL",
+        "tags": ["dev"]
+      }
+    }
+  },
+  "info": {
+    "title": "WCIES API",
+    "description": "WCIES cross-border e-commerce management system API",
+    "version": "0.1.0",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "cookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "wcies_session"
+      }
+    },
+    "schemas": {
+      "LivenessResponseDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ReadinessResponseDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "LoginRequestDto": {
+        "type": "object",
+        "properties": {
+          "usernameOrEmail": {
+            "type": "string",
+            "description": "Username or email",
+            "example": "admin"
+          },
+          "password": {
+            "type": "string",
+            "description": "Plain password (transit only, never stored)"
+          }
+        },
+        "required": ["usernameOrEmail", "password"]
+      },
+      "LoginResponseDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UserEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "LogoutResponseDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateTestJobDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "TestJobResponseDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "StorageTestResponseDto": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  }
+}

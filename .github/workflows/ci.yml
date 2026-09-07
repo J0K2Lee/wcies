@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: lint / typecheck / arch / unit / build
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: wcies
+          POSTGRES_PASSWORD: wcies_dev_password
+          POSTGRES_DB: wcies_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U wcies -d wcies_dev"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      minio:
+        image: minio/minio:latest
+        env:
+          MINIO_ROOT_USER: wcies_minio_dev
+          MINIO_ROOT_PASSWORD: wcies_minio_dev_secret
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "mc ready local"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NODE_ENV: test
+      PORT: '3000'
+      DATABASE_URL: postgresql://wcies:wcies_dev_password@localhost:5432/wcies_dev
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci-only-jwt-secret-0123456789abcdef-xyz
+      JWT_EXPIRES_IN: 1h
+      CREDENTIAL_ENCRYPTION_KEY: abababababababababababababababababababababababababababababababab
+      S3_ENDPOINT: http://localhost:9000
+      S3_ACCESS_KEY: wcies_minio_dev
+      S3_SECRET_KEY: wcies_minio_dev_secret
+      S3_BUCKET: wcies
+      S3_FORCE_PATH_STYLE: 'true'
+      CORS_ORIGIN: http://localhost:5173
+      ADMIN_USERNAME: admin
+      ADMIN_EMAIL: admin@wcies.local
+      ADMIN_PASSWORD: ci-test-password
+      LOG_LEVEL: warn
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Architecture check
+        run: pnpm check:arch
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Run database migrations
+        run: pnpm db:migrate
+
+      - name: Seed dev admin
+        run: pnpm seed:dev
+
+      - name: Integration tests
+        run: pnpm test:integration
