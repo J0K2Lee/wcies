@@ -7,6 +7,7 @@ import { ProductEntity } from './entities/product.entity';
 import { SkuEntity } from './entities/sku.entity';
 import { SkuBarcodeEntity } from './entities/sku-barcode.entity';
 import { SkuImageEntity } from './entities/sku-image.entity';
+import { SkuBundleComponentEntity } from './entities/sku-bundle-component.entity';
 import { ProductRepository } from './repositories/product.repository';
 import { SkuRepository } from './repositories/sku.repository';
 import { SkuBarcodeRepository } from './repositories/sku-barcode.repository';
@@ -15,13 +16,20 @@ import { ProductService } from './services/product.service';
 import { SkuService } from './services/sku.service';
 import { BarcodeService } from './services/barcode.service';
 import { SkuImageService } from './services/sku-image.service';
+import { SkuBundleService } from './services/sku-bundle.service';
 import { ProductController } from './controllers/product.controller';
 import { SkuController } from './controllers/sku.controller';
 
 /** Product + SKU + barcode + images (spec §94 module layout). */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ProductEntity, SkuEntity, SkuBarcodeEntity, SkuImageEntity]),
+    TypeOrmModule.forFeature([
+      ProductEntity,
+      SkuEntity,
+      SkuBarcodeEntity,
+      SkuImageEntity,
+      SkuBundleComponentEntity,
+    ]),
     CatalogModule,
     OperationLogModule,
     ObjectStorageModule,
@@ -32,11 +40,12 @@ import { SkuController } from './controllers/sku.controller';
     SkuService,
     BarcodeService,
     SkuImageService,
+    SkuBundleService,
     ProductRepository,
     SkuRepository,
     SkuBarcodeRepository,
     SkuImageRepository,
   ],
-  exports: [ProductService, SkuService, BarcodeService, SkuImageService],
+  exports: [ProductService, SkuService, BarcodeService, SkuImageService, SkuBundleService],
 })
 export class ProductModule {}
