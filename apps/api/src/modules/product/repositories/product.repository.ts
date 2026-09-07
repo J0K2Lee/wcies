@@ -64,10 +64,10 @@ export class ProductRepository {
     }
 
     const column = {
-      createdAt: 'product.created_at',
-      updatedAt: 'product.updated_at',
-      productCode: 'product.product_code',
-      nameZh: 'product.name_zh',
+      createdAt: 'product.createdAt',
+      updatedAt: 'product.updatedAt',
+      productCode: 'product.productCode',
+      nameZh: 'product.nameZh',
     }[filters.sortBy];
 
     qb.orderBy(column, filters.sortOrder === 'asc' ? 'ASC' : 'DESC')

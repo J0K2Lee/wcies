@@ -16,7 +16,6 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiConsumes, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PageMeta } from '@wcies/shared';
 import { ok, okPage } from '../../../common/dto/api-response';
-import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
 import { CurrentOperator } from '../../../common/decorators/current-operator.decorator';
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import {
@@ -82,7 +81,7 @@ export class SkuController {
   @Get('skus')
   @ApiOperation({ summary: 'List SKUs (paged; filters incl. hasListing/platformId/storeId)' })
   @ApiOkResponse({ type: SkuListEnvelopeDto })
-  async list(@Query() query: SkuListQueryDto & PaginationQueryDto): Promise<SkuListEnvelopeDto> {
+  async list(@Query() query: SkuListQueryDto): Promise<SkuListEnvelopeDto> {
     const { items, meta } = await this.skuService.list(query);
     return okPage(items, meta);
   }

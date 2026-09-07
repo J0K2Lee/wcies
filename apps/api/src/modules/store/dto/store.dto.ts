@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsObject, IsOptional, IsString, IsUUID, Length, MaxLength } from 'class-validator';
 import { STORE_STATUSES } from '../constants/store.constants';
+import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
 
 export class CreateStoreRequestDto {
   @ApiProperty({ format: 'uuid', description: 'Platform the store belongs to' })
@@ -60,7 +61,7 @@ export class UpdateStoreRequestDto {
   settings?: Record<string, unknown>;
 }
 
-export class StoreListQueryDto {
+export class StoreListQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({ format: 'uuid' })
   @IsOptional()
   @IsString()

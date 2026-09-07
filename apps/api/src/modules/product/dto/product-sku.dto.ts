@@ -13,6 +13,7 @@ import {
 } from 'class-validator';
 import { PRODUCT_STATUSES } from '../entities/product.entity';
 import { SKU_STATUSES } from '../entities/sku.entity';
+import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
 
 // ---------------------------------------------------------------------------
 // Product
@@ -100,7 +101,7 @@ export class UpdateProductRequestDto {
   remark?: string;
 }
 
-export class ProductListQueryDto {
+export class ProductListQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({ description: 'Matches product_code / name_zh / name_ru' })
   @IsOptional()
   @IsString()
@@ -378,7 +379,7 @@ export class UpdateSkuRequestDto {
   remark?: string;
 }
 
-export class SkuListQueryDto {
+export class SkuListQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({ description: 'Matches sku_code / name_zh / name_ru / model' })
   @IsOptional()
   @IsString()

@@ -12,7 +12,6 @@ import {
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PageMeta } from '@wcies/shared';
 import { ok, okPage } from '../../../common/dto/api-response';
-import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
 import { CurrentOperator } from '../../../common/decorators/current-operator.decorator';
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import {
@@ -49,9 +48,7 @@ export class ProductController {
   @Get()
   @ApiOperation({ summary: 'List products (paged, keyword/brand/category/status filters)' })
   @ApiOkResponse({ type: ProductListEnvelopeDto })
-  async list(
-    @Query() query: ProductListQueryDto & PaginationQueryDto,
-  ): Promise<ProductListEnvelopeDto> {
+  async list(@Query() query: ProductListQueryDto): Promise<ProductListEnvelopeDto> {
     const { items, meta } = await this.productService.list(query);
     return okPage(items, meta);
   }

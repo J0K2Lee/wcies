@@ -71,7 +71,7 @@ export class StoreRepository {
       });
     }
 
-    qb.orderBy('store.created_at', 'DESC').skip(offset).take(limit);
+    qb.orderBy('store.createdAt', 'DESC').skip(offset).take(limit);
 
     const [{ raw: rawRows, entities }, total] = await Promise.all([
       qb.getRawAndEntities(),

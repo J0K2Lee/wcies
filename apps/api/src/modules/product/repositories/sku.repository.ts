@@ -49,8 +49,8 @@ export class SkuRepository {
     const qb = this.repository
       .createQueryBuilder('sku')
       .innerJoin('products', 'product', 'product.id = sku.product_id')
-      .addSelect('product.product_code', 'product_code')
-      .addSelect('product.name_zh', 'product_name')
+      .addSelect('product.productCode', 'product_code')
+      .addSelect('product.nameZh', 'product_name')
       .addSelect('product.brand_id', 'brand_id')
       .addSelect('brand.name_zh', 'brand_name')
       .addSelect(
@@ -155,10 +155,10 @@ export class SkuRepository {
     }
 
     const column = {
-      createdAt: 'sku.created_at',
-      updatedAt: 'sku.updated_at',
-      skuCode: 'sku.sku_code',
-      nameZh: 'sku.name_zh',
+      createdAt: 'sku.createdAt',
+      updatedAt: 'sku.updatedAt',
+      skuCode: 'sku.skuCode',
+      nameZh: 'sku.nameZh',
     }[filters.sortBy];
 
     qb.orderBy(column, filters.sortOrder === 'asc' ? 'ASC' : 'DESC')
@@ -218,7 +218,7 @@ export class SkuRepository {
     return this.repository
       .createQueryBuilder('sku')
       .where('sku.product_id IN (:...productIds)', { productIds })
-      .orderBy('sku.sku_code', 'ASC')
+      .orderBy('sku.skuCode', 'ASC')
       .getMany();
   }
 }
