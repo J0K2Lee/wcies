@@ -32,5 +32,4 @@ export class SkuBarcodeEntity {
   createdAt!: Date;
 }
 
-export const BARCODE_TYPES = ['EAN', 'GTIN', 'MANUFACTURER', 'INTERNAL', 'OTHER'] as const;
-export type BarcodeType = (typeof BARCODE_TYPES)[number];
+export { BARCODE_TYPES, BarcodeType } from '../constants/barcode.constants';

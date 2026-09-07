@@ -251,6 +251,14 @@ export class WarehouseBinService {
     return this.repository.findBinById(id);
   }
 
+  /** Import handler lookup: existing bin by warehouse + code. */
+  async findByWarehouseAndCode(
+    warehouseId: string,
+    binCode: string,
+  ): Promise<WarehouseBinEntity | null> {
+    return this.repository.findBinByCode(warehouseId, binCode);
+  }
+
   private async assertWarehouseExists(
     warehouseId: string,
   ): Promise<{ id: string; warehouseCode: string }> {

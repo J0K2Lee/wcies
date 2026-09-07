@@ -5,6 +5,8 @@ import { LoggerModule } from './common/logger/logger.module';
 import { AppLoggerService } from './common/logger/app-logger.service';
 import { createRootConfigModule } from './config/root-config.module';
 import { QueueRootModule } from './infrastructure/queue/queue-root.module';
+import { DatabaseModule } from './database/database.module';
+import { ObjectStorageModule } from './infrastructure/storage/object-storage.module';
 import { WorkersModule } from './workers/workers.module';
 
 /**
@@ -12,7 +14,14 @@ import { WorkersModule } from './workers/workers.module';
  * `pnpm dev:worker`. Consumes BullMQ queues.
  */
 @Module({
-  imports: [createRootConfigModule(), LoggerModule, QueueRootModule, WorkersModule],
+  imports: [
+    createRootConfigModule(),
+    LoggerModule,
+    DatabaseModule,
+    QueueRootModule,
+    ObjectStorageModule,
+    WorkersModule,
+  ],
 })
 class WorkerModule {}
 

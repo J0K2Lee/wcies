@@ -88,9 +88,7 @@ export class ListingService {
   }
 
   /** All mappings of an internal SKU across stores/listings (task §91). */
-  async listMappingsOfSku(
-    skuId: string,
-  ): Promise<
+  async listMappingsOfSku(skuId: string): Promise<
     Array<
       ListingSkuResponseDto & {
         platformCode: string;

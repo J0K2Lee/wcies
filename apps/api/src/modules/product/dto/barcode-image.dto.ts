@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsIn, IsOptional, IsString, Length, MaxLength } from 'class-validator';
-import { BARCODE_TYPES } from '../entities/sku-barcode.entity';
+import { BARCODE_TYPES } from '../constants/barcode.constants';
 
 export class CreateBarcodeRequestDto {
   @ApiProperty({ example: '6971234567890', maxLength: 255 })

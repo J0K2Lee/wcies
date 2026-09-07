@@ -140,6 +140,14 @@ export class StoreService {
     return this.repository.findById(id);
   }
 
+  /** Cross-module lookup by platform + store_code (import handler). */
+  async getEntityByPlatformAndCode(
+    platformId: string,
+    storeCode: string,
+  ): Promise<StoreEntity | null> {
+    return this.repository.findByPlatformAndCode(platformId, storeCode);
+  }
+
   /** Store + owning platform, used for fulfillment-mode validation. */
   async getEntityWithPlatform(
     id: string,
