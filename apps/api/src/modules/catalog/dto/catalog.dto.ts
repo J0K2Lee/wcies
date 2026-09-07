@@ -171,6 +171,6 @@ export class CategoryResponseDto {
 
 /** Category node with children for tree display. */
 export class CategoryTreeItemDto extends CategoryResponseDto {
-  @ApiProperty({ type: Array, of: CategoryTreeItemDto })
+  @ApiProperty({ type: [CategoryTreeItemDto] })
   children!: CategoryTreeItemDto[];
 }

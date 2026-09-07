@@ -16,6 +16,7 @@ import { DevModule } from './modules/dev/dev.module';
 import { HealthModule } from './modules/health/health.module';
 import { OperationLogModule } from './modules/operation-log/operation-log.module';
 import { PlatformModule } from './modules/platform/platform.module';
+import { ProductModule } from './modules/product/product.module';
 import { StoreModule } from './modules/store/store.module';
 
 /**
@@ -39,6 +40,7 @@ import { StoreModule } from './modules/store/store.module';
     PlatformModule,
     StoreModule,
     CatalogModule,
+    ProductModule,
     ...(process.env.NODE_ENV !== 'production' ? [DevModule] : []),
   ],
   providers: [
