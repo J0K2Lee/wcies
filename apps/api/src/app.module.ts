@@ -11,6 +11,7 @@ import { ObjectStorageModule } from './infrastructure/storage/object-storage.mod
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
+import { CatalogModule } from './modules/catalog/catalog.module';
 import { DevModule } from './modules/dev/dev.module';
 import { HealthModule } from './modules/health/health.module';
 import { OperationLogModule } from './modules/operation-log/operation-log.module';
@@ -37,6 +38,7 @@ import { StoreModule } from './modules/store/store.module';
     OperationLogModule,
     PlatformModule,
     StoreModule,
+    CatalogModule,
     ...(process.env.NODE_ENV !== 'production' ? [DevModule] : []),
   ],
   providers: [
