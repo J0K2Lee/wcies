@@ -124,7 +124,10 @@ function checkRule3(): void {
 }
 
 function checkRule4(): void {
-  const moduleFiles = listFiles(join(ROOT, 'apps/api/src/modules'), ['.ts']);
+  const moduleFiles = listFiles(join(ROOT, 'apps/api/src/modules'), ['.ts']).filter(
+    // Test code is exempt from module boundaries (dependency-rules.md §4).
+    (file) => !file.endsWith('.spec.ts') && !file.endsWith('.test.ts'),
+  );
   for (const file of moduleFiles) {
     const normalized = file.split(sep).join('/');
     const ownMatch = /\/modules\/([^/]+)\//.exec(normalized);
