@@ -29,6 +29,7 @@
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "seed:dev": "pnpm --filter @wcies/api seed:dev",
+    "seed:sprint1": "pnpm --filter @wcies/api seed:sprint1",
     "openapi:export": "pnpm --filter @wcies/api openapi:export",
     "api-client:generate": "tsx scripts/generate-api-client.ts",
     "prepare": "husky"

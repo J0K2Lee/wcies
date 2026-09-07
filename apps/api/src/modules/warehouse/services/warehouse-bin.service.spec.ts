@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { WarehouseBinBatchInvalidError, expandRange } from './warehouse-bin.service';
+import { WarehouseBinBatchInvalidError } from '../errors/warehouse-errors';
+import { expandRange } from './warehouse-bin.service';
 
 describe('expandRange (batch bin generation, task §41)', () => {
   it('expands inclusive numeric ranges keeping zero padding', () => {

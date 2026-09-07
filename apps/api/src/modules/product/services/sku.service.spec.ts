@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  assertDimensionsConsistent,
-  computeVolumeCm3,
-  SkuDimensionsInvalidError,
-} from './sku.service';
+import { SkuDimensionsInvalidError } from '../errors/sku-errors';
+import { assertDimensionsConsistent, computeVolumeCm3 } from './sku.service';
 
 describe('computeVolumeCm3 (task §23: volume is backend-computed)', () => {
   it('computes length x width x height', () => {

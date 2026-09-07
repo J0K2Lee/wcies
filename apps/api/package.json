@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "seed:dev": "tsx scripts/seed-dev-data.ts",
+    "seed:sprint1": "tsx scripts/seed-sprint1-data.ts",
     "openapi:export": "tsx scripts/export-openapi.ts",
     "test": "vitest run"
   },
