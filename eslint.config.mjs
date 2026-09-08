@@ -76,6 +76,8 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-call': 'off',
       '@typescript-eslint/no-unsafe-argument': 'off',
       '@typescript-eslint/no-explicit-any': 'off',
+      // Mock assertions reference detached class methods by design.
+      '@typescript-eslint/unbound-method': 'off',
     },
   },
   prettierConfig,
