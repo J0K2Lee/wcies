@@ -22,6 +22,9 @@ import { WarehouseModule } from './modules/warehouse/warehouse.module';
 import { ListingModule } from './modules/listing/listing.module';
 import { ImportModule } from './modules/import/import.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
+import { ExceptionModule } from './modules/exception/exception.module';
+import { OrderModule } from './modules/order/order.module';
+import { PickingModule } from './modules/picking/picking.module';
 
 /**
  * HTTP API root module.
@@ -49,6 +52,9 @@ import { InventoryModule } from './modules/inventory/inventory.module';
     ListingModule,
     ImportModule,
     InventoryModule,
+    ExceptionModule,
+    OrderModule,
+    PickingModule,
     ...(process.env.NODE_ENV !== 'production' ? [DevModule] : []),
   ],
   providers: [
