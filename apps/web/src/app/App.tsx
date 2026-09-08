@@ -17,6 +17,12 @@ import { ReservationsPage } from '../pages/inventory/ReservationsPage';
 import { OrdersPage } from '../pages/orders/OrdersPage';
 import { PickingPage } from '../pages/picking/PickingPage';
 import { PickingTaskWorkPage } from '../pages/picking/PickingTaskWorkPage';
+import { ShipmentsPage } from '../pages/shipments/ShipmentsPage';
+import { ShipmentDetailPage } from '../pages/shipments/ShipmentDetailPage';
+import { PackageWorkPage } from '../pages/shipments/PackageWorkPage';
+import { InterceptionsPage } from '../pages/interceptions/InterceptionsPage';
+import { InterceptionDetailPage } from '../pages/interceptions/InterceptionDetailPage';
+import { NotificationsPage } from '../pages/notifications/NotificationsPage';
 
 export function App() {
   return (
@@ -39,6 +45,12 @@ export function App() {
         <Route path="/orders" element={<OrdersPage />} />
         <Route path="/picking" element={<PickingPage />} />
         <Route path="/picking/:id" element={<PickingTaskWorkPage />} />
+        <Route path="/shipments" element={<ShipmentsPage />} />
+        <Route path="/shipments/:id" element={<ShipmentDetailPage />} />
+        <Route path="/packages/:id" element={<PackageWorkPage />} />
+        <Route path="/interceptions" element={<InterceptionsPage />} />
+        <Route path="/interceptions/:id" element={<InterceptionDetailPage />} />
+        <Route path="/notifications" element={<NotificationsPage />} />
       </Route>
     </Routes>
   );

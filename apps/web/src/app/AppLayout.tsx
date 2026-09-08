@@ -3,7 +3,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router';
 
 const { Sider, Header, Content } = Layout;
 
-/** Sprint 1 navigation tree (task §63). */
+/** Sprint 1 navigation tree + Sprint 3/4 warehouse operations (task §56). */
 const MENU_ITEMS = [
   { key: '/', label: '首页' },
   {
@@ -35,9 +35,15 @@ const MENU_ITEMS = [
   {
     key: 'order-group',
     label: '订单',
+    children: [{ key: '/orders', label: '订单管理' }],
+  },
+  {
+    key: 'warehouse-ops-group',
+    label: '仓库作业',
     children: [
-      { key: '/orders', label: '订单管理' },
-      { key: '/picking', label: '拣货作业' },
+      { key: '/picking', label: '拣货' },
+      { key: '/shipments', label: '发货' },
+      { key: '/interceptions', label: '拦截' },
     ],
   },
   {
@@ -51,18 +57,22 @@ const MENU_ITEMS = [
   {
     key: 'system-group',
     label: '系统',
-    children: [{ key: '/import', label: '导入中心' }],
+    children: [
+      { key: '/import', label: '导入中心' },
+      { key: '/notifications', label: '通知中心' },
+    ],
   },
 ];
 
-/** Authenticated app shell with the Sprint 1 sidebar. */
+/** Authenticated app shell with the Sprint 4 sidebar (task §56). */
 export function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
 
   const selectedKey = location.pathname;
   const openKeys = MENU_ITEMS.filter(
-    (item) => 'children' in item && item.children?.some((child) => child.key === selectedKey),
+    (item) =>
+      'children' in item && item.children?.some((child) => selectedKey.startsWith(child.key)),
   ).map((item) => item.key);
 
   return (
