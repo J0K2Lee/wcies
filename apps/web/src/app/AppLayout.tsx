@@ -33,6 +33,14 @@ const MENU_ITEMS = [
     ],
   },
   {
+    key: 'order-group',
+    label: '订单',
+    children: [
+      { key: '/orders', label: '订单管理' },
+      { key: '/picking', label: '拣货作业' },
+    ],
+  },
+  {
     key: 'platform-group',
     label: '平台',
     children: [

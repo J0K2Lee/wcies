@@ -14,6 +14,9 @@ import { ImportPage } from '../pages/import/ImportPage';
 import { InventoryPage } from '../pages/inventory/InventoryPage';
 import { InventoryTransactionsPage } from '../pages/inventory/InventoryTransactionsPage';
 import { ReservationsPage } from '../pages/inventory/ReservationsPage';
+import { OrdersPage } from '../pages/orders/OrdersPage';
+import { PickingPage } from '../pages/picking/PickingPage';
+import { PickingTaskWorkPage } from '../pages/picking/PickingTaskWorkPage';
 
 export function App() {
   return (
@@ -33,6 +36,9 @@ export function App() {
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/inventory/transactions" element={<InventoryTransactionsPage />} />
         <Route path="/inventory/reservations" element={<ReservationsPage />} />
+        <Route path="/orders" element={<OrdersPage />} />
+        <Route path="/picking" element={<PickingPage />} />
+        <Route path="/picking/:id" element={<PickingTaskWorkPage />} />
       </Route>
     </Routes>
   );
