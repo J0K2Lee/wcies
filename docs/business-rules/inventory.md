@@ -1640,3 +1640,25 @@ SELLABLE / DEFECTIVE / REPAIR / SCRAPPED
 
 - Balance 行的创建只通过 `initializeStock / receiveStock / moveBin 目标`（`INSERT ... ON CONFLICT DO NOTHING` + FOR UPDATE）；查询不产生 Balance 副作用。
 - Reservation / Picked / On Hand 的任何变化都必须且只能经 Inventory 模块 Service；流水与事件为审计数据，无删除接口。
+
+---
+
+# 61. Sprint 3 Inventory 扩展实现约定（部分拣货 + SN）
+
+以下为 Sprint 3 在 Sprint 2 基线上新增并经验证的操作性约定（与上文规则一致）。
+
+## 61.1 部分拣货（PICK 逐件累计）
+
+- 新增 `ReservationService.pickStockPartial(reservationId, { quantity, serialNumbers?, operator, idempotencyKey?, remark? })`：一次从 Reserved → Picked 移动 ≤ 全量的数量。
+- 实现方式与整单 PICK 相同：行按 `bin_code` 排序、逐行 FOR UPDATE、贪心扣除 `line.pickedQty`（`picked_qty` 字段即为此预留）；行拣满 → 行状态 PICKED；全部行拣满 → Header PICKED（部分拣货期间 Header 保持 ACTIVE，`pickedAt` 在首次拣货时记录）。
+- 事件类型仍为 `PICK`；事件幂等键 `PICK:<reservationId>:<clientKey>`。Picking 模块的 scanKey 为 `PTI<pickingTaskItemId>#<结果计数>`，保证同一扫码重放幂等、并发不超卖。
+- UNPICK / RELEASE / SHIP 仍为整单操作；部分拣货后的 Reservation 处于 ACTIVE 且存在已拣行时，RELEASE 被状态机拒绝（先由上层业务约束：部分拣货中的订单禁止取消）。
+
+## 61.2 InventorySerial（单件追踪明细）
+
+- `inventory_serials`：`serial_number` 全局 UNIQUE；状态 `IN_STOCK / RESERVED / PICKED / SHIPPED`（SHIPPED 留给 Shipment 阶段）；`reservation_id` / `picking_task_item_id` 为占用追溯。
+- SN 不是第二库存事实源：数量事实仍是 `inventory_balances`；涉及 Serial Tracking SKU 的库存动作，Balance 与 SN 必须同事务一致。
+- `initializeStock / receiveStock`：`serial_tracking = true` 的 SKU 必须提供与数量一致（数量必须为整数件）的 SN 列表，超集/缺失均拒绝；非 SN 商品携带 SN 列表直接拒绝（422）。
+- `reserveStock`：SN 商品按已分配的 Reservation 行所在 Bin 逐行选取 IN_STOCK SN（按 serial_number 排序）标记 RESERVED；某 Bin SN 不足即整体回滚并返回 `INVENTORY_INSUFFICIENT_STOCK`。
+- `releaseReservation`：该 Reservation 名下 RESERVED SN 回到 IN_STOCK；`pickStockPartial` / `pickStock`：携带的 SN（必须属于该 Reservation 且状态 RESERVED）→ PICKED 并写入 `picking_task_item_id`；`unpickStock`：PICKED SN → RESERVED。
+- SN 数量不变式：同一 `(sku, warehouse)` 下 `IN_STOCK + RESERVED + PICKED` 的 SN 件数必须等于对应 Balance 的 `onHand - (非 SN 维度的差异)`——由同事务写入保证，不做异步对账。
