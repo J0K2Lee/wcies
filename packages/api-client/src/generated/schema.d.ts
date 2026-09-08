@@ -1419,6 +1419,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 通知列表（分页，按类型/通道/状态过滤） */
+        get: operations["NotificationController_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 通知详情 */
+        get: operations["NotificationController_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重试失败的 FEISHU 通知投递 */
+        post: operations["NotificationController_retry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/picking-tasks": {
         parameters: {
             query?: never;
@@ -1499,6 +1550,297 @@ export interface paths {
         put?: never;
         /** 完成拣货任务（校验全部行已拣完） */
         post: operations["PickingController_complete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/interceptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 拦截任务列表（分页） */
+        get: operations["InterceptionController_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/interceptions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 拦截任务详情（要找什么/在哪找/SN/目标库位/历史） */
+        get: operations["InterceptionController_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/interceptions/{id}/assign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 指派员工（CREATED → ASSIGNED） */
+        post: operations["InterceptionController_assign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/interceptions/{id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 开始查找（CREATED/ASSIGNED → LOCATING） */
+        post: operations["InterceptionController_start"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/interceptions/{id}/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 拦截扫码：验证 SKU / SN / 目标库位（→ INTERCEPTED，不改库存） */
+        post: operations["InterceptionController_scan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/interceptions/{id}/return-to-stock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 回库（原子：Picked - N，OnHand 不变，SN → IN_STOCK，Package 解除） */
+        post: operations["InterceptionController_returnToStock"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/interceptions/{id}/fail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 标记失败（未找到商品；库存保持 Picked + 异常） */
+        post: operations["InterceptionController_fail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/interceptions/{id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 关闭拦截任务（RETURNED_TO_STOCK/FAILED → CLOSED） */
+        post: operations["InterceptionController_close"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/shipments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 发货单列表（分页 + 包裹汇总） */
+        get: operations["ShipmentController_list"];
+        put?: never;
+        /** 从订单的 PICKED 行创建发货单（按仓拆分） */
+        post: operations["ShipmentController_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/shipments/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 发货单详情（待发商品 / 包裹进度 / 面单 / 物流信息） */
+        get: operations["ShipmentController_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/shipments/{id}/packages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 创建包裹（发货单进入 PACKING） */
+        post: operations["ShipmentController_createPackage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/shipments/{id}/tracking": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** 人工录入/修改物流单号与承运商（未出库前） */
+        patch: operations["ShipmentController_updateTracking"];
+        trace?: never;
+    };
+    "/api/v1/shipments/{id}/ship": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 正式出库（原子扣减 Picked/OnHand，幂等，不重复扣减） */
+        post: operations["ShipmentController_ship"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/shipments/{id}/labels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 面单列表（含短期签名查看 URL） */
+        get: operations["ShipmentController_listLabels"];
+        put?: never;
+        /** 手工上传面单文件（PDF/PNG/JPEG，私有桶 + 签名访问） */
+        post: operations["ShipmentController_uploadLabel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/packages/{id}/workbench": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 打包工作台数据（待装商品 + 已装明细 + SN 进度） */
+        get: operations["PackageController_workbench"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/packages/{id}/items/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 扫码装箱（每次 1 件；SN 商品必带 serialNumber；不改变库存） */
+        post: operations["PackageController_scan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/packages/{id}/seal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 封箱（OPEN/REPACK_REQUIRED → SEALED；齐全后发货单 READY_TO_SHIP） */
+        post: operations["PackageController_seal"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2110,6 +2452,83 @@ export interface components {
             binBarcode?: string;
             /** @description 显式指定拣货行（同 SKU 多行时） */
             itemId?: string;
+        };
+        AssignInterceptionRequestDto: {
+            /**
+             * @description 指派员工（默认当前操作人）
+             * @example 张三
+             */
+            assigneeName?: string;
+        };
+        InterceptionScanRequestDto: {
+            /**
+             * @description SKU 条码（后端验证）
+             * @example 4601234506789
+             */
+            barcode: string;
+            /** @description SN 管理商品必填 */
+            serialNumber?: string;
+            /**
+             * @description 目标回库库位条码（后端验证）
+             * @example SZ01-A01-01
+             */
+            binBarcode: string;
+        };
+        ReturnToStockRequestDto: {
+            /** @description 覆盖扫码时记录的目标库位 */
+            binBarcode?: string;
+        };
+        FailInterceptionRequestDto: {
+            /** @example 在暂存区未找到商品 */
+            reason?: string;
+        };
+        ShipmentListEnvelopeDto: Record<string, never>;
+        CreateShipmentRequestDto: {
+            /** @description 从该订单的 PICKED 行创建发货单（按仓拆分，1 Shipment = 1 Warehouse） */
+            orderId: string;
+        };
+        CreateShipmentEnvelopeDto: Record<string, never>;
+        ShipmentEnvelopeDto: Record<string, never>;
+        UpdateShipmentTrackingRequestDto: {
+            /**
+             * @description 人工录入物流单号（未来 Adapter 自动填入）
+             * @example TRK123456789
+             */
+            trackingNumber?: string;
+            /** @example CDEK */
+            carrierCode?: string;
+            /** @example EXPRESS */
+            shippingMethod?: string;
+        };
+        ShipShipmentRequestDto: {
+            /** @description 幂等键：重复提交同一键不会重复扣减库存 */
+            idempotencyKey?: string;
+            /** @description 出库时顺带录入物流信息 */
+            tracking?: components["schemas"]["UpdateShipmentTrackingRequestDto"];
+        };
+        LabelListEnvelopeDto: Record<string, never>;
+        PackingScanRequestDto: {
+            /**
+             * @description SKU 条码（扫码器=键盘输入，每次 1 件）
+             * @example 4601234506789
+             */
+            barcode: string;
+            /** @description SN 管理商品必填 */
+            serialNumber?: string;
+        };
+        PackageDimensionsDto: {
+            /** @example 1.250 */
+            weightKg?: string;
+            /** @example 30.00 */
+            lengthCm?: string;
+            /** @example 20.00 */
+            widthCm?: string;
+            /** @example 10.00 */
+            heightCm?: string;
+        };
+        SealPackageRequestDto: {
+            /** @description 封箱时录入重量/尺寸 */
+            dimensions?: components["schemas"]["PackageDimensionsDto"];
         };
         CreateTestJobDto: Record<string, never>;
         TestJobResponseDto: Record<string, never>;
@@ -3945,7 +4364,7 @@ export interface operations {
                 skuId?: string;
                 warehouseId?: string;
                 binId?: string;
-                transactionType?: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "MOVE_BIN" | "MANUAL_ADJUSTMENT";
+                transactionType?: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "RETURN_PICKED" | "MOVE_BIN" | "MANUAL_ADJUSTMENT";
                 referenceType?: "MANUAL" | "TEST" | "ORDER" | "IMPORT";
                 referenceId?: string;
                 createdFrom?: string;
@@ -4279,7 +4698,7 @@ export interface operations {
     ExceptionController_list: {
         parameters: {
             query?: {
-                exceptionType?: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE";
+                exceptionType?: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED";
                 status?: "OPEN" | "RESOLVED" | "IGNORED";
                 referenceType?: string;
                 referenceId?: string;
@@ -4369,7 +4788,7 @@ export interface operations {
             query?: {
                 /** @description 订单号 / 平台订单号模糊搜索 */
                 keyword?: string;
-                erpStatus?: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "CANCELLED" | "EXCEPTION";
+                erpStatus?: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
                 storeId?: string;
             };
             header?: never;
@@ -4455,6 +4874,66 @@ export interface operations {
             header?: never;
             path: {
                 itemId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    NotificationController_list: {
+        parameters: {
+            query?: {
+                type?: "ORDER_INTERCEPTION_REQUIRED" | "ORDER_INTERCEPTION_FAILED";
+                channel?: "SYSTEM" | "FEISHU";
+                status?: "PENDING" | "SENT" | "FAILED" | "CANCELLED";
+                referenceId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    NotificationController_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    NotificationController_retry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
             };
             cookie?: never;
         };
@@ -4581,6 +5060,417 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    InterceptionController_list: {
+        parameters: {
+            query?: {
+                orderId?: string;
+                warehouseId?: string;
+                status?: "CREATED" | "ASSIGNED" | "LOCATING" | "INTERCEPTED" | "FAILED" | "RETURNED_TO_STOCK" | "CLOSED";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    InterceptionController_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    InterceptionController_assign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignInterceptionRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    InterceptionController_start: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    InterceptionController_scan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InterceptionScanRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    InterceptionController_returnToStock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReturnToStockRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    InterceptionController_fail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FailInterceptionRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    InterceptionController_close: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ShipmentController_list: {
+        parameters: {
+            query?: {
+                orderId?: string;
+                warehouseId?: string;
+                status?: "DRAFT" | "READY_TO_PACK" | "PACKING" | "READY_TO_SHIP" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+                /** @description 物流单号模糊搜索 */
+                trackingNumber?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShipmentListEnvelopeDto"];
+                };
+            };
+        };
+    };
+    ShipmentController_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateShipmentRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateShipmentEnvelopeDto"];
+                };
+            };
+        };
+    };
+    ShipmentController_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShipmentEnvelopeDto"];
+                };
+            };
+        };
+    };
+    ShipmentController_createPackage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ShipmentController_updateTracking: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateShipmentTrackingRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShipmentEnvelopeDto"];
+                };
+            };
+        };
+    };
+    ShipmentController_ship: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShipShipmentRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ShipmentController_listLabels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabelListEnvelopeDto"];
+                };
+            };
+        };
+    };
+    ShipmentController_uploadLabel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    PackageController_workbench: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    PackageController_scan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PackingScanRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    PackageController_seal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SealPackageRequestDto"];
+            };
+        };
         responses: {
             200: {
                 headers: {

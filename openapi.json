@@ -2896,6 +2896,7 @@
                 "PICK",
                 "UNPICK",
                 "SHIP",
+                "RETURN_PICKED",
                 "MOVE_BIN",
                 "MANUAL_ADJUSTMENT"
               ]
@@ -3445,7 +3446,12 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": ["ORDER_SKU_MAPPING_FAILED", "ORDER_OUT_OF_STOCK", "ORDER_INVALID_STATE"]
+              "enum": [
+                "ORDER_SKU_MAPPING_FAILED",
+                "ORDER_OUT_OF_STOCK",
+                "ORDER_INVALID_STATE",
+                "ORDER_INTERCEPTION_FAILED"
+              ]
             }
           },
           {
@@ -3604,6 +3610,8 @@
                 "BACKORDERED",
                 "PICKING",
                 "PICKED",
+                "PARTIALLY_SHIPPED",
+                "SHIPPED",
                 "CANCELLED",
                 "EXCEPTION"
               ]
@@ -3724,6 +3732,99 @@
         },
         "summary": "重试分配库存（BACKORDERED / PENDING 行）",
         "tags": ["orders"]
+      }
+    },
+    "/api/v1/notifications": {
+      "get": {
+        "operationId": "NotificationController_list",
+        "parameters": [
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["ORDER_INTERCEPTION_REQUIRED", "ORDER_INTERCEPTION_FAILED"]
+            }
+          },
+          {
+            "name": "channel",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["SYSTEM", "FEISHU"]
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["PENDING", "SENT", "FAILED", "CANCELLED"]
+            }
+          },
+          {
+            "name": "referenceId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "通知列表（分页，按类型/通道/状态过滤）",
+        "tags": ["notifications"]
+      }
+    },
+    "/api/v1/notifications/{id}": {
+      "get": {
+        "operationId": "NotificationController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "通知详情",
+        "tags": ["notifications"]
+      }
+    },
+    "/api/v1/notifications/{id}/retry": {
+      "post": {
+        "operationId": "NotificationController_retry",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "重试失败的 FEISHU 通知投递",
+        "tags": ["notifications"]
       }
     },
     "/api/v1/picking-tasks": {
@@ -3882,6 +3983,595 @@
         },
         "summary": "完成拣货任务（校验全部行已拣完）",
         "tags": ["picking-tasks"]
+      }
+    },
+    "/api/v1/interceptions": {
+      "get": {
+        "operationId": "InterceptionController_list",
+        "parameters": [
+          {
+            "name": "orderId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "warehouseId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "CREATED",
+                "ASSIGNED",
+                "LOCATING",
+                "INTERCEPTED",
+                "FAILED",
+                "RETURNED_TO_STOCK",
+                "CLOSED"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "拦截任务列表（分页）",
+        "tags": ["interceptions"]
+      }
+    },
+    "/api/v1/interceptions/{id}": {
+      "get": {
+        "operationId": "InterceptionController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "拦截任务详情（要找什么/在哪找/SN/目标库位/历史）",
+        "tags": ["interceptions"]
+      }
+    },
+    "/api/v1/interceptions/{id}/assign": {
+      "post": {
+        "operationId": "InterceptionController_assign",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignInterceptionRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "指派员工（CREATED → ASSIGNED）",
+        "tags": ["interceptions"]
+      }
+    },
+    "/api/v1/interceptions/{id}/start": {
+      "post": {
+        "operationId": "InterceptionController_start",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "开始查找（CREATED/ASSIGNED → LOCATING）",
+        "tags": ["interceptions"]
+      }
+    },
+    "/api/v1/interceptions/{id}/scan": {
+      "post": {
+        "operationId": "InterceptionController_scan",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterceptionScanRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "拦截扫码：验证 SKU / SN / 目标库位（→ INTERCEPTED，不改库存）",
+        "tags": ["interceptions"]
+      }
+    },
+    "/api/v1/interceptions/{id}/return-to-stock": {
+      "post": {
+        "operationId": "InterceptionController_returnToStock",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReturnToStockRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "回库（原子：Picked - N，OnHand 不变，SN → IN_STOCK，Package 解除）",
+        "tags": ["interceptions"]
+      }
+    },
+    "/api/v1/interceptions/{id}/fail": {
+      "post": {
+        "operationId": "InterceptionController_fail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FailInterceptionRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "标记失败（未找到商品；库存保持 Picked + 异常）",
+        "tags": ["interceptions"]
+      }
+    },
+    "/api/v1/interceptions/{id}/close": {
+      "post": {
+        "operationId": "InterceptionController_close",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "关闭拦截任务（RETURNED_TO_STOCK/FAILED → CLOSED）",
+        "tags": ["interceptions"]
+      }
+    },
+    "/api/v1/shipments": {
+      "get": {
+        "operationId": "ShipmentController_list",
+        "parameters": [
+          {
+            "name": "orderId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "warehouseId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "DRAFT",
+                "READY_TO_PACK",
+                "PACKING",
+                "READY_TO_SHIP",
+                "SHIPPED",
+                "CANCELLED",
+                "EXCEPTION"
+              ]
+            }
+          },
+          {
+            "name": "trackingNumber",
+            "required": false,
+            "in": "query",
+            "description": "物流单号模糊搜索",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShipmentListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "发货单列表（分页 + 包裹汇总）",
+        "tags": ["shipments"]
+      },
+      "post": {
+        "operationId": "ShipmentController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateShipmentRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateShipmentEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "从订单的 PICKED 行创建发货单（按仓拆分）",
+        "tags": ["shipments"]
+      }
+    },
+    "/api/v1/shipments/{id}": {
+      "get": {
+        "operationId": "ShipmentController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShipmentEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "发货单详情（待发商品 / 包裹进度 / 面单 / 物流信息）",
+        "tags": ["shipments"]
+      }
+    },
+    "/api/v1/shipments/{id}/packages": {
+      "post": {
+        "operationId": "ShipmentController_createPackage",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "创建包裹（发货单进入 PACKING）",
+        "tags": ["shipments"]
+      }
+    },
+    "/api/v1/shipments/{id}/tracking": {
+      "patch": {
+        "operationId": "ShipmentController_updateTracking",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateShipmentTrackingRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShipmentEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "人工录入/修改物流单号与承运商（未出库前）",
+        "tags": ["shipments"]
+      }
+    },
+    "/api/v1/shipments/{id}/ship": {
+      "post": {
+        "operationId": "ShipmentController_ship",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShipShipmentRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "正式出库（原子扣减 Picked/OnHand，幂等，不重复扣减）",
+        "tags": ["shipments"]
+      }
+    },
+    "/api/v1/shipments/{id}/labels": {
+      "post": {
+        "operationId": "ShipmentController_uploadLabel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "手工上传面单文件（PDF/PNG/JPEG，私有桶 + 签名访问）",
+        "tags": ["shipments"]
+      },
+      "get": {
+        "operationId": "ShipmentController_listLabels",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabelListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "面单列表（含短期签名查看 URL）",
+        "tags": ["shipments"]
+      }
+    },
+    "/api/v1/packages/{id}/workbench": {
+      "get": {
+        "operationId": "PackageController_workbench",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "打包工作台数据（待装商品 + 已装明细 + SN 进度）",
+        "tags": ["packages"]
+      }
+    },
+    "/api/v1/packages/{id}/items/scan": {
+      "post": {
+        "operationId": "PackageController_scan",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PackingScanRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "扫码装箱（每次 1 件；SN 商品必带 serialNumber；不改变库存）",
+        "tags": ["packages"]
+      }
+    },
+    "/api/v1/packages/{id}/seal": {
+      "post": {
+        "operationId": "PackageController_seal",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SealPackageRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "封箱（OPEN/REPACK_REQUIRED → SEALED；齐全后发货单 READY_TO_SHIP）",
+        "tags": ["packages"]
       }
     },
     "/api/v1/dev/test-job": {
@@ -5344,6 +6034,164 @@
           }
         },
         "required": ["barcode"]
+      },
+      "AssignInterceptionRequestDto": {
+        "type": "object",
+        "properties": {
+          "assigneeName": {
+            "type": "string",
+            "example": "张三",
+            "description": "指派员工（默认当前操作人）"
+          }
+        }
+      },
+      "InterceptionScanRequestDto": {
+        "type": "object",
+        "properties": {
+          "barcode": {
+            "type": "string",
+            "example": "4601234506789",
+            "description": "SKU 条码（后端验证）"
+          },
+          "serialNumber": {
+            "type": "string",
+            "description": "SN 管理商品必填"
+          },
+          "binBarcode": {
+            "type": "string",
+            "example": "SZ01-A01-01",
+            "description": "目标回库库位条码（后端验证）"
+          }
+        },
+        "required": ["barcode", "binBarcode"]
+      },
+      "ReturnToStockRequestDto": {
+        "type": "object",
+        "properties": {
+          "binBarcode": {
+            "type": "string",
+            "description": "覆盖扫码时记录的目标库位"
+          }
+        }
+      },
+      "FailInterceptionRequestDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "example": "在暂存区未找到商品"
+          }
+        }
+      },
+      "ShipmentListEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateShipmentRequestDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "description": "从该订单的 PICKED 行创建发货单（按仓拆分，1 Shipment = 1 Warehouse）"
+          }
+        },
+        "required": ["orderId"]
+      },
+      "CreateShipmentEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ShipmentEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateShipmentTrackingRequestDto": {
+        "type": "object",
+        "properties": {
+          "trackingNumber": {
+            "type": "string",
+            "example": "TRK123456789",
+            "description": "人工录入物流单号（未来 Adapter 自动填入）"
+          },
+          "carrierCode": {
+            "type": "string",
+            "example": "CDEK"
+          },
+          "shippingMethod": {
+            "type": "string",
+            "example": "EXPRESS"
+          }
+        }
+      },
+      "ShipShipmentRequestDto": {
+        "type": "object",
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "description": "幂等键：重复提交同一键不会重复扣减库存"
+          },
+          "tracking": {
+            "description": "出库时顺带录入物流信息",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateShipmentTrackingRequestDto"
+              }
+            ]
+          }
+        }
+      },
+      "LabelListEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "PackingScanRequestDto": {
+        "type": "object",
+        "properties": {
+          "barcode": {
+            "type": "string",
+            "example": "4601234506789",
+            "description": "SKU 条码（扫码器=键盘输入，每次 1 件）"
+          },
+          "serialNumber": {
+            "type": "string",
+            "description": "SN 管理商品必填"
+          }
+        },
+        "required": ["barcode"]
+      },
+      "PackageDimensionsDto": {
+        "type": "object",
+        "properties": {
+          "weightKg": {
+            "type": "string",
+            "example": "1.250"
+          },
+          "lengthCm": {
+            "type": "string",
+            "example": "30.00"
+          },
+          "widthCm": {
+            "type": "string",
+            "example": "20.00"
+          },
+          "heightCm": {
+            "type": "string",
+            "example": "10.00"
+          }
+        }
+      },
+      "SealPackageRequestDto": {
+        "type": "object",
+        "properties": {
+          "dimensions": {
+            "description": "封箱时录入重量/尺寸",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PackageDimensionsDto"
+              }
+            ]
+          }
+        }
       },
       "CreateTestJobDto": {
         "type": "object",
