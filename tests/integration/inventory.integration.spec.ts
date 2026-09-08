@@ -110,7 +110,9 @@ async function balancesOf(skuId_: string): Promise<BalanceRow[]> {
   const list = await client.get<BalanceRow[]>(
     `/api/v1/inventory?skuId=${skuId_}&warehouseId=${warehouseId}&pageSize=100`,
   );
-  return list.body.data;
+  // The list API does not guarantee row order; sort here so assertions on
+  // multi-bin layouts are deterministic regardless of updated_at ordering.
+  return [...list.body.data].sort((a, b) => a.binCode.localeCompare(b.binCode));
 }
 
 async function reserve(input: {

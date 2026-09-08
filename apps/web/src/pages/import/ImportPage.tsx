@@ -24,6 +24,7 @@ const IMPORT_TYPES = [
   { value: 'WAREHOUSE', label: '仓库' },
   { value: 'BIN', label: '库位' },
   { value: 'LISTING_MAPPING', label: 'Listing 映射' },
+  { value: 'INITIAL_INVENTORY', label: '库存初始化' },
 ];
 
 const STATUS_TAG: Record<string, string> = {

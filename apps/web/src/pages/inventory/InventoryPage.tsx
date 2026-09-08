@@ -92,11 +92,21 @@ export function InventoryPage() {
   const [action, setAction] = useState<ActionMode | null>(null);
   const [detailSku, setDetailSku] = useState<string | null>(null);
   const [skuSearch, setSkuSearch] = useState('');
+  // Warehouse pickers use server-side keyword search: the warehouse table can
+  // hold far more rows than one page of options (test leftovers sort earlier
+  // by createdAt DESC), so local filtering on page 1 is not enough.
+  const [warehouseSearch, setWarehouseSearch] = useState('');
+  const [presetWarehouses, setPresetWarehouses] = useState<Array<{ value: string; label: string }>>(
+    [],
+  );
   const [form] = Form.useForm();
 
   const warehouses = useApiQuery<{
     data: Array<{ id: string; warehouseCode: string; name: string }>;
-  }>('/api/v1/warehouses', { page: 1, pageSize: 100 }, ['warehouses-lite']);
+  }>('/api/v1/warehouses', { page: 1, pageSize: 20, keyword: warehouseSearch || undefined }, [
+    'warehouses-lite',
+    warehouseSearch,
+  ]);
   const inventory = useApiQuery<{ data: InventoryRow[]; meta: { total: number } }>(
     '/api/v1/inventory',
     { page, pageSize: 50, keyword: keyword || undefined, warehouseId, status },
@@ -135,10 +145,17 @@ export function InventoryPage() {
     formWarehouseId !== undefined,
   );
 
+  // Search results first, then preset options (row actions open the modal with
+  // a warehouse that may not be in the current search result page).
   const warehouseOptions = (warehouses.data?.data ?? []).map((warehouse) => ({
     value: warehouse.id,
     label: `${warehouse.warehouseCode} ${warehouse.name}`,
   }));
+  for (const preset of presetWarehouses) {
+    if (!warehouseOptions.some((option) => option.value === preset.value)) {
+      warehouseOptions.push(preset);
+    }
+  }
   const binOptions = (binsOfWarehouse.data?.data ?? []).map((bin) => ({
     value: bin.id,
     label: bin.binCode,
@@ -206,6 +223,17 @@ export function InventoryPage() {
     form.resetFields();
     if (preset !== undefined) {
       form.setFieldsValue(preset);
+      const warehouseId = (preset['warehouseId'] ?? preset['safetyWarehouseId']) as
+        string | undefined;
+      const code = preset['warehouseCode'] as string | undefined;
+      if (warehouseId !== undefined && code !== undefined) {
+        const label = `${code} ${(preset['warehouseName'] as string | undefined) ?? ''}`.trim();
+        setPresetWarehouses((prev) =>
+          prev.some((item) => item.value === warehouseId)
+            ? prev
+            : [...prev, { value: warehouseId, label }],
+        );
+      }
     }
     setAction(mode);
   };
@@ -228,7 +256,9 @@ export function InventoryPage() {
           placeholder="仓库"
           allowClear
           showSearch
-          optionFilterProp="label"
+          filterOption={false}
+          onSearch={setWarehouseSearch}
+          notFoundContent={warehouses.isLoading ? '搜索中...' : '无匹配仓库'}
           style={{ width: 220 }}
           options={warehouseOptions}
           value={warehouseId}
@@ -317,6 +347,8 @@ export function InventoryPage() {
                     openAction('adjust', {
                       skuId: record.skuId,
                       warehouseId: record.warehouseId,
+                      warehouseCode: record.warehouseCode,
+                      warehouseName: record.warehouseName,
                       binId: record.binId,
                     })
                   }
@@ -329,6 +361,8 @@ export function InventoryPage() {
                     openAction('safety', {
                       skuId: record.skuId,
                       safetyWarehouseId: record.warehouseId,
+                      warehouseCode: record.warehouseCode,
+                      warehouseName: record.warehouseName,
                       safetyQty: Number(record.safetyQty),
                     })
                   }
@@ -341,6 +375,8 @@ export function InventoryPage() {
                     openAction('move', {
                       skuId: record.skuId,
                       warehouseId: record.warehouseId,
+                      warehouseCode: record.warehouseCode,
+                      warehouseName: record.warehouseName,
                       fromBinId: record.binId,
                     })
                   }
@@ -537,7 +573,13 @@ export function InventoryPage() {
           {action === 'safety' ? (
             <>
               <Form.Item name="safetyWarehouseId" label="仓库" rules={[{ required: true }]}>
-                <Select options={warehouseOptions} />
+                <Select
+                  showSearch
+                  filterOption={false}
+                  onSearch={setWarehouseSearch}
+                  notFoundContent={warehouses.isLoading ? '搜索中...' : '无匹配仓库'}
+                  options={warehouseOptions}
+                />
               </Form.Item>
               <Form.Item
                 name="safetyQty"
@@ -555,6 +597,10 @@ export function InventoryPage() {
               rules={[{ required: true, message: '请选择仓库' }]}
             >
               <Select
+                showSearch
+                filterOption={false}
+                onSearch={setWarehouseSearch}
+                notFoundContent={warehouses.isLoading ? '搜索中...' : '无匹配仓库'}
                 options={warehouseOptions}
                 onChange={() => form.setFieldValue('binId', undefined)}
               />
