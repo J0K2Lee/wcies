@@ -225,6 +225,13 @@ export class InitializeStockRequestDto {
   @Transform(asQuantityString)
   @Matches(POSITIVE_QTY_PATTERN, { message: '数量格式错误（最多3位小数）' })
   quantity!: string;
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'SN 管理商品必填：与数量一致的 SN 列表；非 SN 商品禁止提供',
+  })
+  @IsOptional()
+  @IsString({ each: true })
+  serialNumbers?: string[];
   @ApiProperty({ enum: INVENTORY_REFERENCE_TYPES })
   @IsIn(INVENTORY_REFERENCE_TYPES)
   referenceType!: InventoryReferenceType;

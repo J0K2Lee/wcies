@@ -14,6 +14,7 @@ import {
   InventoryReservationRepository,
   ReservationListFilters,
 } from '../repositories/inventory-reservation.repository';
+import { InventorySerialRepository } from '../repositories/inventory-serial.repository';
 import {
   InventoryTransactionRepository,
   TransactionListFilters,
@@ -123,6 +124,7 @@ export class InventoryQueryService {
     private readonly balanceRepo: InventoryBalanceRepository,
     private readonly reservationRepo: InventoryReservationRepository,
     private readonly ledgerRepo: InventoryTransactionRepository,
+    private readonly serialRepo: InventorySerialRepository,
     private readonly reservationService: ReservationService,
     private readonly skuService: SkuService,
   ) {}
@@ -289,6 +291,18 @@ export class InventoryQueryService {
       throw new ReservationNotFoundError(id);
     }
     return this.reservationService.buildDtoWithCodes(reservation, false);
+  }
+
+  /** Serial occupancy of a reservation (Sprint 3 picking workflow read model). */
+  async listReservationSerials(
+    reservationId: string,
+  ): Promise<Array<{ serialNumber: string; status: string; pickingTaskItemId: string | null }>> {
+    const serials = await this.serialRepo.findByReservationId(reservationId);
+    return serials.map((serial) => ({
+      serialNumber: serial.serialNumber,
+      status: serial.status,
+      pickingTaskItemId: serial.pickingTaskItemId,
+    }));
   }
 
   private toRowDto(row: {

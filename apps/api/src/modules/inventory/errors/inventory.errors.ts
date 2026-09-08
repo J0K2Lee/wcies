@@ -122,3 +122,17 @@ export class AdjustmentInvalidError extends DomainError {
     super(message, details);
   }
 }
+
+/**
+ * Serial-number rule violation (Sprint 3 task §42-§44): SN count mismatch,
+ * duplicate SN, SN provided for a non-serial SKU, or an SN that does not
+ * belong to the reservation being picked.
+ */
+export class InventorySerialInvalidError extends DomainError {
+  readonly code = 'INVENTORY_SERIAL_INVALID';
+  readonly httpStatus = 422;
+
+  constructor(message: string, details: Record<string, unknown> = {}) {
+    super(message, details);
+  }
+}

@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsIn,
   IsNumber,
   IsOptional,
@@ -279,6 +280,7 @@ export class CreateSkuRequestDto {
 
   @ApiPropertyOptional({ example: false, description: 'SN tracking config only (task §25)' })
   @IsOptional()
+  @IsBoolean()
   serialTracking?: boolean;
 
   @ApiPropertyOptional({ maxLength: 2000 })
@@ -371,6 +373,7 @@ export class UpdateSkuRequestDto {
 
   @ApiPropertyOptional()
   @IsOptional()
+  @IsBoolean()
   serialTracking?: boolean;
 
   @ApiPropertyOptional({ maxLength: 2000 })

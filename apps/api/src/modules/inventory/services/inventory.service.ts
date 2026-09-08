@@ -14,18 +14,21 @@ import {
 import {
   IdempotencyConflictError,
   InventoryQuantityInvalidError,
+  InventorySerialInvalidError,
 } from '../errors/inventory.errors';
 import {
   InventoryBalanceRepository,
   isUniqueViolation,
 } from '../repositories/inventory-balance.repository';
 import { InventoryTransactionRepository } from '../repositories/inventory-transaction.repository';
+import { InventorySerialRepository } from '../repositories/inventory-serial.repository';
 import {
   assertBalanceInvariants,
   nextVersionOf,
   resolveDimension,
   DimensionDeps,
 } from './inventory-dimension';
+import { SkuNotFoundError } from '../../product/errors/sku-errors';
 
 export interface AddStockInput {
   skuId: string;
@@ -39,6 +42,12 @@ export interface AddStockInput {
   remark?: string | null;
   idempotencyKey: string;
   operator: OperatorContext;
+  /**
+   * Serial numbers of the received units (Sprint 3 task §44). REQUIRED for
+   * serial-tracked SKUs (count must equal the quantity, integer units only);
+   * FORBIDDEN otherwise.
+   */
+  serialNumbers?: string[];
 }
 
 export interface BalanceSnapshot {
@@ -82,6 +91,7 @@ export class InventoryService {
     private readonly dataSource: DataSource,
     private readonly balanceRepo: InventoryBalanceRepository,
     private readonly ledgerRepo: InventoryTransactionRepository,
+    private readonly serialRepo: InventorySerialRepository,
     skuService: SkuService,
     warehouseService: WarehouseService,
     binService: WarehouseBinService,
@@ -110,6 +120,41 @@ export class InventoryService {
       });
     }
     const dim = await resolveDimension(this.deps, input, input.operator);
+
+    // Serial validation BEFORE any write (Sprint 3 task §44): serial-tracked
+    // SKUs must receive one serial per unit; others must not carry serials.
+    const sku = await this.deps.skuService.getEntityById(input.skuId);
+    if (sku === null) {
+      throw new SkuNotFoundError(input.skuId);
+    }
+    const serialNumbers = [
+      ...new Set((input.serialNumbers ?? []).map((sn) => sn.trim()).filter((sn) => sn !== '')),
+    ];
+    if (sku.serialTracking) {
+      if (qty % 1000n !== 0n) {
+        throw new InventorySerialInvalidError('SN 管理商品的入库数量必须为整数件', {
+          skuId: input.skuId,
+          quantity: input.quantity,
+        });
+      }
+      if (input.serialNumbers === undefined || serialNumbers.length === 0) {
+        throw new InventorySerialInvalidError('SN 管理商品入库必须提供 SN 列表', {
+          skuId: input.skuId,
+          quantity: input.quantity,
+        });
+      }
+      if (BigInt(serialNumbers.length) * 1000n !== qty) {
+        throw new InventorySerialInvalidError('SN 数量与入库数量不一致', {
+          skuId: input.skuId,
+          quantity: input.quantity,
+          serialCount: serialNumbers.length,
+        });
+      }
+    } else if (serialNumbers.length > 0) {
+      throw new InventorySerialInvalidError('非 SN 管理商品不能提供 SN 列表', {
+        skuId: input.skuId,
+      });
+    }
 
     const existingEvent = await this.ledgerRepo.findEventByIdempotencyKey(input.idempotencyKey);
     if (existingEvent !== null) {
@@ -172,6 +217,30 @@ export class InventoryService {
             },
           ],
         );
+
+        // Serial rows are written in the SAME transaction as the balance so
+        // SN detail can never drift from the quantity fact (task §43).
+        if (serialNumbers.length > 0) {
+          try {
+            await this.serialRepo.insertMany(
+              runner,
+              serialNumbers.map((serialNumber) => ({
+                serialNumber,
+                skuId: dim.skuId,
+                warehouseId: dim.warehouseId,
+                binId: dim.binId,
+                status: 'IN_STOCK' as const,
+              })),
+            );
+          } catch (error: unknown) {
+            if (isUniqueViolation(error)) {
+              throw new InventorySerialInvalidError('SN 已存在（与现有库存或本次列表重复）', {
+                skuId: input.skuId,
+              });
+            }
+            throw error;
+          }
+        }
 
         await runner.commitTransaction();
         done = {

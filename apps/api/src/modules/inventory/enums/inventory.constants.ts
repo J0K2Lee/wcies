@@ -80,3 +80,11 @@ export type ReservationReferenceType = (typeof RESERVATION_REFERENCE_TYPES)[numb
 /** Computed row availability for the inventory list API (task §41 `status`). */
 export const INVENTORY_ROW_STATUSES = ['IN_STOCK', 'OUT_OF_STOCK'] as const;
 export type InventoryRowStatus = (typeof INVENTORY_ROW_STATUSES)[number];
+
+/**
+ * Serial-tracked unit status (Sprint 3 task §42). SN is per-unit tracking
+ * detail, never a second stock fact source; SHIPPED belongs to the Shipment
+ * sprint and is never entered in Sprint 3.
+ */
+export const INVENTORY_SERIAL_STATUSES = ['IN_STOCK', 'RESERVED', 'PICKED', 'SHIPPED'] as const;
+export type InventorySerialStatus = (typeof INVENTORY_SERIAL_STATUSES)[number];

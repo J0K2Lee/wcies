@@ -9,10 +9,12 @@ import { InventoryReservationEntity } from './entities/inventory-reservation.ent
 import { InventoryReservationLineEntity } from './entities/inventory-reservation-line.entity';
 import { InventoryEventEntity } from './entities/inventory-event.entity';
 import { InventoryTransactionEntity } from './entities/inventory-transaction.entity';
+import { InventorySerialEntity } from './entities/inventory-serial.entity';
 import { InventoryBalanceRepository } from './repositories/inventory-balance.repository';
 import { InventoryReservationRepository } from './repositories/inventory-reservation.repository';
 import { InventoryTransactionRepository } from './repositories/inventory-transaction.repository';
 import { InventorySafetyStockRepository } from './repositories/inventory-safety-stock.repository';
+import { InventorySerialRepository } from './repositories/inventory-serial.repository';
 import { InventoryService } from './services/inventory.service';
 import { InventoryAdjustmentService } from './services/inventory-adjustment.service';
 import { InventoryMovementService } from './services/inventory-movement.service';
@@ -40,6 +42,7 @@ import {
       InventoryReservationLineEntity,
       InventoryEventEntity,
       InventoryTransactionEntity,
+      InventorySerialEntity,
     ]),
     ProductModule,
     WarehouseModule,
@@ -55,6 +58,7 @@ import {
     InventoryReservationRepository,
     InventoryTransactionRepository,
     InventorySafetyStockRepository,
+    InventorySerialRepository,
     InventoryService,
     InventoryAdjustmentService,
     InventoryMovementService,
