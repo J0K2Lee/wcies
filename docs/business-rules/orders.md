@@ -38,11 +38,21 @@ orders 1:N order_items
 
 ---
 
-# 3. Order 与 Shipment 分离
+# 3. Order 与 Shipment 分离（Sprint 4 实现）
 
-1. Order ≠ Shipment ≠ Package（AGENTS.md §37）。
-2. Sprint 3 不实现 Shipment 模块业务，仅保留关联边界（库存 CONSUMED/SHIP 能力已由 Inventory Core 提供，Sprint 3 订单状态不进入 SHIPPED/DELIVERED）。
-3. 禁止把平台订单号当作物流包裹模型。
+1. Order ≠ Shipment ≠ Package（AGENTS.md §37）：`Order 1:N Shipment 1:N Package 1:N PackageItem`。
+2. `shipments` / `packages` / `package_items` / `package_item_serials` / `shipping_labels` 已于 Sprint 4 落地；禁止把 `orders.tracking_number` / `orders.package_id` 当作物流模型。
+3. 一个 Shipment 只属于一个 Warehouse（订单跨仓必须拆多张 Shipment，与 1 PickingTask = 1 Warehouse 一致）。
+4. Shipment 状态（仓库履约阶梯，禁止直接使用物流轨迹状态）：
+
+```text
+DRAFT（预留） → READY_TO_PACK → PACKING → READY_TO_SHIP → SHIPPED
+                                                     ↘ CANCELLED / EXCEPTION（预留）
+```
+
+创建即 `READY_TO_PACK`（进入条件：订单行全部 PICKED）；首个 Package 创建后进入 `PACKING`；全部待发数量打包且所有包裹 `SEALED` 后进入 `READY_TO_SHIP`；正式出库后 `SHIPPED`。
+
+5. Package 状态：`OPEN → SEALED → SHIPPED`，另有 `CANCELLED` 与 `REPACK_REQUIRED`（已封箱包裹因拦截失去某行后必须重打包的可审计状态）。
 
 ---
 
@@ -98,6 +108,7 @@ PENDING        已保存，尚未尝试分配
 RESERVED       已创建 InventoryReservation
 BACKORDERED    映射成功但库存不足
 PICKED         已完成拣货（pickedQty == requiredQty）
+SHIPPED        已随 Shipment 正式出库（Sprint 4；该行全部数量已离开库存）
 RELEASED       订单取消后的取消终态
 ```
 
@@ -117,7 +128,7 @@ FAILED    无法解析（skuId = NULL，禁止猜测 SKU）
 
 # 7. Order ERP 状态机
 
-Sprint 3 状态全集：
+Sprint 4 状态全集：
 
 ```text
 NEW
@@ -127,11 +138,13 @@ PARTIALLY_BACKORDERED
 BACKORDERED
 PICKING
 PICKED
+PARTIALLY_SHIPPED（Sprint 4：部分行/数量已出库，其余仍待履约）
+SHIPPED（Sprint 4：全部可履约行已出库）
 CANCELLED
 EXCEPTION
 ```
 
-不包含 SHIPPED / DELIVERED / RETURNED（Shipment Sprint 再加入）。
+不包含 DELIVERED / RETURNED（后续 Sprint 再加入）。
 
 ## 汇总规则（清晰模型）
 
@@ -140,11 +153,13 @@ EXCEPTION
 1. `CANCELLED` 为终态，取消后不再重算。
 2. 无任何可履约行（全部 mapping FAILED）→ `EXCEPTION`。
 3. 存在未完成拣货的拣货任务行（订单行进入 CREATED/IN_PROGRESS 的 PickingTask 且未全部拣完）→ `PICKING`。
-4. 全部可履约行（mapping != FAILED 且 fulfillment != RELEASED）均为 PICKED → `PICKED`。
-5. 存在 BACKORDERED 行：
+4. 全部可履约行（mapping != FAILED 且 fulfillment != RELEASED）均为 SHIPPED → `SHIPPED`。
+5. 存在 SHIPPED 行但并非全部 → `PARTIALLY_SHIPPED`。
+6. 全部可履约行均为 PICKED → `PICKED`。
+7. 存在 BACKORDERED 行：
    - 存在 RESERVED/PICKED 行 → `PARTIALLY_BACKORDERED`；
    - 全部为 BACKORDERED → `BACKORDERED`。
-6. 其余（全部 RESERVED）→ `READY_TO_PICK`。
+8. 其余（全部 RESERVED）→ `READY_TO_PICK`。
 
 存在部分 mapping FAILED 但仍有可履约行时：订单保留业务汇总状态，映射失败以挂接异常呈现（UI 明确区分“不知道是什么 SKU”与“知道 SKU 但没库存”）。
 
@@ -184,6 +199,11 @@ fulfillment_status = RELEASED
 
 直接 `RELEASED`，不触碰库存。
 
+## SHIPPED 行取消（Sprint 4）
+
+已随 Shipment 出库的行**跳过**（保持 SHIPPED）：禁止仓内拦截，不释放、
+不回库；找回走未来的 Return / Logistics 流程。
+
 ## Picked 取消（拦截）
 
 ```text
@@ -206,7 +226,7 @@ OrderItem 保持 PICKED，Picked 库存保持
 
 # 9. Order Interception（拦截）
 
-`order_interceptions`：Picked 取消的实体找回任务。
+`order_interceptions`：Picked 取消的实体找回任务（Sprint 4 完整实现）。
 
 状态（冻结）：
 
@@ -215,7 +235,16 @@ CREATED → ASSIGNED → LOCATING → INTERCEPTED → RETURNED_TO_STOCK → CLOS
                                     ↘ FAILED
 ```
 
-Sprint 3 只实现创建（CREATED）；完整扫码回库与通知在后续仓库/通知 Sprint。禁止 Picked 取消时自动恢复库存。
+规则：
+
+1. 创建：`OrderService.cancel` 对每个 PICKED 行经 `ORDER_INTERCEPTION_PORT` 创建拦截任务，并发布 `ORDER_INTERCEPTION_REQUIRED` 领域事件（SYSTEM 通知立即落库；FEISHU 通知失败不得影响取消事务）。
+2. 拦截范围：仅"已发生实体拣货且未出库"的商品。Shipment 已 `SHIPPED` 的行禁止仓内拦截（`INTERCEPTION_NOT_ALLOWED_AFTER_SHIPMENT`）。
+3. 扫码验证（后端强制）：SKU 条码（`INTERCEPTION_SKU_MISMATCH`）、SN（SN 商品必须属于该订单 Reservation 且状态 PICKED，`INTERCEPTION_SERIAL_MISMATCH`）、目标回库 Bin（必须属于该仓库）。
+4. 回库（原子事务）：解包（PackageItem / PackageItemSerial 移除；SEALED 包裹 → `REPACK_REQUIRED`，清空包裹 → `CANCELLED`；ShipmentItem 快照行删除；Shipment 阶梯重算）→ 库存 `RETURN_PICKED`（Picked - N，On Hand 不变，SN → IN_STOCK 回目标 Bin，Reservation → RELEASED）→ OrderItem → RELEASED。状态历史（`order_interception_histories`）逐跳记录，内部合并步骤也留痕。
+5. 失败：`FAILED` 不动库存（Picked 保持），创建 `ORDER_INTERCEPTION_FAILED` 异常并发送通知。
+6. 关闭：`RETURNED_TO_STOCK` / `FAILED` → `CLOSED`。
+
+禁止 Picked 取消时自动恢复库存。
 
 ---
 
@@ -279,7 +308,7 @@ Reservation 全部行拣完后 Header 进入 PICKED。PickingModule 禁止直接
 
 1. `skus.serial_tracking = true` 的 SKU 为 SN 管理商品。
 2. `inventory_serials` 是单件追踪明细，不是第二库存事实源；数量事实仍是 `inventory_balances`。SN 与 Balance 状态必须同事务一致。
-3. SN 状态：`IN_STOCK / RESERVED / PICKED / SHIPPED`（SHIPPED 留给 Shipment 阶段）。
+3. SN 状态：`IN_STOCK / RESERVED / PICKED / SHIPPED`（SHIPPED 于 Sprint 4 正式出库时进入；拦截回库时回到 IN_STOCK 并落回目标 Bin）。
 4. SN 入库：serial_tracking SKU 的 `initialize/receive` 必须提供与数量一致的 SN 列表（禁止 On Hand = 10 但只有 8 个 SN）；非 SN 商品提供 SN 列表则拒绝。
 5. SN 保留：reserve 时按分配行所在 Bin 选取 IN_STOCK SN 标记 RESERVED；release 回 IN_STOCK；拣货扫码必须携带 `serialNumber`（SN 校验失败拒绝），拣货成功 SN → PICKED 并关联 picking_task_item_id。
 6. SN 唯一占用：同一 SN 不能同时服务两个订单（全局 UNIQUE + 状态约束）。
@@ -315,7 +344,12 @@ Reservation 全部行拣完后 Header 进入 PICKED。PickingModule 禁止直接
 ORDER_RESERVE:<orderItemId>          预约
 ORDER_RELEASE:<orderItemId>          取消释放
 PICK:<reservationId>:<scanKey>       逐件拣货（scanKey 由 Picking 行号 + 结果计数派生）
+SHIP:<reservationId>:<shipmentKey>   正式出库（shipmentKey = SHIPMENT:<shipmentId> 或调用方幂等键）
+RETURN_PICKED:<reservationId>:<interceptionKey>   拦截回库（interceptionKey = INTERCEPT:<interceptionId>）
 ```
+
+Shipment 出库幂等另有数据库层保障：`shipments` 行锁 + `SHIPPED` 状态检查，
+重复调用返回幂等结果（`alreadyShipped = true`），不再次扣减库存。
 
 ## 异常幂等
 
@@ -323,7 +357,17 @@ PICK:<reservationId>:<scanKey>       逐件拣货（scanKey 由 Picking 行号 +
 
 ---
 
-# 14. 事务边界（Sprint 3 实现约定）
+# 14. 事务边界（Sprint 3 实现约定；Sprint 4 扩展）
+
+Sprint 4 在此基础上增加三个原子业务命令（显式 QueryRunner + Inventory 事务感知 API）：
+
+```text
+拣货扫码：PickingTaskItem 递增 + pickStockPartialInTx + OrderItem PICKED（单事务）
+正式出库：shipStockPartialInTx + Package/Shipment/OrderItem SHIPPED（单事务）
+拦截回库：解包 + returnPickedStockInTx + OrderItem RELEASED + 拦截状态（单事务）
+```
+
+订单状态汇总（recompute + history）在提交后执行，失败可重算，不破坏库存事实。
 
 订单基础记录与行级分配分离：
 
@@ -352,12 +396,69 @@ PICK:<reservationId>:<scanKey>       逐件拣货（scanKey 由 Picking 行号 +
 
 ---
 
+# 15A. Shipment 与 Packing（Sprint 4）
+
+## 进入条件
+
+只有 `OrderItem.fulfillmentStatus = PICKED` 的行可进入 Shipment（按仓拆分，
+`shipment_items` 为数量快照）。`BACKORDERED / RESERVED / MAPPING_FAILED` 行禁止进入。
+一个订单行最多归属一张未取消的 Shipment（`shipment_items.order_item_id` 全局唯一）。
+
+## 打包（Packing）
+
+```text
+Picked Order Items → Create Package → 扫码 SKU → 数量校验 → Seal
+```
+
+1. 扫码装箱每次 1 件，条码由后端解析为 Internal SKU；打包**不改变库存**。
+2. 错误 SKU：`PACKING_SKU_MISMATCH`；超量：`PACKING_QUANTITY_EXCEEDED`。
+3. 数量完整性：Shipment 内全部包裹的 PackageItem 合计必须等于快照数量
+   （`SHIPMENT_NOT_FULLY_PACKED`），且全部包裹 SEALED 后才允许出库。
+4. SN 商品打包必须记录具体 SN（`package_item_serials`，全局唯一）；打包 SN
+   必须已属于当前订单行的 Reservation（禁止装入其他订单的 SN），SN 状态保持 PICKED。
+5. 并发：每张 Shipment 的打包操作按 Shipment 行锁 + Package 行锁串行化。
+
+## 正式出库（Ship）
+
+```text
+READY_TO_SHIP → shipShipment() → SHIPPED
+```
+
+单一数据库事务内完成：逐行 `shipStockPartialInTx`（Picked - N / On Hand - N /
+SN → SHIPPED）→ Packages → SHIPPED → Shipment → SHIPPED → OrderItems → SHIPPED。
+任一步失败整体回滚（不存在"Shipment=SHIPPED 但库存未扣"或反向状态）。
+人工可录入 `trackingNumber / carrierCode`（未来由平台 Adapter 自动填入）。
+
+## 面单（Shipping Label）
+
+`shipping_labels` 为平台无关元数据：Sprint 4 仅支持 `MANUAL_UPLOAD`
+（经 ObjectStorageService 私有桶 + 短期签名 URL 查看/打印，支持 PDF/PNG/JPEG）；
+`PLATFORM_API` 为未来预留。
+
+# 15B. Picking 原子性（Sprint 4 P0）
+
+PickingTaskItem 状态变化与 Inventory `Reserved → Picked` **必须原子提交**：
+
+```text
+锁 PickingTaskItem → 守卫递增 pickedQty → pickStockPartialInTx（同一 QueryRunner）
+→ OrderItem → PICKED → COMMIT
+```
+
+任何一步失败整体 ROLLBACK（不再使用"先改 Picking 再失败补偿"）。
+事务协调方案：Inventory 暴露事务感知公共 API（`pickStockPartialInTx` /
+`shipStockPartialInTx` / `returnPickedStockInTx`），Picking/Shipment/Interception
+模块持有事务边界但**不掌握库存计算**。
+
+---
+
 # 16. 修改本文档的条件
 
 以下变更必须先修改本文档：
 
 - 新增/删除 ERP 订单状态或合法迁移；
 - 新增/删除订单行履约状态或映射状态；
+- 新增/删除 Shipment / Package 状态或改变打包/出库规则；
+- 改变拦截生命周期、回库规则或通知行为；
 - 改变订单汇总状态优先级模型；
 - 改变锁库存时机、缺货行为或 Backorder 逻辑；
 - 改变取消类型与库存处理；

@@ -262,19 +262,20 @@ SCRAP
 
 # 10. 库存数量变化总表
 
-| 操作 | On Hand | Reserved | Picked |
-|---|---:|---:|---:|
-| 采购入库 / 初始入库 / 收货入库 | +N | 0 | 0 |
-| 新订单锁库存 | 0 | +N | 0 |
-| 释放未拣订单 | 0 | -N | 0 |
-| 拣货 | 0 | -N | +N |
-| 取消拣货并实体回库 | 0 | 0 | -N |
-| 正式出库 | -N | 0 | -N |
-| 盘盈 | +N | 0 | 0 |
-| 盘亏 | -N | 0 | 0 |
-| 调拨发出 | -N | 0 | 0 |
-| 调拨接收 | +N | 0 | 0 |
-| 库内移位（同一 Event 两条流水） | 源 -N / 目标 +N | 0 | 0 |
+| 操作 | On Hand | Reserved | Picked | Inventory 事件类型 |
+|---|---:|---:|---:|---|
+| 采购入库 / 初始入库 / 收货入库 | +N | 0 | 0 | RECEIVE / INITIAL_STOCK |
+| 新订单锁库存 | 0 | +N | 0 | RESERVE |
+| 释放未拣订单 | 0 | -N | 0 | RELEASE |
+| 拣货（逐件） | 0 | -N | +N | PICK |
+| 正式出库（Sprint 4） | -N | 0 | -N | SHIP |
+| 拦截回库（Sprint 4） | 0（不变） | 0 | -N | RETURN_PICKED |
+| 取消拣货并实体回库 | 0 | 0 | -N | RETURN_PICKED |
+| 盘盈 | +N | 0 | 0 | MANUAL_ADJUSTMENT |
+| 盘亏 | -N | 0 | 0 | MANUAL_ADJUSTMENT |
+| 调拨发出 | -N | 0 | 0 | （调拨 Sprint） |
+| 调拨接收 | +N | 0 | 0 | （调拨 Sprint） |
+| 库内移位（同一 Event 两条流水） | 源 -N / 目标 +N | 0 | 0 | MOVE_BIN |
 
 任何新增库存行为，都应先补充本表或对应规则。
 
@@ -471,24 +472,24 @@ SN错误：
 
 ---
 
-# 18. 正式出库
+# 18. 正式出库（Sprint 4 实现）
 
-货物正式完成仓库出库时：
+Shipment 完成全部校验后执行 `shipShipment()`，库存侧调用 Inventory 的
+`ReservationService.shipStockPartialInTx`（事务感知公共 API，与
+Shipment/Package/OrderItem 状态更新共用同一数据库事务）：
 
 ```text
 Picked - N
 On Hand - N
+SN: PICKED → SHIPPED
 ```
 
-Reservation进入最终消耗状态。
+事件类型为 `SHIP`（幂等键 `SHIP:<reservationId>:<shipmentKey>`）。
 
-产生：
-
-```text
-ORDER_SHIP
-```
-
-库存流水。
+部分出库支持：`inventory_reservation_lines.shipped_qty` 记录每行已出库数量；
+全部行 `shipped_qty == picked_qty` 时 Reservation Header 进入 `CONSUMED`，
+否则保持 `PICKED`（余量仍可拦截）。重复出库同一 Shipment 返回幂等结果，
+不得再次扣减库存、不得再次产生流水。
 
 ---
 
@@ -579,21 +580,17 @@ Interception Task
 
 ```text
 Picked - N
+On Hand 不变（绝不 +N）
+SN: PICKED → IN_STOCK（回到扫码目标 Bin，reservation/picking 占用清空）
+Reservation: PICKED → RELEASED（明确取消终态，不得保持 PICKED）
+OrderItem: PICKED → RELEASED（取消终态）
 ```
 
-由于：
-
-```text
-On Hand 从未减少
-```
-
-因此无需再：
-
-```text
-On Hand + N
-```
-
-商品重新进入可售状态。
+Sprint 4 实现：`ReservationService.returnPickedStockInTx`，事件类型
+`RETURN_PICKED`（幂等键 `RETURN_PICKED:<reservationId>:<interceptionKey>`），
+回库数量 = 该 Reservation 剩余未出库的 Picked 数量（`picked_qty - shipped_qty`，
+支持部分出库后取消的场景）。回库与 Package 解除、SN 更新、订单行终态
+在**同一事务**内完成。
 
 必须生成对应库存流水。
 
