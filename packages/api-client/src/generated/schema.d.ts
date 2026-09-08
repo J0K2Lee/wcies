@@ -1266,6 +1266,245 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/exceptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 异常列表（分页，可按订单行引用过滤） */
+        get: operations["ExceptionController_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/exceptions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 异常详情 */
+        get: operations["ExceptionController_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/exceptions/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 解决异常（OPEN → RESOLVED） */
+        post: operations["ExceptionController_resolve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/exceptions/{id}/ignore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 忽略异常（OPEN → IGNORED） */
+        post: operations["ExceptionController_ignore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 订单列表（分页 + 汇总计数 + 未处理异常数） */
+        get: operations["OrderController_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 订单详情（行/预约/历史/异常/拦截/拣货） */
+        get: operations["OrderController_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 标准化订单摄入（管理员/开发测试入口；未来 SyncService 复用 Service） */
+        post: operations["OrderController_ingest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 取消订单（按行处理库存：Reserved 释放 / Picked 拦截） */
+        post: operations["OrderController_cancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders/items/{itemId}/retry-allocation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重试分配库存（BACKORDERED / PENDING 行） */
+        post: operations["OrderController_retryAllocation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/picking-tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 拣货任务列表（分页 + 进度汇总） */
+        get: operations["PickingController_list"];
+        put?: never;
+        /** 从订单创建拣货任务（仅 RESERVED 行，按仓拆分） */
+        post: operations["PickingController_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/picking-tasks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 拣货任务详情（待拣 SKU / 多 Bin / SN） */
+        get: operations["PickingController_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/picking-tasks/{id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 开始拣货任务（CREATED → IN_PROGRESS） */
+        post: operations["PickingController_start"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/picking-tasks/{id}/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 扫码拣货（每次 1 件；SN 商品必带 serialNumber） */
+        post: operations["PickingController_scan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/picking-tasks/{id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 完成拣货任务（校验全部行已拣完） */
+        post: operations["PickingController_complete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/dev/test-job": {
         parameters: {
             query?: never;
@@ -1724,6 +1963,8 @@ export interface components {
              * @example 10
              */
             quantity: string;
+            /** @description SN 管理商品必填：与数量一致的 SN 列表；非 SN 商品禁止提供 */
+            serialNumbers?: string[];
             /** @enum {string} */
             referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT";
             referenceId: string;
@@ -1747,6 +1988,8 @@ export interface components {
              * @example 10
              */
             quantity: string;
+            /** @description SN 管理商品必填：与数量一致的 SN 列表；非 SN 商品禁止提供 */
+            serialNumbers?: string[];
             /** @enum {string} */
             referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT";
             referenceId: string;
@@ -1817,6 +2060,57 @@ export interface components {
             safetyQty: string;
         };
         SafetyStockEnvelopeDto: Record<string, never>;
+        ExceptionCloseRequestDto: {
+            /** @description 处理备注（记录在 details.closeRemark） */
+            remark?: string;
+        };
+        NormalizedOrderItemInputDto: {
+            platformProductId?: string;
+            platformSkuId?: string;
+            sellerSku?: string;
+            offerId?: string;
+            /** @example 2 */
+            quantity: string;
+            rawData?: Record<string, never>;
+        };
+        NormalizedOrderInputDto: {
+            storeId: string;
+            /** @example OZON-123456789 */
+            platformOrderId: string;
+            /** @example awaiting_packaging */
+            platformStatus?: string;
+            /** @example FBS */
+            fulfillmentMode?: string;
+            /** Format: date-time */
+            orderedAt: string;
+            /** @example RUB */
+            currency?: string;
+            items: components["schemas"]["NormalizedOrderItemInputDto"][];
+            /** @description 平台原始报文（保留事实，task §14） */
+            rawData?: Record<string, never>;
+            remark?: string;
+        };
+        OrderCancelRequestDto: {
+            /** @description 取消原因（记入历史与拦截任务） */
+            reason?: string;
+        };
+        CreatePickingTaskRequestDto: {
+            /** @description 从该订单的 RESERVED 行生成拣货任务（按仓拆分） */
+            orderId: string;
+        };
+        PickingScanRequestDto: {
+            /**
+             * @description SKU 条码（USB/蓝牙扫码器=键盘输入）
+             * @example 4601234506789
+             */
+            barcode: string;
+            /** @description SN 管理商品必填 */
+            serialNumber?: string;
+            /** @description 预留：库位条码（第一阶段不强制） */
+            binBarcode?: string;
+            /** @description 显式指定拣货行（同 SKU 多行时） */
+            itemId?: string;
+        };
         CreateTestJobDto: Record<string, never>;
         TestJobResponseDto: Record<string, never>;
         StorageTestResponseDto: Record<string, never>;
@@ -3979,6 +4273,320 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SafetyStockEnvelopeDto"];
                 };
+            };
+        };
+    };
+    ExceptionController_list: {
+        parameters: {
+            query?: {
+                exceptionType?: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE";
+                status?: "OPEN" | "RESOLVED" | "IGNORED";
+                referenceType?: string;
+                referenceId?: string;
+                storeId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ExceptionController_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ExceptionController_resolve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExceptionCloseRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ExceptionController_ignore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExceptionCloseRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    OrderController_list: {
+        parameters: {
+            query?: {
+                /** @description 订单号 / 平台订单号模糊搜索 */
+                keyword?: string;
+                erpStatus?: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "CANCELLED" | "EXCEPTION";
+                storeId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    OrderController_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    OrderController_ingest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NormalizedOrderInputDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    OrderController_cancel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderCancelRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    OrderController_retryAllocation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                itemId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    PickingController_list: {
+        parameters: {
+            query?: {
+                warehouseId?: string;
+                status?: "CREATED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+                orderId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    PickingController_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePickingTaskRequestDto"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    PickingController_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    PickingController_start: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    PickingController_scan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PickingScanRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    PickingController_complete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
