@@ -6,8 +6,11 @@
 
 /**
  * ERP order status (task §5). ALLOCATING is a reserved value - Sprint 3
- * ingestion allocates in one pass and never enters it. SHIPPED/DELIVERED/
- * RETURNED belong to the Shipment sprint and are NOT defined here.
+ * ingestion allocates in one pass and never enters it. SHIPPED and
+ * PARTIALLY_SHIPPED arrive with Sprint 4 (a shipment actually shipping);
+ * PARTIALLY_SHIPPED is real, not reserved: one order can ship across
+ * several shipments or leave backordered lines behind. DELIVERED / RETURNED
+ * belong to later sprints and are NOT defined here.
  */
 export const ERP_ORDER_STATUSES = [
   'NEW',
@@ -17,6 +20,8 @@ export const ERP_ORDER_STATUSES = [
   'BACKORDERED',
   'PICKING',
   'PICKED',
+  'PARTIALLY_SHIPPED',
+  'SHIPPED',
   'CANCELLED',
   'EXCEPTION',
 ] as const;
@@ -28,6 +33,7 @@ export const ORDER_ITEM_FULFILLMENT_STATUSES = [
   'RESERVED',
   'BACKORDERED',
   'PICKED',
+  'SHIPPED',
   'RELEASED',
 ] as const;
 export type OrderItemFulfillmentStatus = (typeof ORDER_ITEM_FULFILLMENT_STATUSES)[number];

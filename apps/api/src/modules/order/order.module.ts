@@ -8,33 +8,29 @@ import { WarehouseModule } from '../warehouse/warehouse.module';
 import { OperationLogModule } from '../operation-log/operation-log.module';
 import { LoggerModule } from '../../common/logger/logger.module';
 import { PickingModule } from '../picking/picking.module';
+import { NotificationModule } from '../notification/notification.module';
+import { InterceptionModule } from '../interception/interception.module';
 import { OrderEntity } from './entities/order.entity';
 import { OrderItemEntity } from './entities/order-item.entity';
 import { OrderStatusHistoryEntity } from './entities/order-status-history.entity';
-import { OrderInterceptionEntity } from './entities/order-interception.entity';
 import { OrderRepository } from './repositories/order.repository';
 import { OrderItemRepository } from './repositories/order-item.repository';
 import { OrderStatusHistoryRepository } from './repositories/order-status-history.repository';
-import { OrderInterceptionRepository } from './repositories/order-interception.repository';
 import { OrderStatusService } from './services/order-status.service';
 import { OrderIngestionService } from './services/order-ingestion.service';
 import { OrderService } from './services/order.service';
 import { OrderController } from './controllers/order.controller';
 
 /**
- * Order Core (Sprint 3). Stock is only touched via the exported Inventory
- * services; SKU resolution only via ListingResolverService (check-architecture
- * Rule 3/4). OrderModule and PickingModule reference each other's public
- * services, so the picking import uses forwardRef.
+ * Order Core (Sprint 3; Sprint 4 adds SHIPPED rollups). Stock is only touched
+ * via the exported Inventory services; SKU resolution only via
+ * ListingResolverService (check-architecture Rule 3/4). Picking and
+ * Interception reference OrderService while OrderService consumes their
+ * ports - both pairings use forwardRef.
  */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
-      OrderEntity,
-      OrderItemEntity,
-      OrderStatusHistoryEntity,
-      OrderInterceptionEntity,
-    ]),
+    TypeOrmModule.forFeature([OrderEntity, OrderItemEntity, OrderStatusHistoryEntity]),
     StoreModule,
     ListingModule,
     InventoryModule,
@@ -42,14 +38,15 @@ import { OrderController } from './controllers/order.controller';
     WarehouseModule,
     OperationLogModule,
     LoggerModule,
+    NotificationModule,
     forwardRef(() => PickingModule),
+    forwardRef(() => InterceptionModule),
   ],
   controllers: [OrderController],
   providers: [
     OrderRepository,
     OrderItemRepository,
     OrderStatusHistoryRepository,
-    OrderInterceptionRepository,
     OrderStatusService,
     OrderIngestionService,
     OrderService,

@@ -12,6 +12,11 @@ export class OrderItemRepository {
     return this.dataSource.getRepository(OrderItemEntity).findOneBy({ id });
   }
 
+  /** In-transaction read on the caller's connection (pool discipline). */
+  async findByIdTx(manager: EntityManager, id: string): Promise<OrderItemEntity | null> {
+    return manager.getRepository(OrderItemEntity).findOneBy({ id });
+  }
+
   async findByOrderId(orderId: string): Promise<OrderItemEntity[]> {
     return this.dataSource
       .getRepository(OrderItemEntity)

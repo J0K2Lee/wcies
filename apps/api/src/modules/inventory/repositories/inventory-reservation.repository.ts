@@ -137,7 +137,7 @@ export class InventoryReservationRepository {
   async updateLine(
     runner: QueryRunner,
     lineId: string,
-    patch: Partial<Pick<InventoryReservationLineEntity, 'status' | 'pickedQty'>>,
+    patch: Partial<Pick<InventoryReservationLineEntity, 'status' | 'pickedQty' | 'shippedQty'>>,
   ): Promise<void> {
     await runner.manager
       .getRepository(InventoryReservationLineEntity)

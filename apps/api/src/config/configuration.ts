@@ -36,6 +36,12 @@ export const appConfig = registerAs('app', () => {
       bucket: process.env.S3_BUCKET ?? '',
       forcePathStyle: (process.env.S3_FORCE_PATH_STYLE ?? 'true') === 'true',
     } satisfies S3Config,
+    /**
+     * Feishu webhook for outbound notifications (Sprint 4 task §49): purely
+     * OPTIONAL - when absent the FEISHU channel stays a Provider boundary and
+     * only SYSTEM notifications are created. No default URL is ever guessed.
+     */
+    feishuWebhookUrl: process.env.FEISHU_WEBHOOK_URL ?? null,
   };
 });
 

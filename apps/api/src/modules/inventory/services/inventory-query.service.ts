@@ -21,6 +21,7 @@ import {
 } from '../repositories/inventory-transaction.repository';
 import { ReservationDto, ReservationService } from './reservation.service';
 import { InventoryCondition } from '../enums/inventory.constants';
+import { InventorySerialEntity } from '../entities/inventory-serial.entity';
 
 export interface InventoryRowDto {
   id: string;
@@ -303,6 +304,35 @@ export class InventoryQueryService {
       status: serial.status,
       pickingTaskItemId: serial.pickingTaskItemId,
     }));
+  }
+
+  /**
+   * Single-serial lookup for cross-module scan validation (Sprint 4 packing
+   * + interception): is this SN known, and does it belong to the expected
+   * SKU / reservation with the expected status?
+   */
+  async findSerialByNumber(serialNumber: string): Promise<{
+    serialNumber: string;
+    skuId: string;
+    warehouseId: string;
+    binId: string | null;
+    status: string;
+    reservationId: string | null;
+  } | null> {
+    const serial = await this.dataSource
+      .getRepository(InventorySerialEntity)
+      .findOneBy({ serialNumber });
+    if (serial === null) {
+      return null;
+    }
+    return {
+      serialNumber: serial.serialNumber,
+      skuId: serial.skuId,
+      warehouseId: serial.warehouseId,
+      binId: serial.binId,
+      status: serial.status,
+      reservationId: serial.reservationId,
+    };
   }
 
   private toRowDto(row: {

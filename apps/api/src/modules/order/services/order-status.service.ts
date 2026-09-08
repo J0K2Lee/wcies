@@ -15,8 +15,9 @@ import { ORDER_PICKING_STATE_PORT, OrderPickingStatePort } from '../ports/order-
  *
  * Rollup priority (see orders.md):
  *   CANCELLED (sticky) > EXCEPTION (no fulfillable line at all) > PICKING
- *   (open picking items) > PICKED (all fulfillable picked) > partial/full
- *   BACKORDERED > READY_TO_PICK.
+ *   (open picking items) > SHIPPED (all fulfillable shipped) >
+ *   PARTIALLY_SHIPPED (some shipped, rest still fulfillable) > PICKED (all
+ *   fulfillable picked) > partial/full BACKORDERED > READY_TO_PICK.
  */
 @Injectable()
 export class OrderStatusService {
@@ -90,6 +91,12 @@ export class OrderStatusService {
     }
     if ((await this.pickingState.countActivePickingItems(orderId)) > 0) {
       return 'PICKING';
+    }
+    if (fulfillable.every((item) => item.fulfillmentStatus === 'SHIPPED')) {
+      return 'SHIPPED';
+    }
+    if (fulfillable.some((item) => item.fulfillmentStatus === 'SHIPPED')) {
+      return 'PARTIALLY_SHIPPED';
     }
     if (fulfillable.every((item) => item.fulfillmentStatus === 'PICKED')) {
       return 'PICKED';

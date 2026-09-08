@@ -25,6 +25,9 @@ import { InventoryModule } from './modules/inventory/inventory.module';
 import { ExceptionModule } from './modules/exception/exception.module';
 import { OrderModule } from './modules/order/order.module';
 import { PickingModule } from './modules/picking/picking.module';
+import { ShipmentModule } from './modules/shipment/shipment.module';
+import { InterceptionModule } from './modules/interception/interception.module';
+import { NotificationModule } from './modules/notification/notification.module';
 
 /**
  * HTTP API root module.
@@ -55,6 +58,9 @@ import { PickingModule } from './modules/picking/picking.module';
     ExceptionModule,
     OrderModule,
     PickingModule,
+    ShipmentModule,
+    InterceptionModule,
+    NotificationModule,
     ...(process.env.NODE_ENV !== 'production' ? [DevModule] : []),
   ],
   providers: [

@@ -47,7 +47,9 @@ export const RESERVATION_TRANSITIONS: Readonly<
 /**
  * Business event / transaction types (task §16, §20-§38). One per inventory
  * core action; future modules (purchase/transfer/return) add their own types
- * instead of reusing these.
+ * instead of reusing these. RETURN_PICKED is the Sprint 4 interception
+ * return-to-stock primitive: Picked - N while On Hand stays untouched
+ * (picking never reduced it).
  */
 export const INVENTORY_EVENT_TYPES = [
   'INITIAL_STOCK',
@@ -57,6 +59,7 @@ export const INVENTORY_EVENT_TYPES = [
   'PICK',
   'UNPICK',
   'SHIP',
+  'RETURN_PICKED',
   'MOVE_BIN',
   'MANUAL_ADJUSTMENT',
 ] as const;

@@ -4,11 +4,12 @@
  * docs/business-rules/orders.md.
  */
 
-/** Sprint 3 exception types (task §26). */
+/** Exception types (Sprint 3 task §26; Sprint 4 adds interception failure). */
 export const EXCEPTION_TYPES = [
   'ORDER_SKU_MAPPING_FAILED',
   'ORDER_OUT_OF_STOCK',
   'ORDER_INVALID_STATE',
+  'ORDER_INTERCEPTION_FAILED',
 ] as const;
 export type ExceptionType = (typeof EXCEPTION_TYPES)[number];
 
@@ -20,6 +21,6 @@ export type ExceptionSeverity = (typeof EXCEPTION_SEVERITIES)[number];
 export const EXCEPTION_STATUSES = ['OPEN', 'RESOLVED', 'IGNORED'] as const;
 export type ExceptionStatus = (typeof EXCEPTION_STATUSES)[number];
 
-/** Reference owners used by Sprint 3 creators. */
-export const EXCEPTION_REFERENCE_TYPES = ['ORDER', 'ORDER_ITEM'] as const;
+/** Reference owners used by Sprint 3/4 creators. */
+export const EXCEPTION_REFERENCE_TYPES = ['ORDER', 'ORDER_ITEM', 'ORDER_INTERCEPTION'] as const;
 export type ExceptionReferenceType = (typeof EXCEPTION_REFERENCE_TYPES)[number];

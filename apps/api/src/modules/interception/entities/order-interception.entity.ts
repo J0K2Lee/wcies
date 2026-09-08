@@ -3,25 +3,23 @@ import {
   CreateDateColumn,
   Entity,
   Index,
-  JoinColumn,
-  ManyToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { OrderEntity } from './order.entity';
-import { OrderItemEntity } from './order-item.entity';
-import { OrderInterceptionStatus } from '../enums/order.constants';
+import { OrderInterceptionStatus } from '../../order/enums/order.constants';
 
 /**
- * Order interception (Sprint 3 task §56-§57): created when a PICKED order
- * line is cancelled. The physical unit must be found and returned to stock;
- * cancelling NEVER auto-restores availability (AGENTS.md §42). Sprint 3
- * implements creation only (status CREATED).
+ * Order interception (Sprint 3 task §56-§57 created it; Sprint 4 task
+ * §29-§45 owns the full workflow). Created when a PICKED order line is
+ * cancelled: the physical unit must be found and returned to stock through a
+ * scanned, validated return - cancelling NEVER auto-restores availability
+ * (AGENTS.md §42). Cross-module references stay plain UUID columns.
  */
 @Entity('order_interceptions')
 @Index('uq_order_interceptions_no', ['interceptionNo'], { unique: true })
 @Index('idx_order_interceptions_order', ['orderId'])
 @Index('idx_order_interceptions_status', ['status'])
+@Index('idx_order_interceptions_warehouse', ['warehouseId'])
 export class OrderInterceptionEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -47,6 +45,30 @@ export class OrderInterceptionEntity {
   @Column({ type: 'uuid', name: 'assigned_to', nullable: true })
   assignedTo!: string | null;
 
+  @Column({ type: 'varchar', length: 100, name: 'assigned_to_name', nullable: true })
+  assignedToName!: string | null;
+
+  /** The bin the operator scanned as the return destination (task §34). */
+  @Column({ type: 'uuid', name: 'target_bin_id', nullable: true })
+  targetBinId!: string | null;
+
+  /** SKU verified by the interception scan (task §35). */
+  @Column({ type: 'uuid', name: 'scanned_sku_id', nullable: true })
+  scannedSkuId!: string | null;
+
+  /** SNs verified by the interception scan (task §36). */
+  @Column({ type: 'jsonb', name: 'scanned_serial_numbers', nullable: true })
+  scannedSerialNumbers!: string[] | null;
+
+  @Column({ type: 'timestamptz', name: 'scanned_at', nullable: true })
+  scannedAt!: Date | null;
+
+  @Column({ type: 'timestamptz', name: 'failed_at', nullable: true })
+  failedAt!: Date | null;
+
+  @Column({ type: 'text', name: 'failed_reason', nullable: true })
+  failedReason!: string | null;
+
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;
 
@@ -64,12 +86,4 @@ export class OrderInterceptionEntity {
 
   @Column({ type: 'timestamptz', name: 'closed_at', nullable: true })
   closedAt!: Date | null;
-
-  @ManyToOne(() => OrderEntity)
-  @JoinColumn({ name: 'order_id' })
-  order?: OrderEntity;
-
-  @ManyToOne(() => OrderItemEntity)
-  @JoinColumn({ name: 'order_item_id' })
-  orderItem?: OrderItemEntity;
 }

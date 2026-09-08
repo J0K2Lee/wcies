@@ -13,8 +13,9 @@ import { ReservationLineStatus } from '../enums/inventory.constants';
 
 /**
  * Reservation LINE (task §25-§26/§32): the per-bin allocation of a
- * reservation header. picked_qty reserves headroom for partial pick in a
- * later sprint - Sprint 2 always picks the full line.
+ * reservation header. picked_qty supports partial picking (one scan = one
+ * unit); shipped_qty supports partial shipping across multiple shipments
+ * (Sprint 4) - the line is CONSUMED only when shipped_qty reaches picked_qty.
  */
 @Entity('inventory_reservation_lines')
 @Index('idx_inventory_reservation_lines_reservation', ['reservationId'])
@@ -33,6 +34,9 @@ export class InventoryReservationLineEntity {
 
   @Column({ type: 'numeric', precision: 18, scale: 3, name: 'picked_qty', default: '0' })
   pickedQty!: string;
+
+  @Column({ type: 'numeric', precision: 18, scale: 3, name: 'shipped_qty', default: '0' })
+  shippedQty!: string;
 
   @Column({ type: 'varchar', length: 30 })
   status!: ReservationLineStatus;

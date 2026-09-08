@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, QueryRunner } from 'typeorm';
 import { PickingTaskItemEntity } from '../entities/picking-task-item.entity';
 
 /** Data access for picking-task items. */
@@ -39,6 +39,16 @@ export class PickingTaskItemRepository {
     return this.dataSource.getRepository(PickingTaskItemEntity).findOneBy({ id });
   }
 
+  /** Locks one item FOR UPDATE on the caller's transaction (Sprint 4 P0). */
+  async lockById(runner: QueryRunner, id: string): Promise<PickingTaskItemEntity | null> {
+    return runner.manager
+      .getRepository(PickingTaskItemEntity)
+      .createQueryBuilder('i')
+      .where('i.id = :id', { id })
+      .setLock('pessimistic_write')
+      .getOne();
+  }
+
   /** Items of an order that sit in a CREATED/IN_PROGRESS task (status port). */
   async countActivePickingItems(orderId: string): Promise<number> {
     const rows = await this.dataSource.query<Array<{ cnt: string }>>(
@@ -76,11 +86,13 @@ export class PickingTaskItemRepository {
   /**
    * Atomic one-unit increment with the over-pick guard evaluated under the
    * row lock (task §40/§77/§85): concurrent scans serialize here and the
-   * loser sees picked_qty + 1 > required_qty -> 0 rows.
-   * Returns the resulting picked_qty, or null when the guard rejected.
+   * loser sees picked_qty + 1 > required_qty -> 0 rows. Runs on the CALLER's
+   * QueryRunner so the increment commits atomically with the inventory pick
+   * (Sprint 4 P0). Returns the resulting picked_qty, or null when the guard
+   * rejected.
    */
-  async incrementPickedQty(item: PickingTaskItemEntity): Promise<string | null> {
-    const result = await this.dataSource.query<unknown>(
+  async incrementPickedQtyTx(runner: QueryRunner, itemId: string): Promise<string | null> {
+    const result: unknown = await runner.query(
       `UPDATE picking_task_items
           SET picked_qty = picked_qty + 1,
               status = CASE WHEN picked_qty + 1 >= required_qty THEN 'PICKED' ELSE 'PENDING' END,
@@ -88,23 +100,11 @@ export class PickingTaskItemRepository {
         WHERE id = $1::uuid
           AND status = 'PENDING'
           AND picked_qty + 1 <= required_qty
-        RETURNING picked_qty::text`,
-      [item.id],
+        RETURNING picked_qty::text, required_qty::text`,
+      [itemId],
     );
-    const rows = unwrapReturningRows<{ picked_qty: string }>(result);
+    const rows = unwrapReturningRows<{ picked_qty: string; required_qty: string }>(result);
     return rows[0]?.picked_qty ?? null;
-  }
-
-  /** Compensating decrement when the inventory pick failed after increment. */
-  async decrementPickedQty(itemId: string, expectedPickedQty: string): Promise<void> {
-    await this.dataSource.query(
-      `UPDATE picking_task_items
-          SET picked_qty = picked_qty - 1,
-              status = 'PENDING',
-              updated_at = now()
-        WHERE id = $1::uuid AND picked_qty = $2::numeric`,
-      [itemId, expectedPickedQty],
-    );
   }
 
   async countPendingOfTask(pickingTaskId: string): Promise<number> {

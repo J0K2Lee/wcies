@@ -40,16 +40,16 @@ import {
 } from '../dto/picking.dto';
 
 /**
- * Picking workflow (Sprint 3 task §28-§51).
+ * Picking workflow (Sprint 3 task §28-§51; Sprint 4 P0 task §3-§5).
  *
- * Scan concurrency design (task §85): each scan FIRST claims one unit via an
- * atomic guarded increment on picking_task_items (row lock re-evaluates
- * picked_qty + 1 <= required_qty), THEN moves the stock through
- * ReservationService.pickStockPartial on a deterministic idempotency key
- * (`PTI<itemId>#<resulting pickedQty>`). A failed pick compensates the
- * increment back. Holding no outer transaction across the inventory call
- * avoids a cross-connection deadlock (the inventory tx also writes the FK
- * picking_task_item_id on inventory_serials).
+ * Scan atomicity (Sprint 4 P0): each scan runs ONE database transaction that
+ * locks the PickingTaskItem, performs the guarded picked_qty increment, moves
+ * the stock through ReservationService.pickStockPartialInTx (the
+ * transaction-aware Inventory public API) and flips the OrderItem to PICKED -
+ * all rows commit or roll back TOGETHER. The Sprint 3 "increment first,
+ * compensate on failure" pattern is gone: an inventory failure now rolls the
+ * increment back with everything else. Inventory still owns every stock rule;
+ * this service only owns the transaction boundary (task §5).
  */
 @Injectable()
 export class PickingService implements OrderPickingStatePort {
@@ -272,40 +272,66 @@ export class PickingService implements OrderPickingStatePort {
       }
     }
 
-    // 4. Claim one unit atomically (over-pick guard under the row lock).
-    const pickedQtyAfter = await this.itemRepo.incrementPickedQty(target);
-    if (pickedQtyAfter === null) {
-      const fresh = await this.itemRepo.findById(target.id);
-      throw new PickingQuantityExceededError({
-        pickingTaskItemId: target.id,
-        requiredQty: target.requiredQty,
-        pickedQty: fresh?.pickedQty ?? target.pickedQty,
-      });
-    }
-
-    // 5. Move the stock via the inventory core; compensate on failure.
+    // 4-5. Claim one unit AND move the stock in ONE transaction (Sprint 4 P0):
+    // lock item -> guarded increment -> inventory Reserved->Picked on the SAME
+    // runner -> OrderItem PICKED when the line completes. Any failure rolls
+    // the whole command back.
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    let lineCompleted!: boolean;
     try {
-      await this.reservationService.pickStockPartial(target.reservationId, {
+      const locked = await this.itemRepo.lockById(runner, target.id);
+      if (locked === null) {
+        throw new PickingTaskStateInvalidError('拣货行不存在或已变更', {
+          pickingTaskItemId: target.id,
+        });
+      }
+      if (locked.status !== 'PENDING') {
+        throw new PickingQuantityExceededError({
+          pickingTaskItemId: locked.id,
+          requiredQty: locked.requiredQty,
+          pickedQty: locked.pickedQty,
+        });
+      }
+      const incremented = await this.itemRepo.incrementPickedQtyTx(runner, target.id);
+      if (incremented === null) {
+        throw new PickingQuantityExceededError({
+          pickingTaskItemId: target.id,
+          requiredQty: locked.requiredQty,
+          pickedQty: locked.pickedQty,
+        });
+      }
+      lineCompleted = parseQty(incremented) === parseQty(locked.requiredQty);
+
+      await this.reservationService.pickStockPartialInTx(runner, target.reservationId, {
         quantity: '1',
         serialNumbers: sku.serialTracking ? [input.serialNumber?.trim() as string] : undefined,
         pickingTaskItemId: target.id,
         operator,
-        idempotencyKey: `PTI${target.id}#${pickedQtyAfter}`,
+        idempotencyKey: `PTI${target.id}#${incremented}`,
         remark: `picking=${task.pickingNo}`,
       });
+
+      if (lineCompleted) {
+        await this.orderService.markItemPickedInTx(runner.manager, target.orderItemId);
+      }
+      await runner.commitTransaction();
     } catch (error: unknown) {
-      await this.itemRepo.decrementPickedQty(target.id, pickedQtyAfter);
+      await runner.rollbackTransaction();
       this.logger.warn(
-        `picking scan rolled back taskId=${taskId} item=${target.id} pickedQtyAfter=${pickedQtyAfter}: ${String(error)}`,
+        `picking scan rolled back taskId=${taskId} item=${target.id}: ${String(error)}`,
         'PickingService',
       );
       throw error;
+    } finally {
+      await runner.release();
     }
 
-    // 6. Post-scan bookkeeping.
+    // 6. Post-commit bookkeeping (rollup statuses only - never stock).
     const freshItem = (await this.itemRepo.findById(target.id)) as PickingTaskItemEntity;
-    if (freshItem.status === 'PICKED') {
-      await this.orderService.markItemPicked(target.orderItemId, operator);
+    if (lineCompleted) {
+      await this.orderService.recomputeAfterPick(target.orderItemId, operator);
     }
     const pending = await this.itemRepo.countPendingOfTask(taskId);
     if (pending === 0) {

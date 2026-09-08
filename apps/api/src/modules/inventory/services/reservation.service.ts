@@ -54,6 +54,7 @@ export interface ReservationLineDto {
   binCode: string;
   quantity: string;
   pickedQty: string;
+  shippedQty: string;
   status: string;
 }
 
@@ -74,6 +75,8 @@ export interface ReservationDto {
   releasedAt: Date | null;
   consumedAt: Date | null;
   lines: ReservationLineDto[];
+  /** Serial occupancy of the reservation (SN-tracked SKUs only). */
+  serials: Array<{ serialNumber: string; status: string; pickingTaskItemId: string | null }>;
   idempotentReplay: boolean;
 }
 
@@ -542,6 +545,39 @@ export class ReservationService {
    * disagree.
    */
   async pickStockPartial(reservationId: string, input: PartialPickInput): Promise<ReservationDto> {
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    let finished!: InventoryReservationEntity;
+    let replayed!: boolean;
+    try {
+      const outcome = await this.pickStockPartialInTx(runner, reservationId, input);
+      finished = outcome.reservation;
+      replayed = outcome.idempotentReplay;
+      await runner.commitTransaction();
+    } catch (error: unknown) {
+      await runner.rollbackTransaction();
+      throw error;
+    } finally {
+      await runner.release();
+    }
+    return this.buildDtoWithCodes(finished, replayed);
+  }
+
+  /**
+   * Transaction-aware partial pick (Sprint 4 P0, task §3-§5): runs the SAME
+   * locked-balance logic on the CALLER's QueryRunner so the picking business
+   * command (PickingTaskItem increment + inventory Reserved->Picked +
+   * OrderItem status) commits or rolls back as ONE database transaction.
+   * Inventory still owns every stock rule; the caller only owns the
+   * transaction boundary. All queries run on the runner's connection - never
+   * the shared pool - while the transaction is open.
+   */
+  async pickStockPartialInTx(
+    runner: QueryRunner,
+    reservationId: string,
+    input: PartialPickInput,
+  ): Promise<{ reservation: InventoryReservationEntity; idempotentReplay: boolean }> {
     const qty = parseQty(input.quantity);
     if (qty <= 0n) {
       throw new InventoryQuantityInvalidError('部分拣货数量必须大于 0');
@@ -549,212 +585,554 @@ export class ReservationService {
     const eventKey = `PICK:${reservationId}:${input.idempotencyKey ?? randomUUID()}`;
 
     if (input.idempotencyKey !== undefined) {
-      const existingEvent = await this.ledgerRepo.findEventByIdempotencyKey(eventKey);
+      const existingEvent = await this.ledgerRepo.findEventByIdempotencyKeyTx(runner, eventKey);
       if (existingEvent !== null) {
-        const reservation = await this.reservationRepo.findById(reservationId);
+        const reservation = await this.reservationRepo.lockById(runner, reservationId);
         if (reservation === null) {
           throw new ReservationNotFoundError(reservationId);
         }
-        return this.buildDtoWithCodes(reservation, true);
+        return { reservation, idempotentReplay: true };
       }
     }
 
-    const runner = this.dataSource.createQueryRunner();
-    await runner.connect();
-    await runner.startTransaction();
-    let finished: InventoryReservationEntity | undefined;
-    try {
-      const reservation = await this.reservationRepo.lockById(runner, reservationId);
-      if (reservation === null) {
-        throw new ReservationNotFoundError(reservationId);
+    const reservation = await this.reservationRepo.lockById(runner, reservationId);
+    if (reservation === null) {
+      throw new ReservationNotFoundError(reservationId);
+    }
+    if (reservation.status !== 'ACTIVE') {
+      throw new InvalidReservationStateError({
+        reservationId,
+        currentStatus: reservation.status,
+        attemptedAction: 'PICK_PARTIAL',
+      });
+    }
+
+    const lines = await this.reservationRepo.findLinesLocked(runner, reservationId);
+    const orderedLines = await sortLinesByBinCodeOnRunner(runner, lines);
+    const serialTracked = await skuSerialTrackedOnRunner(runner, reservation.skuId);
+
+    // Plan the per-line take.
+    const lineTakes = new Map<string, bigint>();
+    let pickedSerials: InventorySerialEntity[] = [];
+    if (serialTracked) {
+      const serialNumbers = [...new Set((input.serialNumbers ?? []).map((sn) => sn.trim()))].filter(
+        (sn) => sn !== '',
+      );
+      if (input.serialNumbers === undefined || serialNumbers.length === 0) {
+        throw new InventorySerialInvalidError('SN 管理商品拣货必须提供 serialNumber', {
+          reservationId,
+        });
       }
-      if (reservation.status !== 'ACTIVE') {
+      if (qty % 1000n !== 0n || BigInt(serialNumbers.length) * 1000n !== qty) {
+        throw new InventorySerialInvalidError('拣货数量与 serialNumber 数量不一致', {
+          reservationId,
+          quantity: input.quantity,
+          serialCount: serialNumbers.length,
+        });
+      }
+      pickedSerials = await this.serialRepo.lockBySerialNumbers(runner, serialNumbers);
+      const byNumber = new Map(pickedSerials.map((serial) => [serial.serialNumber, serial]));
+      for (const serialNumber of serialNumbers) {
+        const serial = byNumber.get(serialNumber);
+        if (
+          serial === undefined ||
+          serial.reservationId !== reservationId ||
+          serial.status !== 'RESERVED' ||
+          serial.skuId !== reservation.skuId
+        ) {
+          throw new InventorySerialInvalidError('SN 不属于该预约或状态不允许拣货', {
+            reservationId,
+            serialNumber,
+          });
+        }
+      }
+      // Serial bins drive the line allocation (one unit per serial).
+      const remainingOf = new Map(
+        orderedLines.map((line) => [line.id, parseQty(line.quantity) - parseQty(line.pickedQty)]),
+      );
+      for (const serial of pickedSerials) {
+        const target = orderedLines.find((line) => line.binId === serial.binId);
+        const headroom = target === undefined ? 0n : (remainingOf.get(target.id) ?? 0n);
+        if (target === undefined || headroom < 1000n) {
+          throw new InventorySerialInvalidError('SN 所在库位与预约分配行不匹配', {
+            reservationId,
+            serialNumber: serial.serialNumber,
+            binId: serial.binId,
+          });
+        }
+        remainingOf.set(target.id, headroom - 1000n);
+        lineTakes.set(target.id, (lineTakes.get(target.id) ?? 0n) + 1000n);
+      }
+    } else {
+      if (input.serialNumbers !== undefined && input.serialNumbers.length > 0) {
+        throw new InventorySerialInvalidError('非 SN 管理商品不能提供 serialNumber', {
+          reservationId,
+        });
+      }
+      let remaining = qty;
+      for (const line of orderedLines) {
+        if (remaining === 0n) {
+          break;
+        }
+        const pickable = parseQty(line.quantity) - parseQty(line.pickedQty);
+        if (pickable <= 0n) {
+          continue;
+        }
+        const take = pickable < remaining ? pickable : remaining;
+        lineTakes.set(line.id, take);
+        remaining -= take;
+      }
+      if (remaining > 0n) {
         throw new InvalidReservationStateError({
           reservationId,
           currentStatus: reservation.status,
           attemptedAction: 'PICK_PARTIAL',
         });
       }
+    }
 
-      const lines = await this.reservationRepo.findLinesLocked(runner, reservationId);
-      const orderedLines = await sortLinesByBinCodeOnRunner(runner, lines);
-      const serialTracked = await skuSerialTrackedOnRunner(runner, reservation.skuId);
+    const ledgerLines: LedgerLineInsert[] = [];
+    let allLinesFullyPicked = true;
+    for (const line of orderedLines) {
+      const take = lineTakes.get(line.id) ?? 0n;
+      const linePickedAfter = parseQty(line.pickedQty) + take;
+      if (take === 0n) {
+        allLinesFullyPicked = allLinesFullyPicked && linePickedAfter === parseQty(line.quantity);
+        continue;
+      }
+      const balance = await this.balanceRepo.lockByDim(runner, {
+        skuId: reservation.skuId,
+        warehouseId: reservation.warehouseId,
+        binId: line.binId,
+        condition: 'SELLABLE',
+      });
+      if (balance === null) {
+        throw new BalanceMissingInvariantError({
+          skuId: reservation.skuId,
+          warehouseId: reservation.warehouseId,
+          binId: line.binId,
+        });
+      }
+      const reserved = qtyFromDb(balance.reservedQty);
+      const picked = qtyFromDb(balance.pickedQty);
+      const patch = {
+        onHandQty: balance.onHandQty,
+        reservedQty: formatQty(reserved - take), // Reserved - N, Picked + N (task §31)
+        pickedQty: formatQty(picked + take),
+        version: nextVersionOf(balance),
+      };
+      assertBalanceInvariants(patch);
+      await this.balanceRepo.saveQuantities(runner, balance.id, patch);
+      ledgerLines.push({
+        skuId: reservation.skuId,
+        warehouseId: reservation.warehouseId,
+        binId: line.binId,
+        transactionType: 'PICK',
+        quantityBefore: balance.onHandQty,
+        quantityChange: '0.000',
+        quantityAfter: balance.onHandQty,
+        reservedBefore: balance.reservedQty,
+        reservedChange: formatQty(-take),
+        reservedAfter: patch.reservedQty,
+        pickedBefore: balance.pickedQty,
+        pickedChange: formatQty(take),
+        pickedAfter: patch.pickedQty,
+        remark: `reservation=${reservation.reservationNo}`,
+      });
 
-      // Plan the per-line take.
-      const lineTakes = new Map<string, bigint>();
-      let pickedSerials: InventorySerialEntity[] = [];
-      if (serialTracked) {
-        const serialNumbers = [
-          ...new Set((input.serialNumbers ?? []).map((sn) => sn.trim())),
-        ].filter((sn) => sn !== '');
-        if (input.serialNumbers === undefined || serialNumbers.length === 0) {
-          throw new InventorySerialInvalidError('SN 管理商品拣货必须提供 serialNumber', {
+      const fullyPicked = linePickedAfter === parseQty(line.quantity);
+      allLinesFullyPicked = allLinesFullyPicked && fullyPicked;
+      await this.reservationRepo.updateLine(runner, line.id, {
+        pickedQty: formatQty(linePickedAfter),
+        status: fullyPicked ? 'PICKED' : 'ACTIVE',
+      });
+    }
+
+    if (pickedSerials.length > 0) {
+      await this.serialRepo.updateMany(
+        runner,
+        pickedSerials.map((serial) => serial.id),
+        { status: 'PICKED', pickingTaskItemId: input.pickingTaskItemId ?? null },
+      );
+    }
+
+    await this.ledgerRepo.insertEventWithLines(
+      runner,
+      {
+        eventType: 'PICK',
+        referenceType: reservation.referenceType,
+        referenceId: reservation.referenceId,
+        idempotencyKey: eventKey,
+        operatorId: input.operator.userId,
+        remark: `reservation=${reservation.reservationNo}; partial=${formatQty(qty)}${suffixRemark(input.remark)}`,
+      },
+      ledgerLines,
+    );
+
+    if (allLinesFullyPicked) {
+      const headerPatch: Partial<InventoryReservationEntity> = {
+        status: 'PICKED',
+        pickedAt: reservation.pickedAt ?? new Date(),
+      };
+      await this.reservationRepo.updateStatus(runner, reservationId, headerPatch);
+      return { reservation: { ...reservation, ...headerPatch }, idempotentReplay: false };
+    }
+    return { reservation, idempotentReplay: false };
+  }
+
+  // --------------------------------------------------------------------------
+  // Partial ship (Sprint 4: one order item may ship across several shipments)
+  // --------------------------------------------------------------------------
+
+  /**
+   * Moves `quantity` from Picked to shipped on the CALLER's QueryRunner
+   * (Sprint 4 task §22-§23): Picked - N AND On Hand - N per allocated bin,
+   * SN-tracked units -> SHIPPED. The reservation header flips to CONSUMED
+   * only when every line's shipped_qty reaches its picked_qty, so a partially
+   * shipped reservation stays PICKED and the remainder remains interceptable.
+   */
+  async shipStockPartialInTx(
+    runner: QueryRunner,
+    reservationId: string,
+    input: {
+      quantity: string;
+      operator: OperatorContext;
+      idempotencyKey: string;
+      remark?: string | null;
+      /** Required for serial-tracked SKUs; count must match the quantity. */
+      serialNumbers?: string[];
+    },
+  ): Promise<{ reservation: InventoryReservationEntity; idempotentReplay: boolean }> {
+    const qty = parseQty(input.quantity);
+    if (qty <= 0n) {
+      throw new InventoryQuantityInvalidError('出库数量必须大于 0');
+    }
+    const eventKey = `SHIP:${reservationId}:${input.idempotencyKey}`;
+    const raced = await this.ledgerRepo.findEventByIdempotencyKeyTx(runner, eventKey);
+    if (raced !== null) {
+      const reservation = await this.reservationRepo.lockById(runner, reservationId);
+      if (reservation === null) {
+        throw new ReservationNotFoundError(reservationId);
+      }
+      return { reservation, idempotentReplay: true };
+    }
+
+    const reservation = await this.reservationRepo.lockById(runner, reservationId);
+    if (reservation === null) {
+      throw new ReservationNotFoundError(reservationId);
+    }
+    if (reservation.status !== 'PICKED') {
+      throw new InvalidReservationStateError({
+        reservationId,
+        currentStatus: reservation.status,
+        attemptedAction: 'SHIP_PARTIAL',
+      });
+    }
+
+    const lines = await this.reservationRepo.findLinesLocked(runner, reservationId);
+    const orderedLines = await sortLinesByBinCodeOnRunner(runner, lines);
+    const serialTracked = await skuSerialTrackedOnRunner(runner, reservation.skuId);
+
+    const lineTakes = new Map<string, bigint>();
+    let shippedSerials: InventorySerialEntity[] = [];
+    if (serialTracked) {
+      const serialNumbers = [...new Set((input.serialNumbers ?? []).map((sn) => sn.trim()))].filter(
+        (sn) => sn !== '',
+      );
+      if (input.serialNumbers === undefined || serialNumbers.length === 0) {
+        throw new InventorySerialInvalidError('SN 管理商品出库必须提供 serialNumber 列表', {
+          reservationId,
+        });
+      }
+      if (qty % 1000n !== 0n || BigInt(serialNumbers.length) * 1000n !== qty) {
+        throw new InventorySerialInvalidError('出库数量与 serialNumber 数量不一致', {
+          reservationId,
+          quantity: input.quantity,
+          serialCount: serialNumbers.length,
+        });
+      }
+      shippedSerials = await this.serialRepo.lockBySerialNumbers(runner, serialNumbers);
+      const byNumber = new Map(shippedSerials.map((serial) => [serial.serialNumber, serial]));
+      for (const serialNumber of serialNumbers) {
+        const serial = byNumber.get(serialNumber);
+        if (
+          serial === undefined ||
+          serial.reservationId !== reservationId ||
+          serial.status !== 'PICKED' ||
+          serial.skuId !== reservation.skuId
+        ) {
+          throw new InventorySerialInvalidError('SN 不属于该预约或状态不允许出库', {
             reservationId,
-          });
-        }
-        if (qty % 1000n !== 0n || BigInt(serialNumbers.length) * 1000n !== qty) {
-          throw new InventorySerialInvalidError('拣货数量与 serialNumber 数量不一致', {
-            reservationId,
-            quantity: input.quantity,
-            serialCount: serialNumbers.length,
-          });
-        }
-        pickedSerials = await this.serialRepo.lockBySerialNumbers(runner, serialNumbers);
-        const byNumber = new Map(pickedSerials.map((serial) => [serial.serialNumber, serial]));
-        for (const serialNumber of serialNumbers) {
-          const serial = byNumber.get(serialNumber);
-          if (
-            serial === undefined ||
-            serial.reservationId !== reservationId ||
-            serial.status !== 'RESERVED' ||
-            serial.skuId !== reservation.skuId
-          ) {
-            throw new InventorySerialInvalidError('SN 不属于该预约或状态不允许拣货', {
-              reservationId,
-              serialNumber,
-            });
-          }
-        }
-        // Serial bins drive the line allocation (one unit per serial).
-        const remainingOf = new Map(
-          orderedLines.map((line) => [line.id, parseQty(line.quantity) - parseQty(line.pickedQty)]),
-        );
-        for (const serial of pickedSerials) {
-          const target = orderedLines.find((line) => line.binId === serial.binId);
-          const headroom = target === undefined ? 0n : (remainingOf.get(target.id) ?? 0n);
-          if (target === undefined || headroom < 1000n) {
-            throw new InventorySerialInvalidError('SN 所在库位与预约分配行不匹配', {
-              reservationId,
-              serialNumber: serial.serialNumber,
-              binId: serial.binId,
-            });
-          }
-          remainingOf.set(target.id, headroom - 1000n);
-          lineTakes.set(target.id, (lineTakes.get(target.id) ?? 0n) + 1000n);
-        }
-      } else {
-        if (input.serialNumbers !== undefined && input.serialNumbers.length > 0) {
-          throw new InventorySerialInvalidError('非 SN 管理商品不能提供 serialNumber', {
-            reservationId,
-          });
-        }
-        let remaining = qty;
-        for (const line of orderedLines) {
-          if (remaining === 0n) {
-            break;
-          }
-          const pickable = parseQty(line.quantity) - parseQty(line.pickedQty);
-          if (pickable <= 0n) {
-            continue;
-          }
-          const take = pickable < remaining ? pickable : remaining;
-          lineTakes.set(line.id, take);
-          remaining -= take;
-        }
-        if (remaining > 0n) {
-          throw new InvalidReservationStateError({
-            reservationId,
-            currentStatus: reservation.status,
-            attemptedAction: 'PICK_PARTIAL',
+            serialNumber,
           });
         }
       }
-
-      const ledgerLines: LedgerLineInsert[] = [];
-      let allLinesFullyPicked = true;
+      // Serial bins drive the line allocation (one unit per serial).
+      const remainingOf = new Map(
+        orderedLines.map((line) => [line.id, parseQty(line.pickedQty) - parseQty(line.shippedQty)]),
+      );
+      for (const serial of shippedSerials) {
+        const target = orderedLines.find((line) => line.binId === serial.binId);
+        const headroom = target === undefined ? 0n : (remainingOf.get(target.id) ?? 0n);
+        if (target === undefined || headroom < 1000n) {
+          throw new InventorySerialInvalidError('SN 所在库位与预约拣货行不匹配', {
+            reservationId,
+            serialNumber: serial.serialNumber,
+            binId: serial.binId,
+          });
+        }
+        remainingOf.set(target.id, headroom - 1000n);
+        lineTakes.set(target.id, (lineTakes.get(target.id) ?? 0n) + 1000n);
+      }
+    } else {
+      if (input.serialNumbers !== undefined && input.serialNumbers.length > 0) {
+        throw new InventorySerialInvalidError('非 SN 管理商品不能提供 serialNumber', {
+          reservationId,
+        });
+      }
+      let remaining = qty;
       for (const line of orderedLines) {
-        const take = lineTakes.get(line.id) ?? 0n;
-        const linePickedAfter = parseQty(line.pickedQty) + take;
-        if (take === 0n) {
-          allLinesFullyPicked = allLinesFullyPicked && linePickedAfter === parseQty(line.quantity);
+        if (remaining === 0n) {
+          break;
+        }
+        const shippable = parseQty(line.pickedQty) - parseQty(line.shippedQty);
+        if (shippable <= 0n) {
           continue;
         }
-        const balance = await this.balanceRepo.lockByDim(runner, {
+        const take = shippable < remaining ? shippable : remaining;
+        lineTakes.set(line.id, take);
+        remaining -= take;
+      }
+      if (remaining > 0n) {
+        throw new InvalidReservationStateError({
+          reservationId,
+          currentStatus: reservation.status,
+          attemptedAction: 'SHIP_PARTIAL',
+        });
+      }
+    }
+
+    const ledgerLines: LedgerLineInsert[] = [];
+    let allLinesFullyShipped = true;
+    for (const line of orderedLines) {
+      const take = lineTakes.get(line.id) ?? 0n;
+      const lineShippedAfter = parseQty(line.shippedQty) + take;
+      if (take === 0n) {
+        allLinesFullyShipped =
+          allLinesFullyShipped && lineShippedAfter === parseQty(line.pickedQty);
+        continue;
+      }
+      const balance = await this.balanceRepo.lockByDim(runner, {
+        skuId: reservation.skuId,
+        warehouseId: reservation.warehouseId,
+        binId: line.binId,
+        condition: 'SELLABLE',
+      });
+      if (balance === null) {
+        throw new BalanceMissingInvariantError({
           skuId: reservation.skuId,
           warehouseId: reservation.warehouseId,
           binId: line.binId,
-          condition: 'SELLABLE',
         });
-        if (balance === null) {
-          throw new BalanceMissingInvariantError({
-            skuId: reservation.skuId,
-            warehouseId: reservation.warehouseId,
-            binId: line.binId,
-          });
-        }
-        const reserved = qtyFromDb(balance.reservedQty);
-        const picked = qtyFromDb(balance.pickedQty);
-        const patch = {
-          onHandQty: balance.onHandQty,
-          reservedQty: formatQty(reserved - take), // Reserved - N, Picked + N (task §31)
-          pickedQty: formatQty(picked + take),
-          version: nextVersionOf(balance),
-        };
-        assertBalanceInvariants(patch);
-        await this.balanceRepo.saveQuantities(runner, balance.id, patch);
-        ledgerLines.push({
+      }
+      const onHand = qtyFromDb(balance.onHandQty);
+      const picked = qtyFromDb(balance.pickedQty);
+      const patch = {
+        onHandQty: formatQty(onHand - take), // Picked - N, On Hand - N (task §34)
+        reservedQty: balance.reservedQty,
+        pickedQty: formatQty(picked - take),
+        version: nextVersionOf(balance),
+      };
+      assertBalanceInvariants(patch);
+      await this.balanceRepo.saveQuantities(runner, balance.id, patch);
+      ledgerLines.push({
+        skuId: reservation.skuId,
+        warehouseId: reservation.warehouseId,
+        binId: line.binId,
+        transactionType: 'SHIP',
+        quantityBefore: balance.onHandQty,
+        quantityChange: formatQty(-take),
+        quantityAfter: patch.onHandQty,
+        reservedBefore: null,
+        reservedChange: null,
+        reservedAfter: null,
+        pickedBefore: balance.pickedQty,
+        pickedChange: formatQty(-take),
+        pickedAfter: patch.pickedQty,
+        remark: `reservation=${reservation.reservationNo}`,
+      });
+
+      const fullyShipped = lineShippedAfter === parseQty(line.pickedQty);
+      allLinesFullyShipped = allLinesFullyShipped && fullyShipped;
+      await this.reservationRepo.updateLine(runner, line.id, {
+        shippedQty: formatQty(lineShippedAfter),
+        status: fullyShipped ? 'CONSUMED' : 'PICKED',
+      });
+    }
+
+    if (shippedSerials.length > 0) {
+      await this.serialRepo.updateMany(
+        runner,
+        shippedSerials.map((serial) => serial.id),
+        { status: 'SHIPPED' },
+      );
+    }
+
+    await this.ledgerRepo.insertEventWithLines(
+      runner,
+      {
+        eventType: 'SHIP',
+        referenceType: reservation.referenceType,
+        referenceId: reservation.referenceId,
+        idempotencyKey: eventKey,
+        operatorId: input.operator.userId,
+        remark: `reservation=${reservation.reservationNo}; partial=${formatQty(qty)}${suffixRemark(input.remark)}`,
+      },
+      ledgerLines,
+    );
+
+    if (allLinesFullyShipped) {
+      const headerPatch: Partial<InventoryReservationEntity> = {
+        status: 'CONSUMED',
+        consumedAt: new Date(),
+      };
+      await this.reservationRepo.updateStatus(runner, reservationId, headerPatch);
+      return { reservation: { ...reservation, ...headerPatch }, idempotentReplay: false };
+    }
+    return { reservation, idempotentReplay: false };
+  }
+
+  // --------------------------------------------------------------------------
+  // Interception return-to-stock (Sprint 4 task §37-§40)
+  // --------------------------------------------------------------------------
+
+  /**
+   * Returns the REMAINING picked units (picked_qty - shipped_qty per line) of
+   * a PICKED reservation back to sellable stock on the CALLER's QueryRunner:
+   * Picked - N while On Hand NEVER increases - picking never reduced it
+   * (task §38). SN-tracked units return to IN_STOCK at the scanned target
+   * bin; the reservation ends in RELEASED, never PICKED (task §39).
+   */
+  async returnPickedStockInTx(
+    runner: QueryRunner,
+    reservationId: string,
+    input: {
+      targetBinId: string;
+      operator: OperatorContext;
+      idempotencyKey: string;
+      remark?: string | null;
+    },
+  ): Promise<{ reservation: InventoryReservationEntity; idempotentReplay: boolean }> {
+    const eventKey = `RETURN_PICKED:${reservationId}:${input.idempotencyKey}`;
+    const raced = await this.ledgerRepo.findEventByIdempotencyKeyTx(runner, eventKey);
+    if (raced !== null) {
+      const reservation = await this.reservationRepo.lockById(runner, reservationId);
+      if (reservation === null) {
+        throw new ReservationNotFoundError(reservationId);
+      }
+      return { reservation, idempotentReplay: true };
+    }
+
+    const reservation = await this.reservationRepo.lockById(runner, reservationId);
+    if (reservation === null) {
+      throw new ReservationNotFoundError(reservationId);
+    }
+    if (reservation.status !== 'PICKED') {
+      throw new InvalidReservationStateError({
+        reservationId,
+        currentStatus: reservation.status,
+        attemptedAction: 'RETURN_PICKED',
+      });
+    }
+
+    const lines = await this.reservationRepo.findLinesLocked(runner, reservationId);
+    const orderedLines = await sortLinesByBinCodeOnRunner(runner, lines);
+
+    const ledgerLines: LedgerLineInsert[] = [];
+    for (const line of orderedLines) {
+      const remaining = parseQty(line.pickedQty) - parseQty(line.shippedQty);
+      if (remaining <= 0n) {
+        continue;
+      }
+      const balance = await this.balanceRepo.lockByDim(runner, {
+        skuId: reservation.skuId,
+        warehouseId: reservation.warehouseId,
+        binId: line.binId,
+        condition: 'SELLABLE',
+      });
+      if (balance === null) {
+        throw new BalanceMissingInvariantError({
           skuId: reservation.skuId,
           warehouseId: reservation.warehouseId,
           binId: line.binId,
-          transactionType: 'PICK',
-          quantityBefore: balance.onHandQty,
-          quantityChange: '0.000',
-          quantityAfter: balance.onHandQty,
-          reservedBefore: balance.reservedQty,
-          reservedChange: formatQty(-take),
-          reservedAfter: patch.reservedQty,
-          pickedBefore: balance.pickedQty,
-          pickedChange: formatQty(take),
-          pickedAfter: patch.pickedQty,
-          remark: `reservation=${reservation.reservationNo}`,
-        });
-
-        const fullyPicked = linePickedAfter === parseQty(line.quantity);
-        allLinesFullyPicked = allLinesFullyPicked && fullyPicked;
-        await this.reservationRepo.updateLine(runner, line.id, {
-          pickedQty: formatQty(linePickedAfter),
-          status: fullyPicked ? 'PICKED' : 'ACTIVE',
         });
       }
+      const picked = qtyFromDb(balance.pickedQty);
+      const patch = {
+        onHandQty: balance.onHandQty, // On Hand unchanged - pick never reduced it
+        reservedQty: balance.reservedQty,
+        pickedQty: formatQty(picked - remaining),
+        version: nextVersionOf(balance),
+      };
+      assertBalanceInvariants(patch);
+      await this.balanceRepo.saveQuantities(runner, balance.id, patch);
+      ledgerLines.push({
+        skuId: reservation.skuId,
+        warehouseId: reservation.warehouseId,
+        binId: line.binId,
+        transactionType: 'RETURN_PICKED',
+        quantityBefore: balance.onHandQty,
+        quantityChange: '0.000',
+        quantityAfter: patch.onHandQty,
+        reservedBefore: null,
+        reservedChange: null,
+        reservedAfter: null,
+        pickedBefore: balance.pickedQty,
+        pickedChange: formatQty(-remaining),
+        pickedAfter: patch.pickedQty,
+        remark: `reservation=${reservation.reservationNo}; bin=${input.targetBinId}`,
+      });
+      await this.reservationRepo.updateLine(runner, line.id, { status: 'RELEASED' });
+    }
 
-      if (pickedSerials.length > 0) {
-        await this.serialRepo.updateMany(
-          runner,
-          pickedSerials.map((serial) => serial.id),
-          { status: 'PICKED', pickingTaskItemId: input.pickingTaskItemId ?? null },
-        );
-      }
+    // Every PICKED serial of this reservation returns to IN_STOCK at the
+    // scanned target bin, freed of its reservation/picking occupancy - in the
+    // SAME transaction as the balance patch (task §40).
+    const serials = await this.serialRepo.findByReservationIdTx(runner, reservationId, 'PICKED');
+    if (serials.length > 0) {
+      await this.serialRepo.updateMany(
+        runner,
+        serials.map((serial) => serial.id),
+        {
+          status: 'IN_STOCK',
+          binId: input.targetBinId,
+          reservationId: null,
+          pickingTaskItemId: null,
+        },
+      );
+    }
 
+    if (ledgerLines.length > 0) {
       await this.ledgerRepo.insertEventWithLines(
         runner,
         {
-          eventType: 'PICK',
+          eventType: 'RETURN_PICKED',
           referenceType: reservation.referenceType,
           referenceId: reservation.referenceId,
           idempotencyKey: eventKey,
           operatorId: input.operator.userId,
-          remark: `reservation=${reservation.reservationNo}; partial=${formatQty(qty)}${suffixRemark(input.remark)}`,
+          remark: `reservation=${reservation.reservationNo}${suffixRemark(input.remark)}`,
         },
         ledgerLines,
       );
-
-      if (allLinesFullyPicked) {
-        const headerPatch: Partial<InventoryReservationEntity> = {
-          status: 'PICKED',
-          pickedAt: reservation.pickedAt ?? new Date(),
-        };
-        await this.reservationRepo.updateStatus(runner, reservationId, headerPatch);
-        finished = { ...reservation, ...headerPatch };
-      } else {
-        finished = reservation;
-      }
-
-      await runner.commitTransaction();
-    } finally {
-      await runner.release();
     }
 
-    return this.buildDtoWithCodes(finished, false);
+    const headerPatch: Partial<InventoryReservationEntity> = {
+      status: 'RELEASED',
+      releasedAt: new Date(),
+    };
+    await this.reservationRepo.updateStatus(runner, reservationId, headerPatch);
+    return { reservation: { ...reservation, ...headerPatch }, idempotentReplay: false };
   }
 
   // --------------------------------------------------------------------------
@@ -799,10 +1177,17 @@ export class ReservationService {
         binCode: bin?.binCode ?? '',
         quantity: line.quantity,
         pickedQty: line.pickedQty,
+        shippedQty: line.shippedQty,
         status: line.status,
       });
     }
+    const serials = await this.serialRepo.findByReservationId(reservation.id);
     return {
+      serials: serials.map((serial) => ({
+        serialNumber: serial.serialNumber,
+        status: serial.status,
+        pickingTaskItemId: serial.pickingTaskItemId,
+      })),
       id: reservation.id,
       reservationNo: reservation.reservationNo,
       skuId: reservation.skuId,

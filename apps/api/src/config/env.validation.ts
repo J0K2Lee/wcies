@@ -36,4 +36,10 @@ export const envValidationSchema = Joi.object({
   ADMIN_PASSWORD: Joi.string().min(8).optional(),
 
   LOG_LEVEL: Joi.string().valid('fatal', 'error', 'warn', 'info', 'debug', 'trace').optional(),
+
+  // Optional Feishu webhook (Sprint 4): absent = FEISHU channel stays a
+  // provider boundary only; never guessed (task §49).
+  FEISHU_WEBHOOK_URL: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .optional(),
 }).unknown(true);

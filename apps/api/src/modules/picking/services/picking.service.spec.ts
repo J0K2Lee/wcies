@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DataSource } from 'typeorm';
+import { DataSource, QueryRunner } from 'typeorm';
 import { PickingService } from './picking.service';
 import { PickingTaskRepository } from '../repositories/picking-task.repository';
 import { PickingTaskItemRepository } from '../repositories/picking-task-item.repository';
@@ -69,7 +69,24 @@ function build(input: {
         }
       : item,
   );
-  const dataSource = { transaction: vi.fn() } as unknown as DataSource;
+  // A fake QueryRunner standing in for the ONE transaction that now spans the
+  // guarded increment + inventory pick + order-item flip (Sprint 4 P0).
+  const manager = {
+    getRepository: () => ({ update: vi.fn().mockResolvedValue(undefined) }),
+  };
+  const runner = {
+    manager,
+    connect: vi.fn().mockResolvedValue(undefined),
+    startTransaction: vi.fn().mockResolvedValue(undefined),
+    commitTransaction: vi.fn().mockResolvedValue(undefined),
+    rollbackTransaction: vi.fn().mockResolvedValue(undefined),
+    release: vi.fn().mockResolvedValue(undefined),
+    query: vi.fn(),
+  } as unknown as QueryRunner;
+  const dataSource = {
+    transaction: vi.fn(),
+    createQueryRunner: vi.fn().mockReturnValue(runner),
+  } as unknown as DataSource;
   const taskRepo = {
     findById: vi.fn().mockResolvedValue(task),
     nextPickingNo: vi.fn(),
@@ -87,10 +104,20 @@ function build(input: {
       .mockImplementation((id: string) =>
         Promise.resolve(itemsAfterScan.find((item) => item.id === id) ?? null),
       ),
-    incrementPickedQty: vi
+    lockById: vi
       .fn()
-      .mockResolvedValue(input.incrementResult === undefined ? '1.000' : input.incrementResult),
-    decrementPickedQty: vi.fn().mockResolvedValue(undefined),
+      .mockImplementation((runnerArg: QueryRunner, id: string) =>
+        Promise.resolve(
+          (runnerArg === runner ? input.items.find((item) => item.id === id) : null) ?? null,
+        ),
+      ),
+    incrementPickedQtyTx: vi
+      .fn()
+      .mockImplementation((runnerArg: QueryRunner, _id: string) =>
+        runnerArg === runner
+          ? Promise.resolve(input.incrementResult === undefined ? '1.000' : input.incrementResult)
+          : Promise.resolve(null),
+      ),
     countPendingOfTask: vi
       .fn()
       .mockImplementation(() =>
@@ -104,11 +131,13 @@ function build(input: {
     hasPickedProgress,
     insert: vi.fn(),
   } as unknown as PickingTaskItemRepository;
-  const markItemPicked = vi.fn().mockResolvedValue(undefined);
+  const markItemPickedInTx = vi.fn().mockResolvedValue(undefined);
+  const recomputeAfterPick = vi.fn().mockResolvedValue('PICKED');
   const orderService = {
     listReservedItemsForPicking: vi.fn(),
     getOrderOrThrow: vi.fn().mockResolvedValue({ id: 'order-1', orderNo: 'ORD1' }),
-    markItemPicked,
+    markItemPickedInTx,
+    recomputeAfterPick,
   } as unknown as OrderService;
   const barcodeService = {
     findByBarcode: vi
@@ -135,11 +164,11 @@ function build(input: {
     findByWarehouseAndCode: vi.fn().mockResolvedValue(null),
   } as unknown as WarehouseBinService;
   const reservationService = {
-    pickStockPartial: vi.fn().mockImplementation(() => {
+    pickStockPartialInTx: vi.fn().mockImplementation(() => {
       if (input.pickError !== undefined) {
         throw input.pickError;
       }
-      return Promise.resolve({});
+      return Promise.resolve({ reservation: {}, idempotentReplay: false });
     }),
   } as unknown as ReservationService;
   const inventoryQuery = {
@@ -169,13 +198,15 @@ function build(input: {
     itemRepo,
     reservationService,
     orderService,
-    markItemPicked,
+    markItemPickedInTx,
+    recomputeAfterPick,
+    runner,
     countActivePickingItems,
     hasPickedProgress,
   };
 }
 
-describe('PickingService.scan (task §35-§41/§74-§77)', () => {
+describe('PickingService.scan (task §35-§41/§74-§77; Sprint 4 P0 single-transaction)', () => {
   it('rejects scans before the task is started', async () => {
     const { service } = build({ task: makeTask('CREATED'), items: [makeItem()] });
     await expect(service.scan('task-1', { barcode: 'B' }, OPERATOR)).rejects.toMatchObject({
@@ -191,7 +222,7 @@ describe('PickingService.scan (task §35-§41/§74-§77)', () => {
     await expect(service.scan('task-1', { barcode: 'NOPE' }, OPERATOR)).rejects.toMatchObject({
       code: 'PICKING_BARCODE_NOT_FOUND',
     });
-    expect(reservationService.pickStockPartial).not.toHaveBeenCalled();
+    expect(reservationService.pickStockPartialInTx).not.toHaveBeenCalled();
   });
 
   it('scanned SKU is not the pending line -> PICKING_SKU_MISMATCH, no stock touched (task §75)', async () => {
@@ -202,7 +233,7 @@ describe('PickingService.scan (task §35-§41/§74-§77)', () => {
     await expect(service.scan('task-1', { barcode: 'B' }, OPERATOR)).rejects.toMatchObject({
       code: 'PICKING_SKU_MISMATCH',
     });
-    expect(reservationService.pickStockPartial).not.toHaveBeenCalled();
+    expect(reservationService.pickStockPartialInTx).not.toHaveBeenCalled();
   });
 
   it('guarded increment rejects the scan beyond requiredQty (task §77/§85)', async () => {
@@ -213,7 +244,7 @@ describe('PickingService.scan (task §35-§41/§74-§77)', () => {
     await expect(service.scan('task-1', { barcode: 'B' }, OPERATOR)).rejects.toMatchObject({
       code: 'PICKING_QUANTITY_EXCEEDED',
     });
-    expect(reservationService.pickStockPartial).not.toHaveBeenCalled();
+    expect(reservationService.pickStockPartialInTx).not.toHaveBeenCalled();
   });
 
   it('serial-tracked SKU without serialNumber -> PICKING_SERIAL_REQUIRED', async () => {
@@ -245,11 +276,12 @@ describe('PickingService.scan (task §35-§41/§74-§77)', () => {
     ).rejects.toMatchObject({ code: 'PICKING_SERIAL_INVALID' });
   });
 
-  it('successful scan moves one unit via pickStockPartial with deterministic key', async () => {
-    const { service, reservationService } = build({ items: [makeItem()] });
+  it('successful scan moves one unit via pickStockPartialInTx on the SAME transaction', async () => {
+    const { service, reservationService, runner } = build({ items: [makeItem()] });
     const result = await service.scan('task-1', { barcode: 'B' }, OPERATOR);
     expect(result.pickedQty).toBe('1.000');
-    expect(reservationService.pickStockPartial).toHaveBeenCalledWith(
+    expect(reservationService.pickStockPartialInTx).toHaveBeenCalledWith(
+      runner,
       'rsv-1',
       expect.objectContaining({
         quantity: '1',
@@ -259,22 +291,24 @@ describe('PickingService.scan (task §35-§41/§74-§77)', () => {
     );
   });
 
-  it('inventory pick failure compensates the increment back (task §23)', async () => {
-    const { service, itemRepo } = build({
+  it('inventory pick failure ROLLS THE WHOLE TRANSACTION BACK - no compensation (Sprint 4 P0)', async () => {
+    const { service, runner } = build({
       items: [makeItem()],
       pickError: new Error('boom'),
     });
     await expect(service.scan('task-1', { barcode: 'B' }, OPERATOR)).rejects.toThrow('boom');
-    expect(itemRepo.decrementPickedQty).toHaveBeenCalledWith('pt-item-1', '1.000');
+    expect(runner.rollbackTransaction).toHaveBeenCalledTimes(1);
+    expect(runner.commitTransaction).not.toHaveBeenCalled();
   });
 
-  it('completed line notifies the order module to mark the item PICKED', async () => {
-    const { service, markItemPicked } = build({
+  it('completed line flips the order item PICKED inside the same transaction', async () => {
+    const { service, markItemPickedInTx, recomputeAfterPick } = build({
       items: [makeItem({ requiredQty: '1.000' })],
       incrementResult: '1.000',
     });
     await service.scan('task-1', { barcode: 'B' }, OPERATOR);
-    expect(markItemPicked).toHaveBeenCalledWith('oi-1', OPERATOR);
+    expect(markItemPickedInTx).toHaveBeenCalled();
+    expect(recomputeAfterPick).toHaveBeenCalledWith('oi-1', OPERATOR);
   });
 });
 
