@@ -21,6 +21,7 @@ import { StoreModule } from './modules/store/store.module';
 import { WarehouseModule } from './modules/warehouse/warehouse.module';
 import { ListingModule } from './modules/listing/listing.module';
 import { ImportModule } from './modules/import/import.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
 
 /**
  * HTTP API root module.
@@ -47,6 +48,7 @@ import { ImportModule } from './modules/import/import.module';
     WarehouseModule,
     ListingModule,
     ImportModule,
+    InventoryModule,
     ...(process.env.NODE_ENV !== 'production' ? [DevModule] : []),
   ],
   providers: [

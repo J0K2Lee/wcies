@@ -7,16 +7,28 @@ type QueryKey = keyof WciesPaths & string;
 /**
  * Typed GET helper for the generated api-client: unwraps the envelope and
  * throws the unified error message on failure (pages only handle data).
+ * `pathParams` substitutes `{placeholders}` in templated paths; `enabled`
+ * gates the query (e.g. until a drawer opens).
  */
 export function useApiQuery<
   TData,
   TQuery extends Record<string, unknown> = Record<string, unknown>,
->(path: QueryKey, params: TQuery, queryKey: unknown[]): UseQueryResult<TData> {
+>(
+  path: QueryKey,
+  params: TQuery,
+  queryKey: unknown[],
+  pathParams?: Record<string, string>,
+  enabled = true,
+): UseQueryResult<TData> {
   return useQuery<TData>({
     queryKey,
+    enabled,
     queryFn: async () => {
       const { data, error } = await apiClient.GET(path, {
-        params: { query: params as never },
+        params: {
+          query: params as never,
+          ...(pathParams === undefined ? {} : { path: pathParams as never }),
+        },
       });
       if (error !== undefined) {
         throw new Error(error.error.message);
@@ -55,6 +67,22 @@ export async function apiPatch<TData>(
   pathParams?: Record<string, string>,
 ): Promise<TData> {
   const { data, error } = await apiClient.PATCH(path, {
+    params: pathParams === undefined ? undefined : { path: pathParams as never },
+    body: body as never,
+  });
+  if (error !== undefined) {
+    throw new Error(error.error.message);
+  }
+  return (data as { data: TData }).data;
+}
+
+/** Typed PUT helper returning the unwrapped data or throwing. */
+export async function apiPut<TData>(
+  path: QueryKey,
+  body: unknown,
+  pathParams?: Record<string, string>,
+): Promise<TData> {
+  const { data, error } = await apiClient.PUT(path, {
     params: pathParams === undefined ? undefined : { path: pathParams as never },
     body: body as never,
   });

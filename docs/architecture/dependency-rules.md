@@ -23,9 +23,9 @@ Controller 只负责 HTTP、DTO 校验、调用 Service。
 
 `apps/web` 禁止 import `@wcies/api/*`、`apps/api/**`（含 Entity）。后端类型只能通过 `@wcies/shared`（通用契约）与 `@wcies/api-client`（OpenAPI 生成）进入前端。
 
-### Rule 3 — Integration 不得 import Inventory 内部实现
+### Rule 3 — 非 Inventory 代码不得 import Inventory 内部实现
 
-平台集成代码（现在或未来的 `modules/integration` 及所有 `modules/inventory` 之外的代码）禁止 import `modules/inventory/repositories|entities|internal`。库存只能通过 Inventory 模块公开 Service 访问（AGENTS.md §10）。
+任何 `modules/inventory` 之外的代码（含未来的 `modules/integration`、平台 Adapter）禁止 import `modules/inventory/repositories|entities|internal`（相对路径同样会被解析检查）。库存读写只能通过 Inventory 模块导出的 Service（AGENTS.md §10/§19，Sprint 2 任务 §49）。
 
 ### Rule 4 — 模块间不得 import 对方内部 Repository / Entity
 

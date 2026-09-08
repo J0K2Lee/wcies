@@ -24,6 +24,15 @@ const MENU_ITEMS = [
     ],
   },
   {
+    key: 'inventory-group',
+    label: '库存',
+    children: [
+      { key: '/inventory', label: '库存查询' },
+      { key: '/inventory/transactions', label: '库存流水' },
+      { key: '/inventory/reservations', label: 'Reservation' },
+    ],
+  },
+  {
     key: 'platform-group',
     label: '平台',
     children: [

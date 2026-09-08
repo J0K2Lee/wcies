@@ -9,6 +9,7 @@ import { PlatformModule } from '../platform/platform.module';
 import { ProductModule } from '../product/product.module';
 import { StoreModule } from '../store/store.module';
 import { WarehouseModule } from '../warehouse/warehouse.module';
+import { InventoryModule } from '../inventory/inventory.module';
 import { ImportJobEntity } from './entities/import-job.entity';
 import { ImportJobRepository } from './repositories/import-job.repository';
 import { ImportService } from './import.service';
@@ -21,6 +22,7 @@ import {
   WarehouseImportHandler,
 } from './handlers/master-data-import.handlers';
 import { ListingMappingImportHandler } from './handlers/listing-mapping-import.handler';
+import { InitialInventoryImportHandler } from './handlers/initial-inventory-import.handler';
 
 /**
  * Import Center base module (task §57): upload+validate runs on the API;
@@ -37,6 +39,7 @@ import { ListingMappingImportHandler } from './handlers/listing-mapping-import.h
     ProductModule,
     WarehouseModule,
     ListingModule,
+    InventoryModule,
   ],
   controllers: [ImportController],
   providers: [
@@ -48,6 +51,7 @@ import { ListingMappingImportHandler } from './handlers/listing-mapping-import.h
     WarehouseImportHandler,
     BinImportHandler,
     ListingMappingImportHandler,
+    InitialInventoryImportHandler,
   ],
   exports: [ImportExecutorService],
 })

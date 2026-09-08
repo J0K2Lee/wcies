@@ -259,6 +259,33 @@ export class WarehouseBinService {
     return this.repository.findBinByCode(warehouseId, binCode);
   }
 
+  /** Inventory core lookup: how many bins a warehouse currently has. */
+  async countByWarehouse(warehouseId: string): Promise<number> {
+    return this.repository.countBins(warehouseId);
+  }
+
+  /**
+   * Inventory core (Sprint 2 task §6): warehouses that start holding stock
+   * without physical bin management get one virtual `DEFAULT` bin, so
+   * inventory_balances.bin_id is never NULL and the unique dimension stays
+   * stable. Returns the DEFAULT bin when it already exists.
+   */
+  async ensureDefaultBin(
+    warehouseId: string,
+    operator: OperatorContext,
+  ): Promise<WarehouseBinEntity> {
+    const existing = await this.repository.findBinByCode(warehouseId, 'DEFAULT');
+    if (existing !== null) {
+      return existing;
+    }
+    const created = await this.create(
+      warehouseId,
+      { binCode: 'DEFAULT', remark: '系统虚拟库位（无实体库位管理仓默认）' },
+      operator,
+    );
+    return (await this.repository.findBinById(created.id)) as WarehouseBinEntity;
+  }
+
   private async assertWarehouseExists(
     warehouseId: string,
   ): Promise<{ id: string; warehouseCode: string }> {

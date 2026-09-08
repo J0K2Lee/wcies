@@ -6,7 +6,7 @@ import { SkuService } from '../../product/services/sku.service';
 import { ImportRowError } from '../entities/import-job.entity';
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import { booleanField, optionalField, requiredField } from '../services/excel-parser';
-import { ImportHandler, ValidRow } from './import-handler';
+import { ImportHandler, ImportRowContext, ValidRow } from './import-handler';
 import { BARCODE_TYPES, BarcodeType } from '../../product/constants/barcode.constants';
 
 interface BarcodeRowData {
@@ -96,7 +96,12 @@ export class BarcodeImportHandler implements ImportHandler {
     return { validRows, errors };
   }
 
-  async importRow(raw: Record<string, unknown>, operator: OperatorContext): Promise<void> {
+  async importRow(
+    raw: Record<string, unknown>,
+    operator: OperatorContext,
+
+    _context: ImportRowContext,
+  ): Promise<void> {
     const row = raw as unknown as BarcodeRowData;
     const sku = await this.skuService.getEntityByCode(row.skuCode);
     if (sku === null) {
@@ -191,7 +196,12 @@ export class WarehouseImportHandler implements ImportHandler {
     return { validRows, errors };
   }
 
-  async importRow(raw: Record<string, unknown>, operator: OperatorContext): Promise<void> {
+  async importRow(
+    raw: Record<string, unknown>,
+    operator: OperatorContext,
+
+    _context: ImportRowContext,
+  ): Promise<void> {
     const row = raw as unknown as WarehouseRowData;
     await this.warehouseService.create(
       {
@@ -301,7 +311,12 @@ export class BinImportHandler implements ImportHandler {
     return { validRows, errors };
   }
 
-  async importRow(raw: Record<string, unknown>, operator: OperatorContext): Promise<void> {
+  async importRow(
+    raw: Record<string, unknown>,
+    operator: OperatorContext,
+
+    _context: ImportRowContext,
+  ): Promise<void> {
     const row = raw as unknown as BinRowData;
     const warehouse = await this.warehouseService.getEntityByCode(row.warehouseCode);
     if (warehouse === null) {

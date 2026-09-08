@@ -14,7 +14,14 @@ export interface ImportRowError {
   message: string;
 }
 
-export const IMPORT_TYPES = ['SKU', 'BARCODE', 'WAREHOUSE', 'BIN', 'LISTING_MAPPING'] as const;
+export const IMPORT_TYPES = [
+  'SKU',
+  'BARCODE',
+  'WAREHOUSE',
+  'BIN',
+  'LISTING_MAPPING',
+  'INITIAL_INVENTORY',
+] as const;
 export type ImportType = (typeof IMPORT_TYPES)[number];
 
 export const IMPORT_STATUSES = [

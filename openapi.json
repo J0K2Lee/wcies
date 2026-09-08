@@ -2695,7 +2695,7 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": ["SKU", "BARCODE", "WAREHOUSE", "BIN", "LISTING_MAPPING"]
+              "enum": ["SKU", "BARCODE", "WAREHOUSE", "BIN", "LISTING_MAPPING", "INITIAL_INVENTORY"]
             }
           },
           {
@@ -2751,6 +2751,688 @@
         },
         "summary": "Import job detail incl. row-level errors",
         "tags": ["imports"]
+      }
+    },
+    "/api/v1/inventory": {
+      "get": {
+        "operationId": "InventoryController_list",
+        "parameters": [
+          {
+            "name": "keyword",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "skuId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "warehouseId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "binId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "condition",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["SELLABLE", "QC_PENDING", "DEFECTIVE", "REPAIR", "SCRAPPED"]
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "description": "IN_STOCK=有可售, OUT_OF_STOCK=无可售",
+            "schema": {
+              "type": "string",
+              "enum": ["IN_STOCK", "OUT_OF_STOCK"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List inventory balances with derived availability",
+        "tags": ["inventory"]
+      }
+    },
+    "/api/v1/inventory/skus/{skuId}": {
+      "get": {
+        "operationId": "InventoryController_getSkuInventory",
+        "parameters": [
+          {
+            "name": "skuId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkuInventoryEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "SKU inventory drilldown: totals -> warehouses -> bins",
+        "tags": ["inventory"]
+      }
+    },
+    "/api/v1/inventory/transactions": {
+      "get": {
+        "operationId": "InventoryController_listTransactions",
+        "parameters": [
+          {
+            "name": "skuId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "warehouseId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "binId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "transactionType",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "INITIAL_STOCK",
+                "RECEIVE",
+                "RESERVE",
+                "RELEASE",
+                "PICK",
+                "UNPICK",
+                "SHIP",
+                "MOVE_BIN",
+                "MANUAL_ADJUSTMENT"
+              ]
+            }
+          },
+          {
+            "name": "referenceType",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["MANUAL", "TEST", "ORDER", "IMPORT"]
+            }
+          },
+          {
+            "name": "referenceId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "createdFrom",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "date-time",
+              "example": "2026-09-01T00:00:00Z",
+              "type": "string"
+            }
+          },
+          {
+            "name": "createdTo",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "date-time",
+              "example": "2026-09-08T23:59:59Z",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Inventory transaction ledger (audit)",
+        "tags": ["inventory"]
+      }
+    },
+    "/api/v1/inventory/initialize": {
+      "post": {
+        "operationId": "InventoryController_initialize",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InitializeStockRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockChangeEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "[Admin] Initialize stock (first go-live import only)",
+        "tags": ["inventory"]
+      }
+    },
+    "/api/v1/inventory/receive": {
+      "post": {
+        "operationId": "InventoryController_receive",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReceiveStockRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockChangeEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "[Admin] Receive stock (future purchase-receipt primitive)",
+        "tags": ["inventory"]
+      }
+    },
+    "/api/v1/inventory/adjust": {
+      "post": {
+        "operationId": "InventoryController_adjust",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdjustStockRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockChangeEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "[Admin] Manual stock adjustment (+N / -N with reason)",
+        "tags": ["inventory"]
+      }
+    },
+    "/api/v1/inventory/move-bin": {
+      "post": {
+        "operationId": "InventoryController_moveBin",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveBinRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoveBinEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Move stock between bins of one warehouse (single event, two lines)",
+        "tags": ["inventory"]
+      }
+    },
+    "/api/v1/inventory/reservations": {
+      "post": {
+        "operationId": "InventoryReservationController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReserveStockRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Reserve stock (multi-bin allocation, idempotent)",
+        "tags": ["inventory-reservations"]
+      },
+      "get": {
+        "operationId": "InventoryReservationController_list",
+        "parameters": [
+          {
+            "name": "skuId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "warehouseId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["ACTIVE", "PICKED", "RELEASED", "CONSUMED", "CANCELLED"]
+            }
+          },
+          {
+            "name": "referenceType",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["TEST", "MANUAL", "ORDER"]
+            }
+          },
+          {
+            "name": "referenceId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List reservations",
+        "tags": ["inventory-reservations"]
+      }
+    },
+    "/api/v1/inventory/reservations/{id}": {
+      "get": {
+        "operationId": "InventoryReservationController_getById",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Reservation detail with per-bin lines",
+        "tags": ["inventory-reservations"]
+      }
+    },
+    "/api/v1/inventory/reservations/{id}/release": {
+      "post": {
+        "operationId": "InventoryReservationController_release",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReservationLifecycleRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Release an ACTIVE reservation (Reserved -N)",
+        "tags": ["inventory-reservations"]
+      }
+    },
+    "/api/v1/inventory/reservations/{id}/pick": {
+      "post": {
+        "operationId": "InventoryReservationController_pick",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReservationLifecycleRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Pick a full ACTIVE reservation (Reserved -N, Picked +N)",
+        "tags": ["inventory-reservations"]
+      }
+    },
+    "/api/v1/inventory/reservations/{id}/unpick": {
+      "post": {
+        "operationId": "InventoryReservationController_unpick",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReservationLifecycleRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Undo a pick (PICKED -> ACTIVE; pick-correction only)",
+        "tags": ["inventory-reservations"]
+      }
+    },
+    "/api/v1/inventory/reservations/{id}/ship": {
+      "post": {
+        "operationId": "InventoryReservationController_ship",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReservationLifecycleRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Ship a PICKED reservation (Picked -N, On Hand -N)",
+        "tags": ["inventory-reservations"]
+      }
+    },
+    "/api/v1/inventory/safety-stocks": {
+      "get": {
+        "operationId": "InventorySafetyStockController_list",
+        "parameters": [
+          {
+            "name": "skuId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "warehouseId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafetyStockListEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List safety stock policies",
+        "tags": ["inventory-safety-stocks"]
+      }
+    },
+    "/api/v1/inventory/safety-stocks/{skuId}/{warehouseId}": {
+      "put": {
+        "operationId": "InventorySafetyStockController_upsert",
+        "parameters": [
+          {
+            "name": "skuId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "warehouseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertSafetyStockRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafetyStockEnvelopeDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Set/update safety stock of a SKU in a warehouse (policy only)",
+        "tags": ["inventory-safety-stocks"]
       }
     },
     "/api/v1/dev/test-job": {
@@ -3805,6 +4487,279 @@
         "properties": {}
       },
       "ImportListEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "InventoryListEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "SkuInventoryEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "TransactionListEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "InitializeStockRequestDto": {
+        "type": "object",
+        "properties": {
+          "skuId": {
+            "type": "string"
+          },
+          "warehouseId": {
+            "type": "string"
+          },
+          "binId": {
+            "type": "string",
+            "description": "省略时仅允许无库位仓库（自动 DEFAULT 虚拟库位）"
+          },
+          "condition": {
+            "type": "string",
+            "enum": ["SELLABLE", "QC_PENDING", "DEFECTIVE", "REPAIR", "SCRAPPED"],
+            "default": "SELLABLE"
+          },
+          "quantity": {
+            "type": "string",
+            "example": "10",
+            "description": "允许 0（建立零余额记录），不允许负数"
+          },
+          "referenceType": {
+            "type": "string",
+            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT"]
+          },
+          "referenceId": {
+            "type": "string"
+          },
+          "remark": {
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "example": "INIT:PRD-VK87:2026-09-08"
+          }
+        },
+        "required": [
+          "skuId",
+          "warehouseId",
+          "quantity",
+          "referenceType",
+          "referenceId",
+          "idempotencyKey"
+        ]
+      },
+      "StockChangeEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ReceiveStockRequestDto": {
+        "type": "object",
+        "properties": {
+          "skuId": {
+            "type": "string"
+          },
+          "warehouseId": {
+            "type": "string"
+          },
+          "binId": {
+            "type": "string",
+            "description": "省略时仅允许无库位仓库（自动 DEFAULT 虚拟库位）"
+          },
+          "condition": {
+            "type": "string",
+            "enum": ["SELLABLE", "QC_PENDING", "DEFECTIVE", "REPAIR", "SCRAPPED"],
+            "default": "SELLABLE"
+          },
+          "quantity": {
+            "type": "string",
+            "example": "10",
+            "description": "允许 0（建立零余额记录），不允许负数"
+          },
+          "referenceType": {
+            "type": "string",
+            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT"]
+          },
+          "referenceId": {
+            "type": "string"
+          },
+          "remark": {
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "example": "INIT:PRD-VK87:2026-09-08"
+          }
+        },
+        "required": [
+          "skuId",
+          "warehouseId",
+          "quantity",
+          "referenceType",
+          "referenceId",
+          "idempotencyKey"
+        ]
+      },
+      "AdjustStockRequestDto": {
+        "type": "object",
+        "properties": {
+          "skuId": {
+            "type": "string"
+          },
+          "warehouseId": {
+            "type": "string"
+          },
+          "binId": {
+            "type": "string"
+          },
+          "condition": {
+            "type": "string",
+            "enum": ["SELLABLE", "QC_PENDING", "DEFECTIVE", "REPAIR", "SCRAPPED"],
+            "default": "SELLABLE"
+          },
+          "quantityDelta": {
+            "type": "string",
+            "example": "-1",
+            "description": "带符号增量，不允许 0"
+          },
+          "reason": {
+            "type": "string",
+            "example": "盘点补录"
+          },
+          "remark": {
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          }
+        },
+        "required": ["skuId", "warehouseId", "binId", "quantityDelta", "reason", "idempotencyKey"]
+      },
+      "MoveBinRequestDto": {
+        "type": "object",
+        "properties": {
+          "skuId": {
+            "type": "string"
+          },
+          "warehouseId": {
+            "type": "string"
+          },
+          "fromBinId": {
+            "type": "string"
+          },
+          "toBinId": {
+            "type": "string"
+          },
+          "condition": {
+            "type": "string",
+            "enum": ["SELLABLE", "QC_PENDING", "DEFECTIVE", "REPAIR", "SCRAPPED"],
+            "default": "SELLABLE"
+          },
+          "quantity": {
+            "type": "string",
+            "example": "4"
+          },
+          "referenceType": {
+            "type": "string",
+            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT"]
+          },
+          "referenceId": {
+            "type": "string"
+          },
+          "remark": {
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "skuId",
+          "warehouseId",
+          "fromBinId",
+          "toBinId",
+          "quantity",
+          "referenceType",
+          "referenceId",
+          "idempotencyKey"
+        ]
+      },
+      "MoveBinEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ReserveStockRequestDto": {
+        "type": "object",
+        "properties": {
+          "skuId": {
+            "type": "string"
+          },
+          "warehouseId": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "string",
+            "example": "3"
+          },
+          "referenceType": {
+            "type": "string",
+            "enum": ["TEST", "MANUAL", "ORDER"]
+          },
+          "referenceId": {
+            "type": "string"
+          },
+          "remark": {
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "example": "ORDER_RESERVE:orderItem123"
+          }
+        },
+        "required": [
+          "skuId",
+          "warehouseId",
+          "quantity",
+          "referenceType",
+          "referenceId",
+          "idempotencyKey"
+        ]
+      },
+      "ReservationEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ReservationListEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ReservationLifecycleRequestDto": {
+        "type": "object",
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "description": "同一业务事件重复请求时传相同 key 以幂等重放"
+          },
+          "remark": {
+            "type": "string"
+          }
+        }
+      },
+      "SafetyStockListEnvelopeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpsertSafetyStockRequestDto": {
+        "type": "object",
+        "properties": {
+          "safetyQty": {
+            "type": "string",
+            "example": "2"
+          }
+        },
+        "required": ["safetyQty"]
+      },
+      "SafetyStockEnvelopeDto": {
         "type": "object",
         "properties": {}
       },

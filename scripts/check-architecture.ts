@@ -4,9 +4,9 @@
  * Fails (exit code 1) when a rule is violated:
  *   Rule 1: Controllers must not import repositories.
  *   Rule 2: Web must not import backend entities / @wcies/api.
- *   Rule 3: Integration code must not import inventory repositories
- *           (inventory module arrives in a later sprint; the rule stands
- *           ready so it cannot be violated from day one).
+ *   Rule 3: Code outside modules/inventory must not import inventory
+ *           repositories/entities/internal (Sprint 2 task §49) -
+ *           relative imports are resolved so deep paths are caught.
  *   Rule 4: A business module must not import another module's internal
  *           repositories/entities directory.
  *
@@ -112,9 +112,11 @@ function checkRule2(): void {
 }
 
 function checkRule3(): void {
-  // The integration module (platform adapters) arrives in a later sprint;
-  // scan the whole api src so the rule also catches integration code living
-  // anywhere outside modules/inventory.
+  // Sprint 2 (task §49): the inventory module now exists; nothing outside it
+  // may import inventory repositories/entities/internal - cross-module reads
+  // and writes go through the exported Inventory services only
+  // (AGENTS.md §10/§19). Both package-style and relative imports are
+  // resolved so '../../inventory/repositories/...' is caught too.
   const apiFiles = listFiles(join(ROOT, 'apps/api/src'), ['.ts']);
   for (const file of apiFiles) {
     const normalized = file.split(sep).join('/');
@@ -122,13 +124,17 @@ function checkRule3(): void {
       continue;
     }
     for (const spec of importSpecifiers(readFileSync(file, 'utf8'))) {
+      const target = spec.startsWith('.') ? resolve(file, '..', spec).split(sep).join('/') : spec;
       if (
+        target.includes('modules/inventory/repositories') ||
+        target.includes('modules/inventory/entities') ||
+        target.includes('modules/inventory/internal') ||
         spec.includes('modules/inventory/repositories') ||
         spec.includes('modules/inventory/entities') ||
         spec.includes('modules/inventory/internal')
       ) {
         violations.push({
-          rule: 'Rule 3: integration must not import inventory internals',
+          rule: 'Rule 3: non-inventory code must not import inventory internals',
           file: relative(ROOT, file),
           detail: `import "${spec}"`,
         });

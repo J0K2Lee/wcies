@@ -264,7 +264,7 @@ SCRAP
 
 | 操作 | On Hand | Reserved | Picked |
 |---|---:|---:|---:|
-| 采购入库 | +N | 0 | 0 |
+| 采购入库 / 初始入库 / 收货入库 | +N | 0 | 0 |
 | 新订单锁库存 | 0 | +N | 0 |
 | 释放未拣订单 | 0 | -N | 0 |
 | 拣货 | 0 | -N | +N |
@@ -274,6 +274,7 @@ SCRAP
 | 盘亏 | -N | 0 | 0 |
 | 调拨发出 | -N | 0 | 0 |
 | 调拨接收 | +N | 0 | 0 |
+| 库内移位（同一 Event 两条流水） | 源 -N / 目标 +N | 0 | 0 |
 
 任何新增库存行为，都应先补充本表或对应规则。
 
@@ -1593,3 +1594,49 @@ SELLABLE / DEFECTIVE / REPAIR / SCRAPPED
 18. 手工调整不得绕过Reservation/Picked等业务状态。
 19. 库存流水必须关联业务来源。
 20. 修改库存核心规则必须先更新本文档。
+
+---
+
+# 60. Sprint 2 Inventory Core 实现约定
+
+以下为 Sprint 2 库存核心已实现并经验证的操作性约定（与上文规则一致，作为实现基线）。
+
+## 60.1 数量与公式
+
+- 所有库存数量为 `NUMERIC(18,3)`；服务端统一使用整数毫单位（bigint）运算，序列化为字符串（见 `common/utils/quantity.ts`）。
+- `Physical Available = On Hand - Reserved - Picked`（按 Balance 行计算；Reserve / Move Bin 的可占用/可移动判断以此为准）。
+- `Sellable Available = max(Physical Available - Safety Stock, 0)`（仅作为计算字段返回，不落库）。
+- Reserve 依据 Physical Available 判定，不扣减 Safety Stock；Safety Stock 只影响 Sellable。
+
+## 60.2 数据模型
+
+- `inventory_balances`：唯一维度 `(sku_id, warehouse_id, bin_id, inventory_condition)`；DB CHECK 保证三个数量非负且 `reserved + picked <= on_hand`。0 余额行保留，与"从未初始化"可区分。
+- `inventory_safety_stocks`：维度 `(sku_id, warehouse_id)`，策略数据，变更不产生流水。
+- `inventory_reservations`（Header：业务来源/幂等键/状态）+ `inventory_reservation_lines`（按 Bin 的分配行，含 `picked_qty` 为部分拣货预留）。
+- `inventory_events`（一个业务事件 = 一个幂等键）+ `inventory_transactions`（明细行，行幂等键为 `<event key>#<line>`，`transaction_no` 为 `<event_no>-<line>`）。
+- Reservation 状态机：`ACTIVE → PICKED → CONSUMED`；`ACTIVE → RELEASED`；`PICKED → ACTIVE`（unpick）。`CANCELLED` 保留给未来订单取消流程，Sprint 2 无进入该状态的迁移。
+
+## 60.3 库位规则
+
+- 存放库存的仓库必须至少有一个库位；无实体库位管理的仓库在首次入库时自动创建系统虚拟库位 `DEFAULT`。
+- 指定 `binId` 时必须属于同一仓库；跨仓移动属于未来 Transfer。
+
+## 60.4 操作与事件类型
+
+- `initializeStock → INITIAL_STOCK`（允许数量 0 以建立零余额记录）；`receiveStock → RECEIVE`（未来采购收货底层能力）。
+- `reserveStock → RESERVE`（跨 Bin 贪心分配，按 bin_code 顺序）；`release/pick/unpick/ship → RELEASE/PICK/UNPICK/SHIP`。
+- `moveBin → MOVE_BIN`（同一 Event 两条流水：源 -N / 目标 +N；不得移动 Reserved/Picked 占用部分）。
+- `adjustStock → MANUAL_ADJUSTMENT`（仅 On Hand；不得使结果为负或低于占用；必须填写原因）。
+- Reference 类型：`MANUAL / TEST / ORDER / IMPORT`（Reservation 第一阶段仅 `TEST / MANUAL / ORDER`）。
+
+## 60.5 并发与幂等
+
+- 写路径统一为：候选行按 `bin_code` 排序 → 逐行 `SELECT ... FOR UPDATE` → 重算可用量 → 变更 → 写 Event/Transaction → 提交。
+- Reservation 幂等键落在 Header 与 Event 上（均唯一）；重复/并发同键请求返回首次结果（`idempotentReplay=true`），同键不同参数返回冲突错误。
+- 生命周期操作可携带幂等键（`<OP>:<reservationId>:<clientKey>`）实现重放；不携带时由状态机拒绝重复执行（409），绝不重复扣减。
+- INITIAL_INVENTORY 导入行幂等键：`INITIAL_INVENTORY:<importJobId>:<excelRowNumber>`；同一文件内重复库存维度行被拒绝。
+
+## 60.6 已冻结实现决策
+
+- Balance 行的创建只通过 `initializeStock / receiveStock / moveBin 目标`（`INSERT ... ON CONFLICT DO NOTHING` + FOR UPDATE）；查询不产生 Balance 副作用。
+- Reservation / Picked / On Hand 的任何变化都必须且只能经 Inventory 模块 Service；流水与事件为审计数据，无删除接口。

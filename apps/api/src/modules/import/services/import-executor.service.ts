@@ -41,7 +41,7 @@ export class ImportExecutorService {
       const data = { ...row };
       delete data['rowNumber'];
       try {
-        await handler.importRow(data, operator);
+        await handler.importRow(data, operator, { jobId, rowNumber });
         importedRows += 1;
       } catch (error: unknown) {
         failedRows += 1;

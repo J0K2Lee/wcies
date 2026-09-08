@@ -6,7 +6,7 @@ import { StoreService } from '../../store/services/store.service';
 import { ImportRowError } from '../entities/import-job.entity';
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import { optionalField, requiredField } from '../services/excel-parser';
-import { ImportHandler, ValidRow } from './import-handler';
+import { ImportHandler, ImportRowContext, ValidRow } from './import-handler';
 
 interface ListingMappingRowData {
   platformCode: string;
@@ -111,7 +111,12 @@ export class ListingMappingImportHandler implements ImportHandler {
     return { validRows, errors };
   }
 
-  async importRow(raw: Record<string, unknown>, operator: OperatorContext): Promise<void> {
+  async importRow(
+    raw: Record<string, unknown>,
+    operator: OperatorContext,
+
+    _context: ImportRowContext,
+  ): Promise<void> {
     const row = raw as unknown as ListingMappingRowData;
     const platform = await this.platformService.getEntityByCode(row.platformCode);
     if (platform === null) {

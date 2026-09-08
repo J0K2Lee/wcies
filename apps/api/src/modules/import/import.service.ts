@@ -20,6 +20,7 @@ import {
   WarehouseImportHandler,
 } from './handlers/master-data-import.handlers';
 import { ListingMappingImportHandler } from './handlers/listing-mapping-import.handler';
+import { InitialInventoryImportHandler } from './handlers/initial-inventory-import.handler';
 import { QUEUE_NAMES } from '../../infrastructure/queue/queue.constants';
 import { OperatorContext } from '../operation-log/operation-log.service';
 
@@ -68,6 +69,7 @@ export class ImportService {
     warehouseHandler: WarehouseImportHandler,
     binHandler: BinImportHandler,
     listingMappingHandler: ListingMappingImportHandler,
+    initialInventoryHandler: InitialInventoryImportHandler,
   ) {
     for (const handler of [
       skuHandler,
@@ -75,6 +77,7 @@ export class ImportService {
       warehouseHandler,
       binHandler,
       listingMappingHandler,
+      initialInventoryHandler,
     ]) {
       this.handlers.set(handler.type, handler);
     }

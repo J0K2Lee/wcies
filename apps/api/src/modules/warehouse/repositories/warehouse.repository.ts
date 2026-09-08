@@ -151,6 +151,10 @@ export class WarehouseRepository {
     return this.binRepository.findOneBy({ warehouseId, binCode });
   }
 
+  async countBins(warehouseId: string): Promise<number> {
+    return this.binRepository.count({ where: { warehouseId } });
+  }
+
   async findExistingBinCodes(
     warehouseId: string,
     binCodes: string[],

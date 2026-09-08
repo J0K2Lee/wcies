@@ -1010,6 +1010,262 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List inventory balances with derived availability */
+        get: operations["InventoryController_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/inventory/skus/{skuId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** SKU inventory drilldown: totals -> warehouses -> bins */
+        get: operations["InventoryController_getSkuInventory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/inventory/transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Inventory transaction ledger (audit) */
+        get: operations["InventoryController_listTransactions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/inventory/initialize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** [Admin] Initialize stock (first go-live import only) */
+        post: operations["InventoryController_initialize"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/inventory/receive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** [Admin] Receive stock (future purchase-receipt primitive) */
+        post: operations["InventoryController_receive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/inventory/adjust": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** [Admin] Manual stock adjustment (+N / -N with reason) */
+        post: operations["InventoryController_adjust"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/inventory/move-bin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Move stock between bins of one warehouse (single event, two lines) */
+        post: operations["InventoryController_moveBin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/inventory/reservations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List reservations */
+        get: operations["InventoryReservationController_list"];
+        put?: never;
+        /** Reserve stock (multi-bin allocation, idempotent) */
+        post: operations["InventoryReservationController_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/inventory/reservations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reservation detail with per-bin lines */
+        get: operations["InventoryReservationController_getById"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/inventory/reservations/{id}/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Release an ACTIVE reservation (Reserved -N) */
+        post: operations["InventoryReservationController_release"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/inventory/reservations/{id}/pick": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pick a full ACTIVE reservation (Reserved -N, Picked +N) */
+        post: operations["InventoryReservationController_pick"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/inventory/reservations/{id}/unpick": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Undo a pick (PICKED -> ACTIVE; pick-correction only) */
+        post: operations["InventoryReservationController_unpick"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/inventory/reservations/{id}/ship": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ship a PICKED reservation (Picked -N, On Hand -N) */
+        post: operations["InventoryReservationController_ship"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/inventory/safety-stocks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List safety stock policies */
+        get: operations["InventorySafetyStockController_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/inventory/safety-stocks/{skuId}/{warehouseId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set/update safety stock of a SKU in a warehouse (policy only) */
+        put: operations["InventorySafetyStockController_upsert"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/dev/test-job": {
         parameters: {
             query?: never;
@@ -1450,6 +1706,117 @@ export interface components {
         };
         ImportJobEnvelopeDto: Record<string, never>;
         ImportListEnvelopeDto: Record<string, never>;
+        InventoryListEnvelopeDto: Record<string, never>;
+        SkuInventoryEnvelopeDto: Record<string, never>;
+        TransactionListEnvelopeDto: Record<string, never>;
+        InitializeStockRequestDto: {
+            skuId: string;
+            warehouseId: string;
+            /** @description 省略时仅允许无库位仓库（自动 DEFAULT 虚拟库位） */
+            binId?: string;
+            /**
+             * @default SELLABLE
+             * @enum {string}
+             */
+            condition: "SELLABLE" | "QC_PENDING" | "DEFECTIVE" | "REPAIR" | "SCRAPPED";
+            /**
+             * @description 允许 0（建立零余额记录），不允许负数
+             * @example 10
+             */
+            quantity: string;
+            /** @enum {string} */
+            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT";
+            referenceId: string;
+            remark?: string;
+            /** @example INIT:PRD-VK87:2026-09-08 */
+            idempotencyKey: string;
+        };
+        StockChangeEnvelopeDto: Record<string, never>;
+        ReceiveStockRequestDto: {
+            skuId: string;
+            warehouseId: string;
+            /** @description 省略时仅允许无库位仓库（自动 DEFAULT 虚拟库位） */
+            binId?: string;
+            /**
+             * @default SELLABLE
+             * @enum {string}
+             */
+            condition: "SELLABLE" | "QC_PENDING" | "DEFECTIVE" | "REPAIR" | "SCRAPPED";
+            /**
+             * @description 允许 0（建立零余额记录），不允许负数
+             * @example 10
+             */
+            quantity: string;
+            /** @enum {string} */
+            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT";
+            referenceId: string;
+            remark?: string;
+            /** @example INIT:PRD-VK87:2026-09-08 */
+            idempotencyKey: string;
+        };
+        AdjustStockRequestDto: {
+            skuId: string;
+            warehouseId: string;
+            binId: string;
+            /**
+             * @default SELLABLE
+             * @enum {string}
+             */
+            condition: "SELLABLE" | "QC_PENDING" | "DEFECTIVE" | "REPAIR" | "SCRAPPED";
+            /**
+             * @description 带符号增量，不允许 0
+             * @example -1
+             */
+            quantityDelta: string;
+            /** @example 盘点补录 */
+            reason: string;
+            remark?: string;
+            idempotencyKey: string;
+        };
+        MoveBinRequestDto: {
+            skuId: string;
+            warehouseId: string;
+            fromBinId: string;
+            toBinId: string;
+            /**
+             * @default SELLABLE
+             * @enum {string}
+             */
+            condition: "SELLABLE" | "QC_PENDING" | "DEFECTIVE" | "REPAIR" | "SCRAPPED";
+            /** @example 4 */
+            quantity: string;
+            /** @enum {string} */
+            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT";
+            referenceId: string;
+            remark?: string;
+            idempotencyKey: string;
+        };
+        MoveBinEnvelopeDto: Record<string, never>;
+        ReserveStockRequestDto: {
+            skuId: string;
+            warehouseId: string;
+            /** @example 3 */
+            quantity: string;
+            /** @enum {string} */
+            referenceType: "TEST" | "MANUAL" | "ORDER";
+            referenceId: string;
+            remark?: string;
+            /** @example ORDER_RESERVE:orderItem123 */
+            idempotencyKey: string;
+        };
+        ReservationEnvelopeDto: Record<string, never>;
+        ReservationListEnvelopeDto: Record<string, never>;
+        ReservationLifecycleRequestDto: {
+            /** @description 同一业务事件重复请求时传相同 key 以幂等重放 */
+            idempotencyKey?: string;
+            remark?: string;
+        };
+        SafetyStockListEnvelopeDto: Record<string, never>;
+        UpsertSafetyStockRequestDto: {
+            /** @example 2 */
+            safetyQty: string;
+        };
+        SafetyStockEnvelopeDto: Record<string, never>;
         CreateTestJobDto: Record<string, never>;
         TestJobResponseDto: Record<string, never>;
         StorageTestResponseDto: Record<string, never>;
@@ -3190,7 +3557,7 @@ export interface operations {
     ImportController_list: {
         parameters: {
             query?: {
-                importType?: "SKU" | "BARCODE" | "WAREHOUSE" | "BIN" | "LISTING_MAPPING";
+                importType?: "SKU" | "BARCODE" | "WAREHOUSE" | "BIN" | "LISTING_MAPPING" | "INITIAL_INVENTORY";
                 status?: "VALIDATED" | "PENDING_IMPORT" | "IMPORTING" | "COMPLETED" | "FAILED";
             };
             header?: never;
@@ -3226,6 +3593,391 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImportJobEnvelopeDto"];
+                };
+            };
+        };
+    };
+    InventoryController_list: {
+        parameters: {
+            query?: {
+                keyword?: string;
+                skuId?: string;
+                warehouseId?: string;
+                binId?: string;
+                condition?: "SELLABLE" | "QC_PENDING" | "DEFECTIVE" | "REPAIR" | "SCRAPPED";
+                /** @description IN_STOCK=有可售, OUT_OF_STOCK=无可售 */
+                status?: "IN_STOCK" | "OUT_OF_STOCK";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryListEnvelopeDto"];
+                };
+            };
+        };
+    };
+    InventoryController_getSkuInventory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skuId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkuInventoryEnvelopeDto"];
+                };
+            };
+        };
+    };
+    InventoryController_listTransactions: {
+        parameters: {
+            query?: {
+                skuId?: string;
+                warehouseId?: string;
+                binId?: string;
+                transactionType?: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "MOVE_BIN" | "MANUAL_ADJUSTMENT";
+                referenceType?: "MANUAL" | "TEST" | "ORDER" | "IMPORT";
+                referenceId?: string;
+                createdFrom?: string;
+                createdTo?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransactionListEnvelopeDto"];
+                };
+            };
+        };
+    };
+    InventoryController_initialize: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InitializeStockRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockChangeEnvelopeDto"];
+                };
+            };
+        };
+    };
+    InventoryController_receive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReceiveStockRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockChangeEnvelopeDto"];
+                };
+            };
+        };
+    };
+    InventoryController_adjust: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdjustStockRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockChangeEnvelopeDto"];
+                };
+            };
+        };
+    };
+    InventoryController_moveBin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MoveBinRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MoveBinEnvelopeDto"];
+                };
+            };
+        };
+    };
+    InventoryReservationController_list: {
+        parameters: {
+            query?: {
+                skuId?: string;
+                warehouseId?: string;
+                status?: "ACTIVE" | "PICKED" | "RELEASED" | "CONSUMED" | "CANCELLED";
+                referenceType?: "TEST" | "MANUAL" | "ORDER";
+                referenceId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReservationListEnvelopeDto"];
+                };
+            };
+        };
+    };
+    InventoryReservationController_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReserveStockRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReservationEnvelopeDto"];
+                };
+            };
+        };
+    };
+    InventoryReservationController_getById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReservationEnvelopeDto"];
+                };
+            };
+        };
+    };
+    InventoryReservationController_release: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReservationLifecycleRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReservationEnvelopeDto"];
+                };
+            };
+        };
+    };
+    InventoryReservationController_pick: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReservationLifecycleRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReservationEnvelopeDto"];
+                };
+            };
+        };
+    };
+    InventoryReservationController_unpick: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReservationLifecycleRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReservationEnvelopeDto"];
+                };
+            };
+        };
+    };
+    InventoryReservationController_ship: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReservationLifecycleRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReservationEnvelopeDto"];
+                };
+            };
+        };
+    };
+    InventorySafetyStockController_list: {
+        parameters: {
+            query?: {
+                skuId?: string;
+                warehouseId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SafetyStockListEnvelopeDto"];
+                };
+            };
+        };
+    };
+    InventorySafetyStockController_upsert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skuId: string;
+                warehouseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertSafetyStockRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SafetyStockEnvelopeDto"];
                 };
             };
         };
