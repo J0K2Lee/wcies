@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WCIES Sprint 1 — 主数据与平台映射 全景</title>
+<style>
+  :root {
+    --blue: #1677ff;
+    --blue-dark: #0958d9;
+    --bg: #f5f7fa;
+    --card: #ffffff;
+    --text: #1f2329;
+    --muted: #6b7280;
+    --green: #16a34a;
+    --red: #dc2626;
+    --orange: #ea580c;
+    --border: #e5e7eb;
+    --code-bg: #f0f5ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text);
+    padding: 32px 20px 64px; line-height: 1.6;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 26px; margin-bottom: 4px; }
+  h1 .accent { color: var(--blue); }
+  .subtitle { color: var(--muted); margin-bottom: 28px; font-size: 14px; }
+  .grid { display: grid; gap: 20px; }
+  .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  @media (max-width: 860px) { .grid.cols-2 { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px 22px; box-shadow: 0 1px 3px rgba(0,0,0,.04);
+  }
+  .card h2 { font-size: 16px; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+  .badge {
+    display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+    background: var(--code-bg); color: var(--blue-dark);
+  }
+  pre.tree {
+    font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; line-height: 1.75;
+    background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 14px 16px; overflow-x: auto;
+  }
+  pre.tree .c { color: #64748b; } pre.tree .b { color: #7dd3fc; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; padding: 6px 8px; border-bottom: 2px solid var(--border); }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  code {
+    font-family: Consolas, monospace; font-size: 12px; background: var(--code-bg);
+    color: var(--blue-dark); padding: 1px 6px; border-radius: 4px; white-space: nowrap;
+  }
+  .rule { border-left: 3px solid var(--blue); padding-left: 14px; margin-bottom: 16px; }
+  .rule:last-child { margin-bottom: 0; }
+  .rule .t { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+  .rule .d { font-size: 13px; color: var(--muted); }
+  .ok { color: var(--green); font-weight: 700; }
+  .no { color: var(--red); font-weight: 700; }
+  .warn { color: var(--orange); font-weight: 700; }
+  .flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; margin-top: 8px; }
+  .flow .step {
+    background: var(--code-bg); border: 1px solid #c7d7fe; color: var(--blue-dark);
+    font-size: 12.5px; padding: 6px 12px; border-radius: 8px; font-weight: 600;
+    display: flex; align-items: center;
+  }
+  .flow .arrow { align-self: center; color: var(--muted); font-size: 14px; }
+  .mermaid-box { background: #fff; border-radius: 8px; overflow-x: auto; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 14px; }
+  @media (max-width: 700px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+  .stat { background: var(--bg); border-radius: 8px; padding: 10px 12px; text-align: center; }
+  .stat .n { font-size: 22px; font-weight: 800; color: var(--blue); }
+  .stat .l { font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>WCIES <span class="accent">Sprint 1</span> — 主数据与平台映射</h1>
+  <div class="subtitle">Master Data Foundation · 模块全景 / 数据关系 / 关键业务规则 · 全链路验证通过（lint ✓ typecheck ✓ arch ✓ 40 单测 ✓ 50 集成 ✓ build ✓）</div>
+
+  <div class="grid cols-2">
+    <!-- 模块全景 -->
+    <div class="card">
+      <h2><span class="badge">模块</span> 后端模块与职责</h2>
+<pre class="tree">apps/api/src/modules/
+├── <span class="b">platform/</span>        # 平台主数据（只读种子）
+├── <span class="b">store/</span>           # 店铺 + 凭证加密（Admin 才可写）
+├── <span class="b">catalog/</span>         # 品牌 + 类目树（防环）
+├── <span class="b">product/</span>         # 商品 / SKU / 条码 / 图片 / Bundle
+├── <span class="b">warehouse/</span>       # 仓库 / 库位批量建位 / 店仓绑定
+├── <span class="b">listing/</span>         # Listing 映射 + <span class="b">Resolver</span>
+├── <span class="b">import/</span>          # Excel 导入（校验→队列→执行）
+└── <span class="c">operation-log/</span>   # 主数据审计（横切）
+
+apps/web/src/pages/   <span class="c"># 8 个管理页面</span>
+├── products/ skus/ listings/
+├── warehouses/ <span class="c">(含库位)</span>
+├── stores/ <span class="c">(含店仓绑定)</span>
+└── import/</pre>
+    </div>
+
+    <!-- 验收数据 -->
+    <div class="card">
+      <h2><span class="badge">验收</span> 真实业务数据落地</h2>
+      <div class="stats">
+        <div class="stat"><div class="n">11</div><div class="l">店铺<br>8 OZON + 1 WB + 2 YX</div></div>
+        <div class="stat"><div class="n">20</div><div class="l">深圳仓库位<br>5 架 × 4 层</div></div>
+        <div class="stat"><div class="n">3</div><div class="l">VK87-BLK 映射<br>OZON-A ×2 + WB ×1</div></div>
+        <div class="stat"><div class="n">91</div><div class="l">Excel 导入成功行<br>12 错误行精确报告</div></div>
+      </div>
+      <table style="margin-top:16px">
+        <tr><th>关键验收项</th><th>结果</th></tr>
+        <tr><td>一个 SKU → 多平台 / 多店铺 / 多链接</td><td class="ok">通过</td></tr>
+        <tr><td>Resolver 严格 Store Scoped（不串店）</td><td class="ok">通过</td></tr>
+        <tr><td>同店歧义 → <code>LISTING_SKU_RESOLVE_AMBIGUOUS</code></td><td class="ok">通过</td></tr>
+        <tr><td>重复业务键导入 → Reject 不覆盖</td><td class="ok">通过</td></tr>
+        <tr><td>空库 18 个 Migration + Seed</td><td class="ok">通过</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- 数据关系 -->
+  <div class="card" style="margin-top:20px">
+    <h2><span class="badge">数据</span> 核心实体关系（16 张表 · 关键路径）</h2>
+    <div class="mermaid-box">
+<pre class="mermaid">
+erDiagram
+    PLATFORM ||--o{ STORE : "1 平台 : N 店铺"
+    STORE ||--o| PLATFORM_CREDENTIAL : "凭证分离(加密)"
+    STORE ||--o{ STORE_WAREHOUSE_BINDING : ""
+    WAREHOUSE ||--o{ STORE_WAREHOUSE_BINDING : "N:M 履约"
+    WAREHOUSE ||--o{ WAREHOUSE_BIN : "1 仓 : N 库位"
+    BRAND ||--o{ PRODUCT : ""
+    CATEGORY ||--o{ PRODUCT : "类目树"
+    PRODUCT ||--|{ SKU : "1 商品 : N SKU"
+    SKU ||--o{ SKU_BARCODE : "条码全局唯一"
+    SKU ||--o{ SKU_IMAGE : "图片存 MinIO"
+    STORE ||--o{ PLATFORM_LISTING : "store+ppid 唯一"
+    PLATFORM_LISTING ||--o{ PLATFORM_LISTING_SKU : "变体"
+    SKU ||--o{ PLATFORM_LISTING_SKU : "无 UNIQUE(sku,store)"
+</pre>
+    </div>
+    <div style="font-size:12.5px;color:var(--muted);margin-top:8px">
+      关键唯一约束：<code>product_code</code> <code>sku_code</code> <code>barcode</code>（全局）
+      <code>(platform_id, store_code)</code> <code>(warehouse_id, bin_code)</code>
+      <code>(store_id, platform_product_id)</code>；Partial Unique：<b>每 SKU 仅一个主条码 / 主图</b>
+    </div>
+  </div>
+
+  <!-- 四条关键业务规则 -->
+  <div class="grid cols-2" style="margin-top:20px">
+    <div class="card">
+      <h2><span class="badge">规则</span> ① Resolver 订单安全边界</h2>
+      <div class="rule">
+        <div class="t">解析必须带 storeId（结构性保证）</div>
+        <div class="d">Repository 层查询永远携带 <code>WHERE store_id = ?</code>，全局 offer_id 查找在代码路径上不可能发生。</div>
+      </div>
+      <pre class="tree">resolveInternalSku({ storeId, offerId?... })
+  标识全空          → LISTING_SKU_RESOLVE_FAILED
+  同店 0 候选       → LISTING_SKU_RESOLVE_FAILED
+  同店 >1 候选      → <span style="color:#f87171">LISTING_SKU_RESOLVE_AMBIGUOUS</span>
+                      <span class="c">// 绝不"取第一条"</span>
+  唯一命中          → 返回 Internal SKU</pre>
+      <div class="d" style="margin-top:8px;font-size:12.5px">
+        实测：<span class="ok">OZON-A 与 OZON-B 同 offerId="ABC" 各解析到正确 SKU</span>；
+        <span class="warn">跨店同字符串不冲突、同店重复即拒绝</span>。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><span class="badge">规则</span> ② 条码唯一 + 单主条码</h2>
+      <div class="rule">
+        <div class="t">一个条码永远只绑一个 SKU</div>
+        <div class="d"><code>uq_sku_barcodes_barcode</code> 全局唯一，冲突报 <code>SKU_BARCODE_ALREADY_EXISTS</code>。</div>
+      </div>
+      <div class="rule">
+        <div class="t">每 SKU 最多一个 is_primary = true</div>
+        <div class="d">数据库 Partial Unique Index 兜底（<code>WHERE is_primary</code>），切换主条码在<b>事务内先降级旧主条码</b>，不只靠前端。</div>
+      </div>
+      <table style="margin-top:6px">
+        <tr><th>类型</th><th>说明</th></tr>
+        <tr><td><code>EAN / GTIN</code></td><td>69 码归入此语义，不建 CN_69_CODE</td></tr>
+        <tr><td><code>MANUFACTURER</code></td><td>厂商条码</td></tr>
+        <tr><td><code>INTERNAL</code></td><td>系统生成 WCSKU%08d</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2><span class="badge">规则</span> ③ 店仓绑定双校验（Service 层）</h2>
+      <pre class="tree">创建 Binding(store, warehouse, mode)
+  ① 平台一致    mode 前缀平台 == store 平台
+     <span style="color:#f87171">WB 店铺 + OZON_FBO → 拒绝</span>
+  ② 仓库类型匹配
+     FBO/FBY/FBW  → 仅 PLATFORM 仓
+     FBS/RFBS/FBP → SELF / THIRD_PARTY 仓
+     <span style="color:#f87171">OZON_FBO + SELF 仓 → 拒绝</span>
+  ③ 三元组去重  store+warehouse+mode 已存在 → 拒绝</pre>
+      <div class="d" style="margin-top:8px;font-size:12.5px">
+        履约语义只存在于 Binding / 常量层，<b>不污染 Inventory Core</b>；
+        一个仓库可被多店共享（深圳仓实测绑 3 店），<code>warehouse.store_id</code> 被禁止。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><span class="badge">规则</span> ④ Excel 导入：先校验后落库</h2>
+      <div class="flow">
+        <div class="step">上传 xlsx</div><div class="arrow">→</div>
+        <div class="step">存 MinIO</div><div class="arrow">→</div>
+        <div class="step">同步解析+校验</div><div class="arrow">→</div>
+        <div class="step">行级错误报告</div><div class="arrow">→</div>
+        <div class="step">人工确认</div><div class="arrow">→</div>
+        <div class="step">BullMQ 导入</div>
+      </div>
+      <ul style="font-size:13px;margin-top:12px;padding-left:18px">
+        <li>错误精确到 <b>行 / 字段 / 错误码</b>（如 Row 18 · internal_sku_code · SKU_NOT_FOUND），禁止只报 "Import failed"</li>
+        <li>唯一键重复（sku_code / 条码 / 仓库编码）→ <span class="no">Reject 并报告</span>，<b>绝不静默覆盖</b></li>
+        <li>单行失败不阻塞整批（worker 逐行隔离），5 类固定模板：SKU / 条码 / 仓库 / 库位 / Listing映射</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 编码与状态 -->
+  <div class="card" style="margin-top:20px">
+    <h2><span class="badge">约定</span> 业务编码与状态模型</h2>
+    <div class="grid cols-2">
+      <table>
+        <tr><th>对象</th><th>自动编码</th><th>可改码</th></tr>
+        <tr><td>Product</td><td><code>PRD000001</code></td><td class="ok">可（UUID 永不变）</td></tr>
+        <tr><td>SKU</td><td><code>SKU000001</code></td><td class="ok">可（UUID 永不变）</td></tr>
+        <tr><td>内部条码</td><td><code>WCSKU00000001</code></td><td>—</td></tr>
+        <tr><td>库位条码</td><td><code>BIN-SZ01-A01-01</code></td><td class="ok">可</td></tr>
+      </table>
+      <table>
+        <tr><th>实体</th><th>状态流转</th><th>硬删除</th></tr>
+        <tr><td>Product / SKU</td><td>DRAFT → ACTIVE ⇄ INACTIVE</td><td class="no">禁止</td></tr>
+        <tr><td>Store / Warehouse / Binding</td><td>ACTIVE ⇄ INACTIVE</td><td class="no">禁止</td></tr>
+        <tr><td>条码 / 图片（无引用时）</td><td>—</td><td class="ok">允许</td></tr>
+      </table>
+    </div>
+    <div style="font-size:12.5px;color:var(--muted);margin-top:10px">
+      SKU 特殊规则：<code>volume_cm3</code> 只由后端按 长×宽×高 计算（长宽高必须全有或全无）；
+      <code>moving_average_cost</code> 为预留字段恒 NULL；<code>serial_tracking</code> 仅是配置。
+      主数据规则文档：<code>docs/business-rules/master-data.md</code>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  const mermaidScript = document.createElement("script");
+  mermaidScript.src = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+  mermaidScript.type = "module";
+  mermaidScript.onload = () => {
+    window.mermaid.initialize({ startOnLoad: true, theme: "neutral", er: { useMaxWidth: true } });
+  };
+  document.body.appendChild(mermaidScript);
+</script>
+</body>
+</html>
