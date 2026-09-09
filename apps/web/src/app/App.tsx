@@ -23,6 +23,7 @@ import { PackageWorkPage } from '../pages/shipments/PackageWorkPage';
 import { InterceptionsPage } from '../pages/interceptions/InterceptionsPage';
 import { InterceptionDetailPage } from '../pages/interceptions/InterceptionDetailPage';
 import { NotificationsPage } from '../pages/notifications/NotificationsPage';
+import { SyncCenterPage } from '../pages/sync/SyncCenterPage';
 
 export function App() {
   return (
@@ -51,6 +52,7 @@ export function App() {
         <Route path="/interceptions" element={<InterceptionsPage />} />
         <Route path="/interceptions/:id" element={<InterceptionDetailPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
+        <Route path="/sync" element={<SyncCenterPage />} />
       </Route>
     </Routes>
   );

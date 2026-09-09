@@ -19,9 +19,10 @@ interface ListingRow {
 
 interface ListingSkuRow {
   id: string;
-  skuId: string;
-  skuCode: string;
-  skuName: string;
+  skuId: string | null;
+  skuCode: string | null;
+  skuName: string | null;
+  mappingStatus: string;
   platformSkuId: string | null;
   sellerSku: string | null;
   offerId: string | null;
@@ -38,7 +39,25 @@ export function ListingsPage() {
   const [keyword, setKeyword] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [mapTarget, setMapTarget] = useState<ListingSkuRow | null>(null);
   const [form] = Form.useForm();
+  const [mapForm] = Form.useForm();
+
+  const mapMutation = useMutation({
+    mutationFn: (skuId: string) =>
+      apiPost(
+        '/api/v1/listings/{listingId}/skus/{id}/map',
+        { skuId },
+        { listingId: detailId ?? '', id: mapTarget?.id ?? '' },
+      ),
+    onSuccess: () => {
+      void message.success('映射完成（后续同步不会覆盖）');
+      setMapTarget(null);
+      void queryClient.invalidateQueries({ queryKey: ['listing-detail'] });
+      void queryClient.invalidateQueries({ queryKey: ['listings'] });
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
 
   const list = useApiQuery<{ data: ListingRow[]; meta: { total: number } }>(
     '/api/v1/listings',
@@ -319,14 +338,76 @@ export function ListingsPage() {
           dataSource={detail.data?.skus ?? []}
           pagination={false}
           columns={[
-            { title: '内部SKU', dataIndex: 'skuCode' },
-            { title: '名称', dataIndex: 'skuName' },
+            {
+              title: '映射状态',
+              dataIndex: 'mappingStatus',
+              width: 90,
+              render: (value: string) =>
+                value === 'MAPPED' ? (
+                  <Tag color="green">MAPPED</Tag>
+                ) : (
+                  <Tag color="orange">UNMAPPED</Tag>
+                ),
+            },
+            {
+              title: '内部SKU',
+              dataIndex: 'skuCode',
+              render: (value: string | null) => value ?? <Tag color="orange">未映射</Tag>,
+            },
+            { title: '名称', dataIndex: 'skuName', render: (value: string | null) => value ?? '-' },
             { title: 'Platform SKU', dataIndex: 'platformSkuId' },
             { title: 'Seller SKU', dataIndex: 'sellerSku' },
             { title: 'Offer ID', dataIndex: 'offerId' },
-            { title: '状态', dataIndex: 'status' },
+            {
+              title: '操作',
+              width: 110,
+              render: (_: unknown, row: ListingSkuRow) =>
+                row.mappingStatus === 'UNMAPPED' ? (
+                  <Button
+                    size="small"
+                    type="primary"
+                    ghost
+                    onClick={() => {
+                      setMapTarget(row);
+                      mapForm.resetFields();
+                    }}
+                  >
+                    人工映射
+                  </Button>
+                ) : null,
+            },
           ]}
         />
+
+        <Modal
+          title={`人工映射：${mapTarget?.offerId ?? mapTarget?.platformSkuId ?? ''} → Internal SKU`}
+          open={mapTarget !== null}
+          onCancel={() => setMapTarget(null)}
+          onOk={() =>
+            void mapForm.validateFields().then((values) => mapMutation.mutate(values.skuId))
+          }
+          confirmLoading={mapMutation.isPending}
+        >
+          <p style={{ color: '#888' }}>
+            同步而来的平台SKU事实，人工确认后绑定内部SKU；后续平台同步不会覆盖该映射。
+          </p>
+          <Form form={mapForm} layout="vertical">
+            <Form.Item
+              name="skuId"
+              label="内部SKU"
+              rules={[{ required: true, message: '请选择内部SKU' }]}
+            >
+              <Select
+                showSearch
+                optionFilterProp="label"
+                options={(skus.data?.data ?? []).map((sku) => ({
+                  value: sku.id,
+                  label: `${sku.skuCode} ${sku.nameZh}`,
+                }))}
+              />
+            </Form.Item>
+          </Form>
+        </Modal>
       </Drawer>
     </Space>
   );

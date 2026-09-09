@@ -1,5 +1,5 @@
 import { Body, Controller, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Public } from '../../auth/decorators/public.decorator';
 import { WebhookIngestService } from '../services/webhook.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
@@ -26,6 +26,14 @@ export class OzonWebhookController {
   @Post()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'OZON push notification 入口（保存 raw event 后立即返回）' })
+  @ApiOkResponse({
+    description: 'OZON 约定的确认格式（非 WCIES envelope）',
+    schema: {
+      type: 'object',
+      required: ['result'],
+      properties: { result: { type: 'boolean' } },
+    },
+  })
   async receive(
     @Param('storeCode') storeCode: string,
     @Body() payload: unknown,

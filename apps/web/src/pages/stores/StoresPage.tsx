@@ -4,6 +4,7 @@ import {
   Button,
   Descriptions,
   Drawer,
+  Empty,
   Form,
   Input,
   Modal,
@@ -34,7 +35,26 @@ interface CredentialRow {
   credentialType: string;
   status: string;
   configured: boolean;
+  lastValidatedAt: string | null;
+  lastValidationStatus: string | null;
+  lastValidationError: string | null;
   updatedAt: string;
+}
+
+interface SyncOverview {
+  storeId: string;
+  platformCode: string;
+  credential: {
+    credentialId: string | null;
+    configured: boolean;
+    lastValidatedAt: string | null;
+    lastValidationStatus: string | null;
+    lastValidationError: string | null;
+  } | null;
+  lastOrderSync: { status: string; finishedAt: string | null } | null;
+  lastListingSync: { status: string; finishedAt: string | null } | null;
+  consecutiveFailures: number;
+  activeJobId: string | null;
 }
 
 interface BindingRow {
@@ -78,6 +98,10 @@ export function StoresPage() {
     { page: 1, pageSize: 50 },
     ['store-bindings', drawerId],
   );
+  const syncOverview = useApiQuery<SyncOverview>('/api/v1/sync/stores/{storeId}/overview', {}, [
+    'store-sync-overview',
+    drawerId,
+  ]);
 
   const refreshStore = () => {
     void queryClient.invalidateQueries({ queryKey: ['stores'] });
@@ -109,6 +133,37 @@ export function StoresPage() {
       setCredentialModalOpen(false);
       credentialForm.resetFields();
       refreshStore();
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const validateMutation = useMutation({
+    mutationFn: (credentialId: string) =>
+      apiPost<{ validationStatus: string; error: string | null }>(
+        '/api/v1/stores/{storeId}/credentials/{id}/validate',
+        {},
+        { storeId: drawerId ?? '', id: credentialId },
+      ),
+    onSuccess: (result) => {
+      if (result.validationStatus === 'VALID') {
+        void message.success('连接验证通过（已连接）');
+      } else if (result.validationStatus === 'INVALID') {
+        void message.error(`认证失败：${result.error ?? ''}`);
+      } else {
+        void message.warning(`验证出错：${result.error ?? ''}`);
+      }
+      refreshStore();
+      void queryClient.invalidateQueries({ queryKey: ['store-sync-overview'] });
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: (type: 'orders' | 'listings') =>
+      apiPost('/api/v1/sync/' + type, { storeId: drawerId ?? '' }),
+    onSuccess: () => {
+      void message.success('同步任务已创建，可在「平台 / 同步中心」查看进度');
+      void queryClient.invalidateQueries({ queryKey: ['store-sync-overview'] });
     },
     onError: (error: Error) => void message.error(error.message),
   });
@@ -316,12 +371,123 @@ export function StoresPage() {
                         dataIndex: 'configured',
                         render: (v: boolean) => (v ? '是' : '否'),
                       },
+                      {
+                        title: '验证状态',
+                        dataIndex: 'lastValidationStatus',
+                        render: (value: string | null) =>
+                          value === 'VALID' ? (
+                            <Tag color="green">已连接</Tag>
+                          ) : value === 'INVALID' ? (
+                            <Tag color="red">认证失败</Tag>
+                          ) : value === 'ERROR' ? (
+                            <Tag color="orange">验证出错</Tag>
+                          ) : (
+                            <Tag>未验证</Tag>
+                          ),
+                      },
+                      {
+                        title: '验证时间',
+                        dataIndex: 'lastValidatedAt',
+                        render: (value: string | null) =>
+                          value === null ? '-' : new Date(value).toLocaleString('zh-CN'),
+                      },
+                      {
+                        title: '操作',
+                        render: (_: unknown, row: CredentialRow) => (
+                          <Button
+                            size="small"
+                            loading={validateMutation.isPending}
+                            onClick={() => validateMutation.mutate(row.id)}
+                          >
+                            验证连接
+                          </Button>
+                        ),
+                      },
                       { title: '更新时间', dataIndex: 'updatedAt' },
                     ]}
                   />
                   <p style={{ color: '#888' }}>凭证加密存储，保存后不可查看明文（•••••••）。</p>
                 </Space>
               ),
+            },
+            {
+              key: 'sync',
+              label: '同步',
+              children:
+                syncOverview.data === undefined ? (
+                  <Empty description="加载中…" />
+                ) : (
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Descriptions
+                      column={2}
+                      size="small"
+                      bordered
+                      items={[
+                        {
+                          key: 'cred',
+                          label: '凭证状态',
+                          children:
+                            syncOverview.data.credential === null
+                              ? '未配置'
+                              : syncOverview.data.credential.lastValidationStatus === 'VALID'
+                                ? '已连接'
+                                : syncOverview.data.credential.lastValidationStatus === 'INVALID'
+                                  ? '认证失败'
+                                  : syncOverview.data.credential.lastValidationStatus === 'ERROR'
+                                    ? `验证出错：${syncOverview.data.credential.lastValidationError ?? ''}`
+                                    : '未验证',
+                        },
+                        {
+                          key: 'order',
+                          label: '最后订单同步',
+                          children: syncOverview.data.lastOrderSync
+                            ? `${syncOverview.data.lastOrderSync.status} @ ${new Date(
+                                syncOverview.data.lastOrderSync.finishedAt ?? '',
+                              ).toLocaleString('zh-CN')}`
+                            : '从未同步',
+                        },
+                        {
+                          key: 'listing',
+                          label: '最后 Listing 同步',
+                          children: syncOverview.data.lastListingSync
+                            ? `${syncOverview.data.lastListingSync.status} @ ${new Date(
+                                syncOverview.data.lastListingSync.finishedAt ?? '',
+                              ).toLocaleString('zh-CN')}`
+                            : '从未同步',
+                        },
+                        {
+                          key: 'failures',
+                          label: '连续失败次数',
+                          children:
+                            syncOverview.data.consecutiveFailures > 0 ? (
+                              <Tag color="red">{syncOverview.data.consecutiveFailures}</Tag>
+                            ) : (
+                              '0'
+                            ),
+                        },
+                      ]}
+                    />
+                    <Space>
+                      <Button
+                        type="primary"
+                        loading={syncMutation.isPending}
+                        onClick={() => syncMutation.mutate('orders')}
+                      >
+                        手动同步订单
+                      </Button>
+                      <Button
+                        loading={syncMutation.isPending}
+                        onClick={() => syncMutation.mutate('listings')}
+                      >
+                        手动同步 Listing
+                      </Button>
+                    </Space>
+                    <p style={{ color: '#888' }}>
+                      自动调度需在环境变量开启并在店铺 settings.sync
+                      中按店铺启用（分阶段上线策略）。
+                    </p>
+                  </Space>
+                ),
             },
             {
               key: 'bindings',
@@ -356,9 +522,16 @@ export function StoresPage() {
       >
         <Form form={credentialForm} layout="vertical">
           <Form.Item
+            name="clientId"
+            label="Client ID"
+            rules={[{ required: true, message: '请输入 Client ID' }]}
+          >
+            <Input placeholder="OZON 后台的 Client ID" />
+          </Form.Item>
+          <Form.Item
             name="apiKey"
             label="API Key"
-            rules={[{ required: true, message: '请输入凭证' }]}
+            rules={[{ required: true, message: '请输入 API Key' }]}
           >
             <Input.Password placeholder="加密存储，不会回显" />
           </Form.Item>

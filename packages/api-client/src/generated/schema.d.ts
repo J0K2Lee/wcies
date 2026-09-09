@@ -245,6 +245,23 @@ export interface paths {
         patch: operations["StoreCredentialController_updatePayload"];
         trace?: never;
     };
+    "/api/v1/stores/{storeId}/credentials/{id}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 验证连接（安全 Read-only 调用；不返回任何密钥） */
+        post: operations["StoreCredentialController_validate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/stores/{storeId}/credentials/{id}/disable": {
         parameters: {
             query?: never;
@@ -918,6 +935,23 @@ export interface paths {
         put?: never;
         /** Add a variant mapping to an existing listing */
         post: operations["ListingController_addMapping"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/listings/{listingId}/skus/{id}/map": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 人工映射：将同步来的 UNMAPPED 平台SKU 绑定到 Internal SKU（同步不覆盖） */
+        post: operations["ListingController_mapUnmappedSku"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1847,6 +1881,125 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sync/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 手动触发订单同步（创建 SyncJob，立即返回） */
+        post: operations["SyncController_triggerOrderSync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sync/listings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 手动触发 Listing 同步（创建 SyncJob，立即返回） */
+        post: operations["SyncController_triggerListingSync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sync/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 同步任务列表（Sync Dashboard） */
+        get: operations["SyncController_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sync/jobs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 同步任务详情（含游标与错误） */
+        get: operations["SyncController_getById"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sync/stores/{storeId}/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 店铺同步概览（凭证状态/最近同步/连续失败） */
+        get: operations["SyncController_storeOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sync/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 外部原始事件列表（Webhook 审计） */
+        get: operations["SyncController_listEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/webhooks/ozon/stores/{storeCode}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** OZON push notification 入口（保存 raw event 后立即返回） */
+        post: operations["OzonWebhookController_receive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/dev/test-job": {
         parameters: {
             query?: never;
@@ -2041,6 +2194,15 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
+            lastValidatedAt: Record<string, never> | null;
+            /**
+             * @description VALID=已连接 INVALID=认证失败 NULL=未验证
+             * @enum {string|null}
+             */
+            lastValidationStatus: "VALID" | "INVALID" | "ERROR" | null;
+            /** @description 最近一次验证失败原因（已脱敏） */
+            lastValidationError: string | null;
+            /** Format: date-time */
             updatedAt: string;
         };
         UpsertCredentialRequestDto: {
@@ -2051,6 +2213,15 @@ export interface components {
             credentialType: "MAIN_API";
             /** @description Plain credential payload (e.g. apiKey/clientId); encrypted at rest */
             payload: Record<string, never>;
+        };
+        CredentialValidateResultDto: {
+            credentialId: string;
+            storeId: string;
+            /** @enum {string} */
+            validationStatus: "VALID" | "INVALID" | "ERROR";
+            error: string | null;
+            /** Format: date-time */
+            validatedAt: string;
         };
         BrandResponseDto: {
             /** Format: uuid */
@@ -2684,6 +2855,11 @@ export interface components {
         ListingResponseDto: {
             /** Format: uuid */
             id: string;
+            /**
+             * Format: date-time
+             * @description 最近一次被 Listing Sync 观察到的时间
+             */
+            lastSeenAt: string | null;
             /** Format: uuid */
             platformId: string;
             /** @example OZON */
@@ -2712,12 +2888,26 @@ export interface components {
             id: string;
             /** Format: uuid */
             listingId: string;
-            /** Format: uuid */
-            skuId: string;
-            /** @example SKU000001 */
-            skuCode: string;
-            /** @example VK87 MAX V2 黑色 */
-            skuName: string;
+            /**
+             * Format: uuid
+             * @description UNMAPPED 平台SKU为 null
+             */
+            skuId: Record<string, never> | null;
+            /**
+             * @description UNMAPPED 行为 null
+             * @example SKU000001
+             */
+            skuCode: Record<string, never> | null;
+            /**
+             * @description UNMAPPED 行为 null
+             * @example VK87 MAX V2 黑色
+             */
+            skuName: Record<string, never> | null;
+            /**
+             * @description 人工映射状态（Sprint 5）
+             * @enum {string}
+             */
+            mappingStatus: "UNMAPPED" | "MAPPED";
             platformSkuId: Record<string, never> | null;
             sellerSku: Record<string, never> | null;
             offerId: Record<string, never> | null;
@@ -2731,6 +2921,11 @@ export interface components {
         ListingDetailDto: {
             /** Format: uuid */
             id: string;
+            /**
+             * Format: date-time
+             * @description 最近一次被 Listing Sync 观察到的时间
+             */
+            lastSeenAt: string | null;
             /** Format: uuid */
             platformId: string;
             /** @example OZON */
@@ -2801,12 +2996,26 @@ export interface components {
             id: string;
             /** Format: uuid */
             listingId: string;
-            /** Format: uuid */
-            skuId: string;
-            /** @example SKU000001 */
-            skuCode: string;
-            /** @example VK87 MAX V2 黑色 */
-            skuName: string;
+            /**
+             * Format: uuid
+             * @description UNMAPPED 平台SKU为 null
+             */
+            skuId: Record<string, never> | null;
+            /**
+             * @description UNMAPPED 行为 null
+             * @example SKU000001
+             */
+            skuCode: Record<string, never> | null;
+            /**
+             * @description UNMAPPED 行为 null
+             * @example VK87 MAX V2 黑色
+             */
+            skuName: Record<string, never> | null;
+            /**
+             * @description 人工映射状态（Sprint 5）
+             * @enum {string}
+             */
+            mappingStatus: "UNMAPPED" | "MAPPED";
             platformSkuId: Record<string, never> | null;
             sellerSku: Record<string, never> | null;
             offerId: Record<string, never> | null;
@@ -2837,6 +3046,13 @@ export interface components {
             platformSkuId?: string;
             sellerSku?: string;
             offerId?: string;
+        };
+        MapListingSkuRequestDto: {
+            /**
+             * Format: uuid
+             * @description 目标 Internal SKU
+             */
+            skuId: string;
         };
         UpdateListingSkuRequestDto: {
             platformSkuId?: Record<string, never> | null;
@@ -3228,6 +3444,8 @@ export interface components {
             orderedAt: string;
             /** Format: date-time */
             createdAt: string;
+            /** @enum {string|null} */
+            syncSource: "MANUAL" | "API" | "POLLING" | "WEBHOOK" | null;
             itemsCount: number;
             reservedCount: number;
             backorderedCount: number;
@@ -3326,6 +3544,8 @@ export interface components {
             orderedAt: string;
             rawData: Record<string, never> | null;
             remark: string | null;
+            /** @enum {string|null} */
+            syncSource: "MANUAL" | "API" | "POLLING" | "WEBHOOK" | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -3380,6 +3600,11 @@ export interface components {
             /** @description 平台原始报文（保留事实，task §14） */
             rawData?: Record<string, never>;
             remark?: string;
+            /**
+             * @description 订单进入系统的渠道（Sprint 5 §58；默认 API）
+             * @enum {string}
+             */
+            syncSource?: "MANUAL" | "API" | "POLLING" | "WEBHOOK";
         };
         OrderCancelResultDto: {
             orderId: string;
@@ -3903,6 +4128,80 @@ export interface components {
             /** @description 封箱时录入重量/尺寸 */
             dimensions?: components["schemas"]["PackageDimensionsDto"];
         };
+        SyncJobDto: {
+            id: string;
+            storeId: string;
+            /** @example OZON-A */
+            storeCode: string;
+            /** @example OZON A店 */
+            storeName: string;
+            /** @example OZON */
+            platformCode: string;
+            /** @enum {string} */
+            syncType: "LISTING_SYNC" | "ORDER_SYNC";
+            /** @enum {string} */
+            status: "PENDING" | "RUNNING" | "SUCCESS" | "PARTIAL" | "FAILED";
+            /** @enum {string} */
+            triggerType: "MANUAL" | "SCHEDULED" | "WEBHOOK" | "RETRY";
+            /** Format: date-time */
+            startedAt: string | null;
+            /** Format: date-time */
+            finishedAt: string | null;
+            successCount: number;
+            failedCount: number;
+            skippedCount: number;
+            retryCount: number;
+            /** @description 适配器游标（Opaque） */
+            cursorBefore: Record<string, never> | null;
+            /** @description 适配器游标（Opaque） */
+            cursorAfter: Record<string, never> | null;
+            errorCode: string | null;
+            errorMessage: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * @description 运行时长（毫秒），未完成为 null
+             * @example 4200
+             */
+            durationMs: Record<string, never>;
+        };
+        TriggerSyncRequestDto: {
+            /** Format: uuid */
+            storeId: string;
+        };
+        StoreSyncOverviewDto: {
+            storeId: string;
+            /** @example OZON-A */
+            storeCode: string;
+            /** @example OZON */
+            platformCode: string;
+            /** @description 凭证验证元数据（不含密钥） */
+            credential: Record<string, never> | null;
+            lastOrderSync: Record<string, never> | null;
+            lastListingSync: Record<string, never> | null;
+            /** @description 连续失败次数（成功即清零） */
+            consecutiveFailures: number;
+            activeJobId: string | null;
+        };
+        RawEventDto: {
+            id: string;
+            /** @example OZON */
+            platform: string;
+            storeId: string;
+            /** @example NEW_POSTING */
+            eventType: string;
+            externalEventId: string | null;
+            payload: Record<string, never>;
+            payloadHash: string;
+            /** @enum {string} */
+            status: "PENDING" | "PROCESSING" | "PROCESSED" | "FAILED" | "SKIPPED" | "REJECTED";
+            /** Format: date-time */
+            receivedAt: string;
+            /** Format: date-time */
+            processedAt: string | null;
+            errorCode: string | null;
+            errorMessage: string | null;
+        };
         TestJobResultDto: {
             /** @example 42 */
             jobId: string;
@@ -4363,6 +4662,32 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["CredentialResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    StoreCredentialController_validate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                storeId: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["CredentialValidateResultDto"];
                     };
                 };
             };
@@ -5882,6 +6207,36 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["AddListingSkuRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ListingSkuResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    ListingController_mapUnmappedSku: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listingId: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MapListingSkuRequestDto"];
             };
         };
         responses: {
@@ -7552,6 +7907,197 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["SealPackageResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    SyncController_triggerOrderSync: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TriggerSyncRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SyncJobDto"];
+                    };
+                };
+            };
+        };
+    };
+    SyncController_triggerListingSync: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TriggerSyncRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SyncJobDto"];
+                    };
+                };
+            };
+        };
+    };
+    SyncController_list: {
+        parameters: {
+            query?: {
+                storeId?: string;
+                syncType?: "LISTING_SYNC" | "ORDER_SYNC";
+                status?: "PENDING" | "RUNNING" | "SUCCESS" | "PARTIAL" | "FAILED";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SyncJobDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    SyncController_getById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SyncJobDto"];
+                    };
+                };
+            };
+        };
+    };
+    SyncController_storeOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                storeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["StoreSyncOverviewDto"];
+                    };
+                };
+            };
+        };
+    };
+    SyncController_listEvents: {
+        parameters: {
+            query?: {
+                storeId?: string;
+                status?: "PENDING" | "PROCESSING" | "PROCESSED" | "FAILED" | "SKIPPED" | "REJECTED";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["RawEventDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    OzonWebhookController_receive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                storeCode: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OZON 约定的确认格式（非 WCIES envelope） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: boolean;
                     };
                 };
             };

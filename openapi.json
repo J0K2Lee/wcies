@@ -687,6 +687,53 @@
         "tags": ["store-credentials"]
       }
     },
+    "/api/v1/stores/{storeId}/credentials/{id}/validate": {
+      "post": {
+        "operationId": "StoreCredentialController_validate",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CredentialValidateResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "验证连接（安全 Read-only 调用；不返回任何密钥）",
+        "tags": ["store-credentials"]
+      }
+    },
     "/api/v1/stores/{storeId}/credentials/{id}/disable": {
       "post": {
         "operationId": "StoreCredentialController_disable",
@@ -3463,6 +3510,63 @@
           }
         },
         "summary": "Add a variant mapping to an existing listing",
+        "tags": ["listings"]
+      }
+    },
+    "/api/v1/listings/{listingId}/skus/{id}/map": {
+      "post": {
+        "operationId": "ListingController_mapUnmappedSku",
+        "parameters": [
+          {
+            "name": "listingId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MapListingSkuRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ListingSkuResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "人工映射：将同步来的 UNMAPPED 平台SKU 绑定到 Internal SKU（同步不覆盖）",
         "tags": ["listings"]
       }
     },
@@ -6540,6 +6644,346 @@
         "tags": ["packages"]
       }
     },
+    "/api/v1/sync/orders": {
+      "post": {
+        "operationId": "SyncController_triggerOrderSync",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TriggerSyncRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SyncJobDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "手动触发订单同步（创建 SyncJob，立即返回）",
+        "tags": ["sync"]
+      }
+    },
+    "/api/v1/sync/listings": {
+      "post": {
+        "operationId": "SyncController_triggerListingSync",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TriggerSyncRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SyncJobDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "手动触发 Listing 同步（创建 SyncJob，立即返回）",
+        "tags": ["sync"]
+      }
+    },
+    "/api/v1/sync/jobs": {
+      "get": {
+        "operationId": "SyncController_list",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "syncType",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["LISTING_SYNC", "ORDER_SYNC"]
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["PENDING", "RUNNING", "SUCCESS", "PARTIAL", "FAILED"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data", "meta"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SyncJobDto"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": ["page", "pageSize", "total"],
+                      "properties": {
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "pageSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "同步任务列表（Sync Dashboard）",
+        "tags": ["sync"]
+      }
+    },
+    "/api/v1/sync/jobs/{id}": {
+      "get": {
+        "operationId": "SyncController_getById",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SyncJobDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "同步任务详情（含游标与错误）",
+        "tags": ["sync"]
+      }
+    },
+    "/api/v1/sync/stores/{storeId}/overview": {
+      "get": {
+        "operationId": "SyncController_storeOverview",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/StoreSyncOverviewDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "店铺同步概览（凭证状态/最近同步/连续失败）",
+        "tags": ["sync"]
+      }
+    },
+    "/api/v1/sync/events": {
+      "get": {
+        "operationId": "SyncController_listEvents",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["PENDING", "PROCESSING", "PROCESSED", "FAILED", "SKIPPED", "REJECTED"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data", "meta"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RawEventDto"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": ["page", "pageSize", "total"],
+                      "properties": {
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "pageSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "外部原始事件列表（Webhook 审计）",
+        "tags": ["sync"]
+      }
+    },
+    "/api/v1/webhooks/ozon/stores/{storeCode}": {
+      "post": {
+        "operationId": "OzonWebhookController_receive",
+        "parameters": [
+          {
+            "name": "storeCode",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OZON 约定的确认格式（非 WCIES envelope）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["result"],
+                  "properties": {
+                    "result": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "OZON push notification 入口（保存 raw event 后立即返回）",
+        "tags": ["webhooks"]
+      }
+    },
     "/api/v1/dev/test-job": {
       "post": {
         "operationId": "DevController_createTestJob",
@@ -6982,6 +7426,22 @@
             "format": "date-time",
             "type": "string"
           },
+          "lastValidatedAt": {
+            "type": "object",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "lastValidationStatus": {
+            "type": "string",
+            "nullable": true,
+            "enum": ["VALID", "INVALID", "ERROR"],
+            "description": "VALID=已连接 INVALID=认证失败 NULL=未验证"
+          },
+          "lastValidationError": {
+            "type": "string",
+            "nullable": true,
+            "description": "最近一次验证失败原因（已脱敏）"
+          },
           "updatedAt": {
             "format": "date-time",
             "type": "string"
@@ -6994,6 +7454,9 @@
           "status",
           "configured",
           "createdAt",
+          "lastValidatedAt",
+          "lastValidationStatus",
+          "lastValidationError",
           "updatedAt"
         ]
       },
@@ -7011,6 +7474,30 @@
           }
         },
         "required": ["credentialType", "payload"]
+      },
+      "CredentialValidateResultDto": {
+        "type": "object",
+        "properties": {
+          "credentialId": {
+            "type": "string"
+          },
+          "storeId": {
+            "type": "string"
+          },
+          "validationStatus": {
+            "type": "string",
+            "enum": ["VALID", "INVALID", "ERROR"]
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
+          },
+          "validatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": ["credentialId", "storeId", "validationStatus", "error", "validatedAt"]
       },
       "BrandResponseDto": {
         "type": "object",
@@ -8679,6 +9166,12 @@
             "type": "string",
             "format": "uuid"
           },
+          "lastSeenAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "最近一次被 Listing Sync 观察到的时间"
+          },
           "platformId": {
             "type": "string",
             "format": "uuid"
@@ -8730,6 +9223,7 @@
         },
         "required": [
           "id",
+          "lastSeenAt",
           "platformId",
           "platformCode",
           "storeId",
@@ -8756,16 +9250,27 @@
             "format": "uuid"
           },
           "skuId": {
-            "type": "string",
-            "format": "uuid"
+            "type": "object",
+            "nullable": true,
+            "format": "uuid",
+            "description": "UNMAPPED 平台SKU为 null"
           },
           "skuCode": {
-            "type": "string",
-            "example": "SKU000001"
+            "type": "object",
+            "nullable": true,
+            "example": "SKU000001",
+            "description": "UNMAPPED 行为 null"
           },
           "skuName": {
+            "type": "object",
+            "nullable": true,
+            "example": "VK87 MAX V2 黑色",
+            "description": "UNMAPPED 行为 null"
+          },
+          "mappingStatus": {
             "type": "string",
-            "example": "VK87 MAX V2 黑色"
+            "enum": ["UNMAPPED", "MAPPED"],
+            "description": "人工映射状态（Sprint 5）"
           },
           "platformSkuId": {
             "type": "object",
@@ -8798,6 +9303,7 @@
           "skuId",
           "skuCode",
           "skuName",
+          "mappingStatus",
           "platformSkuId",
           "sellerSku",
           "offerId",
@@ -8812,6 +9318,12 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "lastSeenAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "最近一次被 Listing Sync 观察到的时间"
           },
           "platformId": {
             "type": "string",
@@ -8870,6 +9382,7 @@
         },
         "required": [
           "id",
+          "lastSeenAt",
           "platformId",
           "platformCode",
           "storeId",
@@ -9006,16 +9519,27 @@
             "format": "uuid"
           },
           "skuId": {
-            "type": "string",
-            "format": "uuid"
+            "type": "object",
+            "nullable": true,
+            "format": "uuid",
+            "description": "UNMAPPED 平台SKU为 null"
           },
           "skuCode": {
-            "type": "string",
-            "example": "SKU000001"
+            "type": "object",
+            "nullable": true,
+            "example": "SKU000001",
+            "description": "UNMAPPED 行为 null"
           },
           "skuName": {
+            "type": "object",
+            "nullable": true,
+            "example": "VK87 MAX V2 黑色",
+            "description": "UNMAPPED 行为 null"
+          },
+          "mappingStatus": {
             "type": "string",
-            "example": "VK87 MAX V2 黑色"
+            "enum": ["UNMAPPED", "MAPPED"],
+            "description": "人工映射状态（Sprint 5）"
           },
           "platformSkuId": {
             "type": "object",
@@ -9069,6 +9593,7 @@
           "skuId",
           "skuCode",
           "skuName",
+          "mappingStatus",
           "platformSkuId",
           "sellerSku",
           "offerId",
@@ -9116,6 +9641,17 @@
           "offerId": {
             "type": "string",
             "maxLength": 255
+          }
+        },
+        "required": ["skuId"]
+      },
+      "MapListingSkuRequestDto": {
+        "type": "object",
+        "properties": {
+          "skuId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "目标 Internal SKU"
           }
         },
         "required": ["skuId"]
@@ -10270,6 +10806,11 @@
             "format": "date-time",
             "type": "string"
           },
+          "syncSource": {
+            "type": "string",
+            "nullable": true,
+            "enum": ["MANUAL", "API", "POLLING", "WEBHOOK"]
+          },
           "itemsCount": {
             "type": "number"
           },
@@ -10302,6 +10843,7 @@
           "currency",
           "orderedAt",
           "createdAt",
+          "syncSource",
           "itemsCount",
           "reservedCount",
           "backorderedCount",
@@ -10622,6 +11164,11 @@
             "type": "string",
             "nullable": true
           },
+          "syncSource": {
+            "type": "string",
+            "nullable": true,
+            "enum": ["MANUAL", "API", "POLLING", "WEBHOOK"]
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -10669,6 +11216,7 @@
           "orderedAt",
           "rawData",
           "remark",
+          "syncSource",
           "createdAt",
           "updatedAt",
           "items",
@@ -10815,6 +11363,11 @@
           },
           "remark": {
             "type": "string"
+          },
+          "syncSource": {
+            "type": "string",
+            "enum": ["MANUAL", "API", "POLLING", "WEBHOOK"],
+            "description": "订单进入系统的渠道（Sprint 5 §58；默认 API）"
           }
         },
         "required": ["storeId", "platformOrderId", "orderedAt", "items"]
@@ -12361,6 +12914,233 @@
             ]
           }
         }
+      },
+      "SyncJobDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "storeId": {
+            "type": "string"
+          },
+          "storeCode": {
+            "type": "string",
+            "example": "OZON-A"
+          },
+          "storeName": {
+            "type": "string",
+            "example": "OZON A店"
+          },
+          "platformCode": {
+            "type": "string",
+            "example": "OZON"
+          },
+          "syncType": {
+            "type": "string",
+            "enum": ["LISTING_SYNC", "ORDER_SYNC"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["PENDING", "RUNNING", "SUCCESS", "PARTIAL", "FAILED"]
+          },
+          "triggerType": {
+            "type": "string",
+            "enum": ["MANUAL", "SCHEDULED", "WEBHOOK", "RETRY"]
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "finishedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "successCount": {
+            "type": "number"
+          },
+          "failedCount": {
+            "type": "number"
+          },
+          "skippedCount": {
+            "type": "number"
+          },
+          "retryCount": {
+            "type": "number"
+          },
+          "cursorBefore": {
+            "type": "object",
+            "nullable": true,
+            "description": "适配器游标（Opaque）"
+          },
+          "cursorAfter": {
+            "type": "object",
+            "nullable": true,
+            "description": "适配器游标（Opaque）"
+          },
+          "errorCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "errorMessage": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "object",
+            "example": 4200,
+            "description": "运行时长（毫秒），未完成为 null"
+          }
+        },
+        "required": [
+          "id",
+          "storeId",
+          "storeCode",
+          "storeName",
+          "platformCode",
+          "syncType",
+          "status",
+          "triggerType",
+          "startedAt",
+          "finishedAt",
+          "successCount",
+          "failedCount",
+          "skippedCount",
+          "retryCount",
+          "cursorBefore",
+          "cursorAfter",
+          "errorCode",
+          "errorMessage",
+          "createdAt",
+          "durationMs"
+        ]
+      },
+      "TriggerSyncRequestDto": {
+        "type": "object",
+        "properties": {
+          "storeId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": ["storeId"]
+      },
+      "StoreSyncOverviewDto": {
+        "type": "object",
+        "properties": {
+          "storeId": {
+            "type": "string"
+          },
+          "storeCode": {
+            "type": "string",
+            "example": "OZON-A"
+          },
+          "platformCode": {
+            "type": "string",
+            "example": "OZON"
+          },
+          "credential": {
+            "type": "object",
+            "nullable": true,
+            "description": "凭证验证元数据（不含密钥）"
+          },
+          "lastOrderSync": {
+            "type": "object",
+            "nullable": true
+          },
+          "lastListingSync": {
+            "type": "object",
+            "nullable": true
+          },
+          "consecutiveFailures": {
+            "type": "number",
+            "description": "连续失败次数（成功即清零）"
+          },
+          "activeJobId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "storeId",
+          "storeCode",
+          "platformCode",
+          "credential",
+          "lastOrderSync",
+          "lastListingSync",
+          "consecutiveFailures",
+          "activeJobId"
+        ]
+      },
+      "RawEventDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string",
+            "example": "OZON"
+          },
+          "storeId": {
+            "type": "string"
+          },
+          "eventType": {
+            "type": "string",
+            "example": "NEW_POSTING"
+          },
+          "externalEventId": {
+            "type": "string",
+            "nullable": true
+          },
+          "payload": {
+            "type": "object"
+          },
+          "payloadHash": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["PENDING", "PROCESSING", "PROCESSED", "FAILED", "SKIPPED", "REJECTED"]
+          },
+          "receivedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "processedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "errorCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "errorMessage": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "platform",
+          "storeId",
+          "eventType",
+          "externalEventId",
+          "payload",
+          "payloadHash",
+          "status",
+          "receivedAt",
+          "processedAt",
+          "errorCode",
+          "errorMessage"
+        ]
       },
       "TestJobResultDto": {
         "type": "object",

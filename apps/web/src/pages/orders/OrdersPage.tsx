@@ -81,6 +81,7 @@ interface OrderDetail {
   fulfillmentMode: string | null;
   currency: string | null;
   orderedAt: string;
+  syncSource: string | null;
   rawData: Record<string, unknown> | null;
   items: OrderItem[];
   history: Array<{
@@ -536,6 +537,21 @@ export function OrdersPage() {
               <Descriptions.Item label="下单时间">
                 {new Date(detail.orderedAt).toLocaleString('zh-CN')}
               </Descriptions.Item>
+              <Descriptions.Item label="同步来源">
+                {detail.syncSource === null ? (
+                  '-'
+                ) : (
+                  <Tag>
+                    {detail.syncSource === 'POLLING'
+                      ? '定时轮询'
+                      : detail.syncSource === 'WEBHOOK'
+                        ? 'Webhook'
+                        : detail.syncSource === 'API'
+                          ? 'API 摄入'
+                          : detail.syncSource}
+                  </Tag>
+                )}
+              </Descriptions.Item>
               <Descriptions.Item label="操作" span={3}>
                 <Button
                   type="primary"
@@ -565,6 +581,27 @@ export function OrdersPage() {
                       pagination={false}
                     />
                   ),
+                },
+                {
+                  key: 'platform-raw',
+                  label: '平台原始数据',
+                  children:
+                    detail.rawData === null ? (
+                      <Empty description="无平台原始数据" />
+                    ) : (
+                      <pre
+                        style={{
+                          maxHeight: 420,
+                          overflow: 'auto',
+                          fontSize: 12,
+                          background: '#fafafa',
+                          padding: 12,
+                          borderRadius: 6,
+                        }}
+                      >
+                        {JSON.stringify(detail.rawData, null, 2)}
+                      </pre>
+                    ),
                 },
                 {
                   key: 'history',

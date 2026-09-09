@@ -52,6 +52,7 @@ const MENU_ITEMS = [
     children: [
       { key: '/stores', label: '店铺管理' },
       { key: '/store-bindings', label: '店仓绑定' },
+      { key: '/sync', label: '同步中心' },
     ],
   },
   {
