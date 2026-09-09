@@ -64,8 +64,15 @@
 1. Listing 唯一键：`store_id + platform_product_id`。
 2. 必须允许：一个 Internal SKU → 多平台 → 多店铺 → 多 Listing；同一 Store 同一 SKU → 多个商品链接。禁止 `UNIQUE(sku_id, store_id)`。
 3. 一个 Listing 可含多个变体（PlatformListingSku）映射不同 Internal SKU。
-4. `platform_sku_id / seller_sku / offer_id` 只建普通索引；唯一约束待接入真实平台 API 后按平台语义收紧。
-5. 所有平台 SKU 反查必须 Store Scoped（§26）。
+
+Sprint 5 起，平台同步会产生**未映射**的平台 SKU 事实：
+
+4. `platform_listing_skus.sku_id` 可空；`mapping_status ∈ {UNMAPPED, MAPPED}`。
+5. 平台同步 upsert 规则：按 `(listing_id, platform_sku_id)` 查找——存在则仅刷新平台事实（offer_id / seller_sku / raw_data），**绝不触碰 sku_id 与 mapping_status**（人工映射永不被同步覆盖）；不存在则插入 `sku_id = NULL, mapping_status = 'UNMAPPED'` 的行。
+6. Resolver 只解析 `sku_id IS NOT NULL AND mapping_status = 'MAPPED'` 的 ACTIVE 行；UNMAPPED 行参与订单解析时按既有规则产生 `ORDER_SKU_MAPPING_FAILED`。
+7. 人工映射入口：`POST /listings/:listingId/skus/:mappingId/map {skuId}`（UNMAPPED → MAPPED，记 Operation Log）。
+8. 严禁自动猜测映射（名字相似/条码一致都不是依据）。
+9. `platform_listings.last_seen_at` 记录最近一次被 Listing Sync 观察到的时间；同步未见到某 listing **不做**任何自动下架/删除。
 
 ## 9. Listing Resolver（订单安全边界）
 

@@ -122,7 +122,8 @@ describe('mapPostingToOrder', () => {
       products: [{ ...POSTING.products[0], quantity: 0 }] as OzonPostingProduct[],
     };
     expect(() => mapPostingToOrder(badQty)).toThrow(/invalid quantity/);
-    const { sku: _omittedSku, ...productWithoutSku } = POSTING.products[0];
+    const first = POSTING.products[0] as OzonPostingProduct;
+    const { sku: _omittedSku, ...productWithoutSku } = first;
     const badSku: OzonFbsPosting = {
       ...POSTING,
       products: [productWithoutSku as OzonPostingProduct],
@@ -136,7 +137,7 @@ describe('mapWebhookPayload', () => {
     const [event] = mapWebhookPayload({
       message_type: 'TYPE_NEW_POSTING',
       posting_number: '00077059-0001-1',
-      seller_id: 3636793,
+      seller_id: 111222333,
       warehouse_id: 2222,
     });
     expect(event?.eventType).toBe('NEW_POSTING');
@@ -162,8 +163,8 @@ describe('mapWebhookPayload', () => {
   });
 
   it('exposes seller_id for webhook identity matching', () => {
-    expect(webhookSellerId({ seller_id: 3636793 })).toBe('3636793');
-    expect(webhookSellerId({ seller_id: '3636793' })).toBe('3636793');
+    expect(webhookSellerId({ seller_id: 111222333 })).toBe('111222333');
+    expect(webhookSellerId({ seller_id: '111222333' })).toBe('111222333');
     expect(webhookSellerId({})).toBeNull();
   });
 });

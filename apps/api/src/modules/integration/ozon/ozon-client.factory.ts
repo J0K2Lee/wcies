@@ -34,10 +34,17 @@ export class OzonClientFactory {
   }
 
   baseUrl(): string {
-    return (
-      this.config.get<string>('OZON_API_BASE_URL')?.replace(/\/+$/, '') ??
-      'https://api-seller.ozon.ru'
-    );
+    const configured = this.config.get<string>('OZON_API_BASE_URL')?.replace(/\/+$/, '');
+    if (configured !== undefined && configured !== '') {
+      return configured;
+    }
+    // Safety guard (task §4 read-first): automated tests must never reach
+    // the real platform by accident - an unroutable placeholder fails fast
+    // instead of silently calling api-seller.ozon.ru.
+    if (this.config.get<string>('NODE_ENV') === 'test') {
+      return 'http://127.0.0.1:9/ozon-not-configured';
+    }
+    return 'https://api-seller.ozon.ru';
   }
 }
 

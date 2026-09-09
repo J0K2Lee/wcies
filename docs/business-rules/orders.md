@@ -165,7 +165,21 @@ EXCEPTION
 
 ## 摄入初始状态
 
-摄入成功后订单直接进入按行结果汇总出的状态（NEW 仅作为创建历史记录的起点，历史链：`null → NEW → <汇总状态>`）。
+摄入成功后订单直接进入按行结果汇总出的状态（NEW 仅作为创建历史记录的起点，历史链：）。
+
+## 平台同步摄入（Sprint 5）
+
+订单除人工/测试 API 摄入外，新增两条同步链路，均**复用** `OrderIngestionService`（不重写 SKU 映射/预约/Backorder/异常逻辑）：
+
+1. **Polling**：SyncModule 按店铺游标窗口拉取平台订单（OZON `/v3/posting/fbs/list`），`orders.sync_source = 'POLLING'`。
+2. **Webhook**：平台推送提示事件（OZON `TYPE_NEW_POSTING`）→ Worker 用已认证 API 按单号回读原文后摄入，`orders.sync_source = 'WEBHOOK'`。Webhook 与 Polling 可并发竞争同一订单；`UNIQUE(store_id, platform_order_id)` + 摄入幂等保证最终仅一张订单、一组 Reservation。
+
+规则：
+
+- 平台订单业务键仍是 `store_id + platform_order_id`（OZON 取 `posting_number`，履约单位而非 order_id）。
+- 行级业务失败（映射失败/缺货）不影响同步任务判定：平台**事实**已成功摄入，同步任务记 SUCCESS，游标推进。
+- 传输/解析/系统级失败：同步任务 FAILED，游标不动，重试安全（见 docs/integrations/ozon.md）。
+- 平台状态（platform_status）仅作事实存储，不驱动 ERP 状态机（§1 规则不变）。
 
 ---
 

@@ -141,7 +141,7 @@ export function runAdapterContractSuite(harness: AdapterContractHarness): void {
 // OZON harness (scripted via the injectable fetch transport)
 // ---------------------------------------------------------------------------
 
-const STORE_CREDENTIAL = { clientId: '3636793', apiKey: 'unit-test-api-key' };
+const STORE_CREDENTIAL = { clientId: '111222333', apiKey: 'unit-test-api-key' };
 
 interface ScriptedRoute {
   /** Endpoint path prefix, e.g. '/v3/product/list'. */
