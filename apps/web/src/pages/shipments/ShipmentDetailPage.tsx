@@ -4,6 +4,7 @@ import {
   Badge,
   Button,
   Card,
+  Collapse,
   Descriptions,
   Input,
   Modal,
@@ -23,6 +24,28 @@ import { apiPatch, apiPost, useApiQuery } from '../../api/hooks';
  * ship (task §60).
  */
 
+/**
+ * One shipment line. `status = ACTIVE` means the line is still a valid part of
+ * the shipment — it does NOT mean "not yet shipped", so a SHIPPED shipment
+ * keeps its lines ACTIVE. VOIDED lines are audit history only.
+ */
+interface ShipmentItem {
+  id: string;
+  skuCode: string;
+  skuName: string;
+  quantity: string;
+  packedQty: string;
+  serialTracking: boolean;
+  serialNumbers: string[];
+  status?: string;
+  voidedAt?: string | null;
+  voidedBy?: string | null;
+  voidedByName?: string | null;
+  voidReason?: string | null;
+  voidSourceType?: string | null;
+  voidSourceId?: string | null;
+}
+
 interface ShipmentDetail {
   id: string;
   shipmentNo: string;
@@ -35,15 +58,10 @@ interface ShipmentDetail {
   shippingMethod: string | null;
   shippedAt: string | null;
   createdAt: string;
-  items: Array<{
-    id: string;
-    skuCode: string;
-    skuName: string;
-    quantity: string;
-    packedQty: string;
-    serialTracking: boolean;
-    serialNumbers: string[];
-  }>;
+  /** Valid lines only (API filters VOIDED out); drives every calculation. */
+  items: ShipmentItem[];
+  /** VOIDED history, permanently retained, never counted. */
+  voidedItems: ShipmentItem[];
   packages: Array<{
     id: string;
     packageNo: string;
@@ -243,6 +261,79 @@ export function ShipmentDetailPage() {
           ]}
         />
       </Card>
+
+      {shipment.voidedItems.length > 0 && (
+        <Collapse
+          size="small"
+          defaultActiveKey={[]}
+          items={[
+            {
+              key: 'voided',
+              label: `已作废 / 历史记录 (${shipment.voidedItems.length})`,
+              children: (
+                <Table
+                  rowKey="id"
+                  size="small"
+                  pagination={false}
+                  dataSource={shipment.voidedItems}
+                  columns={[
+                    { title: 'SKU', dataIndex: 'skuCode', key: 'skuCode', width: 130 },
+                    { title: '名称', dataIndex: 'skuName', key: 'skuName' },
+                    {
+                      title: '原数量',
+                      dataIndex: 'quantity',
+                      key: 'quantity',
+                      width: 90,
+                      render: (value: string) => Number(value),
+                    },
+                    {
+                      title: '状态',
+                      dataIndex: 'status',
+                      key: 'status',
+                      width: 100,
+                      render: (value: string) => <Tag color="default">{value}</Tag>,
+                    },
+                    {
+                      title: '作废原因',
+                      dataIndex: 'voidReason',
+                      key: 'voidReason',
+                      render: (value: string | null) => value ?? '-',
+                    },
+                    {
+                      title: '作废时间',
+                      dataIndex: 'voidedAt',
+                      key: 'voidedAt',
+                      width: 170,
+                      render: (value: string | null) =>
+                        value ? new Date(value).toLocaleString() : '-',
+                    },
+                    {
+                      title: '作废人',
+                      dataIndex: 'voidedByName',
+                      key: 'voidedByName',
+                      width: 120,
+                      render: (value: string | null) => value ?? '-',
+                    },
+                    {
+                      title: '来源',
+                      key: 'source',
+                      width: 150,
+                      render: (_: unknown, row: ShipmentItem) =>
+                        row.voidSourceType === 'ORDER_INTERCEPTION' &&
+                        row.voidSourceId !== null &&
+                        row.voidSourceId !== undefined ? (
+                          <Link to={`/interceptions/${row.voidSourceId}`}>查看拦截任务</Link>
+                        ) : (
+                          (row.voidSourceType ?? '-')
+                        ),
+                    },
+                  ]}
+                />
+              ),
+            },
+          ]}
+        />
+      )}
 
       <Card size="small" title={`包裹 (${shipment.packages.length})`}>
         <Table
