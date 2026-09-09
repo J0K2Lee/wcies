@@ -26,6 +26,24 @@ interface IngestResult {
   }>;
 }
 
+interface ShipmentItem {
+  orderItemId: string;
+  skuId: string;
+  skuCode: string;
+  quantity: string;
+  packedQty: string;
+  serialTracking: boolean;
+  serialNumbers: string[];
+  /** ACTIVE = still a valid part of the shipment; VOIDED = audit history. */
+  status: string;
+  voidedAt: string | null;
+  voidedBy: string | null;
+  voidedByName: string | null;
+  voidReason: string | null;
+  voidSourceType: string | null;
+  voidSourceId: string | null;
+}
+
 interface ShipmentDetail {
   id: string;
   shipmentNo: string;
@@ -33,15 +51,10 @@ interface ShipmentDetail {
   orderId: string;
   orderNo: string;
   trackingNumber: string | null;
-  items: Array<{
-    orderItemId: string;
-    skuId: string;
-    skuCode: string;
-    quantity: string;
-    packedQty: string;
-    serialTracking: boolean;
-    serialNumbers: string[];
-  }>;
+  /** Valid lines only (ACTIVE) - drives every business calculation. */
+  items: ShipmentItem[];
+  /** VOIDED history, permanently retained, never counted. */
+  voidedItems: ShipmentItem[];
   packages: Array<{
     id: string;
     packageNo: string;
@@ -761,6 +774,30 @@ describe('interception lifecycle (task §71-§79)', () => {
     const after = await balancesOf(skuId);
     expect(after.picked).toBe(0);
     expect(after.onHand).toBe(5);
+
+    // VOIDED, never deleted: the line survives as audit history and points at
+    // the interception that voided it.
+    expect(detail.body.data.items).toHaveLength(0);
+    expect(detail.body.data.voidedItems).toHaveLength(1);
+    const voided = detail.body.data.voidedItems[0]!;
+    expect(voided.status).toBe('VOIDED');
+    expect(voided.skuId).toBe(skuId);
+    expect(voided.quantity).toBe('2.000');
+    expect(voided.voidSourceType).toBe('ORDER_INTERCEPTION');
+    expect(voided.voidSourceId).toBe(interception.id);
+    expect(voided.voidedAt).not.toBeNull();
+    expect(voided.voidReason).toContain('拦截回库');
+
+    // Repeating the return is rejected by the interception state machine and
+    // produces NO second VOIDED row.
+    const repeat = await client.post<{ status: string }>(
+      `/api/v1/interceptions/${interception.id}/return-to-stock`,
+      {},
+    );
+    expect(repeat.body.error).toBeDefined();
+    const afterRepeat = await client.get<ShipmentDetail>(`/api/v1/shipments/${shipment.id}`);
+    expect(afterRepeat.body.data.voidedItems).toHaveLength(1);
+    expect(afterRepeat.body.data.items).toHaveLength(0);
   });
 
   it('SEALED package losing a line -> REPACK_REQUIRED (task §76)', async () => {
@@ -855,6 +892,102 @@ describe('interception lifecycle (task §71-§79)', () => {
     // Stock: A returned (picked 0), B still picked 1.
     expect((await balancesOf(skuA)).picked).toBe(0);
     expect((await balancesOf(skuB)).picked).toBe(1);
+
+    // Line A is VOIDED history; line B is still the only ACTIVE line.
+    expect(detail.body.data.items).toHaveLength(1);
+    expect(detail.body.data.items[0]!.skuId).toBe(skuB);
+    expect(detail.body.data.items[0]!.status).toBe('ACTIVE');
+    expect(detail.body.data.voidedItems).toHaveLength(1);
+    expect(detail.body.data.voidedItems[0]!.skuId).toBe(skuA);
+    expect(detail.body.data.voidedItems[0]!.status).toBe('VOIDED');
+    expect(detail.body.data.voidedItems[0]!.voidSourceId).toBe(lineA.id);
+
+    // The remaining ACTIVE line can be re-sealed: package completeness counts
+    // ACTIVE rows only, so the voided line A is invisible to the check and
+    // line B alone satisfies the shipment again. (The order itself is
+    // CANCELLED, so a formal ship stays forbidden - that guard is task §77.)
+    const reseal = await client.post<{ shipmentStatus: string }>(
+      `/api/v1/packages/${packageId}/seal`,
+      {},
+    );
+    expect(reseal.body.error).toBeUndefined();
+    expect(reseal.body.data.shipmentStatus).toBe('READY_TO_SHIP');
+
+    const resealed = await client.get<ShipmentDetail>(`/api/v1/shipments/${shipment.id}`);
+    expect(resealed.body.data.status).toBe('READY_TO_SHIP');
+    expect(resealed.body.data.items).toHaveLength(1);
+    expect(resealed.body.data.items[0]!.status).toBe('ACTIVE');
+    expect(resealed.body.data.voidedItems).toHaveLength(1);
+    expect(resealed.body.data.voidedItems[0]!.status).toBe('VOIDED');
+
+    // A stays returned (picked 0), B is still picked and now packed.
+    expect(await balancesOf(skuA)).toEqual({ onHand: 2, reserved: 0, picked: 0 });
+    expect(await balancesOf(skuB)).toEqual({ onHand: 2, reserved: 0, picked: 1 });
+  });
+
+  it('voided SN is reusable: re-packing the same serial is not a unique conflict', async () => {
+    const skuId = await newSku('SNR', true);
+    const barcode = await addBarcode(skuId);
+    const platformSkuId = await mapSku(skuId);
+    const serial = `SNR-${PREFIX}-${seq}-001`;
+    await initialize(skuId, binA01, '2', [serial, `SNR-${PREFIX}-${seq}-002`]);
+
+    // Order 1 picks + packs the serial, then gets intercepted and returned.
+    const order1 = await ingestOrder([{ platformSkuId, quantity: '1' }]);
+    await pickOrder(order1, new Map([[skuId, barcode]]), new Map([[skuId, [serial]]]));
+    const shipment1 = await createShipment(order1.orderId);
+    const package1 = await createPackage(shipment1.id);
+    await client.post(`/api/v1/packages/${package1}/items/scan`, { barcode, serialNumber: serial });
+    // Packed SNs are the ACTIVE package_item_serials of this shipment.
+    const packed = await client.get<ShipmentDetail>(`/api/v1/shipments/${shipment1.id}`);
+    expect(packed.body.data.items[0]!.serialNumbers).toEqual([serial]);
+
+    await client.post(`/api/v1/orders/${order1.orderId}/cancel`, {});
+    const interceptions = await client.get<InterceptionDetail[]>(
+      `/api/v1/interceptions?orderId=${order1.orderId}`,
+    );
+    const interception = await interceptionDetail(interceptions.body.data[0]!.id);
+    await client.post(`/api/v1/interceptions/${interception.id}/start`, {});
+    await client.post(`/api/v1/interceptions/${interception.id}/scan`, {
+      barcode: interceptionScanBarcode(skuId),
+      serialNumber: serial,
+      binBarcode: `${PREFIX}-SWH-A01-01`,
+    });
+    const returned = await client.post<{ status: string }>(
+      `/api/v1/interceptions/${interception.id}/return-to-stock`,
+      {},
+    );
+    expect(returned.body.data.status).toBe('RETURNED_TO_STOCK');
+
+    // The SN is back in stock and the voided shipment keeps it as history.
+    const detail1 = await client.get<ShipmentDetail>(`/api/v1/shipments/${shipment1.id}`);
+    expect(detail1.body.data.items).toHaveLength(0);
+    expect(detail1.body.data.voidedItems).toHaveLength(1);
+    expect(detail1.body.data.voidedItems[0]!.voidSourceId).toBe(interception.id);
+
+    // Order 2 re-picks the SAME physical serial. A VOIDED package_item_serial
+    // must not block it: only ACTIVE rows take part in the unique index.
+    const order2 = await ingestOrder([{ platformSkuId, quantity: '1' }]);
+    await pickOrder(order2, new Map([[skuId, barcode]]), new Map([[skuId, [serial]]]));
+    const shipment2 = await createShipment(order2.orderId);
+    const package2 = await createPackage(shipment2.id);
+    const rescan = await client.post(`/api/v1/packages/${package2}/items/scan`, {
+      barcode,
+      serialNumber: serial,
+    });
+    expect(rescan.body.error).toBeUndefined();
+
+    const detail2 = await client.get<ShipmentDetail>(`/api/v1/shipments/${shipment2.id}`);
+    expect(detail2.body.data.items[0]!.serialNumbers).toEqual([serial]);
+    // The old VOIDED row did not consume the serial: shipment 1 keeps it only
+    // as history, shipment 2 owns the one and only ACTIVE row.
+    expect(detail2.body.data.voidedItems).toHaveLength(0);
+    const sealed = await client.post<{ shipmentStatus: string }>(
+      `/api/v1/packages/${package2}/seal`,
+      {},
+    );
+    expect(sealed.body.error).toBeUndefined();
+    expect(sealed.body.data.shipmentStatus).toBe('READY_TO_SHIP');
   });
 
   it('already SHIPPED shipment blocks interception return (task §77)', async () => {
