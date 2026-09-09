@@ -15,6 +15,7 @@ import {
   ShipmentNoEligibleItemsError,
   ShipmentNotFoundError,
   ShipmentStateInvalidError,
+  ShipmentVoidSourceInvalidError,
 } from '../errors/shipment.errors';
 import {
   PackageListItemDto,
@@ -22,6 +23,7 @@ import {
   ShipmentItemDto,
   ShipmentListItemDto,
 } from '../dto/shipment.dto';
+import { VOID_SOURCE_TYPES, VoidSourceType } from '../enums/shipment.constants';
 
 /**
  * Shipment application service (Sprint 4 task §7-§9/§13-§14): creation from
@@ -129,10 +131,11 @@ export class ShipmentService {
 
   async getDetail(shipmentId: string): Promise<ShipmentDetailDto> {
     const shipment = await this.getShipmentOrThrow(shipmentId);
-    const [order, warehouse, itemRows, packages, labels] = await Promise.all([
+    const [order, warehouse, itemRows, allItemRows, packages, labels] = await Promise.all([
       this.orderService.getOrderOrThrow(shipment.orderId),
       this.warehouseService.getEntityById(shipment.warehouseId),
       this.shipmentRepo.findItemsByShipmentId(shipmentId),
+      this.shipmentRepo.findAllItemsByShipmentId(shipmentId),
       this.packageRepo.listByShipmentId(shipmentId),
       this.labelRepo.listByShipmentId(shipmentId),
     ]);
@@ -168,6 +171,42 @@ export class ShipmentService {
         packedQty: formatQty(packedTotals.get(item.orderItemId) ?? 0n),
         serialTracking: sku?.serialTracking ?? false,
         serialNumbers,
+        status: item.status,
+        voidedAt: item.voidedAt,
+        voidedBy: item.voidedBy,
+        voidedByName: item.voidedByName,
+        voidReason: item.voidReason,
+        voidSourceType: item.voidSourceType,
+        voidSourceId: item.voidSourceId,
+      });
+    }
+
+    // VOIDED rows are retained audit history: shown separately and never
+    // counted by packing progress, READY_TO_SHIP or the ship transaction.
+    const voidedItemDtos: ShipmentItemDto[] = [];
+    for (const item of allItemRows) {
+      if (item.status !== 'VOIDED') {
+        continue;
+      }
+      const sku = await this.skuService.getEntityById(item.skuId);
+      voidedItemDtos.push({
+        id: item.id,
+        orderItemId: item.orderItemId,
+        skuId: item.skuId,
+        skuCode: sku?.skuCode ?? '',
+        skuName: sku?.nameZh ?? '',
+        reservationId: item.reservationId,
+        quantity: item.quantity,
+        packedQty: '0.000',
+        serialTracking: sku?.serialTracking ?? false,
+        serialNumbers: [],
+        status: item.status,
+        voidedAt: item.voidedAt,
+        voidedBy: item.voidedBy,
+        voidedByName: item.voidedByName,
+        voidReason: item.voidReason,
+        voidSourceType: item.voidSourceType,
+        voidSourceId: item.voidSourceId,
       });
     }
 
@@ -202,6 +241,7 @@ export class ShipmentService {
       shippedAt: shipment.shippedAt,
       createdAt: shipment.createdAt,
       items: itemDtos,
+      voidedItems: voidedItemDtos,
       packages: packageDtos,
       labels: labelDtos,
     };
@@ -271,6 +311,7 @@ export class ShipmentService {
          JOIN packages p ON p.id = pis.package_id
         WHERE p.shipment_id = $1::uuid
           AND pis.order_item_id = $2::uuid
+          AND pis.status = 'ACTIVE'
           AND p.status <> 'CANCELLED'
         ORDER BY pis.serial_number ASC`,
       [shipmentId, orderItemId],
@@ -414,6 +455,7 @@ export class ShipmentService {
          FROM package_items pi
          JOIN packages p ON p.id = pi.package_id
         WHERE pi.order_item_id = $1::uuid
+          AND pi.status = 'ACTIVE'
           AND p.status <> 'CANCELLED'
         ORDER BY p.created_at ASC`,
       [orderItemId],
@@ -428,21 +470,32 @@ export class ShipmentService {
 
   /**
    * Shipment-side cleanup when an interception returns an order item to stock
-   * (task §43-§44), executed inside the interception's transaction:
+   * (task §43-§44/§75-§76), executed inside the interception's transaction:
    * unpack the line from every live package (a formerly SEALED package goes
-   * REPACK_REQUIRED, an emptied package is CANCELLED), drop the shipment-item
-   * row, and re-advance the shipment ladder (PACKING / READY_TO_SHIP /
-   * CANCELLED when nothing is left to send). Returns the affected shipment id
-   * and the packages that were put into REPACK_REQUIRED (for auditing).
+   * REPACK_REQUIRED, an emptied package is CANCELLED), VOID the shipment-item
+   * snapshot row (never delete - it is audit history), and re-advance the
+   * shipment ladder (PACKING / READY_TO_SHIP / CANCELLED when no ACTIVE line
+   * is left). Returns the affected shipment id and the packages that were put
+   * into REPACK_REQUIRED (for auditing).
+   *
+   * The void source is a polymorphic reference validated in the Service layer:
+   * void_source_id intentionally has no database FK.
    */
   async handleInterceptionReturnInTx(
     runner: QueryRunner,
-    orderItemId: string,
+    input: {
+      orderItemId: string;
+      operator: OperatorContext;
+      reason?: string;
+      sourceType: VoidSourceType;
+      sourceId?: string | null;
+    },
   ): Promise<{
     shipmentId: string | null;
     repackRequiredPackageIds: string[];
   } | null> {
-    const assigned = await this.shipmentRepo.findLiveShipmentOfOrderItem(orderItemId);
+    this.assertVoidSource(input.sourceType, input.sourceId ?? null);
+    const assigned = await this.shipmentRepo.findLiveShipmentOfOrderItem(input.orderItemId);
     if (assigned === null) {
       return null;
     }
@@ -452,9 +505,9 @@ export class ShipmentService {
       return null; // shipped goods are rejected earlier (task §45)
     }
 
-    // Unpack the line from live packages; serial rows cascade with the items.
+    // Unpack the line from live packages (VOID, never delete).
     const { affectedPackageIds, emptiedPackageIds } =
-      await this.packageRepo.removeItemsForOrderItemTx(runner.manager, orderItemId);
+      await this.packageRepo.voidItemsForOrderItemTx(runner.manager, input);
     const repackRequired: string[] = [];
     for (const packageId of affectedPackageIds) {
       if (emptiedPackageIds.includes(packageId)) {
@@ -471,8 +524,9 @@ export class ShipmentService {
       }
     }
 
-    // Drop the shipment snapshot row so packed-vs-expected stays truthful.
-    await this.shipmentRepo.removeShipmentItem(runner.manager, orderItemId);
+    // VOID the shipment snapshot row so packed-vs-expected stays truthful
+    // while the original expectation is kept for audit.
+    await this.shipmentRepo.voidShipmentItem(runner.manager, input);
 
     // Re-advance the shipment ladder.
     const remainingItems = await this.shipmentRepo.findItemsByShipmentIdTx(
@@ -494,5 +548,26 @@ export class ShipmentService {
       await this.shipmentRepo.updateStatus(runner.manager, shipmentId, { status: nextStatus });
     }
     return { shipmentId, repackRequiredPackageIds: repackRequired };
+  }
+
+  /**
+   * Validates the polymorphic void source (Service-layer validation by design:
+   * void_source_id has no database FK). ORDER_INTERCEPTION must reference the
+   * interception that caused the void; MANUAL carries no source id.
+   */
+  private assertVoidSource(sourceType: VoidSourceType, sourceId: string | null): void {
+    if (!(VOID_SOURCE_TYPES as readonly string[]).includes(sourceType)) {
+      throw new ShipmentVoidSourceInvalidError(`非法的作废来源类型 ${String(sourceType)}`, {
+        sourceType,
+      });
+    }
+    if (sourceType === 'ORDER_INTERCEPTION' && sourceId === null) {
+      throw new ShipmentVoidSourceInvalidError(
+        'ORDER_INTERCEPTION 作废必须提供来源 ID（拦截任务）',
+        {
+          sourceType,
+        },
+      );
+    }
   }
 }

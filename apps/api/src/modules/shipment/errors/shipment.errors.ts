@@ -115,3 +115,13 @@ export class ShippingLabelInvalidError extends DomainError {
     super(message, details);
   }
 }
+
+/** Invalid polymorphic void source (void_source_type / void_source_id). */
+export class ShipmentVoidSourceInvalidError extends DomainError {
+  readonly code = 'SHIPMENT_VOID_SOURCE_INVALID';
+  readonly httpStatus = 422;
+
+  constructor(message: string, details: Record<string, unknown> = {}) {
+    super(message, details);
+  }
+}

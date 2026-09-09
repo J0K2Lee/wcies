@@ -4,6 +4,8 @@ import { ShipmentEntity } from '../entities/shipment.entity';
 import { ShipmentItemEntity } from '../entities/shipment-item.entity';
 import { ShipmentStatus } from '../enums/shipment.constants';
 import { rawStr } from '../../../common/utils/raw';
+import { OperatorContext } from '../../operation-log/operation-log.service';
+import { SHIPMENT_ITEM_STATUSES, VoidSourceType } from '../enums/shipment.constants';
 
 export interface ShipmentListFilters {
   orderId?: string;
@@ -62,6 +64,7 @@ export class ShipmentRepository {
             skuId: item.skuId,
             reservationId: item.reservationId,
             quantity: item.quantity,
+            status: 'ACTIVE',
           }),
         ),
       );
@@ -95,23 +98,37 @@ export class ShipmentRepository {
     await manager.getRepository(ShipmentEntity).update({ id }, { ...patch, updatedAt: new Date() });
   }
 
+  /** ACTIVE lines only - every business calculation counts these (task §16). */
   async findItemsByShipmentId(shipmentId: string): Promise<ShipmentItemEntity[]> {
-    return this.dataSource
-      .getRepository(ShipmentItemEntity)
-      .find({ where: { shipmentId }, order: { createdAt: 'ASC' } });
+    return this.dataSource.getRepository(ShipmentItemEntity).find({
+      where: { shipmentId, status: 'ACTIVE' },
+      order: { createdAt: 'ASC' },
+    });
   }
 
+  /** ACTIVE lines only, on the caller's transaction. */
   async findItemsByShipmentIdTx(
     manager: EntityManager,
     shipmentId: string,
   ): Promise<ShipmentItemEntity[]> {
     return manager.getRepository(ShipmentItemEntity).find({
-      where: { shipmentId },
+      where: { shipmentId, status: 'ACTIVE' },
       order: { createdAt: 'ASC' },
     });
   }
 
-  /** The live (non-cancelled) shipment an order item is assigned to, if any. */
+  /** All lines including VOIDED history (audit / detail display only). */
+  async findAllItemsByShipmentId(shipmentId: string): Promise<ShipmentItemEntity[]> {
+    return this.dataSource
+      .getRepository(ShipmentItemEntity)
+      .find({ where: { shipmentId }, order: { createdAt: 'ASC' } });
+  }
+
+  /**
+   * The live (non-cancelled) shipment an order item is ACTIVELY assigned to.
+   * VOIDED assignment rows are history and are ignored, so a repeated
+   * interception return cannot pick up an already-voided line.
+   */
   async findLiveShipmentOfOrderItem(orderItemId: string): Promise<{
     shipmentId: string;
     status: string;
@@ -124,6 +141,7 @@ export class ShipmentRepository {
          FROM shipment_items si
          JOIN shipments s ON s.id = si.shipment_id
         WHERE si.order_item_id = $1::uuid
+          AND si.status = 'ACTIVE'
           AND s.status <> 'CANCELLED'
         LIMIT 1`,
       [orderItemId],
@@ -134,8 +152,35 @@ export class ShipmentRepository {
       : { shipmentId: row.shipment_id, status: row.status, shippedAt: row.shipped_at };
   }
 
-  async removeShipmentItem(manager: EntityManager, orderItemId: string): Promise<void> {
-    await manager.getRepository(ShipmentItemEntity).delete({ orderItemId });
+  /**
+   * VOIDS (never deletes) the ACTIVE shipment-item row of an order line and
+   * records the full audit context. Idempotent: a second call matches no
+   * ACTIVE row and is a no-op.
+   */
+  async voidShipmentItem(
+    manager: EntityManager,
+    input: {
+      orderItemId: string;
+      operator: OperatorContext;
+      reason?: string;
+      sourceType: VoidSourceType;
+      sourceId?: string | null;
+    },
+  ): Promise<number> {
+    const result = await manager.getRepository(ShipmentItemEntity).update(
+      { orderItemId: input.orderItemId, status: 'ACTIVE' },
+      {
+        status: 'VOIDED',
+        voidedAt: new Date(),
+        voidedBy: input.operator.userId,
+        voidedByName: input.operator.username,
+        voidReason: input.reason ?? null,
+        voidSourceType: input.sourceType,
+        voidSourceId: input.sourceId ?? null,
+        updatedAt: new Date(),
+      },
+    );
+    return result.affected ?? 0;
   }
 
   /** List with order/warehouse refs and package aggregates (no N+1). */
@@ -170,10 +215,17 @@ export class ShipmentRepository {
       )
       .addSelect(
         (subQuery) =>
-          subQuery.select('COUNT(*)').from('shipment_items', 'si').where('si.shipment_id = s.id'),
+          subQuery
+            .select('COUNT(*)')
+            .from('shipment_items', 'si')
+            .where('si.shipment_id = s.id AND si.status = :activeItem'),
         'items_total',
       )
-      .setParameters({ cancelled: 'CANCELLED', sealed: 'SEALED' });
+      .setParameters({
+        cancelled: 'CANCELLED',
+        sealed: 'SEALED',
+        activeItem: SHIPMENT_ITEM_STATUSES[0],
+      });
     if (filters.orderId !== undefined) {
       qb.andWhere('s.orderId = :orderId', { orderId: filters.orderId });
     }

@@ -240,7 +240,7 @@ CREATED → ASSIGNED → LOCATING → INTERCEPTED → RETURNED_TO_STOCK → CLOS
 1. 创建：`OrderService.cancel` 对每个 PICKED 行经 `ORDER_INTERCEPTION_PORT` 创建拦截任务，并发布 `ORDER_INTERCEPTION_REQUIRED` 领域事件（SYSTEM 通知立即落库；FEISHU 通知失败不得影响取消事务）。
 2. 拦截范围：仅"已发生实体拣货且未出库"的商品。Shipment 已 `SHIPPED` 的行禁止仓内拦截（`INTERCEPTION_NOT_ALLOWED_AFTER_SHIPMENT`）。
 3. 扫码验证（后端强制）：SKU 条码（`INTERCEPTION_SKU_MISMATCH`）、SN（SN 商品必须属于该订单 Reservation 且状态 PICKED，`INTERCEPTION_SERIAL_MISMATCH`）、目标回库 Bin（必须属于该仓库）。
-4. 回库（原子事务）：解包（PackageItem / PackageItemSerial 移除；SEALED 包裹 → `REPACK_REQUIRED`，清空包裹 → `CANCELLED`；ShipmentItem 快照行删除；Shipment 阶梯重算）→ 库存 `RETURN_PICKED`（Picked - N，On Hand 不变，SN → IN_STOCK 回目标 Bin，Reservation → RELEASED）→ OrderItem → RELEASED。状态历史（`order_interception_histories`）逐跳记录，内部合并步骤也留痕。
+4. 回库（原子事务）：解包（PackageItem / PackageItemSerial **作废为 VOIDED，不得物理删除**；SEALED 包裹 → `REPACK_REQUIRED`，清空包裹 → `CANCELLED`；ShipmentItem 快照行**同样作废为 VOIDED，不得物理删除**；Shipment 阶梯重算）→ 库存 `RETURN_PICKED`（Picked - N，On Hand 不变，SN → IN_STOCK 回目标 Bin，Reservation → RELEASED）→ OrderItem → RELEASED。状态历史（`order_interception_histories`）逐跳记录，内部合并步骤也留痕。作废语义与审计字段见 §15A「Shipment / Package 行的作废（VOIDED）生命周期」。
 5. 失败：`FAILED` 不动库存（Picked 保持），创建 `ORDER_INTERCEPTION_FAILED` 异常并发送通知。
 6. 关闭：`RETURNED_TO_STOCK` / `FAILED` → `CLOSED`。
 
@@ -402,7 +402,9 @@ Sprint 4 在此基础上增加三个原子业务命令（显式 QueryRunner + In
 
 只有 `OrderItem.fulfillmentStatus = PICKED` 的行可进入 Shipment（按仓拆分，
 `shipment_items` 为数量快照）。`BACKORDERED / RESERVED / MAPPING_FAILED` 行禁止进入。
-一个订单行最多归属一张未取消的 Shipment（`shipment_items.order_item_id` 全局唯一）。
+一个订单行最多归属一张**有效（ACTIVE）**的 Shipment 行：约束为部分唯一索引
+`uq_shipment_items_order_item_active (order_item_id) WHERE status = 'ACTIVE'`，
+VOIDED 历史行不参与（同一订单行允许历史上多次作废后重新发货）。
 
 ## 打包（Packing）
 
@@ -414,8 +416,10 @@ Picked Order Items → Create Package → 扫码 SKU → 数量校验 → Seal
 2. 错误 SKU：`PACKING_SKU_MISMATCH`；超量：`PACKING_QUANTITY_EXCEEDED`。
 3. 数量完整性：Shipment 内全部包裹的 PackageItem 合计必须等于快照数量
    （`SHIPMENT_NOT_FULLY_PACKED`），且全部包裹 SEALED 后才允许出库。
-4. SN 商品打包必须记录具体 SN（`package_item_serials`，全局唯一）；打包 SN
-   必须已属于当前订单行的 Reservation（禁止装入其他订单的 SN），SN 状态保持 PICKED。
+4. SN 商品打包必须记录具体 SN（`package_item_serials`，ACTIVE 行按
+   `serial_number` 部分唯一，即同一 SN 同时只能存在于一个有效装箱记录中）；
+   打包 SN 必须已属于当前订单行的 Reservation（禁止装入其他订单的 SN），
+   SN 状态保持 PICKED。作废后的 SN 可被再次装箱（见下方作废生命周期）。
 5. 并发：每张 Shipment 的打包操作按 Shipment 行锁 + Package 行锁串行化。
 
 ## 正式出库（Ship）
@@ -434,6 +438,53 @@ SN → SHIPPED）→ Packages → SHIPPED → Shipment → SHIPPED → OrderItem
 `shipping_labels` 为平台无关元数据：Sprint 4 仅支持 `MANUAL_UPLOAD`
 （经 ObjectStorageService 私有桶 + 短期签名 URL 查看/打印，支持 PDF/PNG/JPEG）；
 `PLATFORM_API` 为未来预留。
+
+## Shipment / Package 行的作废（VOIDED）生命周期
+
+`shipment_items` / `package_items` / `package_item_serials` **一律以 VOIDED 替代
+物理删除**。行永久保留作审计历史，用于回答"这张发货单原本要发什么、那一行为什么
+消失了、是谁在什么时候因为什么作废的"。
+
+状态语义（**关键，不得误解**）：
+
+```text
+ACTIVE  = 仍是该 Shipment / Package 的有效组成部分、未被作废
+VOIDED  = 已作废的审计历史
+```
+
+`status = ACTIVE` **不表示"尚未发货"**。Shipment 已 `SHIPPED` 之后，其有效
+`shipment_items` 保持 `ACTIVE` 是**正确状态**；`package_items` 同理。
+ACTIVE/VOIDED 只描述"是否被作废"，不描述发货进度（发货进度看 `packedQty` 与
+Shipment / Package 状态）。
+
+审计字段：`status`、`voided_at`、`voided_by`（uuid，FK → `users.id`，稳定身份）、
+`voided_by_name`（作废时操作人显示名快照，仅用于展示）、`void_reason`、
+`void_source_type`、`void_source_id`。
+`package_item_serials` 只记录 `status / voided_at / voided_by`。
+
+`void_source_id` 为**多态引用，不建 FK**；`void_source_type ∈ {ORDER_INTERCEPTION, MANUAL}`
+与来源存在性由 **Service 层校验**（非法来源 → `SHIPMENT_VOID_SOURCE_INVALID`）。
+
+部分唯一约束（VOIDED 历史行永不阻塞后续重建）：
+
+| 表 | 部分唯一索引 |
+| --- | --- |
+| `shipment_items` | `uq_shipment_items_order_item_active (order_item_id) WHERE status='ACTIVE'` |
+| `package_items` | `uq_package_items_package_order_item_active (package_id, order_item_id) WHERE status='ACTIVE'` |
+| `package_item_serials` | `uq_package_item_serials_serial_active (serial_number) WHERE status='ACTIVE'` |
+
+规则：
+
+1. **所有业务计算只统计 ACTIVE**：打包完整性、出库库存扣减、列表聚合、
+   `findLiveShipmentOfOrderItem` 等一律过滤 ACTIVE；VOIDED 行不参与任何计算。
+2. 作废操作 `UPDATE … WHERE status = 'ACTIVE'`，天然幂等（第二次 affected = 0），
+   不会产生第二条 VOIDED 行。
+3. 作废与回库、Package 重算、Inventory `returnPickedStockInTx`、Reservation →
+   RELEASED、OrderItem → RELEASED、Interception 状态迁移必须在**同一事务**内完成。
+4. 迁移必须显式回填 `UPDATE … SET status='ACTIVE'` 后才建 CHECK / 部分唯一约束，
+   不能只依赖列 DEFAULT。
+5. 前端 `/shipments/:id` 主表只显示 ACTIVE 行；VOIDED 行在默认折叠的
+   「已作废 / 历史记录」区展示，并可跳转到来源拦截任务。
 
 # 15B. Picking 原子性（Sprint 4 P0）
 

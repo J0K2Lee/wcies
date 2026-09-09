@@ -34,6 +34,34 @@ export const PACKAGE_STATUSES = [
 ] as const;
 export type PackageStatus = (typeof PACKAGE_STATUSES)[number];
 
+/**
+ * Shipment / package line lifecycle (Sprint 4 follow-up).
+ *
+ * ACTIVE = the row is still a VALID COMPONENT of its parent (not voided). It
+ * does NOT mean "not shipped yet": after a Shipment is SHIPPED its effective
+ * shipment_items stay ACTIVE, which is the correct state. VOIDED = kept
+ * forever as audit history (e.g. an interception returned the line to stock)
+ * and never counted by any business calculation.
+ */
+export const SHIPMENT_ITEM_STATUSES = ['ACTIVE', 'VOIDED'] as const;
+export type ShipmentItemStatus = (typeof SHIPMENT_ITEM_STATUSES)[number];
+
+/** Package line lifecycle - same ACTIVE / VOIDED semantics as shipment items. */
+export const PACKAGE_ITEM_STATUSES = ['ACTIVE', 'VOIDED'] as const;
+export type PackageItemStatus = (typeof PACKAGE_ITEM_STATUSES)[number];
+
+/** Packed serial lifecycle - VOIDED rows keep the "was packed here" history. */
+export const PACKAGE_ITEM_SERIAL_STATUSES = ['ACTIVE', 'VOIDED'] as const;
+export type PackageItemSerialStatus = (typeof PACKAGE_ITEM_SERIAL_STATUSES)[number];
+
+/**
+ * What caused a line to be voided. `void_source_id` is a POLYMORPHIC business
+ * reference (uuid, no database FK): the Service layer validates the type and
+ * that the referenced source exists.
+ */
+export const VOID_SOURCE_TYPES = ['ORDER_INTERCEPTION', 'MANUAL'] as const;
+export type VoidSourceType = (typeof VOID_SOURCE_TYPES)[number];
+
 /** Shipping label source (task §19): manual upload now, platform API later. */
 export const SHIPPING_LABEL_SOURCES = ['MANUAL_UPLOAD', 'PLATFORM_API'] as const;
 export type ShippingLabelSource = (typeof SHIPPING_LABEL_SOURCES)[number];

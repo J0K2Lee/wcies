@@ -363,6 +363,7 @@ export class PackingService {
            JOIN packages p ON p.id = pi.package_id
           WHERE p.shipment_id = $1::uuid
             AND p.status IN ('OPEN', 'SEALED', 'REPACK_REQUIRED')
+            AND pi.status = 'ACTIVE'
           GROUP BY pi.order_item_id`,
         [pkg.shipmentId],
       ),

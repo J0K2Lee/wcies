@@ -452,11 +452,16 @@ export class InterceptionService implements OrderInterceptionPort {
         });
       }
 
-      // 1. Package consistency BEFORE stock returns (task §43-§44/§75-§76).
-      const unpacked = await this.shipmentService.handleInterceptionReturnInTx(
-        runner,
-        item.orderItemId,
-      );
+      // 1. Package consistency BEFORE stock returns (task §43-§44/§75-§76):
+      //    package lines and the shipment snapshot are VOIDED (audit history)
+      //    instead of deleted, traceable to this interception.
+      const unpacked = await this.shipmentService.handleInterceptionReturnInTx(runner, {
+        orderItemId: item.orderItemId,
+        operator,
+        reason: '拦截回库：该行已取消并实体回库',
+        sourceType: 'ORDER_INTERCEPTION',
+        sourceId: id,
+      });
 
       // 2. Stock: Picked - N, On Hand unchanged, SN -> IN_STOCK at the bin,
       //    reservation -> RELEASED (task §37-§40).

@@ -6,6 +6,8 @@ import {
   PACKAGE_STATUSES,
   SHIPMENT_STATUSES,
   SHIPPING_LABEL_TYPES,
+  SHIPMENT_ITEM_STATUSES,
+  VOID_SOURCE_TYPES,
 } from '../enums/shipment.constants';
 
 // ---------------------------------------------------------------------------
@@ -150,6 +152,16 @@ export class ShipmentItemDto {
   @ApiProperty({ description: 'SN 管理商品' }) serialTracking!: boolean;
   @ApiProperty({ type: [String], description: '该行需要打包的 SN（SN 商品）' })
   serialNumbers!: string[];
+  /** ACTIVE = 仍是发货单有效组成部分（不代表未发货）；VOIDED = 已作废的审计历史。 */
+  @ApiProperty({ enum: SHIPMENT_ITEM_STATUSES }) status!: string;
+  @ApiProperty({ nullable: true, type: Date }) voidedAt!: Date | null;
+  @ApiProperty({ nullable: true, description: '作废操作人 users.id' }) voidedBy!: string | null;
+  @ApiProperty({ nullable: true, description: '作废时操作人显示名快照' }) voidedByName!:
+    string | null;
+  @ApiProperty({ nullable: true }) voidReason!: string | null;
+  @ApiProperty({ nullable: true, enum: VOID_SOURCE_TYPES }) voidSourceType!: string | null;
+  @ApiProperty({ nullable: true, description: '多态来源 ID，如 order_interceptions.id' })
+  voidSourceId!: string | null;
 }
 
 export class PackageItemDto {
@@ -187,8 +199,13 @@ export class ShipmentDetailDto {
   @ApiProperty({ nullable: true, example: 'EXPRESS' }) shippingMethod!: string | null;
   @ApiProperty({ nullable: true, type: Date }) shippedAt!: Date | null;
   @ApiProperty({ type: Date }) createdAt!: Date;
-  @ApiProperty({ type: [ShipmentItemDto], description: '待发商品快照与打包进度' })
+  @ApiProperty({ type: [ShipmentItemDto], description: '待发商品快照与打包进度（仅 ACTIVE）' })
   items!: ShipmentItemDto[];
+  @ApiProperty({
+    type: [ShipmentItemDto],
+    description: '已作废 / 历史记录（VOIDED，永久保留，不参与任何计算）',
+  })
+  voidedItems!: ShipmentItemDto[];
   @ApiProperty({ type: [PackageListItemDto] }) packages!: PackageListItemDto[];
   @ApiProperty({ type: [Object], description: '面单元数据（含签名查看 URL）' })
   labels!: Array<{
