@@ -1,7 +1,8 @@
 import { Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { randomUUID } from 'node:crypto';
 import { ok } from '../../../common/dto/api-response';
+import { ApiOkEnvelope } from '../../../common/swagger/api-envelope';
 import { ObjectStorageService } from '../../../infrastructure/storage/object-storage.service';
 
 export class StorageTestData {
@@ -15,11 +16,6 @@ export class StorageTestData {
   verified!: boolean;
 }
 
-export class StorageTestResponseDto {
-  success!: true;
-  data!: StorageTestData;
-}
-
 /** [DEV ONLY] Round-trip check: upload -> MinIO -> signed URL -> read back. */
 @ApiTags('dev')
 @Controller('dev')
@@ -29,8 +25,8 @@ export class StorageTestController {
   @Post('storage-test')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '[DEV ONLY] Upload a test file and read it back via signed URL' })
-  @ApiOkResponse({ type: StorageTestResponseDto })
-  async runStorageTest(): Promise<StorageTestResponseDto> {
+  @ApiOkEnvelope(StorageTestData)
+  async runStorageTest(): Promise<{ success: true; data: StorageTestData }> {
     const objectKey = `dev/storage-test-${randomUUID()}.txt`;
     const content = `wcies storage test ${new Date().toISOString()}`;
 

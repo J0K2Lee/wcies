@@ -1885,8 +1885,42 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        LivenessResponseDto: Record<string, never>;
-        ReadinessResponseDto: Record<string, never>;
+        LivenessData: {
+            /** @example ok */
+            status: string;
+        };
+        ReadinessChecksDto: {
+            /**
+             * @example up
+             * @enum {string}
+             */
+            postgres: "up" | "down";
+            /**
+             * @example up
+             * @enum {string}
+             */
+            redis: "up" | "down";
+        };
+        ReadinessData: {
+            /** @example ok */
+            status: string;
+            checks: components["schemas"]["ReadinessChecksDto"];
+        };
+        UserResponseDto: {
+            /** Format: uuid */
+            id: string;
+            /** @example admin */
+            username: string;
+            /** @example admin@wcies.local */
+            email: Record<string, never> | null;
+            /** @example ADMIN */
+            role: string;
+            /** @example ACTIVE */
+            status: string;
+        };
+        LoginResponseDataDto: {
+            user: components["schemas"]["UserResponseDto"];
+        };
         LoginRequestDto: {
             /**
              * @description Username or email
@@ -1896,12 +1930,74 @@ export interface components {
             /** @description Plain password (transit only, never stored) */
             password: string;
         };
-        LoginResponseDto: Record<string, never>;
-        UserEnvelopeDto: Record<string, never>;
-        LogoutResponseDto: Record<string, never>;
-        PlatformListEnvelopeDto: Record<string, never>;
-        PlatformEnvelopeDto: Record<string, never>;
-        StoreListEnvelopeDto: Record<string, never>;
+        PlatformResponseDto: {
+            /** Format: uuid */
+            id: string;
+            /** @example OZON */
+            code: string;
+            /** @example OZON */
+            name: string;
+            /** @example ACTIVE */
+            status: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        StoreListItemDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            platformId: string;
+            /** @example OZON */
+            platformCode: string;
+            /** @example OZON */
+            platformName: string;
+            /** @example OZON-A */
+            storeCode: string;
+            /** @example OZON 店铺 A */
+            name: string;
+            /** @example 123456 */
+            sellerId: Record<string, never> | null;
+            /** @example RUB */
+            defaultCurrency: Record<string, never> | null;
+            /** @example ACTIVE */
+            status: string;
+            settings: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** @example true */
+            credentialConfigured: boolean;
+            /** @example 2 */
+            bindingCount: number;
+        };
+        StoreResponseDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            platformId: string;
+            /** @example OZON */
+            platformCode: string;
+            /** @example OZON */
+            platformName: string;
+            /** @example OZON-A */
+            storeCode: string;
+            /** @example OZON 店铺 A */
+            name: string;
+            /** @example 123456 */
+            sellerId: Record<string, never> | null;
+            /** @example RUB */
+            defaultCurrency: Record<string, never> | null;
+            /** @example ACTIVE */
+            status: string;
+            settings: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
         CreateStoreRequestDto: {
             /**
              * Format: uuid
@@ -1919,7 +2015,6 @@ export interface components {
             /** @description Free-form store settings */
             settings?: Record<string, never>;
         };
-        StoreEnvelopeDto: Record<string, never>;
         UpdateStoreRequestDto: {
             /** @example OZON 店铺 A（新） */
             name?: string;
@@ -1929,7 +2024,25 @@ export interface components {
             defaultCurrency?: string;
             settings?: Record<string, never>;
         };
-        CredentialListEnvelopeDto: Record<string, never>;
+        CredentialResponseDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            storeId: string;
+            /** @example MAIN_API */
+            credentialType: string;
+            /** @example ACTIVE */
+            status: string;
+            /**
+             * @description Encrypted payload present and active
+             * @example true
+             */
+            configured: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
         UpsertCredentialRequestDto: {
             /**
              * @example MAIN_API
@@ -1939,8 +2052,22 @@ export interface components {
             /** @description Plain credential payload (e.g. apiKey/clientId); encrypted at rest */
             payload: Record<string, never>;
         };
-        CredentialEnvelopeDto: Record<string, never>;
-        BrandListEnvelopeDto: Record<string, never>;
+        BrandResponseDto: {
+            /** Format: uuid */
+            id: string;
+            /** @example VALKYRIE */
+            code: string;
+            /** @example VALKYRIE */
+            nameZh: string;
+            nameEn: Record<string, never> | null;
+            nameRu: Record<string, never> | null;
+            /** @example ACTIVE */
+            status: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
         CreateBrandRequestDto: {
             /** @example VALKYRIE */
             code: string;
@@ -1951,7 +2078,6 @@ export interface components {
             /** @example VALKYRIE */
             nameRu?: string;
         };
-        BrandEnvelopeDto: Record<string, never>;
         UpdateBrandRequestDto: {
             nameZh?: string;
             nameEn?: string;
@@ -1959,7 +2085,45 @@ export interface components {
             /** @enum {string} */
             status?: "ACTIVE" | "INACTIVE";
         };
-        CategoryTreeEnvelopeDto: Record<string, never>;
+        CategoryTreeItemDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            parentId: Record<string, never> | null;
+            /** @example KEYBOARD */
+            code: string;
+            /** @example 键盘 */
+            nameZh: string;
+            nameRu: Record<string, never> | null;
+            /** @example 0 */
+            sortOrder: number;
+            /** @example ACTIVE */
+            status: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            children: components["schemas"]["CategoryTreeItemDto"][];
+        };
+        CategoryResponseDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            parentId: Record<string, never> | null;
+            /** @example KEYBOARD */
+            code: string;
+            /** @example 键盘 */
+            nameZh: string;
+            nameRu: Record<string, never> | null;
+            /** @example 0 */
+            sortOrder: number;
+            /** @example ACTIVE */
+            status: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
         CreateCategoryRequestDto: {
             /** Format: uuid */
             parentId?: Record<string, never> | null;
@@ -1972,7 +2136,6 @@ export interface components {
             /** @example 0 */
             sortOrder?: number;
         };
-        CategoryEnvelopeDto: Record<string, never>;
         UpdateCategoryRequestDto: {
             /** Format: uuid */
             parentId?: Record<string, never> | null;
@@ -1983,7 +2146,56 @@ export interface components {
             /** @enum {string} */
             status?: "ACTIVE" | "INACTIVE";
         };
-        ProductListEnvelopeDto: Record<string, never>;
+        ProductListItemDto: {
+            /** Format: uuid */
+            id: string;
+            /** @example PRD000001 */
+            productCode: string;
+            /** @example VALKYRIE VK87 MAX V2 机械键盘 */
+            nameZh: string;
+            nameRu: Record<string, never> | null;
+            /** Format: uuid */
+            categoryId: Record<string, never> | null;
+            categoryName: Record<string, never> | null;
+            /** Format: uuid */
+            brandId: Record<string, never> | null;
+            brandName: Record<string, never> | null;
+            /** Format: uuid */
+            mainImageId: Record<string, never> | null;
+            /** @example ACTIVE */
+            status: string;
+            remark: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** @example 2 */
+            skuCount: number;
+        };
+        ProductResponseDto: {
+            /** Format: uuid */
+            id: string;
+            /** @example PRD000001 */
+            productCode: string;
+            /** @example VALKYRIE VK87 MAX V2 机械键盘 */
+            nameZh: string;
+            nameRu: Record<string, never> | null;
+            /** Format: uuid */
+            categoryId: Record<string, never> | null;
+            categoryName: Record<string, never> | null;
+            /** Format: uuid */
+            brandId: Record<string, never> | null;
+            brandName: Record<string, never> | null;
+            /** Format: uuid */
+            mainImageId: Record<string, never> | null;
+            /** @example ACTIVE */
+            status: string;
+            remark: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
         CreateProductRequestDto: {
             /**
              * @description Auto-generated (PRD%06d) when omitted
@@ -1999,8 +2211,52 @@ export interface components {
             brandId?: string;
             remark?: string;
         };
-        ProductEnvelopeDto: Record<string, never>;
-        ProductDetailEnvelopeDto: Record<string, never>;
+        SkuResponseDto: {
+            /** Format: uuid */
+            id: string;
+            /** @example SKU000001 */
+            skuCode: string;
+            /** @example VK87 MAX V2 黑色 */
+            nameZh: string;
+            nameRu: Record<string, never> | null;
+            /** Format: uuid */
+            productId: string;
+            /** @example PRD000001 */
+            productCode: string;
+            /** @example VALKYRIE VK87 MAX V2 机械键盘 */
+            productName: string;
+            model: Record<string, never> | null;
+            color: Record<string, never> | null;
+            size: Record<string, never> | null;
+            /** @example 0.95 */
+            weightKg: Record<string, never> | null;
+            /** @example 35.5 */
+            lengthCm: Record<string, never> | null;
+            /** @example 12.2 */
+            widthCm: Record<string, never> | null;
+            /** @example 3.4 */
+            heightCm: Record<string, never> | null;
+            /** @description Backend-computed: length x width x height (read-only) */
+            volumeCm3: Record<string, never> | null;
+            latestPurchasePrice: Record<string, never> | null;
+            /** @description Reserved; null until the purchase sprint (task §24) */
+            movingAverageCost: Record<string, never> | null;
+            /** @example CNY */
+            costCurrency: string;
+            /** @example false */
+            serialTracking: boolean;
+            /** @example ACTIVE */
+            status: string;
+            remark: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        ProductDetailDto: {
+            product: components["schemas"]["ProductResponseDto"];
+            skus: components["schemas"]["SkuResponseDto"][];
+        };
         UpdateProductRequestDto: {
             /** @description Business code is editable; the UUID never changes (task §16) */
             productCode?: string;
@@ -2017,7 +2273,57 @@ export interface components {
             mainImageId?: Record<string, never>;
             remark?: string;
         };
-        SkuListEnvelopeDto: Record<string, never>;
+        SkuListItemDto: {
+            /** Format: uuid */
+            id: string;
+            /** @example SKU000001 */
+            skuCode: string;
+            /** @example VK87 MAX V2 黑色 */
+            nameZh: string;
+            nameRu: Record<string, never> | null;
+            /** Format: uuid */
+            productId: string;
+            /** @example PRD000001 */
+            productCode: string;
+            /** @example VALKYRIE VK87 MAX V2 机械键盘 */
+            productName: string;
+            model: Record<string, never> | null;
+            color: Record<string, never> | null;
+            size: Record<string, never> | null;
+            /** @example 0.95 */
+            weightKg: Record<string, never> | null;
+            /** @example 35.5 */
+            lengthCm: Record<string, never> | null;
+            /** @example 12.2 */
+            widthCm: Record<string, never> | null;
+            /** @example 3.4 */
+            heightCm: Record<string, never> | null;
+            /** @description Backend-computed: length x width x height (read-only) */
+            volumeCm3: Record<string, never> | null;
+            latestPurchasePrice: Record<string, never> | null;
+            /** @description Reserved; null until the purchase sprint (task §24) */
+            movingAverageCost: Record<string, never> | null;
+            /** @example CNY */
+            costCurrency: string;
+            /** @example false */
+            serialTracking: boolean;
+            /** @example ACTIVE */
+            status: string;
+            remark: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** Format: uuid */
+            brandId: Record<string, never> | null;
+            brandName: Record<string, never> | null;
+            /** @description Primary barcode value */
+            primaryBarcode: Record<string, never> | null;
+            /** @description Signed URL of the primary image */
+            primaryImageUrl: Record<string, never> | null;
+            /** @example 3 */
+            listingCount: number;
+        };
         CreateSkuRequestDto: {
             /**
              * @description Auto-generated (SKU%06d) when omitted
@@ -2063,7 +2369,6 @@ export interface components {
             serialTracking?: boolean;
             remark?: string;
         };
-        SkuEnvelopeDto: Record<string, never>;
         UpdateSkuRequestDto: {
             /** @description Business code is editable; the UUID never changes */
             skuCode?: string;
@@ -2082,7 +2387,22 @@ export interface components {
             serialTracking?: boolean;
             remark?: string;
         };
-        BarcodeListEnvelopeDto: Record<string, never>;
+        BarcodeResponseDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            skuId: string;
+            /** @example 6971234567890 */
+            barcode: string;
+            /** @example EAN */
+            barcodeType: string;
+            /** @example true */
+            isPrimary: boolean;
+            /** @example ACTIVE */
+            status: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
         CreateBarcodeRequestDto: {
             /** @example 6971234567890 */
             barcode: string;
@@ -2098,7 +2418,6 @@ export interface components {
              */
             isPrimary?: boolean;
         };
-        BarcodeEnvelopeDto: Record<string, never>;
         UpdateBarcodeRequestDto: {
             /** @enum {string} */
             barcodeType?: "EAN" | "GTIN" | "MANUFACTURER" | "INTERNAL" | "OTHER";
@@ -2107,15 +2426,87 @@ export interface components {
             /** @enum {string} */
             status?: "ACTIVE" | "INACTIVE";
         };
-        ImageListEnvelopeDto: Record<string, never>;
-        ImageEnvelopeDto: Record<string, never>;
+        SkuImageResponseDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            skuId: string;
+            /** @example 0 */
+            sortOrder: number;
+            /** @example true */
+            isPrimary: boolean;
+            /** @example image/webp */
+            mimeType: string;
+            /** @example 12345 */
+            fileSize: number;
+            width: Record<string, never> | null;
+            height: Record<string, never> | null;
+            /**
+             * @description Short-lived signed URL (private bucket)
+             * @example https://...
+             */
+            url: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
         UpdateSkuImageRequestDto: {
             /** @example 0 */
             sortOrder?: number;
             /** @description DB keeps at most one primary per SKU */
             isPrimary?: boolean;
         };
-        WarehouseListEnvelopeDto: Record<string, never>;
+        WarehouseListItemDto: {
+            /** Format: uuid */
+            id: string;
+            /** @example SZ01 */
+            warehouseCode: string;
+            /** @example 深圳自管仓 */
+            name: string;
+            /** @example SELF */
+            warehouseType: string;
+            /** @example CN */
+            countryCode: Record<string, never> | null;
+            province: Record<string, never> | null;
+            city: Record<string, never> | null;
+            address: Record<string, never> | null;
+            contactName: Record<string, never> | null;
+            contactPhone: Record<string, never> | null;
+            /** @example ACTIVE */
+            status: string;
+            remark: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** @example 20 */
+            binCount: number;
+            /** @example 4 */
+            boundStoreCount: number;
+        };
+        WarehouseResponseDto: {
+            /** Format: uuid */
+            id: string;
+            /** @example SZ01 */
+            warehouseCode: string;
+            /** @example 深圳自管仓 */
+            name: string;
+            /** @example SELF */
+            warehouseType: string;
+            /** @example CN */
+            countryCode: Record<string, never> | null;
+            province: Record<string, never> | null;
+            city: Record<string, never> | null;
+            address: Record<string, never> | null;
+            contactName: Record<string, never> | null;
+            contactPhone: Record<string, never> | null;
+            /** @example ACTIVE */
+            status: string;
+            remark: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
         CreateWarehouseRequestDto: {
             /** @example SZ01 */
             warehouseCode: string;
@@ -2138,7 +2529,6 @@ export interface components {
             contactPhone?: string;
             remark?: string;
         };
-        WarehouseEnvelopeDto: Record<string, never>;
         UpdateWarehouseRequestDto: {
             name?: string;
             /** @enum {string} */
@@ -2151,7 +2541,27 @@ export interface components {
             contactPhone?: string;
             remark?: string;
         };
-        BinListEnvelopeDto: Record<string, never>;
+        BinResponseDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            warehouseId: string;
+            /** @example SZ01-A01-01 */
+            binCode: string;
+            zone: Record<string, never> | null;
+            rack: Record<string, never> | null;
+            level: Record<string, never> | null;
+            position: Record<string, never> | null;
+            /** @example BIN-SZ01-A01-01 */
+            barcode: Record<string, never> | null;
+            /** @example ACTIVE */
+            status: string;
+            remark: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
         CreateBinRequestDto: {
             /** @example SZ01-A01-01 */
             binCode: string;
@@ -2170,7 +2580,11 @@ export interface components {
             barcode?: string;
             remark?: string;
         };
-        BinEnvelopeDto: Record<string, never>;
+        BatchCreateBinsResponseDto: {
+            /** @example 20 */
+            createdCount: number;
+            bins: components["schemas"]["BinResponseDto"][];
+        };
         BatchCreateBinsRequestDto: {
             /**
              * @description Stored on every generated bin
@@ -2193,7 +2607,6 @@ export interface components {
             /** @example 02 */
             positionTo?: string;
         };
-        BatchBinsEnvelopeDto: Record<string, never>;
         UpdateBinRequestDto: {
             zone?: string;
             rack?: string;
@@ -2204,7 +2617,40 @@ export interface components {
             status?: "ACTIVE" | "INACTIVE";
             remark?: string;
         };
-        BindingListEnvelopeDto: Record<string, never>;
+        BindingResponseDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            storeId: string;
+            /** @example OZON-A */
+            storeCode: string;
+            /** @example OZON A店 */
+            storeName: string;
+            /** @example OZON */
+            platformCode: string;
+            /** Format: uuid */
+            warehouseId: string;
+            /** @example SZ01 */
+            warehouseCode: string;
+            /** @example 深圳自管仓 */
+            warehouseName: string;
+            /** @example OZON_RFBS */
+            fulfillmentMode: string;
+            platformWarehouseId: Record<string, never> | null;
+            /** @example true */
+            isInventorySource: boolean;
+            /** @example false */
+            isInventoryPushEnabled: boolean;
+            /** @example 100 */
+            priority: number;
+            settings: Record<string, never> | null;
+            /** @example ACTIVE */
+            status: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
         CreateBindingRequestDto: {
             /** Format: uuid */
             warehouseId: string;
@@ -2226,7 +2672,6 @@ export interface components {
             priority?: number;
             settings?: Record<string, never>;
         };
-        BindingEnvelopeDto: Record<string, never>;
         UpdateBindingRequestDto: {
             platformWarehouseId?: string;
             isInventorySource?: boolean;
@@ -2236,7 +2681,80 @@ export interface components {
             /** @enum {string} */
             status?: "ACTIVE" | "DISABLED";
         };
-        ListingListEnvelopeDto: Record<string, never>;
+        ListingResponseDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            platformId: string;
+            /** @example OZON */
+            platformCode: string;
+            /** Format: uuid */
+            storeId: string;
+            /** @example OZON-A */
+            storeCode: string;
+            /** @example OZON A店 */
+            storeName: string;
+            /** @example 152987456001 */
+            platformProductId: string;
+            title: Record<string, never> | null;
+            url: Record<string, never> | null;
+            /** @example ACTIVE */
+            status: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** @example 2 */
+            mappingCount: number;
+        };
+        ListingSkuResponseDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            listingId: string;
+            /** Format: uuid */
+            skuId: string;
+            /** @example SKU000001 */
+            skuCode: string;
+            /** @example VK87 MAX V2 黑色 */
+            skuName: string;
+            platformSkuId: Record<string, never> | null;
+            sellerSku: Record<string, never> | null;
+            offerId: Record<string, never> | null;
+            /** @example ACTIVE */
+            status: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        ListingDetailDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            platformId: string;
+            /** @example OZON */
+            platformCode: string;
+            /** Format: uuid */
+            storeId: string;
+            /** @example OZON-A */
+            storeCode: string;
+            /** @example OZON A店 */
+            storeName: string;
+            /** @example 152987456001 */
+            platformProductId: string;
+            title: Record<string, never> | null;
+            url: Record<string, never> | null;
+            /** @example ACTIVE */
+            status: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** @example 2 */
+            mappingCount: number;
+            skus: components["schemas"]["ListingSkuResponseDto"][];
+        };
         ListingSkuVariantDto: {
             /** Format: uuid */
             skuId: string;
@@ -2262,9 +2780,52 @@ export interface components {
             /** @description Variant rows mapped in one submit */
             skuVariants: components["schemas"]["ListingSkuVariantDto"][];
         };
-        ListingDetailEnvelopeDto: Record<string, never>;
-        ResolveEnvelopeDto: Record<string, never>;
-        SkuMappingsEnvelopeDto: Record<string, never>;
+        ResolveSkuResponseDto: {
+            /** Format: uuid */
+            listingId: string;
+            /** Format: uuid */
+            listingSkuId: string;
+            /** Format: uuid */
+            internalSkuId: string;
+            /** @example SKU000001 */
+            internalSkuCode: string;
+            /** @example ABC */
+            matchedOfferId: Record<string, never> | null;
+            /** @example VK87-BLK */
+            matchedSellerSku: Record<string, never> | null;
+            /** @example 152987456 */
+            matchedPlatformSkuId: Record<string, never> | null;
+        };
+        SkuMappingRowDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            listingId: string;
+            /** Format: uuid */
+            skuId: string;
+            /** @example SKU000001 */
+            skuCode: string;
+            /** @example VK87 MAX V2 黑色 */
+            skuName: string;
+            platformSkuId: Record<string, never> | null;
+            sellerSku: Record<string, never> | null;
+            offerId: Record<string, never> | null;
+            /** @example ACTIVE */
+            status: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** @example OZON */
+            platformCode: string;
+            /** @example OZON-A */
+            storeCode: string;
+            /** @example 152987456001 */
+            platformProductId: string;
+            /** @example VK87 MAX V2 机械键盘 */
+            title: string | null;
+            url: string | null;
+        };
         UpdateListingRequestDto: {
             title?: string;
             url?: string;
@@ -2277,7 +2838,6 @@ export interface components {
             sellerSku?: string;
             offerId?: string;
         };
-        ListingSkuEnvelopeDto: Record<string, never>;
         UpdateListingSkuRequestDto: {
             platformSkuId?: Record<string, never> | null;
             sellerSku?: Record<string, never> | null;
@@ -2285,11 +2845,155 @@ export interface components {
             /** @enum {string} */
             status?: "ACTIVE" | "INACTIVE";
         };
-        ImportJobEnvelopeDto: Record<string, never>;
-        ImportListEnvelopeDto: Record<string, never>;
-        InventoryListEnvelopeDto: Record<string, never>;
-        SkuInventoryEnvelopeDto: Record<string, never>;
-        TransactionListEnvelopeDto: Record<string, never>;
+        ImportJobResponseDto: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            importType: "SKU" | "BARCODE" | "WAREHOUSE" | "BIN" | "LISTING_MAPPING" | "INITIAL_INVENTORY";
+            /** @enum {string} */
+            status: "VALIDATED" | "PENDING_IMPORT" | "IMPORTING" | "COMPLETED" | "FAILED";
+            /** @example skus-2026.xlsx */
+            originalFilename: string;
+            /** @example 100 */
+            totalRows: number;
+            /** @example 92 */
+            validRows: number;
+            /** @example 8 */
+            invalidRows: number;
+            /** @example 92 */
+            importedRows: number;
+            /** @example 0 */
+            failedRows: number;
+            /** @description Row-level errors with exact Excel row numbers */
+            errors: string[];
+            createdBy: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** Format: date-time */
+            importedAt: Record<string, never> | null;
+        };
+        InventoryRowDto: {
+            id: string;
+            skuId: string;
+            /** @example VK87-BLK */
+            skuCode: string;
+            /** @example VK87 MAX V2 黑色 */
+            skuName: string;
+            warehouseId: string;
+            /** @example SZ01 */
+            warehouseCode: string;
+            /** @example 深圳自管仓 */
+            warehouseName: string;
+            binId: string;
+            /** @example SZ01-A01-01 */
+            binCode: string;
+            /** @enum {string} */
+            condition: "SELLABLE" | "QC_PENDING" | "DEFECTIVE" | "REPAIR" | "SCRAPPED";
+            /** @example 10.000 */
+            onHandQty: string;
+            /** @example 2.000 */
+            reservedQty: string;
+            /** @example 0.000 */
+            pickedQty: string;
+            /** @example 8.000 */
+            physicalAvailableQty: string;
+            /** @example 2.000 */
+            safetyQty: string;
+            /** @example 6.000 */
+            sellableAvailableQty: string;
+            /** @enum {string} */
+            status: "IN_STOCK" | "OUT_OF_STOCK";
+        };
+        SkuInventoryTotalsDto: {
+            onHandQty: string;
+            reservedQty: string;
+            pickedQty: string;
+            physicalAvailableQty: string;
+            safetyQty: string;
+            sellableAvailableQty: string;
+        };
+        SkuInventoryWarehouseDto: {
+            warehouseId: string;
+            warehouseCode: string;
+            warehouseName: string;
+            onHandQty: string;
+            reservedQty: string;
+            pickedQty: string;
+            physicalAvailableQty: string;
+            safetyQty: string;
+            sellableAvailableQty: string;
+        };
+        SkuInventoryDetailDto: {
+            skuId: string;
+            skuCode: string;
+            skuName: string;
+            totals: components["schemas"]["SkuInventoryTotalsDto"];
+            warehouses: components["schemas"]["SkuInventoryWarehouseDto"][];
+            bins: components["schemas"]["InventoryRowDto"][];
+        };
+        TransactionDto: {
+            id: string;
+            /** @example IEV00000042-1 */
+            transactionNo: string;
+            /** @example IEV00000042 */
+            eventNo: string;
+            /** @enum {string} */
+            eventType: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "RETURN_PICKED" | "MOVE_BIN" | "MANUAL_ADJUSTMENT";
+            /** @enum {string} */
+            transactionType: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "RETURN_PICKED" | "MOVE_BIN" | "MANUAL_ADJUSTMENT";
+            skuId: string;
+            skuCode: string;
+            warehouseId: string;
+            warehouseCode: string;
+            binId: string;
+            binCode: string;
+            quantityBefore: string;
+            quantityChange: string;
+            quantityAfter: string;
+            reservedBefore?: Record<string, never> | null;
+            reservedChange?: Record<string, never> | null;
+            reservedAfter?: Record<string, never> | null;
+            pickedBefore?: Record<string, never> | null;
+            pickedChange?: Record<string, never> | null;
+            pickedAfter?: Record<string, never> | null;
+            /** @enum {string} */
+            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT";
+            referenceId: string;
+            operatorId?: Record<string, never> | null;
+            operatorName?: Record<string, never> | null;
+            remark?: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        BalanceSnapshotDto: {
+            balanceId: string;
+            skuId: string;
+            warehouseId: string;
+            binId: string;
+            /** @enum {string} */
+            condition: "SELLABLE" | "QC_PENDING" | "DEFECTIVE" | "REPAIR" | "SCRAPPED";
+            /** @example 10.000 */
+            onHandQty: string;
+            /** @example 0.000 */
+            reservedQty: string;
+            /** @example 0.000 */
+            pickedQty: string;
+        };
+        StockChangeResultDto: {
+            /** @example IEV00000042 */
+            eventNo: string;
+            /**
+             * @example [
+             *       "IEV00000042-1"
+             *     ]
+             */
+            transactionNos: string[];
+            balance: components["schemas"]["BalanceSnapshotDto"];
+            /** @example false */
+            idempotentReplay: boolean;
+        };
         InitializeStockRequestDto: {
             skuId: string;
             warehouseId: string;
@@ -2314,7 +3018,6 @@ export interface components {
             /** @example INIT:PRD-VK87:2026-09-08 */
             idempotencyKey: string;
         };
-        StockChangeEnvelopeDto: Record<string, never>;
         ReceiveStockRequestDto: {
             skuId: string;
             warehouseId: string;
@@ -2358,6 +3061,21 @@ export interface components {
             remark?: string;
             idempotencyKey: string;
         };
+        MoveBinResultDto: {
+            /** @example IEV00000042 */
+            eventNo: string;
+            /**
+             * @example [
+             *       "IEV00000042-1"
+             *     ]
+             */
+            transactionNos: string[];
+            balance: components["schemas"]["BalanceSnapshotDto"];
+            /** @example false */
+            idempotentReplay: boolean;
+            fromBalance: Record<string, never>;
+            toBalance: Record<string, never>;
+        };
         MoveBinRequestDto: {
             skuId: string;
             warehouseId: string;
@@ -2376,7 +3094,41 @@ export interface components {
             remark?: string;
             idempotencyKey: string;
         };
-        MoveBinEnvelopeDto: Record<string, never>;
+        ReservationLineDto: {
+            id: string;
+            binId: string;
+            binCode: string;
+            quantity: string;
+            pickedQty: string;
+            status: string;
+        };
+        ReservationDto: {
+            id: string;
+            /** @example RSV00000001 */
+            reservationNo: string;
+            skuId: string;
+            skuCode: string;
+            warehouseId: string;
+            warehouseCode: string;
+            /** @enum {string} */
+            referenceType: "TEST" | "MANUAL" | "ORDER";
+            referenceId: string;
+            requestedQty: string;
+            /** @enum {string} */
+            status: "ACTIVE" | "PICKED" | "RELEASED" | "CONSUMED" | "CANCELLED";
+            remark?: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            pickedAt?: string | null;
+            /** Format: date-time */
+            releasedAt?: string | null;
+            /** Format: date-time */
+            consumedAt?: string | null;
+            lines: components["schemas"]["ReservationLineDto"][];
+            /** @example false */
+            idempotentReplay: boolean;
+        };
         ReserveStockRequestDto: {
             skuId: string;
             warehouseId: string;
@@ -2389,22 +3141,219 @@ export interface components {
             /** @example ORDER_RESERVE:orderItem123 */
             idempotencyKey: string;
         };
-        ReservationEnvelopeDto: Record<string, never>;
-        ReservationListEnvelopeDto: Record<string, never>;
+        ReservationListItemDto: {
+            id: string;
+            reservationNo: string;
+            skuId: string;
+            skuCode: string;
+            warehouseId: string;
+            warehouseCode: string;
+            referenceType: string;
+            referenceId: string;
+            requestedQty: string;
+            /** @enum {string} */
+            status: "ACTIVE" | "PICKED" | "RELEASED" | "CONSUMED" | "CANCELLED";
+            remark?: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            pickedAt?: string | null;
+            /** Format: date-time */
+            releasedAt?: string | null;
+            /** Format: date-time */
+            consumedAt?: string | null;
+        };
         ReservationLifecycleRequestDto: {
             /** @description 同一业务事件重复请求时传相同 key 以幂等重放 */
             idempotencyKey?: string;
             remark?: string;
         };
-        SafetyStockListEnvelopeDto: Record<string, never>;
+        SafetyStockDto: {
+            id: string;
+            skuId: string;
+            skuCode: string;
+            warehouseId: string;
+            warehouseCode: string;
+            safetyQty: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
         UpsertSafetyStockRequestDto: {
             /** @example 2 */
             safetyQty: string;
         };
-        SafetyStockEnvelopeDto: Record<string, never>;
+        ExceptionItemDto: {
+            id: string;
+            /** @example EXC00000001 */
+            exceptionNo: string;
+            /** @enum {string} */
+            exceptionType: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED";
+            /** @enum {string} */
+            severity: "LOW" | "MEDIUM" | "HIGH";
+            /** @enum {string} */
+            status: "OPEN" | "RESOLVED" | "IGNORED";
+            /** @example ORDER_ITEM */
+            referenceType: string;
+            referenceId: string;
+            storeId: string | null;
+            message: string;
+            details: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            resolvedAt: string | null;
+        };
         ExceptionCloseRequestDto: {
             /** @description 处理备注（记录在 details.closeRemark） */
             remark?: string;
+        };
+        OrderListItemDto: {
+            id: string;
+            /** @example ORD00000001 */
+            orderNo: string;
+            storeId: string;
+            /** @example OZON A店 */
+            storeName: string;
+            /** @example OZON */
+            platformCode: string;
+            /** @example 123456789 */
+            platformOrderId: string;
+            /** @example awaiting_packaging */
+            platformStatus: string | null;
+            /** @enum {string} */
+            erpStatus: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+            fulfillmentMode: string | null;
+            currency: string | null;
+            /** Format: date-time */
+            orderedAt: string;
+            /** Format: date-time */
+            createdAt: string;
+            itemsCount: number;
+            reservedCount: number;
+            backorderedCount: number;
+            pickedCount: number;
+            mappingFailedCount: number;
+            openExceptionsCount: number;
+        };
+        OrderItemExceptionDto: {
+            id: string;
+            /** @example EXC00000001 */
+            exceptionNo: string;
+            exceptionType: string;
+            status: string;
+            message: string;
+        };
+        OrderItemDto: {
+            id: string;
+            orderId: string;
+            lineNo: number;
+            platformProductId: string | null;
+            platformSkuId: string | null;
+            sellerSku: string | null;
+            offerId: string | null;
+            listingSkuId: string | null;
+            skuId: string | null;
+            /** @example VK87-BLK */
+            skuCode: string;
+            /** @example VK87 MAX V2 黑色 */
+            skuName: string;
+            warehouseId: string | null;
+            /** @example 2.000 */
+            quantity: string;
+            /** @enum {string} */
+            fulfillmentStatus: "PENDING" | "RESERVED" | "BACKORDERED" | "PICKED" | "SHIPPED" | "RELEASED";
+            /** @enum {string} */
+            mappingStatus: "PENDING" | "MAPPED" | "FAILED";
+            reservationId: string | null;
+            /** @description 库存预约（含多 Bin 分配行，task §49-§50） */
+            reservation: Record<string, never> | null;
+            rawData: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            exceptions: components["schemas"]["OrderItemExceptionDto"][];
+        };
+        OrderHistoryDto: {
+            id: string;
+            fromStatus: string | null;
+            toStatus: string;
+            reason: string | null;
+            operatorName: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        OrderInterceptionDto: {
+            id: string;
+            /** @example ITC00000001 */
+            interceptionNo: string;
+            orderItemId: string | null;
+            warehouseId: string;
+            /** @enum {string} */
+            status: "CREATED" | "ASSIGNED" | "LOCATING" | "INTERCEPTED" | "FAILED" | "RETURNED_TO_STOCK" | "CLOSED";
+            reason: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        OrderPickingTaskDto: {
+            id: string;
+            /** @example PCK00000001 */
+            pickingNo: string;
+            warehouseId: string;
+            status: string;
+            totalItems: number;
+            pickedItems: number;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        OrderDetailDto: {
+            id: string;
+            /** @example ORD00000001 */
+            orderNo: string;
+            storeId: string;
+            /** @example OZON A店 */
+            storeName: string;
+            /** @example OZON */
+            platformCode: string;
+            /** @example 123456789 */
+            platformOrderId: string;
+            platformStatus: string | null;
+            /** @enum {string} */
+            erpStatus: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+            fulfillmentMode: string | null;
+            currency: string | null;
+            /** Format: date-time */
+            orderedAt: string;
+            rawData: Record<string, never> | null;
+            remark: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            items: components["schemas"]["OrderItemDto"][];
+            history: components["schemas"]["OrderHistoryDto"][];
+            interceptions: components["schemas"]["OrderInterceptionDto"][];
+            pickingTasks: components["schemas"]["OrderPickingTaskDto"][];
+        };
+        OrderIngestItemResultDto: {
+            orderItemId: string;
+            lineNo: number;
+            /** @enum {string} */
+            mappingStatus: "PENDING" | "MAPPED" | "FAILED";
+            /** @enum {string} */
+            fulfillmentStatus: "PENDING" | "RESERVED" | "BACKORDERED" | "PICKED" | "SHIPPED" | "RELEASED";
+            skuId: string | null;
+            reservationId: string | null;
+        };
+        OrderIngestResultDto: {
+            orderId: string;
+            /** @example ORD00000001 */
+            orderNo: string;
+            /** @enum {string} */
+            erpStatus: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+            /** @example false */
+            alreadyIngested: boolean;
+            itemResults: components["schemas"]["OrderIngestItemResultDto"][];
         };
         NormalizedOrderItemInputDto: {
             platformProductId?: string;
@@ -2432,13 +3381,154 @@ export interface components {
             rawData?: Record<string, never>;
             remark?: string;
         };
+        OrderCancelResultDto: {
+            orderId: string;
+            /** @enum {string} */
+            erpStatus: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+            releasedItems: number;
+            interceptions: number;
+        };
         OrderCancelRequestDto: {
             /** @description 取消原因（记入历史与拦截任务） */
             reason?: string;
         };
+        OrderRetryAllocationResultDto: {
+            orderItemId: string;
+            /** @enum {string} */
+            fulfillmentStatus: "PENDING" | "RESERVED" | "BACKORDERED" | "PICKED" | "SHIPPED" | "RELEASED";
+            reserved: boolean;
+        };
+        NotificationDto: {
+            id: string;
+            /** @enum {string} */
+            type: "ORDER_INTERCEPTION_REQUIRED" | "ORDER_INTERCEPTION_FAILED";
+            /** @enum {string} */
+            channel: "SYSTEM" | "FEISHU";
+            /** @example ORDER_INTERCEPTION */
+            referenceType: string;
+            referenceId: string;
+            recipient: Record<string, never> | null;
+            /** @example 需要拦截：订单 ORD00000001 */
+            title: string;
+            content: string;
+            /** @enum {string} */
+            status: "PENDING" | "SENT" | "FAILED" | "CANCELLED";
+            attemptCount: number;
+            lastError: Record<string, never> | null;
+            /** Format: date-time */
+            sentAt: string | null;
+            /** Format: date-time */
+            failedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        RetryNotificationResultDto: {
+            id: string;
+            /** @enum {string} */
+            status: "PENDING" | "SENT" | "FAILED" | "CANCELLED";
+            message: string;
+        };
+        PickingTaskListItemDto: {
+            id: string;
+            /** @example PCK00000001 */
+            pickingNo: string;
+            warehouseId: string;
+            /** @example SZ01 */
+            warehouseCode: string;
+            /** @example 深圳自管仓 */
+            warehouseName: string;
+            /** @enum {string} */
+            status: "CREATED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+            ordersCount: number;
+            itemsTotal: number;
+            itemsPicked: number;
+            /** @example 5.000 */
+            requiredTotal: string;
+            /** @example 2.000 */
+            pickedTotal: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            startedAt: string | null;
+            /** Format: date-time */
+            completedAt: string | null;
+        };
+        CreatePickingTaskResultDto: {
+            tasks: components["schemas"]["PickingTaskListItemDto"][];
+        };
         CreatePickingTaskRequestDto: {
             /** @description 从该订单的 RESERVED 行生成拣货任务（按仓拆分） */
             orderId: string;
+        };
+        PickingBinLineDto: {
+            binId: string;
+            /** @example SZ01-A01-01 */
+            binCode: string;
+            /** @example 2.000 */
+            quantity: string;
+            /** @example 0.000 */
+            pickedQty: string;
+        };
+        PickingItemDto: {
+            id: string;
+            orderId: string;
+            orderItemId: string;
+            /** @example ORD00000001 */
+            orderNo: string;
+            skuId: string;
+            /** @example VK87-BLK */
+            skuCode: string;
+            /** @example VK87 MAX V2 黑色 */
+            skuName: string;
+            /** @description 主条码（扫码提示） */
+            primaryBarcode: string | null;
+            reservationId: string;
+            /** @example 2.000 */
+            requiredQty: string;
+            /** @example 1.000 */
+            pickedQty: string;
+            /** @enum {string} */
+            status: "PENDING" | "PICKED";
+            /** @description 目标库位分配（多 Bin 分别展示） */
+            binLines: components["schemas"]["PickingBinLineDto"][];
+            serialTracking: boolean;
+            /** @description SN 管理商品：该预约仍待拣的 SN（提示可扫序列号） */
+            pendingSerialNumbers: string[];
+        };
+        PickingTaskDetailDto: {
+            id: string;
+            /** @example PCK00000001 */
+            pickingNo: string;
+            warehouseId: string;
+            /** @example SZ01 */
+            warehouseCode: string;
+            /** @example 深圳自管仓 */
+            warehouseName: string;
+            /** @enum {string} */
+            status: "CREATED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+            ordersCount: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            startedAt: string | null;
+            /** Format: date-time */
+            completedAt: string | null;
+            items: components["schemas"]["PickingItemDto"][];
+        };
+        PickingScanResultDto: {
+            taskId: string;
+            itemId: string;
+            /** @example 2.000 */
+            pickedQty: string;
+            /** @example 2.000 */
+            requiredQty: string;
+            /** @enum {string} */
+            itemStatus: "PENDING" | "PICKED";
+            /** @enum {string} */
+            taskStatus: "CREATED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+            /** @description 本次扫描的 SN */
+            serialNumber: string | null;
+            message: string;
         };
         PickingScanRequestDto: {
             /**
@@ -2452,6 +3542,60 @@ export interface components {
             binBarcode?: string;
             /** @description 显式指定拣货行（同 SKU 多行时） */
             itemId?: string;
+        };
+        InterceptionListItemDto: {
+            id: string;
+            /** @example ITC00000001 */
+            interceptionNo: string;
+            orderId: string;
+            /** @example ORD00000001 */
+            orderNo: string;
+            warehouseId: string;
+            /** @example SZ01 */
+            warehouseCode: string;
+            /** @example SKU000001 */
+            skuCode: string;
+            /** @example 无线键盘 */
+            skuName: string;
+            /** @enum {string} */
+            status: "CREATED" | "ASSIGNED" | "LOCATING" | "INTERCEPTED" | "FAILED" | "RETURNED_TO_STOCK" | "CLOSED";
+            assignedToName: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        InterceptionDetailDto: {
+            id: string;
+            /** @example ITC00000001 */
+            interceptionNo: string;
+            orderId: string;
+            /** @example ORD00000001 */
+            orderNo: string;
+            orderErpStatus: string;
+            warehouseId: string;
+            /** @example SZ01 */
+            warehouseCode: string;
+            /** @enum {string} */
+            status: "CREATED" | "ASSIGNED" | "LOCATING" | "INTERCEPTED" | "FAILED" | "RETURNED_TO_STOCK" | "CLOSED";
+            reason: Record<string, never> | null;
+            assignedToName: string | null;
+            /** Format: date-time */
+            assignedAt: string | null;
+            /** Format: date-time */
+            scannedAt: string | null;
+            targetBinId: Record<string, never> | null;
+            failedReason: Record<string, never> | null;
+            /** Format: date-time */
+            failedAt: string | null;
+            /** Format: date-time */
+            returnedToStockAt: string | null;
+            /** Format: date-time */
+            closedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description 需要找回的订单行：SKU/数量/SN/原拣货库位/已打包包裹 */
+            item: Record<string, never> | null;
+            /** @description 状态迁移历史 */
+            history: Record<string, never>[];
         };
         AssignInterceptionRequestDto: {
             /**
@@ -2482,13 +3626,143 @@ export interface components {
             /** @example 在暂存区未找到商品 */
             reason?: string;
         };
-        ShipmentListEnvelopeDto: Record<string, never>;
+        ShipmentListItemDto: {
+            id: string;
+            /** @example SHP00000001 */
+            shipmentNo: string;
+            orderId: string;
+            /** @example ORD00000001 */
+            orderNo: string;
+            warehouseId: string;
+            /** @example SZ01 */
+            warehouseCode: string;
+            /** @example 深圳自管仓 */
+            warehouseName: string;
+            /** @enum {string} */
+            status: "DRAFT" | "READY_TO_PACK" | "PACKING" | "READY_TO_SHIP" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+            /** @example TRK123 */
+            trackingNumber: Record<string, never> | null;
+            packagesCount: number;
+            sealedPackagesCount: number;
+            itemsTotal: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            shippedAt: string | null;
+        };
+        CreateShipmentResultDto: {
+            shipments: components["schemas"]["ShipmentListItemDto"][];
+        };
         CreateShipmentRequestDto: {
             /** @description 从该订单的 PICKED 行创建发货单（按仓拆分，1 Shipment = 1 Warehouse） */
             orderId: string;
         };
-        CreateShipmentEnvelopeDto: Record<string, never>;
-        ShipmentEnvelopeDto: Record<string, never>;
+        ShipmentItemDto: {
+            id: string;
+            orderItemId: string;
+            skuId: string;
+            /** @example SKU000001 */
+            skuCode: string;
+            /** @example 无线键盘 */
+            skuName: string;
+            reservationId: string;
+            /**
+             * @description 本发货单应发数量（PICKED 快照）
+             * @example 2.000
+             */
+            quantity: string;
+            /**
+             * @description 已打包数量（全部包裹合计）
+             * @example 2.000
+             */
+            packedQty: string;
+            /** @description SN 管理商品 */
+            serialTracking: boolean;
+            /** @description 该行需要打包的 SN（SN 商品） */
+            serialNumbers: string[];
+            /** @enum {string} */
+            status: "ACTIVE" | "VOIDED";
+            /** Format: date-time */
+            voidedAt: string | null;
+            /** @description 作废操作人 users.id */
+            voidedBy: Record<string, never> | null;
+            /** @description 作废时操作人显示名快照 */
+            voidedByName: Record<string, never> | null;
+            voidReason: Record<string, never> | null;
+            /** @enum {string|null} */
+            voidSourceType: "ORDER_INTERCEPTION" | "MANUAL" | null;
+            /** @description 多态来源 ID，如 order_interceptions.id */
+            voidSourceId: Record<string, never> | null;
+        };
+        PackageItemDto: {
+            id: string;
+            orderItemId: string;
+            skuId: string;
+            /** @example SKU000001 */
+            skuCode: string;
+            /** @example 无线键盘 */
+            skuName: string;
+            /** @example 2.000 */
+            quantity: string;
+            serialNumbers: string[];
+        };
+        PackageListItemDto: {
+            id: string;
+            /** @example PKG00000001 */
+            packageNo: string;
+            shipmentId: string;
+            /** @enum {string} */
+            status: "OPEN" | "SEALED" | "SHIPPED" | "CANCELLED" | "REPACK_REQUIRED";
+            /** Format: date-time */
+            sealedAt: string | null;
+            items: components["schemas"]["PackageItemDto"][];
+            /**
+             * @description 包裹内件数合计
+             * @example 3.000
+             */
+            totalQty: string;
+            /** Format: date-time */
+            createdAt: string | null;
+        };
+        ShipmentDetailDto: {
+            id: string;
+            /** @example SHP00000001 */
+            shipmentNo: string;
+            orderId: string;
+            /** @example ORD00000001 */
+            orderNo: string;
+            warehouseId: string;
+            /** @example SZ01 */
+            warehouseCode: string;
+            /** @example 深圳自管仓 */
+            warehouseName: string;
+            /** @enum {string} */
+            status: "DRAFT" | "READY_TO_PACK" | "PACKING" | "READY_TO_SHIP" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+            /** @example TRK123 */
+            trackingNumber: Record<string, never> | null;
+            /** @example CDEK */
+            carrierCode: Record<string, never> | null;
+            /** @example EXPRESS */
+            shippingMethod: Record<string, never> | null;
+            /** Format: date-time */
+            shippedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description 待发商品快照与打包进度（仅 ACTIVE） */
+            items: components["schemas"]["ShipmentItemDto"][];
+            /** @description 已作废 / 历史记录（VOIDED，永久保留，不参与任何计算） */
+            voidedItems: components["schemas"]["ShipmentItemDto"][];
+            packages: components["schemas"]["PackageListItemDto"][];
+            /** @description 面单元数据（含签名查看 URL） */
+            labels: Record<string, never>[];
+        };
+        CreatePackageResultDto: {
+            packageId: string;
+            /** @example PKG00000001 */
+            packageNo: string;
+            /** @enum {string} */
+            shipmentStatus: "DRAFT" | "READY_TO_PACK" | "PACKING" | "READY_TO_SHIP" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+        };
         UpdateShipmentTrackingRequestDto: {
             /**
              * @description 人工录入物流单号（未来 Adapter 自动填入）
@@ -2500,13 +3774,102 @@ export interface components {
             /** @example EXPRESS */
             shippingMethod?: string;
         };
+        ShipShipmentResultDto: {
+            shipmentId: string;
+            /** @enum {string} */
+            status: "DRAFT" | "READY_TO_PACK" | "PACKING" | "READY_TO_SHIP" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+            /** Format: date-time */
+            shippedAt: string | null;
+            /** @description 重复出库时为 true（未再次扣减库存） */
+            alreadyShipped: boolean;
+            /** @example ORD00000001 */
+            orderNo: string;
+            /** @description 出库后订单 ERP 状态 */
+            orderErpStatus: string;
+            /** @description 本次出库产生的库存事件号 */
+            eventNos: string[];
+        };
         ShipShipmentRequestDto: {
             /** @description 幂等键：重复提交同一键不会重复扣减库存 */
             idempotencyKey?: string;
             /** @description 出库时顺带录入物流信息 */
             tracking?: components["schemas"]["UpdateShipmentTrackingRequestDto"];
         };
-        LabelListEnvelopeDto: Record<string, never>;
+        ShippingLabelDto: {
+            id: string;
+            shipmentId: string;
+            packageId: Record<string, never> | null;
+            /** @enum {string} */
+            labelType: "SHIPPING";
+            /** @example 面单.pdf */
+            fileName: string;
+            /** @example application/pdf */
+            mimeType: string;
+            fileSize: number;
+            /** @example MANUAL_UPLOAD */
+            source: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description 短期有效的私有文件签名 URL（浏览器打开/打印） */
+            signedUrl: string;
+        };
+        PackageWorkbenchItemDto: {
+            id: string;
+            orderItemId: string;
+            skuId: string;
+            /** @example SKU000001 */
+            skuCode: string;
+            /** @example 无线键盘 */
+            skuName: string;
+            /** @example 2.000 */
+            quantity: string;
+            serialNumbers: string[];
+        };
+        PackageWorkbenchDemandDto: {
+            orderItemId: string;
+            skuId: string;
+            /** @example SKU000001 */
+            skuCode: string;
+            /** @example 无线键盘 */
+            skuName: string;
+            primaryBarcode: string | null;
+            /** @example 2.000 */
+            requiredQty: string;
+            /** @example 1.000 */
+            packedQty: string;
+            /** @description SN 管理商品 */
+            serialTracking: boolean;
+            /** @description SN 商品尚未装箱的 SN */
+            pendingSerialNumbers: string[];
+        };
+        PackageWorkbenchDto: {
+            /** @description 包裹头（id/packageNo/shipmentId/status/sealedAt/createdAt） */
+            package: Record<string, never>;
+            /** @example SHP00000001 */
+            shipmentNo: string;
+            /** @enum {string} */
+            shipmentStatus: "DRAFT" | "READY_TO_PACK" | "PACKING" | "READY_TO_SHIP" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+            /** @description 已装明细 */
+            items: components["schemas"]["PackageWorkbenchItemDto"][];
+            /** @description 待装商品与扫码进度 */
+            demand: components["schemas"]["PackageWorkbenchDemandDto"][];
+        };
+        PackingScanResultDto: {
+            packageId: string;
+            orderItemId: string;
+            skuId: string;
+            /** @example SKU000001 */
+            skuCode: string;
+            /** @example 1.000 */
+            packedQty: string;
+            /**
+             * @description 该行应打包总数
+             * @example 2.000
+             */
+            requiredQty: string;
+            serialNumber: string | null;
+            message: string;
+        };
         PackingScanRequestDto: {
             /**
              * @description SKU 条码（扫码器=键盘输入，每次 1 件）
@@ -2515,6 +3878,16 @@ export interface components {
             barcode: string;
             /** @description SN 管理商品必填 */
             serialNumber?: string;
+        };
+        SealPackageResultDto: {
+            packageId: string;
+            /** @enum {string} */
+            packageStatus: "OPEN" | "SEALED" | "SHIPPED" | "CANCELLED" | "REPACK_REQUIRED";
+            shipmentId: string;
+            /** @enum {string} */
+            shipmentStatus: "DRAFT" | "READY_TO_PACK" | "PACKING" | "READY_TO_SHIP" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+            /** @example 2.000 */
+            totalQty: string;
         };
         PackageDimensionsDto: {
             /** @example 1.250 */
@@ -2530,9 +3903,24 @@ export interface components {
             /** @description 封箱时录入重量/尺寸 */
             dimensions?: components["schemas"]["PackageDimensionsDto"];
         };
-        CreateTestJobDto: Record<string, never>;
-        TestJobResponseDto: Record<string, never>;
-        StorageTestResponseDto: Record<string, never>;
+        TestJobResultDto: {
+            /** @example 42 */
+            jobId: string;
+            /** @example wcies.test */
+            queue: string;
+        };
+        CreateTestJobDto: {
+            /** @example hello */
+            message?: string;
+        };
+        StorageTestData: {
+            /** @example dev/storage-test-<uuid>.txt */
+            objectKey: string;
+            /** @example http://localhost:9000/wcies/dev/storage-test-....txt?X-Amz-... */
+            signedUrl: string;
+            /** @example true */
+            verified: boolean;
+        };
     };
     responses: never;
     parameters: never;
@@ -2556,7 +3944,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LivenessResponseDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["LivenessData"];
+                    };
                 };
             };
         };
@@ -2575,7 +3967,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LivenessResponseDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["LivenessData"];
+                    };
                 };
             };
         };
@@ -2594,7 +3990,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReadinessResponseDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ReadinessData"];
+                    };
                 };
             };
         };
@@ -2617,7 +4017,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LoginResponseDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["LoginResponseDataDto"];
+                    };
                 };
             };
         };
@@ -2636,7 +4040,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UserEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["UserResponseDto"];
+                    };
                 };
             };
         };
@@ -2655,7 +4063,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LogoutResponseDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
                 };
             };
         };
@@ -2674,7 +4086,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PlatformListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PlatformResponseDto"];
+                    };
                 };
             };
         };
@@ -2695,7 +4111,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PlatformEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PlatformResponseDto"];
+                    };
                 };
             };
         };
@@ -2719,7 +4139,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StoreListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["StoreListItemDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
                 };
             };
         };
@@ -2742,7 +4171,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StoreEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["StoreResponseDto"];
+                    };
                 };
             };
         };
@@ -2763,7 +4196,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StoreEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["StoreResponseDto"];
+                    };
                 };
             };
         };
@@ -2788,7 +4225,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StoreEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["StoreResponseDto"];
+                    };
                 };
             };
         };
@@ -2809,7 +4250,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StoreEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["StoreResponseDto"];
+                    };
                 };
             };
         };
@@ -2830,7 +4275,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StoreEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["StoreResponseDto"];
+                    };
                 };
             };
         };
@@ -2851,7 +4300,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CredentialListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["CredentialResponseDto"][];
+                    };
                 };
             };
         };
@@ -2876,7 +4329,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CredentialEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["CredentialResponseDto"];
+                    };
                 };
             };
         };
@@ -2902,7 +4359,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CredentialEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["CredentialResponseDto"];
+                    };
                 };
             };
         };
@@ -2924,7 +4385,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CredentialEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["CredentialResponseDto"];
+                    };
                 };
             };
         };
@@ -2945,7 +4410,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BrandListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BrandResponseDto"];
+                    };
                 };
             };
         };
@@ -2968,7 +4437,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BrandEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BrandResponseDto"];
+                    };
                 };
             };
         };
@@ -2993,7 +4466,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BrandEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BrandResponseDto"];
+                    };
                 };
             };
         };
@@ -3012,7 +4489,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CategoryTreeEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["CategoryTreeItemDto"];
+                    };
                 };
             };
         };
@@ -3035,7 +4516,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CategoryEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["CategoryResponseDto"];
+                    };
                 };
             };
         };
@@ -3060,7 +4545,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CategoryEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["CategoryResponseDto"];
+                    };
                 };
             };
         };
@@ -3087,7 +4576,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ProductListItemDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
                 };
             };
         };
@@ -3110,7 +4608,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ProductResponseDto"];
+                    };
                 };
             };
         };
@@ -3131,7 +4633,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductDetailEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ProductDetailDto"];
+                    };
                 };
             };
         };
@@ -3156,7 +4662,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ProductResponseDto"];
+                    };
                 };
             };
         };
@@ -3177,7 +4687,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ProductResponseDto"];
+                    };
                 };
             };
         };
@@ -3198,7 +4712,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ProductResponseDto"];
+                    };
                 };
             };
         };
@@ -3233,7 +4751,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SkuListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SkuListItemDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
                 };
             };
         };
@@ -3256,7 +4783,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SkuEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SkuResponseDto"];
+                    };
                 };
             };
         };
@@ -3277,7 +4808,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SkuEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SkuResponseDto"];
+                    };
                 };
             };
         };
@@ -3302,7 +4837,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SkuEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SkuResponseDto"];
+                    };
                 };
             };
         };
@@ -3323,7 +4862,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SkuEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SkuResponseDto"];
+                    };
                 };
             };
         };
@@ -3344,7 +4887,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SkuEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SkuResponseDto"];
+                    };
                 };
             };
         };
@@ -3365,7 +4912,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BarcodeListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BarcodeResponseDto"][];
+                    };
                 };
             };
         };
@@ -3390,7 +4941,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BarcodeEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BarcodeResponseDto"];
+                    };
                 };
             };
         };
@@ -3411,7 +4966,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BarcodeEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BarcodeResponseDto"];
+                    };
                 };
             };
         };
@@ -3432,7 +4991,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
             };
         };
     };
@@ -3457,7 +5022,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BarcodeEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BarcodeResponseDto"];
+                    };
                 };
             };
         };
@@ -3478,7 +5047,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ImageListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SkuImageResponseDto"][];
+                    };
                 };
             };
         };
@@ -3499,7 +5072,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ImageEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SkuImageResponseDto"];
+                    };
                 };
             };
         };
@@ -3520,7 +5097,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
             };
         };
     };
@@ -3545,7 +5128,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ImageEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SkuImageResponseDto"];
+                    };
                 };
             };
         };
@@ -3569,7 +5156,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WarehouseListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["WarehouseListItemDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
                 };
             };
         };
@@ -3592,7 +5188,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WarehouseEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["WarehouseResponseDto"];
+                    };
                 };
             };
         };
@@ -3613,7 +5213,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WarehouseEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["WarehouseResponseDto"];
+                    };
                 };
             };
         };
@@ -3638,7 +5242,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WarehouseEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["WarehouseResponseDto"];
+                    };
                 };
             };
         };
@@ -3659,7 +5267,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WarehouseEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["WarehouseResponseDto"];
+                    };
                 };
             };
         };
@@ -3680,7 +5292,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WarehouseEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["WarehouseResponseDto"];
+                    };
                 };
             };
         };
@@ -3705,7 +5321,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BinListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BinResponseDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
                 };
             };
         };
@@ -3730,7 +5355,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BinEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BinResponseDto"];
+                    };
                 };
             };
         };
@@ -3755,7 +5384,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BatchBinsEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BatchCreateBinsResponseDto"];
+                    };
                 };
             };
         };
@@ -3781,7 +5414,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BinEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BinResponseDto"];
+                    };
                 };
             };
         };
@@ -3803,7 +5440,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BinEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BinResponseDto"];
+                    };
                 };
             };
         };
@@ -3825,7 +5466,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BinEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BinResponseDto"];
+                    };
                 };
             };
         };
@@ -3848,7 +5493,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BindingListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BindingResponseDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
                 };
             };
         };
@@ -3869,7 +5523,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BindingListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BindingResponseDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
                 };
             };
         };
@@ -3894,7 +5557,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BindingEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BindingResponseDto"];
+                    };
                 };
             };
         };
@@ -3920,7 +5587,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BindingEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BindingResponseDto"];
+                    };
                 };
             };
         };
@@ -3942,7 +5613,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BindingEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BindingResponseDto"];
+                    };
                 };
             };
         };
@@ -3964,7 +5639,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BindingEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BindingResponseDto"];
+                    };
                 };
             };
         };
@@ -3992,7 +5671,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ListingListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ListingResponseDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
                 };
             };
         };
@@ -4015,7 +5703,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ListingDetailEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ListingDetailDto"];
+                    };
                 };
             };
         };
@@ -4040,7 +5732,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ResolveEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ResolveSkuResponseDto"];
+                    };
                 };
             };
         };
@@ -4061,7 +5757,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SkuMappingsEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SkuMappingRowDto"][];
+                    };
                 };
             };
         };
@@ -4082,7 +5782,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ListingDetailEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ListingDetailDto"];
+                    };
                 };
             };
         };
@@ -4107,7 +5811,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ListingDetailEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ListingDetailDto"];
+                    };
                 };
             };
         };
@@ -4128,7 +5836,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ListingDetailEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ListingDetailDto"];
+                    };
                 };
             };
         };
@@ -4149,7 +5861,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ListingDetailEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ListingDetailDto"];
+                    };
                 };
             };
         };
@@ -4174,7 +5890,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ListingSkuEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ListingSkuResponseDto"];
+                    };
                 };
             };
         };
@@ -4195,7 +5915,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
             };
         };
     };
@@ -4220,7 +5946,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ListingSkuEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ListingSkuResponseDto"];
+                    };
                 };
             };
         };
@@ -4241,7 +5971,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ImportJobEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ImportJobResponseDto"];
+                    };
                 };
             };
         };
@@ -4262,7 +5996,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ImportJobEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ImportJobResponseDto"];
+                    };
                 };
             };
         };
@@ -4284,7 +6022,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ImportListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ImportJobResponseDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
                 };
             };
         };
@@ -4305,7 +6052,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ImportJobEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ImportJobResponseDto"];
+                    };
                 };
             };
         };
@@ -4332,7 +6083,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InventoryListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["InventoryRowDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
                 };
             };
         };
@@ -4353,7 +6113,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SkuInventoryEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SkuInventoryDetailDto"];
+                    };
                 };
             };
         };
@@ -4381,7 +6145,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TransactionListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["TransactionDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
                 };
             };
         };
@@ -4404,7 +6177,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StockChangeEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["StockChangeResultDto"];
+                    };
                 };
             };
         };
@@ -4427,7 +6204,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StockChangeEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["StockChangeResultDto"];
+                    };
                 };
             };
         };
@@ -4450,7 +6231,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StockChangeEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["StockChangeResultDto"];
+                    };
                 };
             };
         };
@@ -4473,7 +6258,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MoveBinEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["MoveBinResultDto"];
+                    };
                 };
             };
         };
@@ -4498,7 +6287,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReservationListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ReservationListItemDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
                 };
             };
         };
@@ -4521,7 +6319,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReservationEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ReservationDto"];
+                    };
                 };
             };
         };
@@ -4542,7 +6344,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReservationEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ReservationDto"];
+                    };
                 };
             };
         };
@@ -4567,7 +6373,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReservationEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ReservationDto"];
+                    };
                 };
             };
         };
@@ -4592,7 +6402,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReservationEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ReservationDto"];
+                    };
                 };
             };
         };
@@ -4617,7 +6431,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReservationEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ReservationDto"];
+                    };
                 };
             };
         };
@@ -4642,7 +6460,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReservationEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ReservationDto"];
+                    };
                 };
             };
         };
@@ -4664,7 +6486,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SafetyStockListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SafetyStockDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
                 };
             };
         };
@@ -4690,7 +6521,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SafetyStockEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SafetyStockDto"];
+                    };
                 };
             };
         };
@@ -4714,7 +6549,18 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ExceptionItemDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
             };
         };
     };
@@ -4733,7 +6579,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ExceptionItemDto"];
+                    };
+                };
             };
         };
     };
@@ -4756,7 +6608,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ExceptionItemDto"];
+                    };
+                };
             };
         };
     };
@@ -4779,7 +6637,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ExceptionItemDto"];
+                    };
+                };
             };
         };
     };
@@ -4801,7 +6665,18 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderListItemDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
             };
         };
     };
@@ -4820,7 +6695,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderDetailDto"];
+                    };
+                };
             };
         };
     };
@@ -4841,7 +6722,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderIngestResultDto"];
+                    };
+                };
             };
         };
     };
@@ -4864,7 +6751,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderCancelResultDto"];
+                    };
+                };
             };
         };
     };
@@ -4883,7 +6776,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderRetryAllocationResultDto"];
+                    };
+                };
             };
         };
     };
@@ -4905,7 +6804,18 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["NotificationDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
             };
         };
     };
@@ -4924,7 +6834,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["NotificationDto"];
+                    };
+                };
             };
         };
     };
@@ -4943,7 +6859,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["RetryNotificationResultDto"];
+                    };
+                };
             };
         };
     };
@@ -4964,7 +6886,18 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PickingTaskListItemDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
             };
         };
     };
@@ -4981,11 +6914,17 @@ export interface operations {
             };
         };
         responses: {
-            201: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["CreatePickingTaskResultDto"];
+                    };
+                };
             };
         };
     };
@@ -5004,7 +6943,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PickingTaskDetailDto"];
+                    };
+                };
             };
         };
     };
@@ -5023,7 +6968,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PickingTaskDetailDto"];
+                    };
+                };
             };
         };
     };
@@ -5046,7 +6997,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PickingScanResultDto"];
+                    };
+                };
             };
         };
     };
@@ -5065,7 +7022,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PickingTaskDetailDto"];
+                    };
+                };
             };
         };
     };
@@ -5086,7 +7049,18 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["InterceptionListItemDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
             };
         };
     };
@@ -5105,7 +7079,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["InterceptionDetailDto"];
+                    };
+                };
             };
         };
     };
@@ -5128,7 +7108,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["InterceptionDetailDto"];
+                    };
+                };
             };
         };
     };
@@ -5147,7 +7133,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["InterceptionDetailDto"];
+                    };
+                };
             };
         };
     };
@@ -5170,7 +7162,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["InterceptionDetailDto"];
+                    };
+                };
             };
         };
     };
@@ -5193,7 +7191,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["InterceptionDetailDto"];
+                    };
+                };
             };
         };
     };
@@ -5216,7 +7220,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["InterceptionDetailDto"];
+                    };
+                };
             };
         };
     };
@@ -5235,7 +7245,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["InterceptionDetailDto"];
+                    };
+                };
             };
         };
     };
@@ -5259,7 +7275,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ShipmentListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ShipmentListItemDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
                 };
             };
         };
@@ -5282,7 +7307,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CreateShipmentEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["CreateShipmentResultDto"];
+                    };
                 };
             };
         };
@@ -5303,7 +7332,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ShipmentEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ShipmentDetailDto"];
+                    };
                 };
             };
         };
@@ -5319,11 +7352,17 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            201: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["CreatePackageResultDto"];
+                    };
+                };
             };
         };
     };
@@ -5347,7 +7386,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ShipmentEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ShipmentDetailDto"];
+                    };
                 };
             };
         };
@@ -5371,7 +7414,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ShipShipmentResultDto"];
+                    };
+                };
             };
         };
     };
@@ -5391,7 +7440,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LabelListEnvelopeDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ShippingLabelDto"];
+                    };
                 };
             };
         };
@@ -5407,11 +7460,17 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            201: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ShippingLabelDto"];
+                    };
+                };
             };
         };
     };
@@ -5430,7 +7489,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PackageWorkbenchDto"];
+                    };
+                };
             };
         };
     };
@@ -5453,7 +7518,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PackingScanResultDto"];
+                    };
+                };
             };
         };
     };
@@ -5476,7 +7547,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SealPackageResultDto"];
+                    };
+                };
             };
         };
     };
@@ -5498,7 +7575,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TestJobResponseDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["TestJobResultDto"];
+                    };
                 };
             };
         };
@@ -5517,7 +7598,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StorageTestResponseDto"];
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["StorageTestData"];
+                    };
                 };
             };
         };

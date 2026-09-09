@@ -1,17 +1,14 @@
 import { Controller, Get } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { ok } from '../../../common/dto/api-response';
+import { ApiOkEnvelope } from '../../../common/swagger/api-envelope';
 import { ServiceUnavailableError } from '../../../common/errors/common-errors';
 import { Public } from '../../auth/decorators/public.decorator';
 import { HealthService } from '../services/health.service';
 
 export class LivenessData {
+  @ApiProperty({ example: 'ok' })
   status!: 'ok';
-}
-
-export class LivenessResponseDto {
-  success!: true;
-  data!: LivenessData;
 }
 
 export class ReadinessChecksDto {
@@ -23,13 +20,10 @@ export class ReadinessChecksDto {
 }
 
 export class ReadinessData {
+  @ApiProperty({ example: 'ok' })
   status!: 'ok';
+  @ApiProperty({ type: ReadinessChecksDto })
   checks!: ReadinessChecksDto;
-}
-
-export class ReadinessResponseDto {
-  success!: true;
-  data!: ReadinessData;
 }
 
 /**
@@ -44,24 +38,24 @@ export class HealthController {
   @Public()
   @Get()
   @ApiOperation({ summary: 'Liveness probe (alias of /health/live)' })
-  @ApiOkResponse({ type: LivenessResponseDto })
-  getLiveAlias(): LivenessResponseDto {
+  @ApiOkEnvelope(LivenessData)
+  getLiveAlias(): { success: true; data: LivenessData } {
     return ok<LivenessData>({ status: 'ok' });
   }
 
   @Public()
   @Get('live')
   @ApiOperation({ summary: 'Liveness probe - API process only' })
-  @ApiOkResponse({ type: LivenessResponseDto })
-  getLive(): LivenessResponseDto {
+  @ApiOkEnvelope(LivenessData)
+  getLive(): { success: true; data: LivenessData } {
     return ok<LivenessData>({ status: 'ok' });
   }
 
   @Public()
   @Get('ready')
   @ApiOperation({ summary: 'Readiness probe - checks PostgreSQL and Redis' })
-  @ApiOkResponse({ type: ReadinessResponseDto })
-  async getReady(): Promise<ReadinessResponseDto> {
+  @ApiOkEnvelope(ReadinessData)
+  async getReady(): Promise<{ success: true; data: ReadinessData }> {
     const result = await this.healthService.checkReadiness();
     if (!result.allUp) {
       throw new ServiceUnavailableError('One or more dependencies are not ready', {

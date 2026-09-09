@@ -32,7 +32,8 @@
     "seed:sprint1": "pnpm --filter @wcies/api seed:sprint1",
     "openapi:export": "pnpm --filter @wcies/api openapi:export",
     "api-client:generate": "tsx scripts/generate-api-client.ts",
-    "prepare": "husky"
+    "prepare": "husky",
+    "check:openapi": "tsx scripts/check-openapi.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

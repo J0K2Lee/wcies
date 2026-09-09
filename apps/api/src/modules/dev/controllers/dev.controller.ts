@@ -1,12 +1,14 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
-import { ApiOkResponse, ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { Queue } from 'bullmq';
 import { IsOptional, IsString, MaxLength } from 'class-validator';
 import { ok } from '../../../common/dto/api-response';
+import { ApiOkEnvelope } from '../../../common/swagger/api-envelope';
 import { QUEUE_NAMES } from '../../../infrastructure/queue/queue.constants';
 
 export class CreateTestJobDto {
+  @ApiPropertyOptional({ example: 'hello', maxLength: 500 })
   @IsOptional()
   @IsString()
   @MaxLength(500)
@@ -25,11 +27,6 @@ export class TestJobResultDto {
   queue!: string;
 }
 
-export class TestJobResponseDto {
-  success!: true;
-  data!: TestJobResultDto;
-}
-
 /**
  * Development-only helper endpoints. The whole DevModule is not registered
  * in production, so these routes return 404 there (Sprint 0 task §17).
@@ -42,8 +39,10 @@ export class DevController {
   @Post('test-job')
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({ summary: '[DEV ONLY] Enqueue a test job into wcies.test queue' })
-  @ApiOkResponse({ type: TestJobResponseDto })
-  async createTestJob(@Body() dto: CreateTestJobDto): Promise<TestJobResponseDto> {
+  @ApiOkEnvelope(TestJobResultDto)
+  async createTestJob(
+    @Body() dto: CreateTestJobDto,
+  ): Promise<{ success: true; data: TestJobResultDto }> {
     const job = await this.testQueue.add(
       'test',
       { message: dto.message ?? 'hello' },

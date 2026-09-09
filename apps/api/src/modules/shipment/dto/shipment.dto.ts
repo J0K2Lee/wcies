@@ -242,6 +242,56 @@ export class CreateShipmentResultDto {
   @ApiProperty({ type: [ShipmentListItemDto] }) shipments!: ShipmentListItemDto[];
 }
 
+export class CreatePackageResultDto {
+  @ApiProperty() packageId!: string;
+  @ApiProperty({ example: 'PKG00000001' }) packageNo!: string;
+  @ApiProperty({ enum: SHIPMENT_STATUSES }) shipmentStatus!: string;
+}
+
+export class PackageWorkbenchItemDto {
+  @ApiProperty() id!: string;
+  @ApiProperty() orderItemId!: string;
+  @ApiProperty() skuId!: string;
+  @ApiProperty({ example: 'SKU000001' }) skuCode!: string;
+  @ApiProperty({ example: '无线键盘' }) skuName!: string;
+  @ApiProperty({ example: '2.000' }) quantity!: string;
+  @ApiProperty({ type: [String] }) serialNumbers!: string[];
+}
+
+export class PackageWorkbenchDemandDto {
+  @ApiProperty() orderItemId!: string;
+  @ApiProperty() skuId!: string;
+  @ApiProperty({ example: 'SKU000001' }) skuCode!: string;
+  @ApiProperty({ example: '无线键盘' }) skuName!: string;
+  @ApiProperty({ nullable: true, type: String }) primaryBarcode!: string | null;
+  @ApiProperty({ example: '2.000' }) requiredQty!: string;
+  @ApiProperty({ example: '1.000' }) packedQty!: string;
+  @ApiProperty({ description: 'SN 管理商品' }) serialTracking!: boolean;
+  @ApiProperty({ type: [String], description: 'SN 商品尚未装箱的 SN' })
+  pendingSerialNumbers!: string[];
+}
+
+export class PackageWorkbenchDto {
+  @ApiProperty({
+    type: Object,
+    description: '包裹头（id/packageNo/shipmentId/status/sealedAt/createdAt）',
+  })
+  package!: {
+    id: string;
+    packageNo: string;
+    shipmentId: string;
+    status: string;
+    sealedAt: Date | null;
+    createdAt: Date;
+  };
+  @ApiProperty({ example: 'SHP00000001' }) shipmentNo!: string;
+  @ApiProperty({ enum: SHIPMENT_STATUSES }) shipmentStatus!: string;
+  @ApiProperty({ type: [PackageWorkbenchItemDto], description: '已装明细' })
+  items!: PackageWorkbenchItemDto[];
+  @ApiProperty({ type: [PackageWorkbenchDemandDto], description: '待装商品与扫码进度' })
+  demand!: PackageWorkbenchDemandDto[];
+}
+
 export class PackingScanResultDto {
   @ApiProperty() packageId!: string;
   @ApiProperty() orderItemId!: string;

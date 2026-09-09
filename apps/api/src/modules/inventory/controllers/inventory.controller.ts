@@ -10,9 +10,10 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PageMeta } from '@wcies/shared';
 import { ok, okPage } from '../../../common/dto/api-response';
+import { ApiOkEnvelope, ApiOkPagedEnvelope } from '../../../common/swagger/api-envelope';
 import { CurrentOperator } from '../../../common/decorators/current-operator.decorator';
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import { AdminGuard } from '../../auth/guards/admin.guard';
@@ -44,48 +45,6 @@ import {
   UpsertSafetyStockRequestDto,
 } from '../dto/inventory.dto';
 
-// Envelope shapes for truthful OpenAPI output types (Sprint 0 §11).
-class InventoryListEnvelopeDto {
-  success!: true;
-  data!: InventoryRowDto[];
-  meta!: PageMeta;
-}
-class SkuInventoryEnvelopeDto {
-  success!: true;
-  data!: SkuInventoryDetailDto;
-}
-class StockChangeEnvelopeDto {
-  success!: true;
-  data!: StockChangeResultDto;
-}
-class MoveBinEnvelopeDto {
-  success!: true;
-  data!: MoveBinResultDto;
-}
-class TransactionListEnvelopeDto {
-  success!: true;
-  data!: TransactionDto[];
-  meta!: PageMeta;
-}
-class ReservationListEnvelopeDto {
-  success!: true;
-  data!: ReservationListItemDto[];
-  meta!: PageMeta;
-}
-class ReservationEnvelopeDto {
-  success!: true;
-  data!: ReservationDto;
-}
-class SafetyStockListEnvelopeDto {
-  success!: true;
-  data!: SafetyStockDto[];
-  meta!: PageMeta;
-}
-class SafetyStockEnvelopeDto {
-  success!: true;
-  data!: SafetyStockDto;
-}
-
 /**
  * Inventory core HTTP API (task §41-§45): read models are authenticated;
  * initialize / receive / adjust are admin-only (task §38/§45). Reservation
@@ -103,8 +62,10 @@ export class InventoryController {
 
   @Get('inventory')
   @ApiOperation({ summary: 'List inventory balances with derived availability' })
-  @ApiOkResponse({ type: InventoryListEnvelopeDto })
-  async list(@Query() query: InventoryListQueryDto): Promise<InventoryListEnvelopeDto> {
+  @ApiOkPagedEnvelope(InventoryRowDto)
+  async list(
+    @Query() query: InventoryListQueryDto,
+  ): Promise<{ success: true; data: InventoryRowDto[]; meta: PageMeta }> {
     const { items, meta } = await this.queryService.listBalances(
       {
         keyword: query.keyword?.trim() || undefined,
@@ -121,17 +82,19 @@ export class InventoryController {
 
   @Get('inventory/skus/:skuId')
   @ApiOperation({ summary: 'SKU inventory drilldown: totals -> warehouses -> bins' })
-  @ApiOkResponse({ type: SkuInventoryEnvelopeDto })
-  async getSkuInventory(@Param('skuId') skuId: string): Promise<SkuInventoryEnvelopeDto> {
+  @ApiOkEnvelope(SkuInventoryDetailDto)
+  async getSkuInventory(
+    @Param('skuId') skuId: string,
+  ): Promise<{ success: true; data: SkuInventoryDetailDto }> {
     return ok(await this.queryService.getSkuInventory(skuId));
   }
 
   @Get('inventory/transactions')
   @ApiOperation({ summary: 'Inventory transaction ledger (audit)' })
-  @ApiOkResponse({ type: TransactionListEnvelopeDto })
+  @ApiOkPagedEnvelope(TransactionDto)
   async listTransactions(
     @Query() query: TransactionListQueryDto,
-  ): Promise<TransactionListEnvelopeDto> {
+  ): Promise<{ success: true; data: TransactionDto[]; meta: PageMeta }> {
     const { items, meta } = await this.queryService.listTransactions(
       {
         skuId: query.skuId,
@@ -152,11 +115,11 @@ export class InventoryController {
   @UseGuards(AdminGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '[Admin] Initialize stock (first go-live import only)' })
-  @ApiOkResponse({ type: StockChangeEnvelopeDto })
+  @ApiOkEnvelope(StockChangeResultDto)
   async initialize(
     @Body() dto: InitializeStockRequestDto,
     @CurrentOperator() operator: OperatorContext,
-  ): Promise<StockChangeEnvelopeDto> {
+  ): Promise<{ success: true; data: StockChangeResultDto }> {
     return ok(
       await this.inventoryService.initializeStock({
         skuId: dto.skuId,
@@ -178,11 +141,11 @@ export class InventoryController {
   @UseGuards(AdminGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '[Admin] Receive stock (future purchase-receipt primitive)' })
-  @ApiOkResponse({ type: StockChangeEnvelopeDto })
+  @ApiOkEnvelope(StockChangeResultDto)
   async receive(
     @Body() dto: ReceiveStockRequestDto,
     @CurrentOperator() operator: OperatorContext,
-  ): Promise<StockChangeEnvelopeDto> {
+  ): Promise<{ success: true; data: StockChangeResultDto }> {
     return ok(
       await this.inventoryService.receiveStock({
         skuId: dto.skuId,
@@ -204,11 +167,11 @@ export class InventoryController {
   @UseGuards(AdminGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '[Admin] Manual stock adjustment (+N / -N with reason)' })
-  @ApiOkResponse({ type: StockChangeEnvelopeDto })
+  @ApiOkEnvelope(StockChangeResultDto)
   async adjust(
     @Body() dto: AdjustStockRequestDto,
     @CurrentOperator() operator: OperatorContext,
-  ): Promise<StockChangeEnvelopeDto> {
+  ): Promise<{ success: true; data: StockChangeResultDto }> {
     return ok(
       await this.adjustmentService.adjustStock({
         skuId: dto.skuId,
@@ -227,11 +190,11 @@ export class InventoryController {
   @Post('inventory/move-bin')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Move stock between bins of one warehouse (single event, two lines)' })
-  @ApiOkResponse({ type: MoveBinEnvelopeDto })
+  @ApiOkEnvelope(MoveBinResultDto)
   async moveBin(
     @Body() dto: MoveBinRequestDto,
     @CurrentOperator() operator: OperatorContext,
-  ): Promise<MoveBinEnvelopeDto> {
+  ): Promise<{ success: true; data: MoveBinResultDto }> {
     return ok(
       await this.movementService.moveBin({
         skuId: dto.skuId,
@@ -261,11 +224,11 @@ export class InventoryReservationController {
   @Post('inventory/reservations')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reserve stock (multi-bin allocation, idempotent)' })
-  @ApiOkResponse({ type: ReservationEnvelopeDto })
+  @ApiOkEnvelope(ReservationDto)
   async create(
     @Body() dto: ReserveStockRequestDto,
     @CurrentOperator() operator: OperatorContext,
-  ): Promise<ReservationEnvelopeDto> {
+  ): Promise<{ success: true; data: ReservationDto }> {
     return ok(
       await this.reservationService.reserveStock({
         skuId: dto.skuId,
@@ -282,8 +245,10 @@ export class InventoryReservationController {
 
   @Get('inventory/reservations')
   @ApiOperation({ summary: 'List reservations' })
-  @ApiOkResponse({ type: ReservationListEnvelopeDto })
-  async list(@Query() query: ReservationListQueryDto): Promise<ReservationListEnvelopeDto> {
+  @ApiOkPagedEnvelope(ReservationListItemDto)
+  async list(
+    @Query() query: ReservationListQueryDto,
+  ): Promise<{ success: true; data: ReservationListItemDto[]; meta: PageMeta }> {
     const { items, meta } = await this.queryService.listReservations(
       {
         skuId: query.skuId,
@@ -299,20 +264,20 @@ export class InventoryReservationController {
 
   @Get('inventory/reservations/:id')
   @ApiOperation({ summary: 'Reservation detail with per-bin lines' })
-  @ApiOkResponse({ type: ReservationEnvelopeDto })
-  async getById(@Param('id') id: string): Promise<ReservationEnvelopeDto> {
+  @ApiOkEnvelope(ReservationDto)
+  async getById(@Param('id') id: string): Promise<{ success: true; data: ReservationDto }> {
     return ok(await this.queryService.getReservation(id));
   }
 
   @Post('inventory/reservations/:id/release')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Release an ACTIVE reservation (Reserved -N)' })
-  @ApiOkResponse({ type: ReservationEnvelopeDto })
+  @ApiOkEnvelope(ReservationDto)
   async release(
     @Param('id') id: string,
     @Body() dto: ReservationLifecycleRequestDto,
     @CurrentOperator() operator: OperatorContext,
-  ): Promise<ReservationEnvelopeDto> {
+  ): Promise<{ success: true; data: ReservationDto }> {
     return ok(
       await this.reservationService.releaseReservation(id, {
         operator,
@@ -325,12 +290,12 @@ export class InventoryReservationController {
   @Post('inventory/reservations/:id/pick')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Pick a full ACTIVE reservation (Reserved -N, Picked +N)' })
-  @ApiOkResponse({ type: ReservationEnvelopeDto })
+  @ApiOkEnvelope(ReservationDto)
   async pick(
     @Param('id') id: string,
     @Body() dto: ReservationLifecycleRequestDto,
     @CurrentOperator() operator: OperatorContext,
-  ): Promise<ReservationEnvelopeDto> {
+  ): Promise<{ success: true; data: ReservationDto }> {
     return ok(
       await this.reservationService.pickStock(id, {
         operator,
@@ -343,12 +308,12 @@ export class InventoryReservationController {
   @Post('inventory/reservations/:id/unpick')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Undo a pick (PICKED -> ACTIVE; pick-correction only)' })
-  @ApiOkResponse({ type: ReservationEnvelopeDto })
+  @ApiOkEnvelope(ReservationDto)
   async unpick(
     @Param('id') id: string,
     @Body() dto: ReservationLifecycleRequestDto,
     @CurrentOperator() operator: OperatorContext,
-  ): Promise<ReservationEnvelopeDto> {
+  ): Promise<{ success: true; data: ReservationDto }> {
     return ok(
       await this.reservationService.unpickStock(id, {
         operator,
@@ -361,12 +326,12 @@ export class InventoryReservationController {
   @Post('inventory/reservations/:id/ship')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Ship a PICKED reservation (Picked -N, On Hand -N)' })
-  @ApiOkResponse({ type: ReservationEnvelopeDto })
+  @ApiOkEnvelope(ReservationDto)
   async ship(
     @Param('id') id: string,
     @Body() dto: ReservationLifecycleRequestDto,
     @CurrentOperator() operator: OperatorContext,
-  ): Promise<ReservationEnvelopeDto> {
+  ): Promise<{ success: true; data: ReservationDto }> {
     return ok(
       await this.reservationService.shipStock(id, {
         operator,
@@ -384,8 +349,10 @@ export class InventorySafetyStockController {
 
   @Get('inventory/safety-stocks')
   @ApiOperation({ summary: 'List safety stock policies' })
-  @ApiOkResponse({ type: SafetyStockListEnvelopeDto })
-  async list(@Query() query: SafetyStockListQueryDto): Promise<SafetyStockListEnvelopeDto> {
+  @ApiOkPagedEnvelope(SafetyStockDto)
+  async list(
+    @Query() query: SafetyStockListQueryDto,
+  ): Promise<{ success: true; data: SafetyStockDto[]; meta: PageMeta }> {
     const { items, meta } = await this.safetyStockService.list(
       { skuId: query.skuId, warehouseId: query.warehouseId },
       { page: query.page, pageSize: query.pageSize },
@@ -395,13 +362,13 @@ export class InventorySafetyStockController {
 
   @Put('inventory/safety-stocks/:skuId/:warehouseId')
   @ApiOperation({ summary: 'Set/update safety stock of a SKU in a warehouse (policy only)' })
-  @ApiOkResponse({ type: SafetyStockEnvelopeDto })
+  @ApiOkEnvelope(SafetyStockDto)
   async upsert(
     @Param('skuId') skuId: string,
     @Param('warehouseId') warehouseId: string,
     @Body() dto: UpsertSafetyStockRequestDto,
     @CurrentOperator() operator: OperatorContext,
-  ): Promise<SafetyStockEnvelopeDto> {
+  ): Promise<{ success: true; data: SafetyStockDto }> {
     return ok(await this.safetyStockService.upsert(skuId, warehouseId, dto.safetyQty, operator));
   }
 }

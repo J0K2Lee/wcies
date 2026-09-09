@@ -99,8 +99,15 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
-      - name: Build
+      - name: Build (all packages)
         run: pnpm build
+
+      - name: OpenAPI export + contract check
+        run: |
+          pnpm openapi:export
+          pnpm check:openapi
+          pnpm api-client:generate
+          git diff --exit-code -- packages/api-client/src/generated/schema.d.ts
 
       - name: Run database migrations
         run: pnpm db:migrate

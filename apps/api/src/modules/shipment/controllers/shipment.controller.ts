@@ -12,47 +12,32 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiConsumes, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentOperator } from '../../../common/decorators/current-operator.decorator';
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import { ok, okPage } from '../../../common/dto/api-response';
+import { ApiOkEnvelope, ApiOkPagedEnvelope } from '../../../common/swagger/api-envelope';
 import { ShipmentService } from '../services/shipment.service';
 import { ShipmentShipService } from '../services/shipment-ship.service';
 import { ShippingLabelService } from '../services/shipping-label.service';
 import { PackingService } from '../services/packing.service';
 import {
+  CreatePackageResultDto,
   CreateShipmentRequestDto,
   CreateShipmentResultDto,
+  PackageWorkbenchDto,
   PackingScanRequestDto,
+  PackingScanResultDto,
   SealPackageRequestDto,
+  SealPackageResultDto,
   ShipShipmentRequestDto,
+  ShipShipmentResultDto,
   ShipmentDetailDto,
   ShipmentListItemDto,
   ShipmentListQueryDto,
   ShippingLabelDto,
   UpdateShipmentTrackingRequestDto,
 } from '../dto/shipment.dto';
-
-class ShipmentEnvelopeDto {
-  success!: true;
-  data!: ShipmentDetailDto;
-}
-
-class ShipmentListEnvelopeDto {
-  success!: true;
-  data!: ShipmentListItemDto[];
-  meta!: { page: number; pageSize: number; total: number };
-}
-
-class CreateShipmentEnvelopeDto {
-  success!: true;
-  data!: CreateShipmentResultDto;
-}
-
-class LabelListEnvelopeDto {
-  success!: true;
-  data!: ShippingLabelDto[];
-}
 
 @ApiTags('shipments')
 @Controller('shipments')
@@ -66,7 +51,7 @@ export class ShipmentController {
 
   @Get()
   @ApiOperation({ summary: '发货单列表（分页 + 包裹汇总）' })
-  @ApiOkResponse({ type: ShipmentListEnvelopeDto })
+  @ApiOkPagedEnvelope(ShipmentListItemDto)
   async list(@Query() query: ShipmentListQueryDto) {
     const result = await this.shipmentService.list(query, {
       page: query.page,
@@ -78,7 +63,7 @@ export class ShipmentController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: '从订单的 PICKED 行创建发货单（按仓拆分）' })
-  @ApiOkResponse({ type: CreateShipmentEnvelopeDto })
+  @ApiOkEnvelope(CreateShipmentResultDto)
   async create(
     @Body() request: CreateShipmentRequestDto,
     @CurrentOperator() operator: OperatorContext,
@@ -90,7 +75,7 @@ export class ShipmentController {
 
   @Get(':id')
   @ApiOperation({ summary: '发货单详情（待发商品 / 包裹进度 / 面单 / 物流信息）' })
-  @ApiOkResponse({ type: ShipmentEnvelopeDto })
+  @ApiOkEnvelope(ShipmentDetailDto)
   async get(@Param('id') id: string) {
     return ok<ShipmentDetailDto>(await this.shipmentService.getDetail(id));
   }
@@ -98,14 +83,15 @@ export class ShipmentController {
   @Post(':id/packages')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: '创建包裹（发货单进入 PACKING）' })
+  @ApiOkEnvelope(CreatePackageResultDto)
   async createPackage(@Param('id') id: string, @CurrentOperator() operator: OperatorContext) {
-    return ok(await this.packingService.createPackage(id, operator));
+    return ok<CreatePackageResultDto>(await this.packingService.createPackage(id, operator));
   }
 
   @Patch(':id/tracking')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '人工录入/修改物流单号与承运商（未出库前）' })
-  @ApiOkResponse({ type: ShipmentEnvelopeDto })
+  @ApiOkEnvelope(ShipmentDetailDto)
   async updateTracking(
     @Param('id') id: string,
     @Body() request: UpdateShipmentTrackingRequestDto,
@@ -117,12 +103,13 @@ export class ShipmentController {
   @Post(':id/ship')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '正式出库（原子扣减 Picked/OnHand，幂等，不重复扣减）' })
+  @ApiOkEnvelope(ShipShipmentResultDto)
   async ship(
     @Param('id') id: string,
     @Body() request: ShipShipmentRequestDto,
     @CurrentOperator() operator: OperatorContext,
   ) {
-    return ok(
+    return ok<ShipShipmentResultDto>(
       await this.shipService.shipShipment(
         id,
         {
@@ -140,6 +127,7 @@ export class ShipmentController {
   @UseInterceptors(FileInterceptor('file'))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: '手工上传面单文件（PDF/PNG/JPEG，私有桶 + 签名访问）' })
+  @ApiOkEnvelope(ShippingLabelDto)
   async uploadLabel(
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
@@ -155,7 +143,7 @@ export class ShipmentController {
 
   @Get(':id/labels')
   @ApiOperation({ summary: '面单列表（含短期签名查看 URL）' })
-  @ApiOkResponse({ type: LabelListEnvelopeDto })
+  @ApiOkEnvelope(ShippingLabelDto)
   async listLabels(@Param('id') id: string) {
     return ok<ShippingLabelDto[]>(await this.labelService.listByShipment(id));
   }
@@ -168,6 +156,7 @@ export class PackageController {
 
   @Get(':id/workbench')
   @ApiOperation({ summary: '打包工作台数据（待装商品 + 已装明细 + SN 进度）' })
+  @ApiOkEnvelope(PackageWorkbenchDto)
   async workbench(@Param('id') id: string) {
     return ok(await this.packingService.getPackageWorkbench(id));
   }
@@ -175,22 +164,26 @@ export class PackageController {
   @Post(':id/items/scan')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '扫码装箱（每次 1 件；SN 商品必带 serialNumber；不改变库存）' })
+  @ApiOkEnvelope(PackingScanResultDto)
   async scan(
     @Param('id') id: string,
     @Body() request: PackingScanRequestDto,
     @CurrentOperator() operator: OperatorContext,
   ) {
-    return ok(await this.packingService.scanItem(id, request, operator));
+    return ok<PackingScanResultDto>(await this.packingService.scanItem(id, request, operator));
   }
 
   @Post(':id/seal')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '封箱（OPEN/REPACK_REQUIRED → SEALED；齐全后发货单 READY_TO_SHIP）' })
+  @ApiOkEnvelope(SealPackageResultDto)
   async seal(
     @Param('id') id: string,
     @Body() request: SealPackageRequestDto,
     @CurrentOperator() operator: OperatorContext,
   ) {
-    return ok(await this.packingService.sealPackage(id, request.dimensions ?? {}, operator));
+    return ok<SealPackageResultDto>(
+      await this.packingService.sealPackage(id, request.dimensions ?? {}, operator),
+    );
   }
 }

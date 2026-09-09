@@ -535,3 +535,12 @@ export class SkuListItemDto extends SkuResponseDto {
   @ApiProperty({ example: 3 })
   listingCount!: number;
 }
+
+/** Product detail response: the product plus its SKUs (product detail page). */
+export class ProductDetailDto {
+  @ApiProperty({ type: ProductResponseDto })
+  product!: ProductResponseDto;
+
+  @ApiProperty({ type: [SkuResponseDto] })
+  skus!: SkuResponseDto[];
+}

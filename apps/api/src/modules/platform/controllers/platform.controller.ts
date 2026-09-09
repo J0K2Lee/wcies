@@ -1,18 +1,9 @@
 import { Controller, Get, Param } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ok } from '../../../common/dto/api-response';
+import { ApiOkEnvelope } from '../../../common/swagger/api-envelope';
 import { PlatformResponseDto } from '../dto/platform-response.dto';
 import { PlatformService } from '../platform.service';
-
-class PlatformListEnvelopeDto {
-  success!: true;
-  data!: PlatformResponseDto[];
-}
-
-class PlatformEnvelopeDto {
-  success!: true;
-  data!: PlatformResponseDto;
-}
 
 /** Read-only platform master data (task §6/§7: users must not create platforms). */
 @ApiTags('platforms')
@@ -22,15 +13,15 @@ export class PlatformController {
 
   @Get()
   @ApiOperation({ summary: 'List platforms (OZON / WB / YANDEX)' })
-  @ApiOkResponse({ type: PlatformListEnvelopeDto })
-  async list(): Promise<PlatformListEnvelopeDto> {
+  @ApiOkEnvelope(PlatformResponseDto)
+  async list(): Promise<{ success: true; data: PlatformResponseDto[] }> {
     return ok(await this.platformService.list());
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get a platform by id' })
-  @ApiOkResponse({ type: PlatformEnvelopeDto })
-  async getById(@Param('id') id: string): Promise<PlatformEnvelopeDto> {
+  @ApiOkEnvelope(PlatformResponseDto)
+  async getById(@Param('id') id: string): Promise<{ success: true; data: PlatformResponseDto }> {
     return ok(await this.platformService.findById(id));
   }
 }

@@ -3,6 +3,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentOperator } from '../../../common/decorators/current-operator.decorator';
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import { ok, okPage } from '../../../common/dto/api-response';
+import { ApiOkEnvelope, ApiOkPagedEnvelope } from '../../../common/swagger/api-envelope';
 import { ExceptionService } from '../services/exception.service';
 import {
   ExceptionCloseRequestDto,
@@ -17,6 +18,7 @@ export class ExceptionController {
 
   @Get()
   @ApiOperation({ summary: '异常列表（分页，可按订单行引用过滤）' })
+  @ApiOkPagedEnvelope(ExceptionItemDto)
   async list(@Query() query: ExceptionListQueryDto) {
     const result = await this.exceptionService.list(query, {
       page: query.page,
@@ -27,6 +29,7 @@ export class ExceptionController {
 
   @Get(':id')
   @ApiOperation({ summary: '异常详情' })
+  @ApiOkEnvelope(ExceptionItemDto)
   async get(@Param('id') id: string) {
     return ok<ExceptionItemDto>(await this.exceptionService.findById(id));
   }
@@ -34,6 +37,7 @@ export class ExceptionController {
   @Post(':id/resolve')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '解决异常（OPEN → RESOLVED）' })
+  @ApiOkEnvelope(ExceptionItemDto)
   async resolve(
     @Param('id') id: string,
     @Body() request: ExceptionCloseRequestDto,
@@ -45,6 +49,7 @@ export class ExceptionController {
   @Post(':id/ignore')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '忽略异常（OPEN → IGNORED）' })
+  @ApiOkEnvelope(ExceptionItemDto)
   async ignore(
     @Param('id') id: string,
     @Body() request: ExceptionCloseRequestDto,
