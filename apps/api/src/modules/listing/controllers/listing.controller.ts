@@ -25,6 +25,7 @@ import {
   AddListingSkuRequestDto,
   CreateListingRequestDto,
   ListingDetailDto,
+  MapListingSkuRequestDto,
   ListingListQueryDto,
   ListingResponseDto,
   ListingSkuResponseDto,
@@ -154,6 +155,21 @@ export class ListingController {
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true; data: ListingSkuResponseDto }> {
     return ok(await this.listingService.addMapping(listingId, dto, operator));
+  }
+
+  @Post(':listingId/skus/:id/map')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '人工映射：将同步来的 UNMAPPED 平台SKU 绑定到 Internal SKU（同步不覆盖）',
+  })
+  @ApiOkEnvelope(ListingSkuResponseDto)
+  async mapUnmappedSku(
+    @Param('listingId') listingId: string,
+    @Param('id') mappingId: string,
+    @Body() dto: MapListingSkuRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: ListingSkuResponseDto }> {
+    return ok(await this.listingService.mapUnmappedSku(listingId, mappingId, dto, operator));
   }
 
   @Patch(':listingId/skus/:id')

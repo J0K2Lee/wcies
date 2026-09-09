@@ -9,6 +9,7 @@ import { StoreRepository } from './repositories/store.repository';
 import { PlatformCredentialRepository } from './repositories/platform-credential.repository';
 import { StoreService } from './services/store.service';
 import { PlatformCredentialService } from './services/platform-credential.service';
+import { CredentialValidationService } from './services/credential-validation.service';
 import { StoreController } from './controllers/store.controller';
 import { StoreCredentialController } from './controllers/store-credential.controller';
 
@@ -23,6 +24,7 @@ import { StoreCredentialController } from './controllers/store-credential.contro
   providers: [
     StoreService,
     PlatformCredentialService,
+    CredentialValidationService,
     StoreRepository,
     PlatformCredentialRepository,
   ],

@@ -38,6 +38,28 @@ export class CredentialResponseDto {
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;
 
+  @ApiProperty({ nullable: true, format: 'date-time' })
+  lastValidatedAt!: Date | null;
+
+  @ApiProperty({
+    nullable: true,
+    enum: ['VALID', 'INVALID', 'ERROR'],
+    description: 'VALID=已连接 INVALID=认证失败 NULL=未验证',
+  })
+  lastValidationStatus!: string | null;
+
+  @ApiProperty({ nullable: true, type: String, description: '最近一次验证失败原因（已脱敏）' })
+  lastValidationError!: string | null;
+
   @ApiProperty({ format: 'date-time' })
   updatedAt!: Date;
+}
+
+/** Result of a credential validation run (Sprint 5 §32; no secret material). */
+export class CredentialValidateResultDto {
+  @ApiProperty() credentialId!: string;
+  @ApiProperty() storeId!: string;
+  @ApiProperty({ enum: ['VALID', 'INVALID', 'ERROR'] }) validationStatus!: string;
+  @ApiProperty({ nullable: true, type: String }) error!: string | null;
+  @ApiProperty({ type: Date }) validatedAt!: Date;
 }

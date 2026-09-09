@@ -59,6 +59,10 @@ export class ListingResolverService {
     if (match === undefined) {
       throw new ListingSkuResolveFailedError(input.storeId, identifiers as Record<string, string>);
     }
+    if (match.skuId === null || match.mappingStatus !== 'MAPPED') {
+      // Defense in depth: the repository already filters these out.
+      throw new ListingSkuResolveFailedError(input.storeId, identifiers as Record<string, string>);
+    }
     const sku = await this.skuService.getEntityById(match.skuId);
     if (sku === null) {
       throw new ListingSkuResolveFailedError(input.storeId, identifiers as Record<string, string>);

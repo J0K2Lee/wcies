@@ -136,16 +136,21 @@ export class StoreService {
   }
 
   /** Cross-module entity lookup (binding / listing services). */
-  async getEntityById(id: string): Promise<StoreEntity | null> {
-    return this.repository.findById(id);
+  /** All ACTIVE stores (sync scheduler iteration). */
+  async listAllActive(): Promise<StoreEntity[]> {
+    return this.repository.listByStatus('ACTIVE');
   }
 
-  /** Cross-module lookup by platform + store_code (import handler). */
+  /** Cross-module store lookup by platform + store code (webhook routing). */
   async getEntityByPlatformAndCode(
     platformId: string,
     storeCode: string,
   ): Promise<StoreEntity | null> {
     return this.repository.findByPlatformAndCode(platformId, storeCode);
+  }
+
+  async getEntityById(id: string): Promise<StoreEntity | null> {
+    return this.repository.findById(id);
   }
 
   /** Store + owning platform, used for fulfillment-mode validation. */

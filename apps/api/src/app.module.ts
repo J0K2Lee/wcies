@@ -28,6 +28,8 @@ import { PickingModule } from './modules/picking/picking.module';
 import { ShipmentModule } from './modules/shipment/shipment.module';
 import { InterceptionModule } from './modules/interception/interception.module';
 import { NotificationModule } from './modules/notification/notification.module';
+import { IntegrationModule } from './modules/integration/integration.module';
+import { SyncModule } from './modules/sync/sync.module';
 
 /**
  * HTTP API root module.
@@ -61,6 +63,8 @@ import { NotificationModule } from './modules/notification/notification.module';
     ShipmentModule,
     InterceptionModule,
     NotificationModule,
+    IntegrationModule,
+    SyncModule,
     ...(process.env.NODE_ENV !== 'production' ? [DevModule] : []),
   ],
   providers: [

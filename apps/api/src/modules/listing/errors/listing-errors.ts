@@ -70,3 +70,16 @@ export class ListingSkuResolveAmbiguousError extends DomainError {
     });
   }
 }
+
+/** Mapping state change not allowed (e.g. mapping an already-mapped row). */
+export class ListingSkuMappingInvalidStateError extends DomainError {
+  readonly code = 'LISTING_SKU_MAPPING_INVALID_STATE';
+  readonly httpStatus = 409;
+
+  constructor(mappingId: string, reason: string) {
+    super(`Listing SKU mapping ${mappingId} cannot change state: ${reason}`, {
+      mappingId,
+      reason,
+    });
+  }
+}

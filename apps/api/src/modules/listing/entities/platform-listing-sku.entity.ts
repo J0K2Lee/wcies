@@ -29,8 +29,17 @@ export class PlatformListingSkuEntity {
   @Column({ type: 'uuid', name: 'listing_id' })
   listingId!: string;
 
-  @Column({ type: 'uuid', name: 'sku_id' })
-  skuId!: string;
+  /**
+   * Nullable since Sprint 5 (task §18): platform SKUs synced from the
+   * platform exist as UNMAPPED facts until a human maps them. The resolver
+   * only resolves rows with a non-null sku_id.
+   */
+  @Column({ type: 'uuid', name: 'sku_id', nullable: true })
+  skuId!: string | null;
+
+  /** UNMAPPED = synced fact awaiting human mapping; MAPPED = skuId set. */
+  @Column({ type: 'varchar', length: 20, name: 'mapping_status', default: 'UNMAPPED' })
+  mappingStatus!: string;
 
   @Column({ type: 'varchar', length: 255, name: 'platform_sku_id', nullable: true })
   platformSkuId!: string | null;

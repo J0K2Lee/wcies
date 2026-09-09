@@ -16,6 +16,7 @@ function makeMapping(id: string, skuId: string, offerId: string | null): Platfor
     platformSkuId: null,
     sellerSku: null,
     offerId,
+    mappingStatus: 'MAPPED',
     status: 'ACTIVE',
     rawData: null,
     createdAt: new Date(),

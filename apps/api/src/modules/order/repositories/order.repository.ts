@@ -65,6 +65,7 @@ export class OrderRepository {
       orderedAt: Date;
       rawData: Record<string, unknown> | null;
       remark: string | null;
+      syncSource: string | null;
     },
     items: Array<{
       lineNo: number;

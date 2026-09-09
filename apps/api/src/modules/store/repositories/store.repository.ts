@@ -93,6 +93,10 @@ export class StoreRepository {
     return this.repository.findOneBy({ id });
   }
 
+  async listByStatus(status: string): Promise<StoreEntity[]> {
+    return this.repository.find({ where: { status }, order: { createdAt: 'ASC' } });
+  }
+
   async findByPlatformAndCode(platformId: string, storeCode: string): Promise<StoreEntity | null> {
     return this.repository.findOneBy({ platformId, storeCode });
   }

@@ -17,6 +17,8 @@ import { AdminGuard } from '../../auth/guards/admin.guard';
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import { CredentialResponseDto, UpsertCredentialRequestDto } from '../dto/credential.dto';
 import { PlatformCredentialService } from '../services/platform-credential.service';
+import { CredentialValidationService } from '../services/credential-validation.service';
+import { CredentialValidateResultDto } from '../dto/credential.dto';
 
 /**
  * Store credentials - admin only (spec §61/§115). Responses expose metadata
@@ -26,7 +28,10 @@ import { PlatformCredentialService } from '../services/platform-credential.servi
 @UseGuards(AdminGuard)
 @Controller('stores/:storeId/credentials')
 export class StoreCredentialController {
-  constructor(private readonly credentialService: PlatformCredentialService) {}
+  constructor(
+    private readonly credentialService: PlatformCredentialService,
+    private readonly validationService: CredentialValidationService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List credential metadata for a store (no secrets)' })
@@ -60,6 +65,18 @@ export class StoreCredentialController {
     return ok(
       await this.credentialService.updatePayload(storeId, credentialId, dto.payload, operator),
     );
+  }
+
+  @Post(':id/validate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '验证连接（安全 Read-only 调用；不返回任何密钥）' })
+  @ApiOkEnvelope(CredentialValidateResultDto)
+  async validate(
+    @Param('storeId') storeId: string,
+    @Param('id') credentialId: string,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: CredentialValidateResultDto }> {
+    return ok(await this.validationService.validate(storeId, credentialId, operator));
   }
 
   @Post(':id/disable')

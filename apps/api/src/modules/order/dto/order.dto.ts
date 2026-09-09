@@ -89,6 +89,13 @@ export class NormalizedOrderInputDto {
   @IsObject()
   rawData?: Record<string, unknown>;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) remark?: string;
+  @ApiPropertyOptional({
+    enum: ['MANUAL', 'API', 'POLLING', 'WEBHOOK'],
+    description: '订单进入系统的渠道（Sprint 5 §58；默认 API）',
+  })
+  @IsOptional()
+  @IsIn(['MANUAL', 'API', 'POLLING', 'WEBHOOK'])
+  syncSource?: string;
 }
 
 export class OrderIngestItemResultDto {
@@ -141,6 +148,8 @@ export class OrderListItemDto {
   @ApiProperty({ nullable: true, type: String }) currency!: string | null;
   @ApiProperty({ type: Date }) orderedAt!: Date;
   @ApiProperty({ type: Date }) createdAt!: Date;
+  @ApiProperty({ nullable: true, enum: ['MANUAL', 'API', 'POLLING', 'WEBHOOK'] })
+  syncSource!: string | null;
   @ApiProperty() itemsCount!: number;
   @ApiProperty() reservedCount!: number;
   @ApiProperty() backorderedCount!: number;
@@ -242,6 +251,8 @@ export class OrderDetailDto {
   @ApiProperty({ type: Date }) orderedAt!: Date;
   @ApiProperty({ nullable: true, type: Object }) rawData!: Record<string, unknown> | null;
   @ApiProperty({ nullable: true, type: String }) remark!: string | null;
+  @ApiProperty({ nullable: true, enum: ['MANUAL', 'API', 'POLLING', 'WEBHOOK'] })
+  syncSource!: string | null;
   @ApiProperty({ type: Date }) createdAt!: Date;
   @ApiProperty({ type: Date }) updatedAt!: Date;
   @ApiProperty({ type: [OrderItemDto] }) items!: OrderItemDto[];

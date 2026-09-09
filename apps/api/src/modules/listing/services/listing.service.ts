@@ -16,6 +16,7 @@ import {
   ListingAlreadyExistsError,
   ListingNotFoundError,
   ListingSkuMappingAlreadyExistsError,
+  ListingSkuMappingInvalidStateError,
   ListingSkuMappingNotFoundError,
 } from '../errors/listing-errors';
 import {
@@ -27,6 +28,7 @@ import {
   AddListingSkuRequestDto,
   CreateListingRequestDto,
   ListingDetailDto,
+  MapListingSkuRequestDto,
   ListingListQueryDto,
   ListingResponseDto,
   ListingSkuResponseDto,
@@ -106,6 +108,7 @@ export class ListingService {
       skuId: row.mapping.skuId,
       skuCode: '',
       skuName: '',
+      mappingStatus: row.mapping.mappingStatus,
       platformSkuId: row.mapping.platformSkuId,
       sellerSku: row.mapping.sellerSku,
       offerId: row.mapping.offerId,
@@ -247,8 +250,50 @@ export class ListingService {
     const sku = await this.skuService.getEntityById(dto.skuId);
     return this.mappingToResponse({
       mapping,
-      skuCode: sku?.skuCode ?? '',
-      skuName: sku?.nameZh ?? '',
+      skuCode: sku?.skuCode ?? null,
+      skuName: sku?.nameZh ?? null,
+    });
+  }
+
+  /**
+   * Human mapping of a synced UNMAPPED platform SKU to an internal SKU
+   * (Sprint 5 task §36). Platform sync NEVER overwrites this (task §19):
+   * sync upserts skip sku_id/mapping_status entirely.
+   */
+  async mapUnmappedSku(
+    listingId: string,
+    mappingId: string,
+    dto: MapListingSkuRequestDto,
+    operator: OperatorContext,
+  ): Promise<ListingSkuResponseDto> {
+    const mapping = await this.findOwnedMappingOrThrow(listingId, mappingId);
+    if (mapping.skuId !== null) {
+      throw new ListingSkuMappingInvalidStateError(mappingId, 'already mapped');
+    }
+    const sku = await this.skuService.getEntityById(dto.skuId);
+    if (sku === null) {
+      throw new SkuNotFoundError(dto.skuId);
+    }
+    await this.repository.updateMapping(mappingId, {
+      skuId: dto.skuId,
+      mappingStatus: 'MAPPED',
+    });
+    await this.operationLog.record({
+      entityType: MAPPING_ENTITY_TYPE,
+      entityId: mappingId,
+      entityCode: mapping.offerId ?? mapping.platformSkuId ?? mappingId,
+      action: 'MAP',
+      changes: {
+        mappingStatus: { from: mapping.mappingStatus, to: 'MAPPED' },
+        skuCode: { from: null, to: sku.skuCode },
+      },
+      operator,
+    });
+    const updated = await this.repository.findMappingById(mappingId);
+    return this.mappingToResponse({
+      mapping: updated as typeof mapping,
+      skuCode: sku.skuCode,
+      skuName: sku.nameZh,
     });
   }
 
@@ -281,11 +326,14 @@ export class ListingService {
       operator,
     });
     const updated = await this.repository.findMappingById(mappingId);
-    const sku = updated === null ? null : await this.skuService.getEntityById(updated.skuId);
+    const sku =
+      updated === null || updated.skuId === null
+        ? null
+        : await this.skuService.getEntityById(updated.skuId);
     return this.mappingToResponse({
       mapping: updated as typeof mapping,
-      skuCode: sku?.skuCode ?? '',
-      skuName: sku?.nameZh ?? '',
+      skuCode: sku?.skuCode ?? null,
+      skuName: sku?.nameZh ?? null,
     });
   }
 
@@ -305,6 +353,93 @@ export class ListingService {
       changes: { deleted: { from: true, to: null } },
       operator,
     });
+  }
+
+  /**
+   * Listing-sync upsert (Sprint 5 task §17-§20). Called ONLY by the sync
+   * engine with platform facts:
+   * - creates listings / updates title, rawData, lastSeenAt, platform status;
+   * - upserts platform-SKU rows keyed by (listingId, platformSkuId);
+   * - NEVER touches skuId / mappingStatus of an existing row - a human
+   *   mapping survives every re-sync (task §19);
+   * - never deactivates listings missing from the payload (task §20).
+   */
+  async applyPlatformListing(input: {
+    storeId: string;
+    platformProductId: string;
+    title: string | null;
+    url: string | null;
+    platformStatus: string | null;
+    skus: Array<{
+      platformSkuId: string | null;
+      offerId: string | null;
+      sellerSku: string | null;
+      rawData: Record<string, unknown>;
+    }>;
+    rawData: Record<string, unknown>;
+  }): Promise<'CREATED' | 'UPDATED'> {
+    const store = await this.storeService.getEntityById(input.storeId);
+    if (store === null) {
+      throw new StoreNotFoundError(input.storeId);
+    }
+    const now = new Date();
+    const existing = await this.repository.findListingByStoreAndProductId(
+      input.storeId,
+      input.platformProductId,
+    );
+    let listing = existing;
+    if (listing === null) {
+      listing = await this.repository.insertListing({
+        platformId: store.platformId,
+        storeId: input.storeId,
+        platformProductId: input.platformProductId,
+        title: input.title,
+        url: input.url,
+        status: 'ACTIVE',
+        rawData: input.rawData,
+        lastSeenAt: now,
+      });
+    } else {
+      await this.repository.updateListing(listing.id, {
+        title: input.title,
+        url: input.url,
+        rawData: input.rawData,
+        lastSeenAt: now,
+      });
+    }
+
+    for (const sku of input.skus) {
+      if (sku.platformSkuId === null) {
+        // Cannot dedup safely without a platform SKU id - store in rawData
+        // of the listing only. OZON always provides one; other platforms
+        // get their own upsert rules when integrated.
+        continue;
+      }
+      const existingMapping = await this.repository.findActiveMappingByListingAndPlatformSkuId(
+        listing.id,
+        sku.platformSkuId,
+      );
+      if (existingMapping !== null) {
+        // Platform fact refresh only - human mapping is untouchable (§19).
+        await this.repository.updateMapping(existingMapping.id, {
+          offerId: sku.offerId,
+          sellerSku: sku.sellerSku,
+          rawData: sku.rawData,
+        });
+      } else {
+        await this.repository.insertMapping({
+          listingId: listing.id,
+          skuId: null,
+          mappingStatus: 'UNMAPPED',
+          platformSkuId: sku.platformSkuId,
+          offerId: sku.offerId,
+          sellerSku: sku.sellerSku,
+          status: 'ACTIVE',
+          rawData: sku.rawData,
+        });
+      }
+    }
+    return existing === null ? 'CREATED' : 'UPDATED';
   }
 
   /** Cross-module: listing entity lookup (import service). */
@@ -392,6 +527,7 @@ export class ListingService {
     const mapping = await this.repository.insertMapping({
       listingId,
       skuId: variant.skuId,
+      mappingStatus: 'MAPPED',
       platformSkuId: variant.platformSkuId ?? null,
       sellerSku: variant.sellerSku ?? null,
       offerId: variant.offerId ?? null,
@@ -457,6 +593,7 @@ export class ListingService {
       title: row.listing.title,
       url: row.listing.url,
       status: row.listing.status,
+      lastSeenAt: row.listing.lastSeenAt,
       createdAt: row.listing.createdAt,
       updatedAt: row.listing.updatedAt,
       mappingCount: row.mappingCount,
@@ -468,6 +605,7 @@ export class ListingService {
       id: row.mapping.id,
       listingId: row.mapping.listingId,
       skuId: row.mapping.skuId,
+      mappingStatus: row.mapping.mappingStatus,
       skuCode: row.skuCode,
       skuName: row.skuName,
       platformSkuId: row.mapping.platformSkuId,

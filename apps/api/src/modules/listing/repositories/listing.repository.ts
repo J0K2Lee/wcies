@@ -24,8 +24,8 @@ export interface ListingRowWithRefs {
 
 export interface MappingRowWithRefs {
   mapping: PlatformListingSkuEntity;
-  skuCode: string;
-  skuName: string;
+  skuCode: string | null;
+  skuName: string | null;
 }
 
 /** Resolve candidate: a mapping row joined with its listing's store scope. */
@@ -65,7 +65,8 @@ export class ListingRepository {
             .select('COUNT(pls.id)')
             .from('platform_listing_skus', 'pls')
             .where('pls.listing_id = listing.id')
-            .andWhere("pls.status = 'ACTIVE'"),
+            .andWhere("pls.status = 'ACTIVE'")
+            .andWhere("pls.mapping_status = 'MAPPED'"),
         'mapping_count',
       );
 
@@ -90,12 +91,15 @@ export class ListingRepository {
           .select('1')
           .from('platform_listing_skus', 'pls_filter')
           .where('pls_filter.listing_id = listing.id')
-          .andWhere("pls_filter.status = 'ACTIVE'");
+          .andWhere("pls_filter.status = 'ACTIVE'")
+          .andWhere("pls_filter.mapping_status = 'MAPPED'");
         if (filters.skuId !== undefined) {
           inner.andWhere('pls_filter.sku_id = :skuIdFilter');
           qb.setParameter('skuIdFilter', filters.skuId);
         }
         const query = inner.getQuery();
+        // Sprint 5 §36: UNMAPPED = listing has no MAPPED variant (may still
+        // carry synced UNMAPPED platform-SKU facts).
         return filters.mappingState === 'UNMAPPED' ? `NOT EXISTS ${query}` : `EXISTS ${query}`;
       });
     }
@@ -148,7 +152,8 @@ export class ListingRepository {
   async listMappingsByListingId(listingId: string): Promise<MappingRowWithRefs[]> {
     const qb = this.mappingRepository
       .createQueryBuilder('pls')
-      .innerJoin('skus', 'sku', 'sku.id = pls.sku_id')
+      // LEFT JOIN since Sprint 5: UNMAPPED rows carry sku_id = NULL.
+      .leftJoin('skus', 'sku', 'sku.id = pls.sku_id')
       .addSelect('sku.sku_code', 'sku_code')
       .addSelect('sku.name_zh', 'sku_name')
       .where('pls.listing_id = :listingId', { listingId })
@@ -157,8 +162,8 @@ export class ListingRepository {
     const rawList = rawRows as Array<Record<string, unknown>>;
     return rawList.map((raw, index) => ({
       mapping: entities[index] as PlatformListingSkuEntity,
-      skuCode: String(raw['sku_code'] as string),
-      skuName: String(raw['sku_name'] as string),
+      skuCode: raw['sku_code'] === null ? null : String(raw['sku_code'] as string),
+      skuName: raw['sku_name'] === null ? null : String(raw['sku_name'] as string),
     }));
   }
 
@@ -199,6 +204,7 @@ export class ListingRepository {
         url: raw['p_url'] === null ? null : String(raw['p_url'] as string),
         status: String(raw['p_status'] as string),
         rawData: null,
+        lastSeenAt: null,
         createdAt: new Date(0),
         updatedAt: new Date(0),
       } satisfies PlatformListingEntity,
@@ -209,6 +215,14 @@ export class ListingRepository {
 
   async findMappingById(id: string): Promise<PlatformListingSkuEntity | null> {
     return this.mappingRepository.findOneBy({ id });
+  }
+
+  /** Sync upsert lookup (Sprint 5 §19): ACTIVE row by platform SKU id. */
+  async findActiveMappingByListingAndPlatformSkuId(
+    listingId: string,
+    platformSkuId: string,
+  ): Promise<PlatformListingSkuEntity | null> {
+    return this.mappingRepository.findOneBy({ listingId, platformSkuId, status: 'ACTIVE' });
   }
 
   async findMappingByListingAndSku(
@@ -256,7 +270,10 @@ export class ListingRepository {
       .innerJoin('platform_listings', 'listing', 'listing.id = pls.listing_id')
       .where('listing.store_id = :storeId', { storeId: input.storeId })
       .andWhere('listing.status = :listingActive', { listingActive: 'ACTIVE' })
-      .andWhere('pls.status = :mappingActive', { mappingActive: 'ACTIVE' });
+      .andWhere('pls.status = :mappingActive', { mappingActive: 'ACTIVE' })
+      // Sprint 5 §18: UNMAPPED rows (sku_id NULL) are facts, never resolvable.
+      .andWhere('pls.sku_id IS NOT NULL')
+      .andWhere('pls.mapping_status = :mapped', { mapped: 'MAPPED' });
 
     const conditions: string[] = [];
     if (input.platformSkuId !== undefined && input.platformSkuId !== '') {

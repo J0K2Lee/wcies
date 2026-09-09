@@ -1,0 +1,76 @@
+import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Job } from 'bullmq';
+import { requestContextStorage } from '../../../common/context/request-context';
+import { AppLoggerService } from '../../../common/logger/app-logger.service';
+import { QUEUE_NAMES } from '../../../infrastructure/queue/queue.constants';
+import { SyncDispatchJobPayload } from '../services/sync-dispatch.service';
+import { SyncJobRepository } from '../repositories/sync-job.repository';
+import { ListingSyncService } from '../services/listing-sync.service';
+import { OrderSyncService } from '../services/order-sync.service';
+
+/**
+ * Consumes ORDER_SYNC jobs (Sprint 5 task §16/§51). Processor = orchestration
+ * only: claim the guarded job row, delegate to the sync service, and let the
+ * service own business outcomes. No platform or order logic here.
+ */
+@Processor(QUEUE_NAMES.orderSync)
+export class OrderSyncProcessor extends WorkerHost {
+  constructor(
+    private readonly jobRepo: SyncJobRepository,
+    private readonly syncService: OrderSyncService,
+    private readonly logger: AppLoggerService,
+  ) {
+    super();
+  }
+
+  async process(job: Job<SyncDispatchJobPayload>): Promise<string> {
+    return requestContextStorage.run({ requestId: `syncjob:${job.data.syncJobId}` }, async () => {
+      const claimed = await this.jobRepo.claimRunning(job.data.syncJobId);
+      if (!claimed) {
+        // Duplicate delivery or stale job (crashed worker) - skip safely.
+        this.logger.warn('order sync job not claimable (stale/duplicate)', {
+          module: 'sync',
+          syncJobId: job.data.syncJobId,
+        });
+        return 'skipped';
+      }
+      const syncJob = await this.jobRepo.findById(job.data.syncJobId);
+      if (syncJob === null) {
+        return 'missing';
+      }
+      await this.syncService.execute(syncJob);
+      return syncJob.id;
+    });
+  }
+}
+
+/** Consumes LISTING_SYNC jobs - same orchestration-only contract. */
+@Processor(QUEUE_NAMES.listingSync)
+export class ListingSyncProcessor extends WorkerHost {
+  constructor(
+    private readonly jobRepo: SyncJobRepository,
+    private readonly syncService: ListingSyncService,
+    private readonly logger: AppLoggerService,
+  ) {
+    super();
+  }
+
+  async process(job: Job<SyncDispatchJobPayload>): Promise<string> {
+    return requestContextStorage.run({ requestId: `syncjob:${job.data.syncJobId}` }, async () => {
+      const claimed = await this.jobRepo.claimRunning(job.data.syncJobId);
+      if (!claimed) {
+        this.logger.warn('listing sync job not claimable (stale/duplicate)', {
+          module: 'sync',
+          syncJobId: job.data.syncJobId,
+        });
+        return 'skipped';
+      }
+      const syncJob = await this.jobRepo.findById(job.data.syncJobId);
+      if (syncJob === null) {
+        return 'missing';
+      }
+      await this.syncService.execute(syncJob);
+      return syncJob.id;
+    });
+  }
+}

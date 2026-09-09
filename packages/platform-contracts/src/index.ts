@@ -4,8 +4,10 @@
  * Every external platform (OZON / Wildberries / Yandex Market) is integrated
  * through a PlatformAdapter implementing the contracts below (AGENTS.md §32).
  *
- * Sprint 0 scope: minimal contract shape only. No real adapters yet -
- * OZON / WB / Yandex implementations arrive in later sprints.
+ * Sprint 5 extends the minimal Sprint 0 shape with the read-first sync
+ * capabilities: listing sync, order polling, credential validation and
+ * (platform-dependent) webhook parsing. Write operations (push inventory,
+ * prices, shipments) are intentionally NOT part of this contract yet.
  */
 
 /** Known platform codes. Extend only when a new platform is actually integrated. */
@@ -23,13 +25,180 @@ export interface PlatformCredentialContext {
 }
 
 /**
+ * Decrypted store context for sync calls. The adapter combines the store's
+ * credential with a store-scoped API call (AGENTS.md §27/§43: sync is ALWAYS
+ * store-scoped, never platform-global).
+ */
+export interface StoreContext {
+  readonly storeId: string;
+  readonly storeCode: string;
+  readonly platform: PlatformCode;
+  readonly credential: Readonly<Record<string, unknown>>;
+}
+
+/** One page of platform data plus the opaque cursor for the next page. */
+export interface PaginatedResult<T> {
+  readonly items: readonly T[];
+  /**
+   * Cursor to pass to the next call. `null` when the enumeration completed
+   * (no more pages). Opaque to the sync layer - only adapters interpret it.
+   */
+  readonly nextCursor: unknown;
+  readonly hasMore: boolean;
+}
+
+/** Normalized platform error categories (Sprint 5 task §39). */
+export const PLATFORM_ERROR_CODES = [
+  'PLATFORM_AUTH_ERROR',
+  'PLATFORM_RATE_LIMITED',
+  'PLATFORM_TIMEOUT',
+  'PLATFORM_BAD_RESPONSE',
+  'PLATFORM_API_ERROR',
+  'PLATFORM_NETWORK_ERROR',
+] as const;
+export type PlatformErrorCode = (typeof PLATFORM_ERROR_CODES)[number];
+
+/** Safe, secret-free platform failure details persisted on sync jobs. */
+export interface PlatformErrorDetail {
+  readonly code: PlatformErrorCode;
+  readonly httpStatus: number | null;
+  readonly requestId: string | null;
+  readonly endpoint: string;
+  readonly storeId: string;
+  readonly message: string;
+  readonly details?: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// Listings
+// ---------------------------------------------------------------------------
+
+/** One platform SKU variant seen inside a platform listing. */
+export interface PlatformListingSkuRaw {
+  /** Platform-side SKU id (OZON: numeric `sku`). */
+  readonly platformSkuId: string | null;
+  /** Seller-maintained article (OZON: `offer_id`). */
+  readonly offerId: string | null;
+  readonly sellerSku: string | null;
+  readonly rawData: Record<string, unknown>;
+}
+
+/**
+ * A platform product page as returned by the platform (Sprint 5 task §17).
+ * Raw data is preserved verbatim for audit/troubleshooting.
+ */
+export interface PlatformListingRaw {
+  readonly platformProductId: string;
+  readonly title: string | null;
+  readonly url: string | null;
+  /** Platform-native status string, stored as fact; never an ERP state. */
+  readonly platformStatus: string | null;
+  readonly skus: readonly PlatformListingSkuRaw[];
+  readonly rawData: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+
+/** One order line as returned by the platform. */
+export interface PlatformOrderItemRaw {
+  readonly platformProductId: string | null;
+  readonly platformSkuId: string | null;
+  readonly offerId: string | null;
+  readonly sellerSku: string | null;
+  readonly quantity: string;
+  readonly rawData: Record<string, unknown>;
+}
+
+/**
+ * A platform order/posting in platform-neutral shape (Sprint 5 task §21).
+ * Mappers convert platform DTOs into this; OrderIngestionService consumes it.
+ */
+export interface PlatformOrderRaw {
+  /** Business key: UNIQUE(storeId, platformOrderId) in WCIES. */
+  readonly platformOrderId: string;
+  readonly platformStatus: string | null;
+  readonly fulfillmentMode: string | null;
+  readonly orderedAt: Date;
+  readonly currency: string | null;
+  readonly items: readonly PlatformOrderItemRaw[];
+  readonly rawData: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// Webhooks
+// ---------------------------------------------------------------------------
+
+/** Webhook event types WCIES knows how to act on. */
+export const PLATFORM_WEBHOOK_EVENT_TYPES = [
+  'NEW_POSTING',
+  'POSTING_CANCELLED',
+  'POSTING_STATE_CHANGED',
+  'ITEM_CHANGED',
+  'PING',
+  'UNKNOWN',
+] as const;
+export type PlatformWebhookEventType = (typeof PLATFORM_WEBHOOK_EVENT_TYPES)[number];
+
+/**
+ * A normalized webhook event. Webhook payloads are treated as HINTS only:
+ * they carry identifiers, not business facts - processors re-read the
+ * platform API for the authoritative data before ingesting anything.
+ */
+export interface PlatformWebhookEvent {
+  readonly eventType: PlatformWebhookEventType;
+  /** Platform event id when provided; null when absent (payload hash dedup). */
+  readonly externalEventId: string | null;
+  /** Platform order ids referenced by the event (e.g. posting numbers). */
+  readonly platformOrderIds: readonly string[];
+  readonly payload: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// Adapter contract
+// ---------------------------------------------------------------------------
+
+/**
  * Base contract every platform adapter implements.
- * Keep it minimal; extend per-sprint with sync/listing/order capabilities
- * only when the corresponding business sprint requires them.
+ * Extended per-sprint with new capabilities only when a business sprint
+ * requires them (no speculative method dumps).
  */
 export interface PlatformAdapter {
   readonly platformCode: PlatformCode;
 
-  /** Throws a DomainError-derived error when credentials are invalid. */
+  /** Throws a PlatformError when credentials are invalid (safe read only). */
   validateCredential(context: PlatformCredentialContext): Promise<void>;
+
+  /**
+   * Fetch one page of platform listings starting at `cursor` (undefined =
+   * first page). Cursor semantics are platform-specific and opaque.
+   */
+  fetchListings(
+    context: StoreContext,
+    cursor?: unknown,
+  ): Promise<PaginatedResult<PlatformListingRaw>>;
+
+  /**
+   * Fetch one page of platform orders. Without a cursor this starts a
+   * catch-up window; adapters may also accept targeted cursors (e.g.
+   * specific posting numbers from a webhook) - see adapter option types.
+   */
+  fetchOrders(context: StoreContext, cursor?: unknown): Promise<PaginatedResult<PlatformOrderRaw>>;
+
+  /**
+   * Parse a raw webhook payload into normalized events. Optional: platforms
+   * without webhook capability simply do not implement it (task §29).
+   */
+  processWebhook?(context: StoreContext, payload: unknown): Promise<PlatformWebhookEvent[]>;
+
+  /**
+   * Targeted order re-read by platform order ids (webhook follow-up): the
+   * webhook payload is only a hint, the authoritative facts come from this
+   * authenticated read. Optional - only webhook-capable platforms need it.
+   */
+  fetchOrdersByPlatformIds?(
+    context: StoreContext,
+    platformOrderIds: readonly string[],
+  ): Promise<readonly PlatformOrderRaw[]>;
 }

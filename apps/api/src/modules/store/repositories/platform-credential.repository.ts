@@ -34,4 +34,16 @@ export class PlatformCredentialRepository {
   async update(id: string, patch: Partial<PlatformCredentialEntity>): Promise<void> {
     await this.repository.update({ id }, patch);
   }
+
+  /** Validation metadata write (Sprint 5 §33); error text already sanitized. */
+  async updateValidationMeta(
+    id: string,
+    meta: {
+      lastValidatedAt: Date;
+      lastValidationStatus: string;
+      lastValidationError: string | null;
+    },
+  ): Promise<void> {
+    await this.repository.update({ id }, meta);
+  }
 }

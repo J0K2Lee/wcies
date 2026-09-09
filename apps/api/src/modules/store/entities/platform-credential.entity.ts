@@ -31,6 +31,16 @@ export class PlatformCredentialEntity {
   @Column({ type: 'varchar', length: 30, default: 'ACTIVE' })
   status!: string;
 
+  /** Validation metadata (Sprint 5 §33); error text is sanitized, never secret. */
+  @Column({ type: 'timestamptz', name: 'last_validated_at', nullable: true })
+  lastValidatedAt!: Date | null;
+
+  @Column({ type: 'varchar', length: 20, name: 'last_validation_status', nullable: true })
+  lastValidationStatus!: string | null;
+
+  @Column({ type: 'text', name: 'last_validation_error', nullable: true })
+  lastValidationError!: string | null;
+
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;
 

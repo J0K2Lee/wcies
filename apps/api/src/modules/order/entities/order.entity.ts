@@ -59,6 +59,10 @@ export class OrderEntity {
   @Column({ type: 'text', nullable: true })
   remark!: string | null;
 
+  /** How the order entered WCIES (Sprint 5 §58): MANUAL / API / POLLING / WEBHOOK. */
+  @Column({ type: 'varchar', length: 30, name: 'sync_source', nullable: true })
+  syncSource!: string | null;
+
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;
 

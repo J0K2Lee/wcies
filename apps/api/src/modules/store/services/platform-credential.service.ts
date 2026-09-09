@@ -118,6 +118,46 @@ export class PlatformCredentialService {
     return JSON.parse(await this.encryption.decrypt(encrypted)) as Record<string, unknown>;
   }
 
+  /**
+   * Sync engine hook (Sprint 5 §32): decrypted ACTIVE credential payload of
+   * the given type, or null when absent/disabled. Secrets stay inside the
+   * caller's StoreContext - never logged, never returned by any API.
+   */
+  async getDecryptedActivePayload(
+    storeId: string,
+    credentialType: string,
+  ): Promise<Record<string, unknown> | null> {
+    const credential = await this.repository.findByStoreAndType(storeId, credentialType);
+    if (credential === null || credential.status !== 'ACTIVE') {
+      return null;
+    }
+    return this.decryptPayload(credential);
+  }
+
+  /** Sync dashboard hook (Sprint 5 §35): secret-free validation metadata. */
+  async getValidationMeta(
+    storeId: string,
+    credentialType: string,
+  ): Promise<{
+    credentialId: string;
+    configured: boolean;
+    lastValidatedAt: Date | null;
+    lastValidationStatus: string | null;
+    lastValidationError: string | null;
+  } | null> {
+    const credential = await this.repository.findByStoreAndType(storeId, credentialType);
+    if (credential === null) {
+      return null;
+    }
+    return {
+      credentialId: credential.id,
+      configured: credential.status === 'ACTIVE',
+      lastValidatedAt: credential.lastValidatedAt,
+      lastValidationStatus: credential.lastValidationStatus,
+      lastValidationError: credential.lastValidationError,
+    };
+  }
+
   private async encryptPayload(payload: Record<string, unknown>): Promise<string> {
     const encrypted = await this.encryption.encrypt(JSON.stringify(payload));
     return JSON.stringify(encrypted);
@@ -149,6 +189,9 @@ export class PlatformCredentialService {
       credentialType: credential.credentialType,
       status: credential.status,
       configured: credential.status === 'ACTIVE' && credential.encryptedPayload.length > 0,
+      lastValidatedAt: credential.lastValidatedAt,
+      lastValidationStatus: credential.lastValidationStatus,
+      lastValidationError: credential.lastValidationError,
       createdAt: credential.createdAt,
       updatedAt: credential.updatedAt,
     };

@@ -40,6 +40,10 @@ export class PlatformListingEntity {
   @Column({ type: 'jsonb', name: 'raw_data', nullable: true })
   rawData!: Record<string, unknown> | null;
 
+  /** Last listing sync that observed this listing (never auto-deleted, §20). */
+  @Column({ type: 'timestamptz', name: 'last_seen_at', nullable: true })
+  lastSeenAt!: Date | null;
+
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;
 

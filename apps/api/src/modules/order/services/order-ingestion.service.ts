@@ -103,6 +103,7 @@ export class OrderIngestionService {
             orderedAt: input.orderedAt,
             rawData: input.rawData ?? null,
             remark: input.remark ?? null,
+            syncSource: input.syncSource ?? 'API',
           },
           input.items.map((item, index) => ({
             lineNo: index + 1,

@@ -122,6 +122,13 @@ export class AddListingSkuRequestDto {
   offerId?: string;
 }
 
+/** Human mapping of a synced UNMAPPED platform SKU to an internal SKU (Sprint 5 §36). */
+export class MapListingSkuRequestDto {
+  @ApiProperty({ format: 'uuid', description: '目标 Internal SKU' })
+  @IsUUID()
+  skuId!: string;
+}
+
 export class UpdateListingSkuRequestDto {
   @ApiPropertyOptional({ maxLength: 255, nullable: true })
   @IsOptional()
@@ -186,14 +193,17 @@ export class ListingSkuResponseDto {
   @ApiProperty({ format: 'uuid' })
   listingId!: string;
 
-  @ApiProperty({ format: 'uuid' })
-  skuId!: string;
+  @ApiProperty({ nullable: true, format: 'uuid', description: 'UNMAPPED 平台SKU为 null' })
+  skuId!: string | null;
 
-  @ApiProperty({ example: 'SKU000001' })
-  skuCode!: string;
+  @ApiProperty({ nullable: true, example: 'SKU000001', description: 'UNMAPPED 行为 null' })
+  skuCode!: string | null;
 
-  @ApiProperty({ example: 'VK87 MAX V2 黑色' })
-  skuName!: string;
+  @ApiProperty({ nullable: true, example: 'VK87 MAX V2 黑色', description: 'UNMAPPED 行为 null' })
+  skuName!: string | null;
+
+  @ApiProperty({ enum: ['UNMAPPED', 'MAPPED'], description: '人工映射状态（Sprint 5）' })
+  mappingStatus!: string;
 
   @ApiProperty({ nullable: true })
   platformSkuId!: string | null;
@@ -217,6 +227,8 @@ export class ListingSkuResponseDto {
 export class ListingResponseDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
+  @ApiProperty({ nullable: true, type: Date, description: '最近一次被 Listing Sync 观察到的时间' })
+  lastSeenAt!: Date | null;
 
   @ApiProperty({ format: 'uuid' })
   platformId!: string;
