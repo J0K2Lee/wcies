@@ -135,7 +135,9 @@ export class SyncJobRepository {
     if (filters.status !== undefined) {
       qb.andWhere('job.status = :status', { status: filters.status });
     }
-    qb.orderBy('job.created_at', 'DESC').skip(offset).take(limit);
+    // Raw-table joins carry no relation metadata, so skip/take (which build a
+    // distinct-id paging subquery) crash in TypeORM; plain LIMIT/OFFSET is safe.
+    qb.orderBy('job.created_at', 'DESC').addOrderBy('job.id', 'DESC').offset(offset).limit(limit);
     const [{ raw: rawRows, entities }, total] = await Promise.all([
       qb.getRawAndEntities(),
       qb.getCount(),

@@ -73,7 +73,17 @@ export function StoreBindingsPage() {
       isInventoryPushEnabled?: boolean;
       priority?: number;
     }) =>
-      apiPost('/api/v1/stores/{storeId}/warehouse-bindings', values, { storeId: values.storeId }),
+      apiPost(
+        '/api/v1/stores/{storeId}/warehouse-bindings',
+        {
+          warehouseId: values.warehouseId,
+          fulfillmentMode: values.fulfillmentMode,
+          platformWarehouseId: values.platformWarehouseId || undefined,
+          isInventoryPushEnabled: values.isInventoryPushEnabled,
+          priority: values.priority,
+        },
+        { storeId: values.storeId },
+      ),
     onSuccess: () => {
       void message.success('绑定已创建');
       setCreateOpen(false);

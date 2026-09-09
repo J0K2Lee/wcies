@@ -510,6 +510,38 @@ describe('listing sync (task §17-§20)', () => {
   });
 });
 
+describe('sync job list (dashboard pagination, regression: raw-join + skip/take)', () => {
+  it('lists jobs with joined store/platform fields and paginates via LIMIT/OFFSET', async () => {
+    const job = await syncAndWait('sync/listings', storeA);
+    expect(job.status).toBe('SUCCESS');
+
+    const list = await client.get<
+      Array<{
+        id: string;
+        storeId: string;
+        storeCode: string;
+        storeName: string;
+        platformCode: string;
+        syncType: string;
+        status: string;
+      }>
+    >(`/api/v1/sync/jobs?storeId=${storeA}&page=1&pageSize=10`);
+    expect(list.status).toBe(200);
+    const row = list.body.data.find((r) => r.id === job.id);
+    expect(row).toBeDefined();
+    expect(row?.storeCode).toBe(`${PREFIX}-A`);
+    expect(row?.storeName).toBe(`${PREFIX} A店`);
+    expect(row?.platformCode).toBe('OZON');
+    expect(row?.syncType).toBe('LISTING_SYNC');
+    expect(list.body.meta.total).toBeGreaterThanOrEqual(1);
+
+    // page beyond offset also works (regression: skip/take + raw join used to 500)
+    const page2 = await client.get(`/api/v1/sync/jobs?storeId=${storeA}&page=2&pageSize=1`);
+    expect(page2.status).toBe(200);
+    expect(Array.isArray(page2.body.data)).toBe(true);
+  });
+});
+
 describe('order sync (task §21-§25, §38, §45-§52)', () => {
   it('ingests a normal order through OrderIngestionService with reservation', async () => {
     const skuId = await newSku('ORD');

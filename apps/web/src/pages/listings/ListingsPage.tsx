@@ -85,11 +85,22 @@ export function ListingsPage() {
     ['skus-lite'],
   );
   const detail = useApiQuery<{
-    platformCode: string;
-    storeCode: string;
-    platformProductId: string;
-    skus: ListingSkuRow[];
-  }>('/api/v1/listings/{id}', {}, ['listing-detail', detailId]);
+    data: {
+      platformCode: string;
+      storeCode: string;
+      platformProductId: string;
+      skus: ListingSkuRow[];
+    };
+  }>(
+    '/api/v1/listings/{id}',
+    {},
+    ['listing-detail', detailId],
+    {
+      id: detailId ?? '',
+    },
+    detailId !== null,
+  );
+  const listingDetail = detail.data?.data;
 
   const createMutation = useMutation({
     mutationFn: (values: {
@@ -324,8 +335,8 @@ export function ListingsPage() {
 
       <Drawer
         title={
-          detail.data
-            ? `${detail.data.platformCode} / ${detail.data.storeCode} / ${detail.data.platformProductId}`
+          listingDetail
+            ? `${listingDetail.platformCode} / ${listingDetail.storeCode} / ${listingDetail.platformProductId}`
             : 'Listing详情'
         }
         width={720}
@@ -335,7 +346,7 @@ export function ListingsPage() {
         <Table<ListingSkuRow>
           rowKey="id"
           size="small"
-          dataSource={detail.data?.skus ?? []}
+          dataSource={listingDetail?.skus ?? []}
           pagination={false}
           columns={[
             {

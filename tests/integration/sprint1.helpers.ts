@@ -9,6 +9,7 @@ export interface Envelope<T> {
   success: boolean;
   data: T;
   error?: { code: string; message: string; details: Record<string, unknown> };
+  meta?: { page: number; pageSize: number; total: number };
 }
 
 export class ApiClient {

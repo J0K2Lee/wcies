@@ -63,14 +63,22 @@ export function WarehousesPage() {
     ['warehouses', page, keyword, warehouseType],
   );
 
-  const detail = useApiQuery<WarehouseRow>('/api/v1/warehouses/{id}', {}, [
-    'warehouse-detail',
-    detailId,
-  ]);
+  const detail = useApiQuery<{ data: WarehouseRow }>(
+    '/api/v1/warehouses/{id}',
+    {},
+    ['warehouse-detail', detailId],
+    {
+      id: detailId ?? '',
+    },
+    detailId !== null,
+  );
+  const warehouse = detail.data?.data;
   const bins = useApiQuery<{ data: BinRow[]; meta: { total: number } }>(
     '/api/v1/warehouses/{warehouseId}/bins',
     { page: 1, pageSize: 50 },
     ['warehouse-bins', detailId],
+    { warehouseId: detailId ?? '' },
+    detailId !== null,
   );
   const bindings = useApiQuery<{
     data: Array<{ storeCode: string; fulfillmentMode: string; status: string }>;
@@ -210,7 +218,7 @@ export function WarehousesPage() {
       </Modal>
 
       <Drawer
-        title={detail.data ? `${detail.data.warehouseCode} ${detail.data.name}` : '仓库详情'}
+        title={warehouse ? `${warehouse.warehouseCode} ${warehouse.name}` : '仓库详情'}
         width={760}
         open={detailId !== null}
         onClose={() => setDetailId(null)}
@@ -220,14 +228,14 @@ export function WarehousesPage() {
             column={2}
             size="small"
             items={[
-              { key: 'code', label: '编码', children: detail.data?.warehouseCode },
+              { key: 'code', label: '编码', children: warehouse?.warehouseCode },
               {
                 key: 'type',
                 label: '类型',
-                children: detail.data ? (TYPE_LABEL[detail.data.warehouseType] ?? '') : '',
+                children: warehouse ? (TYPE_LABEL[warehouse.warehouseType] ?? '') : '',
               },
-              { key: 'city', label: '城市', children: detail.data?.city ?? '-' },
-              { key: 'bins', label: '库位数', children: detail.data?.binCount ?? 0 },
+              { key: 'city', label: '城市', children: warehouse?.city ?? '-' },
+              { key: 'bins', label: '库位数', children: warehouse?.binCount ?? 0 },
             ]}
           />
           <Space>
@@ -264,7 +272,7 @@ export function WarehousesPage() {
       </Drawer>
 
       <Modal
-        title={`批量创建库位 — ${detail.data?.warehouseCode ?? ''}`}
+        title={`批量创建库位 — ${warehouse?.warehouseCode ?? ''}`}
         open={batchOpen}
         onCancel={() => setBatchOpen(false)}
         onOk={() => void batchForm.validateFields().then((values) => batchMutation.mutate(values))}

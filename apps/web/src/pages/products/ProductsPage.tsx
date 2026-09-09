@@ -73,10 +73,16 @@ export function ProductsPage() {
   const categories = useApiQuery<{
     data: Array<{ id: string; nameZh: string; children?: Array<{ id: string; nameZh: string }> }>;
   }>('/api/v1/categories', {}, ['categories']);
-  const detail = useApiQuery<ProductDetail>('/api/v1/products/{id}', {}, [
-    'product-detail',
-    detailId,
-  ]);
+  const detail = useApiQuery<{ data: ProductDetail }>(
+    '/api/v1/products/{id}',
+    {},
+    ['product-detail', detailId],
+    {
+      id: detailId ?? '',
+    },
+    detailId !== null,
+  );
+  const productDetail = detail.data?.data;
 
   const createMutation = useMutation({
     mutationFn: (values: { nameZh: string; brandId?: string; categoryId?: string }) =>
@@ -230,38 +236,38 @@ export function ProductsPage() {
       </Modal>
 
       <Drawer
-        title={detail.data?.product.productCode ?? '商品详情'}
+        title={productDetail?.product.productCode ?? '商品详情'}
         width={720}
         open={detailId !== null}
         onClose={() => setDetailId(null)}
       >
-        {detail.data !== undefined && (
+        {productDetail !== undefined && (
           <Space direction="vertical" style={{ width: '100%' }} size="large">
             <Descriptions
               column={2}
               size="small"
               items={[
-                { key: 'code', label: '商品编号', children: detail.data.product.productCode },
-                { key: 'name', label: '中文名称', children: detail.data.product.nameZh },
-                { key: 'nameRu', label: '俄文名称', children: detail.data.product.nameRu ?? '-' },
-                { key: 'brand', label: '品牌', children: detail.data.product.brandName ?? '-' },
+                { key: 'code', label: '商品编号', children: productDetail.product.productCode },
+                { key: 'name', label: '中文名称', children: productDetail.product.nameZh },
+                { key: 'nameRu', label: '俄文名称', children: productDetail.product.nameRu ?? '-' },
+                { key: 'brand', label: '品牌', children: productDetail.product.brandName ?? '-' },
                 {
                   key: 'category',
                   label: '分类',
-                  children: detail.data.product.categoryName ?? '-',
+                  children: productDetail.product.categoryName ?? '-',
                 },
                 {
                   key: 'status',
                   label: '状态',
                   children:
-                    STATUS_TAG[detail.data.product.status]?.label ?? detail.data.product.status,
+                    STATUS_TAG[productDetail.product.status]?.label ?? productDetail.product.status,
                 },
               ]}
             />
             <Table
               rowKey="id"
               size="small"
-              dataSource={detail.data.skus}
+              dataSource={productDetail.skus}
               pagination={false}
               columns={[
                 { title: 'SKU Code', dataIndex: 'skuCode' },

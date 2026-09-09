@@ -87,21 +87,38 @@ export function StoresPage() {
     {},
     ['platforms'],
   );
-  const detail = useApiQuery<StoreRow>('/api/v1/stores/{id}', {}, ['store-detail', drawerId]);
+  const detail = useApiQuery<{ data: StoreRow }>(
+    '/api/v1/stores/{id}',
+    {},
+    ['store-detail', drawerId],
+    {
+      id: drawerId ?? '',
+    },
+    drawerId !== null,
+  );
+  const store = detail.data?.data;
   const credentials = useApiQuery<{ data: CredentialRow[] }>(
     '/api/v1/stores/{storeId}/credentials',
     {},
     ['store-credentials', drawerId],
+    { storeId: drawerId ?? '' },
+    drawerId !== null,
   );
   const bindings = useApiQuery<{ data: BindingRow[] }>(
     '/api/v1/stores/{storeId}/warehouse-bindings',
     { page: 1, pageSize: 50 },
     ['store-bindings', drawerId],
+    { storeId: drawerId ?? '' },
+    drawerId !== null,
   );
-  const syncOverview = useApiQuery<SyncOverview>('/api/v1/sync/stores/{storeId}/overview', {}, [
-    'store-sync-overview',
-    drawerId,
-  ]);
+  const syncOverview = useApiQuery<{ data: SyncOverview }>(
+    '/api/v1/sync/stores/{storeId}/overview',
+    {},
+    ['store-sync-overview', drawerId],
+    { storeId: drawerId ?? '' },
+    drawerId !== null,
+  );
+  const overview = syncOverview.data?.data;
 
   const refreshStore = () => {
     void queryClient.invalidateQueries({ queryKey: ['stores'] });
@@ -291,7 +308,7 @@ export function StoresPage() {
       </Modal>
 
       <Drawer
-        title={detail.data ? `${detail.data.platformCode} / ${detail.data.storeCode}` : '店铺详情'}
+        title={store ? `${store.platformCode} / ${store.storeCode}` : '店铺详情'}
         width={700}
         open={drawerId !== null}
         onClose={() => setDrawerId(null)}
@@ -301,37 +318,33 @@ export function StoresPage() {
             {
               key: 'base',
               label: '基本资料',
-              children: detail.data !== undefined && (
+              children: store !== undefined && (
                 <Space direction="vertical">
                   <Descriptions
                     column={2}
                     size="small"
                     items={[
-                      { key: 'code', label: '店铺编码', children: detail.data.storeCode },
-                      { key: 'name', label: '名称', children: detail.data.name },
-                      { key: 'seller', label: 'Seller ID', children: detail.data.sellerId ?? '-' },
+                      { key: 'code', label: '店铺编码', children: store.storeCode },
+                      { key: 'name', label: '名称', children: store.name },
+                      { key: 'seller', label: 'Seller ID', children: store.sellerId ?? '-' },
                       {
                         key: 'currency',
                         label: '币种',
-                        children: detail.data.defaultCurrency ?? '-',
+                        children: store.defaultCurrency ?? '-',
                       },
-                      { key: 'status', label: '状态', children: detail.data.status },
+                      { key: 'status', label: '状态', children: store.status },
                     ]}
                   />
-                  {detail.data.status === 'ACTIVE' ? (
+                  {store.status === 'ACTIVE' ? (
                     <Button
                       danger
-                      onClick={() =>
-                        statusMutation.mutate({ id: detail.data.id, action: 'deactivate' })
-                      }
+                      onClick={() => statusMutation.mutate({ id: store.id, action: 'deactivate' })}
                     >
                       停用店铺
                     </Button>
                   ) : (
                     <Button
-                      onClick={() =>
-                        statusMutation.mutate({ id: detail.data.id, action: 'activate' })
-                      }
+                      onClick={() => statusMutation.mutate({ id: store.id, action: 'activate' })}
                     >
                       启用店铺
                     </Button>
@@ -414,7 +427,7 @@ export function StoresPage() {
               key: 'sync',
               label: '同步',
               children:
-                syncOverview.data === undefined ? (
+                overview === undefined ? (
                   <Empty description="加载中…" />
                 ) : (
                   <Space direction="vertical" style={{ width: '100%' }}>
@@ -427,31 +440,31 @@ export function StoresPage() {
                           key: 'cred',
                           label: '凭证状态',
                           children:
-                            syncOverview.data.credential === null
+                            overview.credential === null
                               ? '未配置'
-                              : syncOverview.data.credential.lastValidationStatus === 'VALID'
+                              : overview.credential.lastValidationStatus === 'VALID'
                                 ? '已连接'
-                                : syncOverview.data.credential.lastValidationStatus === 'INVALID'
+                                : overview.credential.lastValidationStatus === 'INVALID'
                                   ? '认证失败'
-                                  : syncOverview.data.credential.lastValidationStatus === 'ERROR'
-                                    ? `验证出错：${syncOverview.data.credential.lastValidationError ?? ''}`
+                                  : overview.credential.lastValidationStatus === 'ERROR'
+                                    ? `验证出错：${overview.credential.lastValidationError ?? ''}`
                                     : '未验证',
                         },
                         {
                           key: 'order',
                           label: '最后订单同步',
-                          children: syncOverview.data.lastOrderSync
-                            ? `${syncOverview.data.lastOrderSync.status} @ ${new Date(
-                                syncOverview.data.lastOrderSync.finishedAt ?? '',
+                          children: overview.lastOrderSync
+                            ? `${overview.lastOrderSync.status} @ ${new Date(
+                                overview.lastOrderSync.finishedAt ?? '',
                               ).toLocaleString('zh-CN')}`
                             : '从未同步',
                         },
                         {
                           key: 'listing',
                           label: '最后 Listing 同步',
-                          children: syncOverview.data.lastListingSync
-                            ? `${syncOverview.data.lastListingSync.status} @ ${new Date(
-                                syncOverview.data.lastListingSync.finishedAt ?? '',
+                          children: overview.lastListingSync
+                            ? `${overview.lastListingSync.status} @ ${new Date(
+                                overview.lastListingSync.finishedAt ?? '',
                               ).toLocaleString('zh-CN')}`
                             : '从未同步',
                         },
@@ -459,8 +472,8 @@ export function StoresPage() {
                           key: 'failures',
                           label: '连续失败次数',
                           children:
-                            syncOverview.data.consecutiveFailures > 0 ? (
-                              <Tag color="red">{syncOverview.data.consecutiveFailures}</Tag>
+                            overview.consecutiveFailures > 0 ? (
+                              <Tag color="red">{overview.consecutiveFailures}</Tag>
                             ) : (
                               '0'
                             ),

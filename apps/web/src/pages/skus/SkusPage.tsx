@@ -89,19 +89,35 @@ export function SkusPage() {
     data: Array<{ id: string; productCode: string; nameZh: string }>;
   }>('/api/v1/products', { page: 1, pageSize: 100 }, ['products-lite']);
 
-  const detail = useApiQuery<SkuRow>('/api/v1/skus/{id}', {}, ['sku-detail', drawerId]);
-  const barcodes = useApiQuery<{ data: BarcodeRow[] }>('/api/v1/skus/{skuId}/barcodes', {}, [
-    'sku-barcodes',
-    drawerId,
-  ]);
-  const images = useApiQuery<{ data: ImageRow[] }>('/api/v1/skus/{skuId}/images', {}, [
-    'sku-images',
-    drawerId,
-  ]);
+  const detail = useApiQuery<{ data: SkuRow }>(
+    '/api/v1/skus/{id}',
+    {},
+    ['sku-detail', drawerId],
+    {
+      id: drawerId ?? '',
+    },
+    drawerId !== null,
+  );
+  const barcodes = useApiQuery<{ data: BarcodeRow[] }>(
+    '/api/v1/skus/{skuId}/barcodes',
+    {},
+    ['sku-barcodes', drawerId],
+    { skuId: drawerId ?? '' },
+    drawerId !== null,
+  );
+  const images = useApiQuery<{ data: ImageRow[] }>(
+    '/api/v1/skus/{skuId}/images',
+    {},
+    ['sku-images', drawerId],
+    { skuId: drawerId ?? '' },
+    drawerId !== null,
+  );
   const mappings = useApiQuery<{ data: MappingRow[] }>(
     '/api/v1/listings/skus/{skuId}/mappings',
     {},
     ['sku-mappings', drawerId],
+    { skuId: drawerId ?? '' },
+    drawerId !== null,
   );
 
   const refreshSku = () => {
@@ -204,7 +220,7 @@ export function SkusPage() {
     onError: (error: Error) => void message.error(error.message),
   });
 
-  const sku = detail.data;
+  const sku = detail.data?.data;
 
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="middle">
