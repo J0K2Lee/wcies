@@ -67,7 +67,7 @@ export class SyncDispatchService {
         attempts: 1,
         removeOnComplete: { age: 3600 },
         removeOnFail: { age: 24 * 3600 },
-        jobId: `syncjob:${job.id}`,
+        jobId: `syncjob-${job.id}`,
       },
     );
 

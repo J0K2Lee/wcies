@@ -7,13 +7,9 @@ import { QUEUE_NAMES } from '../../../infrastructure/queue/queue.constants';
 import { SyncDispatchService } from '../services/sync-dispatch.service';
 import { SyncJobRepository } from '../repositories/sync-job.repository';
 import { WebhookProcessService } from '../services/webhook.service';
-import { readStoreSyncSettings } from '../sync.constants';
+import { readStoreSyncSettings, WebhookJobPayload } from '../sync.constants';
 import { StoreService } from '../../store/services/store.service';
 import { SyncContextService } from '../services/sync-context.service';
-
-export interface WebhookJobPayload {
-  readonly rawEventId: string;
-}
 
 /** Consumes webhook follow-up processing (task §28: fast HTTP, slow work here). */
 @Processor(QUEUE_NAMES.webhook)

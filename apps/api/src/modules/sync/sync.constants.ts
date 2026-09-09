@@ -52,3 +52,8 @@ export function readStoreSyncSettings(settings: Record<string, unknown> | null):
     listingSyncEnabled: raw['listingSyncEnabled'] === true,
   };
 }
+
+/** Payload of a wcies.webhook background job (raw event follow-up). */
+export interface WebhookJobPayload {
+  readonly rawEventId: string;
+}

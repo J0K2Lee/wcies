@@ -57,14 +57,11 @@ export class CreateSyncJobs1790000002000 implements MigrationInterface {
       }),
       true,
     );
-    await queryRunner.createIndex(
-      'sync_jobs',
-      new TableIndex({
-        name: 'uq_sync_jobs_active',
-        columnNames: ['store_id', 'sync_type'],
-        unique: true,
-        where: `status IN ('PENDING', 'RUNNING')`,
-      }),
+    // Raw SQL: TypeORM's TableIndex drops the UNIQUE flag when combined
+    // with a partial WHERE clause - the single-flight guard MUST be unique.
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX uq_sync_jobs_active ON sync_jobs (store_id, sync_type)
+       WHERE status IN ('PENDING', 'RUNNING')`,
     );
     await queryRunner.createIndex(
       'sync_jobs',

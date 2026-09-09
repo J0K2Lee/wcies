@@ -9,6 +9,9 @@
  *           relative imports are resolved so deep paths are caught.
  *   Rule 4: A business module must not import another module's internal
  *           repositories/entities directory.
+ *   Rule 5 (Sprint 5 §61): external platform API hosts/endpoints may only
+ *           appear inside modules/integration - platform calls must never
+ *           leak into core business modules.
  *
  * Architecture discipline cannot rely on memory alone (AGENTS.md §81).
  */
@@ -172,10 +175,37 @@ function checkRule4(): void {
   }
 }
 
+/**
+ * Rule 5 (Sprint 5 task §61): real platform endpoints live only in the
+ * integration layer (Adapter/Client). Core modules must stay ignorant of
+ * which HTTP API a platform speaks.
+ */
+function checkRule5(): void {
+  const apiFiles = listFiles(join(ROOT, 'apps/api/src'), ['.ts']);
+  const PLATFORM_URL_PATTERN =
+    /api-seller\.ozon\.ru|seller-api\.wildberries\.ru|api\.market\.yandex\.net/i;
+  for (const file of apiFiles) {
+    const normalized = file.split(sep).join('/');
+    if (normalized.includes('modules/integration/')) {
+      continue; // the only sanctioned home for platform endpoints
+    }
+    const source = readFileSync(file, 'utf8');
+    const match = PLATFORM_URL_PATTERN.exec(source);
+    if (match !== null) {
+      violations.push({
+        rule: 'Rule 5: platform API endpoints only inside modules/integration',
+        file: relative(ROOT, file),
+        detail: `found "${match[0]}"`,
+      });
+    }
+  }
+}
+
 checkRule1();
 checkRule2();
 checkRule3();
 checkRule4();
+checkRule5();
 
 if (violations.length > 0) {
   console.error(`Architecture check FAILED with ${violations.length} violation(s):\n`);
@@ -185,4 +215,4 @@ if (violations.length > 0) {
   process.exit(1);
 }
 
-console.log('Architecture check passed (4 rules evaluated).');
+console.log('Architecture check passed (5 rules evaluated).');

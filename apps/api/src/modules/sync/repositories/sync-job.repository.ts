@@ -54,7 +54,8 @@ export class SyncJobRepository {
        RETURNING id`,
       [id],
     );
-    return result.length === 1;
+    // TypeORM's pg driver returns [rows, rowCount] for UPDATE...RETURNING.
+    return returningRows(result).length === 1;
   }
 
   async finalize(
@@ -210,8 +211,20 @@ export class SyncJobRepository {
        RETURNING id`,
       [String(olderThanMinutes)],
     );
-    return result.length;
+    return returningRows(result).length;
   }
+}
+
+/**
+ * Normalizes the pg driver's two possible raw-query shapes: plain rows
+ * arrays (SELECT / INSERT ... RETURNING) and the [rows, rowCount] tuple
+ * returned for UPDATE ... RETURNING.
+ */
+function returningRows<T>(result: unknown): T[] {
+  if (Array.isArray(result) && result.length > 0 && Array.isArray(result[0])) {
+    return result[0] as T[];
+  }
+  return (result as T[]) ?? [];
 }
 
 /** Raw sync_jobs row shape returned by INSERT ... RETURNING *. */

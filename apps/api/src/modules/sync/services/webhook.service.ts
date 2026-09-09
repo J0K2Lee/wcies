@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { PlatformWebhookEvent } from '@wcies/platform-contracts';
+import { QUEUE_NAMES } from '../../../infrastructure/queue/queue.constants';
 import { PlatformService } from '../../platform/platform.service';
 import { StoreService } from '../../store/services/store.service';
 import { StoreNotFoundError } from '../../store/errors/store-errors';
@@ -9,6 +12,7 @@ import { OrderSyncService } from './order-sync.service';
 import { ExternalRawEventRepository } from '../repositories/external-raw-event.repository';
 import { webhookSellerId } from '../../integration/ozon/ozon.mapper';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
+import { WebhookJobPayload } from '../sync.constants';
 
 /**
  * OZON webhook ingestion (Sprint 5 task §26-§29).
@@ -32,6 +36,7 @@ export class WebhookIngestService {
     private readonly registry: PlatformAdapterRegistry,
     private readonly contextService: SyncContextService,
     private readonly rawEventRepo: ExternalRawEventRepository,
+    @InjectQueue(QUEUE_NAMES.webhook) private readonly webhookQueue: Queue<WebhookJobPayload>,
     private readonly logger: AppLoggerService,
   ) {}
 
@@ -87,6 +92,18 @@ export class WebhookIngestService {
     if (stored === null) {
       return 'DUPLICATE';
     }
+    // Persisted -> hand off to the worker; the HTTP request never waits for
+    // platform reads or order ingestion (task §28).
+    await this.webhookQueue.add(
+      'process',
+      { rawEventId: stored.id },
+      {
+        attempts: 1,
+        removeOnComplete: { age: 3600 },
+        removeOnFail: { age: 24 * 3600 },
+        jobId: `rawevent-${stored.id}`,
+      },
+    );
     return 'ACCEPTED';
   }
 
@@ -118,6 +135,7 @@ export class WebhookProcessService {
     private readonly contextService: SyncContextService,
     private readonly orderSyncService: OrderSyncService,
     private readonly rawEventRepo: ExternalRawEventRepository,
+    @InjectQueue(QUEUE_NAMES.webhook) private readonly webhookQueue: Queue<WebhookJobPayload>,
     private readonly logger: AppLoggerService,
   ) {}
 

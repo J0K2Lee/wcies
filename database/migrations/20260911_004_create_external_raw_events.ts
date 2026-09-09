@@ -44,23 +44,17 @@ export class CreateExternalRawEvents1790000004000 implements MigrationInterface 
       }),
       true,
     );
-    await queryRunner.createIndex(
-      'external_raw_events',
-      new TableIndex({
-        name: 'uq_external_raw_events_store_payload',
-        columnNames: ['store_id', 'payload_hash'],
-        unique: true,
-      }),
+    // Raw SQL: TypeORM's TableIndex drops UNIQUE when combined with a
+    // WHERE clause (same trap as uq_sync_jobs_active).
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX uq_external_raw_events_store_payload
+       ON external_raw_events (store_id, payload_hash)`,
     );
     // Event-id dedup applies only when the platform supplies one.
-    await queryRunner.createIndex(
-      'external_raw_events',
-      new TableIndex({
-        name: 'uq_external_raw_events_store_event_id',
-        columnNames: ['store_id', 'external_event_id'],
-        unique: true,
-        where: `external_event_id IS NOT NULL`,
-      }),
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX uq_external_raw_events_store_event_id
+       ON external_raw_events (store_id, external_event_id)
+       WHERE external_event_id IS NOT NULL`,
     );
     await queryRunner.createIndex(
       'external_raw_events',

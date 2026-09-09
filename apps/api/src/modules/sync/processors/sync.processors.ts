@@ -24,23 +24,47 @@ export class OrderSyncProcessor extends WorkerHost {
   }
 
   async process(job: Job<SyncDispatchJobPayload>): Promise<string> {
-    return requestContextStorage.run({ requestId: `syncjob:${job.data.syncJobId}` }, async () => {
-      const claimed = await this.jobRepo.claimRunning(job.data.syncJobId);
-      if (!claimed) {
-        // Duplicate delivery or stale job (crashed worker) - skip safely.
-        this.logger.warn('order sync job not claimable (stale/duplicate)', {
+    try {
+      return await requestContextStorage.run(
+        { requestId: `syncjob-${job.data.syncJobId}` },
+        async () => {
+          const claimed = await this.jobRepo.claimRunning(job.data.syncJobId);
+          if (!claimed) {
+            // Duplicate delivery or stale job (crashed worker) - skip safely.
+            this.logger.warn('order sync job not claimable (stale/duplicate)', {
+              module: 'sync',
+              syncJobId: job.data.syncJobId,
+            });
+            return 'skipped';
+          }
+          const syncJob = await this.jobRepo.findById(job.data.syncJobId);
+          if (syncJob === null) {
+            return 'missing';
+          }
+          await this.syncService.execute(syncJob);
+          return syncJob.id;
+        },
+      );
+    } catch (error: unknown) {
+      // A processor crash must not leave the guard row RUNNING forever:
+      // mark FAILED (cursor untouched) and surface the error.
+      await this.jobRepo
+        .finalize(job.data.syncJobId, {
+          status: 'FAILED',
+          errorCode: error instanceof Error ? 'SYNC_PROCESSOR_ERROR' : 'SYNC_PROCESSOR_ERROR',
+          errorMessage: error instanceof Error ? error.message : String(error),
+        })
+        .catch(() => undefined);
+      this.logger.error(
+        `order sync processor failed: ${error instanceof Error ? error.message : String(error)}`,
+        undefined,
+        {
           module: 'sync',
           syncJobId: job.data.syncJobId,
-        });
-        return 'skipped';
-      }
-      const syncJob = await this.jobRepo.findById(job.data.syncJobId);
-      if (syncJob === null) {
-        return 'missing';
-      }
-      await this.syncService.execute(syncJob);
-      return syncJob.id;
-    });
+        },
+      );
+      throw error;
+    }
   }
 }
 
@@ -56,21 +80,43 @@ export class ListingSyncProcessor extends WorkerHost {
   }
 
   async process(job: Job<SyncDispatchJobPayload>): Promise<string> {
-    return requestContextStorage.run({ requestId: `syncjob:${job.data.syncJobId}` }, async () => {
-      const claimed = await this.jobRepo.claimRunning(job.data.syncJobId);
-      if (!claimed) {
-        this.logger.warn('listing sync job not claimable (stale/duplicate)', {
+    try {
+      return await requestContextStorage.run(
+        { requestId: `syncjob-${job.data.syncJobId}` },
+        async () => {
+          const claimed = await this.jobRepo.claimRunning(job.data.syncJobId);
+          if (!claimed) {
+            this.logger.warn('listing sync job not claimable (stale/duplicate)', {
+              module: 'sync',
+              syncJobId: job.data.syncJobId,
+            });
+            return 'skipped';
+          }
+          const syncJob = await this.jobRepo.findById(job.data.syncJobId);
+          if (syncJob === null) {
+            return 'missing';
+          }
+          await this.syncService.execute(syncJob);
+          return syncJob.id;
+        },
+      );
+    } catch (error: unknown) {
+      await this.jobRepo
+        .finalize(job.data.syncJobId, {
+          status: 'FAILED',
+          errorCode: 'SYNC_PROCESSOR_ERROR',
+          errorMessage: error instanceof Error ? error.message : String(error),
+        })
+        .catch(() => undefined);
+      this.logger.error(
+        `listing sync processor failed: ${error instanceof Error ? error.message : String(error)}`,
+        undefined,
+        {
           module: 'sync',
           syncJobId: job.data.syncJobId,
-        });
-        return 'skipped';
-      }
-      const syncJob = await this.jobRepo.findById(job.data.syncJobId);
-      if (syncJob === null) {
-        return 'missing';
-      }
-      await this.syncService.execute(syncJob);
-      return syncJob.id;
-    });
+        },
+      );
+      throw error;
+    }
   }
 }
