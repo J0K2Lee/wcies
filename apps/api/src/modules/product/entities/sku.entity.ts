@@ -11,9 +11,10 @@ import {
  * Internal SKU - the unified identity for inventory / orders / purchase /
  * cost / SN / transfer (task §20/§21). Product 1:N SKU, never the reverse.
  *
- * volume_cm3 is ALWAYS recomputed by the backend from length x width x
- * height; clients cannot write it (task §23). moving_average_cost exists as
- * a reserved field and stays null until the purchase sprint (task §24).
+ * Units (2026-09-09 convention change): weight in g, dimensions in integer mm.
+ * volume_mm3 is ALWAYS recomputed by the backend from length x width x height;
+ * clients cannot write it (task §23). moving_average_cost exists as a reserved
+ * field and stays null until the purchase sprint (task §24).
  */
 @Entity('skus')
 @Index('idx_skus_product', ['productId'])
@@ -42,20 +43,23 @@ export class SkuEntity {
   @Column({ type: 'varchar', length: 100, nullable: true })
   size!: string | null;
 
-  @Column({ type: 'numeric', precision: 12, scale: 4, name: 'weight_kg', nullable: true })
-  weightKg!: string | null;
+  @Column({ type: 'numeric', precision: 12, scale: 3, name: 'weight_g', nullable: true })
+  weightG!: string | null;
 
-  @Column({ type: 'numeric', precision: 12, scale: 3, name: 'length_cm', nullable: true })
-  lengthCm!: string | null;
+  @Column({ type: 'integer', name: 'length_mm', nullable: true })
+  lengthMm!: number | null;
 
-  @Column({ type: 'numeric', precision: 12, scale: 3, name: 'width_cm', nullable: true })
-  widthCm!: string | null;
+  @Column({ type: 'integer', name: 'width_mm', nullable: true })
+  widthMm!: number | null;
 
-  @Column({ type: 'numeric', precision: 12, scale: 3, name: 'height_cm', nullable: true })
-  heightCm!: string | null;
+  @Column({ type: 'integer', name: 'height_mm', nullable: true })
+  heightMm!: number | null;
 
-  @Column({ type: 'numeric', precision: 18, scale: 3, name: 'volume_cm3', nullable: true })
-  volumeCm3!: string | null;
+  @Column({ type: 'bigint', name: 'volume_mm3', nullable: true })
+  volumeMm3!: string | null;
+
+  @Column({ type: 'varchar', length: 1000, name: 'purchase_url', nullable: true })
+  purchaseUrl!: string | null;
 
   @Column({
     type: 'numeric',

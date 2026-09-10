@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { BarcodeService } from '../../product/services/barcode.service';
 import { ProductService } from '../../product/services/product.service';
 import { SkuService } from '../../product/services/sku.service';
-import { assertDimensionsConsistent, computeVolumeCm3 } from '../../product/services/sku.service';
+import { assertDimensionsConsistent } from '../../product/services/sku.service';
 import { ImportRowError } from '../entities/import-job.entity';
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import { booleanField, numericField, optionalField, requiredField } from '../services/excel-parser';
@@ -18,10 +18,10 @@ interface SkuRowData {
   model: string | null;
   color: string | null;
   size: string | null;
-  weightKg: number | null;
-  lengthCm: number | null;
-  widthCm: number | null;
-  heightCm: number | null;
+  weightG: number | null;
+  lengthMm: number | null;
+  widthMm: number | null;
+  heightMm: number | null;
   latestPurchasePrice: number | null;
   barcode: string | null;
   barcodeType: string | null;
@@ -29,15 +29,16 @@ interface SkuRowData {
 }
 
 /**
- * SKU fixed template (spec §87):
+ * SKU fixed template (spec §87; units 2026-09-09: g / integer mm):
  * sku_code | product_code | product_name_zh | name_zh | name_ru | model |
- * color | size | weight_kg | length_cm | width_cm | height_cm |
+ * color | size | weight_g | length_mm | width_mm | height_mm |
  * latest_purchase_price | barcode | barcode_type | serial_tracking
  *
  * - sku_code empty -> auto-generated;
  * - product_code references an existing product, or creates one when
  *   product_name_zh is provided (task §58 lets SKU+product create together);
  * - duplicate sku_code / barcode -> rejected with the exact row (task §61).
+ * - length_mm / width_mm / height_mm must be integers.
  */
 @Injectable()
 export class SkuImportHandler implements ImportHandler {
@@ -95,21 +96,36 @@ export class SkuImportHandler implements ImportHandler {
         }
       }
 
-      const weightKg = numericField(rowNumber, cells, 'weight_kg', errors);
-      const lengthCm = numericField(rowNumber, cells, 'length_cm', errors);
-      const widthCm = numericField(rowNumber, cells, 'width_cm', errors);
-      const heightCm = numericField(rowNumber, cells, 'height_cm', errors);
+      const weightG = numericField(rowNumber, cells, 'weight_g', errors);
+      const lengthMm = numericField(rowNumber, cells, 'length_mm', errors);
+      const widthMm = numericField(rowNumber, cells, 'width_mm', errors);
+      const heightMm = numericField(rowNumber, cells, 'height_mm', errors);
       const latestPurchasePrice = numericField(rowNumber, cells, 'latest_purchase_price', errors);
 
+      for (const [field, value] of [
+        ['length_mm', lengthMm],
+        ['width_mm', widthMm],
+        ['height_mm', heightMm],
+      ] as const) {
+        if (value !== null && !Number.isInteger(value)) {
+          errors.push({
+            row: rowNumber,
+            field,
+            code: 'SKU_DIMENSIONS_INVALID',
+            message: `${field} 必须为整数毫米`,
+          });
+        }
+      }
+
       if (
-        [lengthCm, widthCm, heightCm].filter((value) => value !== null).length !== 0 &&
-        [lengthCm, widthCm, heightCm].filter((value) => value !== null).length !== 3
+        [lengthMm, widthMm, heightMm].filter((value) => value !== null).length !== 0 &&
+        [lengthMm, widthMm, heightMm].filter((value) => value !== null).length !== 3
       ) {
         errors.push({
           row: rowNumber,
-          field: 'length_cm',
+          field: 'length_mm',
           code: 'SKU_DIMENSIONS_INVALID',
-          message: 'length_cm/width_cm/height_cm 必须同时提供',
+          message: 'length_mm/width_mm/height_mm 必须同时提供',
         });
       }
 
@@ -172,10 +188,10 @@ export class SkuImportHandler implements ImportHandler {
         model: optionalField(cells, 'model'),
         color: optionalField(cells, 'color'),
         size: optionalField(cells, 'size'),
-        weightKg,
-        lengthCm,
-        widthCm,
-        heightCm,
+        weightG,
+        lengthMm,
+        widthMm,
+        heightMm,
         latestPurchasePrice,
         barcode,
         barcodeType,
@@ -216,8 +232,7 @@ export class SkuImportHandler implements ImportHandler {
       productId = created.id;
     }
 
-    assertDimensionsConsistent(row.lengthCm, row.widthCm, row.heightCm);
-    const volumeCm3 = computeVolumeCm3(row.lengthCm, row.widthCm, row.heightCm);
+    assertDimensionsConsistent(row.lengthMm, row.widthMm, row.heightMm);
     const sku = await this.skuService.create(
       {
         productId,
@@ -227,16 +242,15 @@ export class SkuImportHandler implements ImportHandler {
         model: row.model ?? undefined,
         color: row.color ?? undefined,
         size: row.size ?? undefined,
-        weightKg: row.weightKg ?? undefined,
-        lengthCm: row.lengthCm ?? undefined,
-        widthCm: row.widthCm ?? undefined,
-        heightCm: row.heightCm ?? undefined,
+        weightG: row.weightG ?? undefined,
+        lengthMm: row.lengthMm ?? undefined,
+        widthMm: row.widthMm ?? undefined,
+        heightMm: row.heightMm ?? undefined,
         latestPurchasePrice: row.latestPurchasePrice ?? undefined,
         serialTracking: row.serialTracking,
       },
       operator,
     );
-    void volumeCm3; // volume is recomputed inside SkuService.create
 
     if (row.barcode !== null) {
       await this.barcodeService.create(

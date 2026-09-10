@@ -1,8 +1,19 @@
 import { useQuery, UseQueryResult } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 import { apiClient } from '../api/client';
 import { WciesPaths } from '@wcies/api-client';
 
 type QueryKey = keyof WciesPaths & string;
+
+/** Debounces a fast-changing value (e.g. Select onSearch) for server-side filtering. */
+export function useDebouncedValue<TValue>(value: TValue, delayMs = 300): TValue {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
+}
 
 /**
  * Typed GET helper for the generated api-client: unwraps the envelope and

@@ -162,15 +162,17 @@ export class OzonAdapter implements PlatformAdapter {
     for (let start = 0; start < offerIds.length; start += PRODUCT_INFO_BATCH) {
       const batch = offerIds.slice(start, start + PRODUCT_INFO_BATCH);
       const response = await this.client.productInfoList(auth, storeId, batch);
+      // Real API (verified 2026-09-09): items sit at top level, no `result`
+      // envelope - see OzonProductInfoListResponse.
       if (
-        !Array.isArray(response?.result?.items) ||
-        response.result.items.some(
+        !Array.isArray(response?.items) ||
+        response.items.some(
           (info: unknown) => typeof (info as OzonProductInfoItem | null)?.id !== 'number',
         )
       ) {
         throw malformedInfoResponse(storeId);
       }
-      const infos = response.result.items.filter(
+      const infos = response.items.filter(
         (info: unknown): info is OzonProductInfoItem =>
           typeof (info as OzonProductInfoItem | null)?.id === 'number',
       );

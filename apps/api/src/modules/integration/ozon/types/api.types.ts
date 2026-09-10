@@ -50,9 +50,12 @@ export interface OzonProductInfoItem {
 }
 
 export interface OzonProductInfoListResponse {
-  readonly result: {
-    readonly items: readonly OzonProductInfoItem[];
-  };
+  /**
+   * Real + spec-verified (2026-09-09 smoke test): the response is a TOP-LEVEL
+   * { items } array - unlike product/list and posting/fbs/list there is NO
+   * `result` envelope (official schema v3GetProductInfoListResponse).
+   */
+  readonly items: readonly OzonProductInfoItem[];
 }
 
 // ---------------------------------------------------------------------------

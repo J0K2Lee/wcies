@@ -28,24 +28,24 @@ import { offsetOf } from '../../../common/dto/pagination.dto';
 
 const ENTITY_TYPE = 'SKU';
 
-export function computeVolumeCm3(
-  lengthCm: number | null,
-  widthCm: number | null,
-  heightCm: number | null,
+export function computeVolumeMm3(
+  lengthMm: number | null,
+  widthMm: number | null,
+  heightMm: number | null,
 ): number | null {
-  if (lengthCm === null || widthCm === null || heightCm === null) {
+  if (lengthMm === null || widthMm === null || heightMm === null) {
     return null;
   }
-  return Number((lengthCm * widthCm * heightCm).toFixed(3));
+  return lengthMm * widthMm * heightMm;
 }
 
 /** Asserts dimensions are all-or-none (task §23: volume must be computable). */
 export function assertDimensionsConsistent(
-  lengthCm: number | null | undefined,
-  widthCm: number | null | undefined,
-  heightCm: number | null | undefined,
+  lengthMm: number | null | undefined,
+  widthMm: number | null | undefined,
+  heightMm: number | null | undefined,
 ): void {
-  const provided = [lengthCm, widthCm, heightCm].filter(
+  const provided = [lengthMm, widthMm, heightMm].filter(
     (value) => value !== null && value !== undefined,
   );
   if (provided.length !== 0 && provided.length !== 3) {
@@ -57,7 +57,8 @@ export function assertDimensionsConsistent(
  * Internal SKU master data (task §20-§27).
  *
  * sku_code: auto-generated (SKU%06d) when omitted, always globally unique.
- * volume_cm3: backend-computed from L x W x H, never accepted from clients.
+ * Units (2026-09-09 convention): weight in g, dimensions in integer mm;
+ * volume_mm3 is backend-computed from L x W x H, never accepted from clients.
  * moving_average_cost: reserved, stays null until the purchase sprint.
  */
 @Injectable()
@@ -125,11 +126,11 @@ export class SkuService {
       }
     }
 
-    const lengthCm = dto.lengthCm ?? null;
-    const widthCm = dto.widthCm ?? null;
-    const heightCm = dto.heightCm ?? null;
-    assertDimensionsConsistent(lengthCm, widthCm, heightCm);
-    const volumeCm3 = computeVolumeCm3(lengthCm, widthCm, heightCm);
+    const lengthMm = dto.lengthMm ?? null;
+    const widthMm = dto.widthMm ?? null;
+    const heightMm = dto.heightMm ?? null;
+    assertDimensionsConsistent(lengthMm, widthMm, heightMm);
+    const volumeMm3 = computeVolumeMm3(lengthMm, widthMm, heightMm);
 
     const sku = await this.repository.insert({
       productId: product.id,
@@ -139,11 +140,12 @@ export class SkuService {
       model: dto.model ?? null,
       color: dto.color ?? null,
       size: dto.size ?? null,
-      weightKg: dto.weightKg === undefined ? null : String(dto.weightKg),
-      lengthCm: lengthCm === null ? null : String(lengthCm),
-      widthCm: widthCm === null ? null : String(widthCm),
-      heightCm: heightCm === null ? null : String(heightCm),
-      volumeCm3: volumeCm3 === null ? null : String(volumeCm3),
+      weightG: dto.weightG === undefined ? null : String(dto.weightG),
+      lengthMm,
+      widthMm,
+      heightMm,
+      volumeMm3: volumeMm3 === null ? null : String(volumeMm3),
+      purchaseUrl: dto.purchaseUrl ?? null,
       latestPurchasePrice:
         dto.latestPurchasePrice === undefined ? null : String(dto.latestPurchasePrice),
       movingAverageCost: null,
@@ -187,11 +189,11 @@ export class SkuService {
       }
     }
 
-    const mergedLength = dto.lengthCm !== undefined ? dto.lengthCm : numOrNull(found.sku.lengthCm);
-    const mergedWidth = dto.widthCm !== undefined ? dto.widthCm : numOrNull(found.sku.widthCm);
-    const mergedHeight = dto.heightCm !== undefined ? dto.heightCm : numOrNull(found.sku.heightCm);
+    const mergedLength = dto.lengthMm !== undefined ? dto.lengthMm : found.sku.lengthMm;
+    const mergedWidth = dto.widthMm !== undefined ? dto.widthMm : found.sku.widthMm;
+    const mergedHeight = dto.heightMm !== undefined ? dto.heightMm : found.sku.heightMm;
     assertDimensionsConsistent(mergedLength, mergedWidth, mergedHeight);
-    const volumeCm3 = computeVolumeCm3(mergedLength, mergedWidth, mergedHeight);
+    const volumeMm3 = computeVolumeMm3(mergedLength, mergedWidth, mergedHeight);
 
     const patch: Partial<SkuEntity> = {};
     if (dto.skuCode !== undefined) patch.skuCode = dto.skuCode.trim();
@@ -200,15 +202,15 @@ export class SkuService {
     if (dto.model !== undefined) patch.model = dto.model;
     if (dto.color !== undefined) patch.color = dto.color;
     if (dto.size !== undefined) patch.size = dto.size;
-    if (dto.weightKg !== undefined)
-      patch.weightKg = dto.weightKg === null ? null : String(dto.weightKg);
-    if (dto.lengthCm !== undefined)
-      patch.lengthCm = dto.lengthCm === null ? null : String(dto.lengthCm);
-    if (dto.widthCm !== undefined)
-      patch.widthCm = dto.widthCm === null ? null : String(dto.widthCm);
-    if (dto.heightCm !== undefined)
-      patch.heightCm = dto.heightCm === null ? null : String(dto.heightCm);
-    patch.volumeCm3 = volumeCm3 === null ? null : String(volumeCm3);
+    if (dto.weightG !== undefined)
+      patch.weightG = dto.weightG === null ? null : String(dto.weightG);
+    if (dto.lengthMm !== undefined) patch.lengthMm = dto.lengthMm;
+    if (dto.widthMm !== undefined) patch.widthMm = dto.widthMm;
+    if (dto.heightMm !== undefined) patch.heightMm = dto.heightMm;
+    patch.volumeMm3 = volumeMm3 === null ? null : String(volumeMm3);
+    if (dto.purchaseUrl !== undefined) {
+      patch.purchaseUrl = dto.purchaseUrl === null ? null : dto.purchaseUrl;
+    }
     if (dto.latestPurchasePrice !== undefined) {
       patch.latestPurchasePrice =
         dto.latestPurchasePrice === null ? null : String(dto.latestPurchasePrice);
@@ -300,11 +302,12 @@ export class SkuService {
       model: sku.model,
       color: sku.color,
       size: sku.size,
-      weightKg: sku.weightKg,
-      lengthCm: sku.lengthCm,
-      widthCm: sku.widthCm,
-      heightCm: sku.heightCm,
-      volumeCm3: sku.volumeCm3,
+      weightG: sku.weightG,
+      lengthMm: sku.lengthMm,
+      widthMm: sku.widthMm,
+      heightMm: sku.heightMm,
+      volumeMm3: sku.volumeMm3,
+      purchaseUrl: sku.purchaseUrl,
       latestPurchasePrice: sku.latestPurchasePrice,
       costCurrency: sku.costCurrency,
       serialTracking: sku.serialTracking,
@@ -324,11 +327,12 @@ export class SkuService {
       model: sku.model,
       color: sku.color,
       size: sku.size,
-      weightKg: numOrNull(sku.weightKg),
-      lengthCm: numOrNull(sku.lengthCm),
-      widthCm: numOrNull(sku.widthCm),
-      heightCm: numOrNull(sku.heightCm),
-      volumeCm3: numOrNull(sku.volumeCm3),
+      weightG: numOrNull(sku.weightG),
+      lengthMm: sku.lengthMm,
+      widthMm: sku.widthMm,
+      heightMm: sku.heightMm,
+      volumeMm3: numOrNull(sku.volumeMm3),
+      purchaseUrl: sku.purchaseUrl,
       latestPurchasePrice: numOrNull(sku.latestPurchasePrice),
       movingAverageCost: numOrNull(sku.movingAverageCost),
       costCurrency: sku.costCurrency,

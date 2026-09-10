@@ -1,21 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { SkuDimensionsInvalidError } from '../errors/sku-errors';
-import { assertDimensionsConsistent, computeVolumeCm3 } from './sku.service';
+import { assertDimensionsConsistent, computeVolumeMm3 } from './sku.service';
 
-describe('computeVolumeCm3 (task §23: volume is backend-computed)', () => {
+describe('computeVolumeMm3 (task §23: volume is backend-computed; integer mm)', () => {
   it('computes length x width x height', () => {
-    expect(computeVolumeCm3(35.5, 12.2, 3.4)).toBe(1472.54);
-    expect(computeVolumeCm3(10, 10, 10)).toBe(1000);
+    expect(computeVolumeMm3(355, 122, 34)).toBe(1_472_540);
+    expect(computeVolumeMm3(100, 100, 100)).toBe(1_000_000);
   });
 
   it('returns null unless all three dimensions exist', () => {
-    expect(computeVolumeCm3(null, 10, 10)).toBeNull();
-    expect(computeVolumeCm3(10, null, null)).toBeNull();
-    expect(computeVolumeCm3(null, null, null)).toBeNull();
-  });
-
-  it('rounds to 3 decimals (column numeric(18,3))', () => {
-    expect(computeVolumeCm3(3.333, 3.333, 3.333)).toBe(37.026);
+    expect(computeVolumeMm3(null, 100, 100)).toBeNull();
+    expect(computeVolumeMm3(100, null, null)).toBeNull();
+    expect(computeVolumeMm3(null, null, null)).toBeNull();
   });
 });
 

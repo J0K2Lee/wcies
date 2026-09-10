@@ -158,9 +158,11 @@ function makeOzonHarness(): AdapterContractHarness {
   const routes = new Map<string, ScriptedRoute>([
     // Default enrichment route: empty detail pages are valid (adapter keeps
     // the listing with null title/sku) unless a test overrides it.
+    // Real OZON returns info items at TOP LEVEL (no `result` envelope),
+    // verified 2026-09-09 smoke test against api-seller.ozon.ru.
     [
       '/v3/product/info/list',
-      { endpoint: '/v3/product/info/list', status: 200, body: { result: { items: [] } } },
+      { endpoint: '/v3/product/info/list', status: 200, body: { items: [] } },
     ],
   ]);
   let callCount = 0;
@@ -222,9 +224,11 @@ function endpointOf(body: unknown): string {
     if ('posting_number' in result) {
       return '/v3/posting/fbs/get';
     }
-    if ('items' in result) {
-      return '/v3/product/info/list';
-    }
+  }
+  // product/info/list is the only read endpoint WITHOUT a `result` envelope
+  // (verified against the real API 2026-09-09): items sit at top level.
+  if (typeof body === 'object' && body !== null && 'items' in body) {
+    return '/v3/product/info/list';
   }
   return '/v3/product/list';
 }

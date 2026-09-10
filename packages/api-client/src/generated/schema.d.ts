@@ -2399,16 +2399,30 @@ export interface components {
             model: Record<string, never> | null;
             color: Record<string, never> | null;
             size: Record<string, never> | null;
-            /** @example 0.95 */
-            weightKg: Record<string, never> | null;
-            /** @example 35.5 */
-            lengthCm: Record<string, never> | null;
-            /** @example 12.2 */
-            widthCm: Record<string, never> | null;
-            /** @example 3.4 */
-            heightCm: Record<string, never> | null;
-            /** @description Backend-computed: length x width x height (read-only) */
-            volumeCm3: Record<string, never> | null;
+            /**
+             * @description Grams (g)
+             * @example 950
+             */
+            weightG: Record<string, never> | null;
+            /**
+             * @description Millimeters (integer)
+             * @example 355
+             */
+            lengthMm: Record<string, never> | null;
+            /**
+             * @description Millimeters (integer)
+             * @example 122
+             */
+            widthMm: Record<string, never> | null;
+            /**
+             * @description Millimeters (integer)
+             * @example 34
+             */
+            heightMm: Record<string, never> | null;
+            /** @description Backend-computed: length_mm x width_mm x height_mm (read-only) */
+            volumeMm3: Record<string, never> | null;
+            /** @description Procurement link */
+            purchaseUrl: Record<string, never> | null;
             latestPurchasePrice: Record<string, never> | null;
             /** @description Reserved; null until the purchase sprint (task §24) */
             movingAverageCost: Record<string, never> | null;
@@ -2461,16 +2475,30 @@ export interface components {
             model: Record<string, never> | null;
             color: Record<string, never> | null;
             size: Record<string, never> | null;
-            /** @example 0.95 */
-            weightKg: Record<string, never> | null;
-            /** @example 35.5 */
-            lengthCm: Record<string, never> | null;
-            /** @example 12.2 */
-            widthCm: Record<string, never> | null;
-            /** @example 3.4 */
-            heightCm: Record<string, never> | null;
-            /** @description Backend-computed: length x width x height (read-only) */
-            volumeCm3: Record<string, never> | null;
+            /**
+             * @description Grams (g)
+             * @example 950
+             */
+            weightG: Record<string, never> | null;
+            /**
+             * @description Millimeters (integer)
+             * @example 355
+             */
+            lengthMm: Record<string, never> | null;
+            /**
+             * @description Millimeters (integer)
+             * @example 122
+             */
+            widthMm: Record<string, never> | null;
+            /**
+             * @description Millimeters (integer)
+             * @example 34
+             */
+            heightMm: Record<string, never> | null;
+            /** @description Backend-computed: length_mm x width_mm x height_mm (read-only) */
+            volumeMm3: Record<string, never> | null;
+            /** @description Procurement link */
+            purchaseUrl: Record<string, never> | null;
             latestPurchasePrice: Record<string, never> | null;
             /** @description Reserved; null until the purchase sprint (task §24) */
             movingAverageCost: Record<string, never> | null;
@@ -2512,17 +2540,31 @@ export interface components {
             color?: string;
             /** @example 87键 */
             size?: string;
-            /** @example 0.95 */
-            weightKg?: number;
             /**
-             * @description Provide with width and height or not at all
-             * @example 35.5
+             * @description Grams (g)
+             * @example 950
              */
-            lengthCm?: number;
-            /** @example 12.2 */
-            widthCm?: number;
-            /** @example 3.4 */
-            heightCm?: number;
+            weightG?: number;
+            /**
+             * @description Millimeters, integer. Provide with width and height or not at all
+             * @example 355
+             */
+            lengthMm?: number;
+            /**
+             * @description Millimeters, integer
+             * @example 122
+             */
+            widthMm?: number;
+            /**
+             * @description Millimeters, integer
+             * @example 34
+             */
+            heightMm?: number;
+            /**
+             * @description Procurement link (1688 / taobao / ...)
+             * @example https://detail.1688.com/offer/123.html
+             */
+            purchaseUrl?: string;
             /**
              * @description Manually maintained in Sprint 1
              * @example 299
@@ -2548,11 +2590,16 @@ export interface components {
             model?: string;
             color?: string;
             size?: string;
-            weightKg?: number;
-            /** @description Provide with width and height or not at all */
-            lengthCm?: number;
-            widthCm?: number;
-            heightCm?: number;
+            /** @description Grams (g) */
+            weightG?: number;
+            /** @description Millimeters, integer. Provide with width and height or not at all */
+            lengthMm?: number;
+            /** @description Millimeters, integer */
+            widthMm?: number;
+            /** @description Millimeters, integer */
+            heightMm?: number;
+            /** @description Procurement link */
+            purchaseUrl?: string;
             latestPurchasePrice?: number;
             costCurrency?: string;
             serialTracking?: boolean;

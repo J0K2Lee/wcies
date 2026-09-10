@@ -137,7 +137,9 @@ function startMockOzon(): Promise<Server> {
             sku: script.productInfos[l.product_id]?.sku ?? 900000000 + l.product_id,
             is_archived: false,
           }));
-        send(200, { result: { items } });
+        // Real OZON returns info items at TOP LEVEL (no `result` envelope),
+        // verified 2026-09-09 smoke test against api-seller.ozon.ru.
+        send(200, { items });
         return;
       }
       if (url === '/v3/posting/fbs/list') {

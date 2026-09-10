@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import {
   IsBoolean,
   IsIn,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -230,40 +231,50 @@ export class CreateSkuRequestDto {
   @MaxLength(100)
   size?: string;
 
-  @ApiPropertyOptional({ example: 0.95 })
+  @ApiPropertyOptional({ example: 950, description: 'Grams (g)' })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  @Max(1_000_000)
-  weightKg?: number;
+  @Max(1_000_000_000)
+  weightG?: number;
 
   @ApiPropertyOptional({
-    example: 35.5,
-    description: 'Provide with width and height or not at all',
+    example: 355,
+    description: 'Millimeters, integer. Provide with width and height or not at all',
   })
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsInt()
   @Min(0)
   @Max(1_000_000)
-  lengthCm?: number;
+  lengthMm?: number;
 
-  @ApiPropertyOptional({ example: 12.2 })
+  @ApiPropertyOptional({ example: 122, description: 'Millimeters, integer' })
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsInt()
   @Min(0)
   @Max(1_000_000)
-  widthCm?: number;
+  widthMm?: number;
 
-  @ApiPropertyOptional({ example: 3.4 })
+  @ApiPropertyOptional({ example: 34, description: 'Millimeters, integer' })
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsInt()
   @Min(0)
   @Max(1_000_000)
-  heightCm?: number;
+  heightMm?: number;
+
+  @ApiPropertyOptional({
+    example: 'https://detail.1688.com/offer/123.html',
+    maxLength: 1000,
+    description: 'Procurement link (1688 / taobao / ...)',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  purchaseUrl?: string;
 
   @ApiPropertyOptional({ example: 299.0, description: 'Manually maintained in Sprint 1' })
   @IsOptional()
@@ -326,37 +337,45 @@ export class UpdateSkuRequestDto {
   @MaxLength(100)
   size?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Grams (g)' })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  @Max(1_000_000)
-  weightKg?: number;
+  @Max(1_000_000_000)
+  weightG?: number;
 
-  @ApiPropertyOptional({ description: 'Provide with width and height or not at all' })
+  @ApiPropertyOptional({
+    description: 'Millimeters, integer. Provide with width and height or not at all',
+  })
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsInt()
   @Min(0)
   @Max(1_000_000)
-  lengthCm?: number;
+  lengthMm?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Millimeters, integer' })
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsInt()
   @Min(0)
   @Max(1_000_000)
-  widthCm?: number;
+  widthMm?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Millimeters, integer' })
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsInt()
   @Min(0)
   @Max(1_000_000)
-  heightCm?: number;
+  heightMm?: number;
+
+  @ApiPropertyOptional({ maxLength: 1000, description: 'Procurement link' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  purchaseUrl?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -473,23 +492,26 @@ export class SkuResponseDto {
   @ApiProperty({ nullable: true })
   size!: string | null;
 
-  @ApiProperty({ nullable: true, example: 0.95 })
-  weightKg!: number | null;
+  @ApiProperty({ nullable: true, example: 950, description: 'Grams (g)' })
+  weightG!: number | null;
 
-  @ApiProperty({ nullable: true, example: 35.5 })
-  lengthCm!: number | null;
+  @ApiProperty({ nullable: true, example: 355, description: 'Millimeters (integer)' })
+  lengthMm!: number | null;
 
-  @ApiProperty({ nullable: true, example: 12.2 })
-  widthCm!: number | null;
+  @ApiProperty({ nullable: true, example: 122, description: 'Millimeters (integer)' })
+  widthMm!: number | null;
 
-  @ApiProperty({ nullable: true, example: 3.4 })
-  heightCm!: number | null;
+  @ApiProperty({ nullable: true, example: 34, description: 'Millimeters (integer)' })
+  heightMm!: number | null;
 
   @ApiProperty({
     nullable: true,
-    description: 'Backend-computed: length x width x height (read-only)',
+    description: 'Backend-computed: length_mm x width_mm x height_mm (read-only)',
   })
-  volumeCm3!: number | null;
+  volumeMm3!: number | null;
+
+  @ApiProperty({ nullable: true, maxLength: 1000, description: 'Procurement link' })
+  purchaseUrl!: string | null;
 
   @ApiProperty({ nullable: true })
   latestPurchasePrice!: number | null;

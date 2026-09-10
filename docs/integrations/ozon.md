@@ -16,7 +16,7 @@
 | Endpoint / Request / Response 字段 | 官方 OpenAPI 规范 json 逐字段核对 | 2026-09-09 |
 | Webhook 事件类型与消息结构 | 官方规范（/v1/notification/* 枚举）+ 开源客户端结构（diphantxm/ozon-api-client）交叉 | 2026-09-09 |
 | Webhook 无签名机制 | 官方文档与所有已知开源实现均无验签 API | 2026-09-09 |
-| 真实凭证实测 | **未验证**（待用户批准 Smoke Test） | - |
+| 真实凭证实测 | 真实 Smoke Test（只读：凭证验证 + Listing + 订单拉取 + 手动同步 + 幂等复测），单店 | 2026-09-09 |
 
 ## 1. Credential 结构
 
@@ -51,8 +51,9 @@ Response：`{result:{last_id: string, items:[{product_id:int64, offer_id:string,
 
 ### POST /v3/product/info/list（批量补充明细）
 
-Request：`{offer_id: string[]}`；Response：`{result:{items:[{id, name, offer_id, sku:int64, is_archived, is_autoarchived,...}]}}`。
+Request：`{offer_id: string[]}`（也接受 `product_id[]` / `sku[]`）；Response：**`{items:[{id, name, offer_id, sku:int64, is_archived, is_autoarchived,...}]}` —— 顶层 `items`，无 `result` 包裹**（与 product/list、posting/fbs/list 不同；官方 schema `v3GetProductInfoListResponse` + 2026-09-09 真实冒烟双确认。首版实现误加了 `result` 包裹，冒烟测试中发现并已修正）。
 用于补充 `name`（标题）与 `sku`（OZON SKU id）。每批 100（保守值；官方上限未在本规范中找到明确数字，**未验证**）。
+实测：按 offer_id 精确匹配，1324 个 offer 全部返回；offer_id 含 CJK/特殊字符可正常匹配。
 
 ### 字段映射（Mapper）
 
@@ -109,10 +110,14 @@ Request：`{posting_number: string, with:{}}`；Response：`{result: <posting>}`
 ## 4. 限流（Rate Limit）
 
 - 官方文档未给出每个方法的精确配额（**未验证**）。
+- **真实观察（2026-09-09 Smoke Test，单店）**：
+  - 响应携带 **`ratelimit-remaining`** 头（无 `ratelimit-limit` 总量头）；不同方法预算不同——`/v3/product/info/list` 连续 14 批后观察到 `9`，`/v3/posting/fbs/list` 观察到 `49`（疑似按方法独立桶）。
+  - 按 ~9 req/秒（客户端 110ms 最小间隔）连续请求 product/list ×7 页 + info/list ×14 批 + posting/list ×1，**全程未触发 429**，未观察到 `Retry-After`。
+  - 请求耗时：首请求 ~2.1s（TLS 握手），其后 0.3–1.1s。
 - WCIES 策略（OzonClient，位于 Integration 层）：
   - **按店铺隔离**的最小请求间隔（`OZON_MIN_REQUEST_INTERVAL_MS`，默认 110ms ≈ 9 req/s/store）；店铺 A 触发限流不影响店铺 B。
   - HTTP 429 → `PLATFORM_RATE_LIMITED`，尊重 `Retry-After`（秒数或 HTTP-date），指数退避上限 60s。
-- 真实配额待 Smoke Test 后回填。
+- 结论：当前 110ms 间隔在真实环境安全；后续如批量拉取可关注 `ratelimit-remaining` 逼近 0 的情况。
 
 ## 5. 重试与错误归一化
 
@@ -125,7 +130,7 @@ Request：`{posting_number: string, with:{}}`；Response：`{result: <posting>}`
 | 400/其他 4xx | `PLATFORM_API_ERROR` | 否（确定性错误） |
 | 200 但响应非法 | `PLATFORM_BAD_RESPONSE` | 否 |
 
-错误对象保存：HTTP status、`x-request-id`（如有）、endpoint 名、storeId、消息（脱敏）。**绝不**包含 Client-Id/Api-Key/Authorization。
+错误对象保存：HTTP status、trace id（真实 API 返回 **`x-o3-trace-id`**；`x-request-id`/`req-id` 为兼容回退，2026-09-09 实测）、endpoint 名、storeId、消息（脱敏）。**绝不**包含 Client-Id/Api-Key/Authorization。
 
 ## 6. Webhook 能力（官方确认支持，已实现）
 
@@ -181,4 +186,13 @@ Request：`{posting_number: string, with:{}}`；Response：`{result: <posting>}`
 
 ## 10. Real Smoke Test
 
-**未执行（NOT RUN）** —— 按任务书 §55/§56，须在自动化测试全部通过后由用户明确批准，且仅限 1 个店铺的 Credential Validation + Fetch Listings + Fetch Orders 只读验证。测试凭证见本地文件 `docs/ozon test info.txt`（未入库）。
+**已执行（2026-09-09，单店 OZON-SMOKE1，只读）** —— 范围：Credential Validation + Fetch Listings + Fetch Orders + Manual Listing/Order Sync + 同窗口幂等复测。未执行任何平台写操作、未开启轮询、未配置 Webhook。
+
+结论摘要：
+
+- 凭证 VALID；Listing 1324 个（7 页 ×200 游标分页，`last_id` 行为符合预期）；订单 3 张（7 天窗口，`has_next=false`）。
+- **发现并修正 1 处真实响应差异**：`/v3/product/info/list` 顶层 `items`、无 `result` 包裹（§2 已更新）；另采集到 `ratelimit-remaining` 响应头与 `x-o3-trace-id` trace 头（§4/§5）。
+- 同窗口重复订单同步：0 重复创建、0 重复 Reservation、0 新增 InventoryTransaction（3 skipped）。
+- 全量报告：`handoff/ozon-smoke-test-report-2026-09-09.md`。
+
+进入单店 Scheduled Polling 试运行需用户另行批准。

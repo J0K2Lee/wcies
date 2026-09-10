@@ -182,20 +182,20 @@ describe('products + skus (task §78/§79)', () => {
 
   it('creates SKUs with auto codes and backend-computed volume (task §79)', async () => {
     const black = await client.post<
-      IdDto & { skuCode: string; volumeCm3: number; serialTracking: boolean }
+      IdDto & { skuCode: string; volumeMm3: number; serialTracking: boolean }
     >('/api/v1/skus', {
       productId,
       nameZh: `${PREFIX} 黑色`,
       color: '黑色',
-      weightKg: 0.95,
-      lengthCm: 35.5,
-      widthCm: 12.2,
-      heightCm: 3.4,
+      weightG: 950,
+      lengthMm: 355,
+      widthMm: 122,
+      heightMm: 34,
       latestPurchasePrice: 299,
       serialTracking: true,
     });
     expect(black.body.data.skuCode).toMatch(/^SKU\d{6}$/);
-    expect(black.body.data.volumeCm3).toBeCloseTo(1472.54, 2);
+    expect(black.body.data.volumeMm3).toBe(355 * 122 * 34);
     expect(black.body.data.serialTracking).toBe(true);
 
     const blue = await client.post<IdDto & { skuCode: string }>('/api/v1/skus', {
@@ -210,23 +210,34 @@ describe('products + skus (task §78/§79)', () => {
     const bad = await client.post('/api/v1/skus', {
       productId,
       nameZh: 'broken',
-      lengthCm: 10,
+      lengthMm: 100,
     });
     expect(bad.status).toBe(422);
   });
 
+  it('rejects non-integer millimeter dimensions (DTO validation)', async () => {
+    const bad = await client.post('/api/v1/skus', {
+      productId,
+      nameZh: 'broken-float',
+      lengthMm: 100.5,
+      widthMm: 50,
+      heightMm: 30,
+    });
+    expect(bad.status).toBe(400);
+  });
+
   it('updates a SKU and recomputes volume (task §23)', async () => {
-    const skus = await client.get<Array<{ id: string; nameZh: string; volumeCm3: number }>>(
+    const skus = await client.get<Array<{ id: string; nameZh: string; volumeMm3: number }>>(
       `/api/v1/skus?productId=${productId}&sortBy=skuCode&sortOrder=asc`,
     );
     const black = skus.body.data.find((sku) => sku.nameZh === `${PREFIX} 黑色`);
     expect(black).toBeDefined();
-    const updated = await client.patch<{ volumeCm3: number }>(`/api/v1/skus/${black?.id}`, {
-      lengthCm: 40,
-      widthCm: 10,
-      heightCm: 10,
+    const updated = await client.patch<{ volumeMm3: number }>(`/api/v1/skus/${black?.id}`, {
+      lengthMm: 400,
+      widthMm: 100,
+      heightMm: 100,
     });
-    expect(updated.body.data.volumeCm3).toBe(4000);
+    expect(updated.body.data.volumeMm3).toBe(4_000_000);
   });
 
   it('activates the product and shows SKU count in list (task §64)', async () => {

@@ -212,7 +212,12 @@ export class OzonClient {
       clearTimeout(timer);
     }
 
-    const requestId = response.headers.get('x-request-id') ?? response.headers.get('req-id');
+    // Real API (verified 2026-09-09) sends `x-o3-trace-id`; older gateways /
+    // the spec mention `x-request-id` / `req-id`. Keep all three, real first.
+    const requestId =
+      response.headers.get('x-o3-trace-id') ??
+      response.headers.get('x-request-id') ??
+      response.headers.get('req-id');
 
     if (response.status === 401 || response.status === 403) {
       return {

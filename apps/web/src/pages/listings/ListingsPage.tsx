@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { App, Button, Drawer, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
 import { useState } from 'react';
-import { apiPost, useApiQuery } from '../../api/hooks';
+import { apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
 
 interface ListingRow {
   id: string;
@@ -42,7 +42,8 @@ export function ListingsPage() {
   const [mapTarget, setMapTarget] = useState<ListingSkuRow | null>(null);
   const [form] = Form.useForm();
   const [mapForm] = Form.useForm();
-
+  const [skuKeyword, setSkuKeyword] = useState('');
+  const debouncedSkuKeyword = useDebouncedValue(skuKeyword);
   const mapMutation = useMutation({
     mutationFn: (skuId: string) =>
       apiPost(
@@ -79,10 +80,19 @@ export function ListingsPage() {
   const stores = useApiQuery<{
     data: Array<{ id: string; platformId: string; storeCode: string; name: string }>;
   }>('/api/v1/stores', { page: 1, pageSize: 100 }, ['stores-lite']);
+  // Reactive platform -> store cascading for the create-mapping modal:
+  // server-side filtered so large store lists are never truncated.
+  const createPlatformId = Form.useWatch('platformId', form);
+  const storesForPlatform = useApiQuery<{
+    data: Array<{ id: string; platformId: string; storeCode: string; name: string }>;
+  }>('/api/v1/stores', { page: 1, pageSize: 100, platformId: createPlatformId }, [
+    'stores-for-platform',
+    createPlatformId ?? 'none',
+  ]);
   const skus = useApiQuery<{ data: Array<{ id: string; skuCode: string; nameZh: string }> }>(
     '/api/v1/skus',
-    { page: 1, pageSize: 100 },
-    ['skus-lite'],
+    { page: 1, pageSize: 50, keyword: debouncedSkuKeyword || undefined },
+    ['skus-for-mapping', debouncedSkuKeyword],
   );
   const detail = useApiQuery<{
     data: {
@@ -271,9 +281,12 @@ export function ListingsPage() {
                 style={{ width: 220 }}
                 showSearch
                 optionFilterProp="label"
-                options={(stores.data?.data ?? [])
-                  .filter((store) => store.platformId === form.getFieldValue('platformId'))
-                  .map((store) => ({ value: store.id, label: `${store.storeCode} ${store.name}` }))}
+                disabled={createPlatformId === undefined}
+                placeholder={createPlatformId === undefined ? '请先选择平台' : '选择该平台下的店铺'}
+                options={(storesForPlatform.data?.data ?? []).map((store) => ({
+                  value: store.id,
+                  label: `${store.storeCode} ${store.name}`,
+                }))}
               />
             </Form.Item>
             <Form.Item
@@ -304,8 +317,10 @@ export function ListingsPage() {
                     >
                       <Select
                         showSearch
-                        optionFilterProp="label"
-                        placeholder="内部SKU"
+                        filterOption={false}
+                        onSearch={setSkuKeyword}
+                        notFoundContent={skus.isLoading ? '搜索中...' : '无匹配SKU'}
+                        placeholder="内部SKU（可输入编码/名称搜索）"
                         options={(skus.data?.data ?? []).map((sku) => ({
                           value: sku.id,
                           label: `${sku.skuCode} ${sku.nameZh}`,
@@ -410,7 +425,10 @@ export function ListingsPage() {
             >
               <Select
                 showSearch
-                optionFilterProp="label"
+                filterOption={false}
+                onSearch={setSkuKeyword}
+                notFoundContent={skus.isLoading ? '搜索中...' : '无匹配SKU'}
+                placeholder="内部SKU（可输入编码/名称搜索）"
                 options={(skus.data?.data ?? []).map((sku) => ({
                   value: sku.id,
                   label: `${sku.skuCode} ${sku.nameZh}`,

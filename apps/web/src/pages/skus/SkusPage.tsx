@@ -7,12 +7,10 @@ import {
   Form,
   Image,
   Input,
-  InputNumber,
   Modal,
   Popconfirm,
   Select,
   Space,
-  Switch,
   Table,
   Tabs,
   Tag,
@@ -20,6 +18,7 @@ import {
 } from 'antd';
 import { useState } from 'react';
 import { apiDelete, apiPatch, apiPost, useApiQuery } from '../../api/hooks';
+import { SkuCreateModal } from '../../components/SkuCreateModal';
 
 interface SkuRow {
   id: string;
@@ -31,8 +30,9 @@ interface SkuRow {
   model: string | null;
   color: string | null;
   size: string | null;
-  weightKg: number | null;
+  weightG: number | null;
   latestPurchasePrice: number | null;
+  purchaseUrl: string | null;
   serialTracking: boolean;
   status: string;
   primaryBarcode: string | null;
@@ -77,7 +77,6 @@ export function SkusPage() {
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
-  const [form] = Form.useForm();
   const [barcodeForm] = Form.useForm();
 
   const list = useApiQuery<{ data: SkuRow[]; meta: { total: number } }>(
@@ -85,9 +84,6 @@ export function SkusPage() {
     { page, pageSize: 50, keyword: keyword || undefined, hasListing },
     ['skus', page, keyword, hasListing],
   );
-  const products = useApiQuery<{
-    data: Array<{ id: string; productCode: string; nameZh: string }>;
-  }>('/api/v1/products', { page: 1, pageSize: 100 }, ['products-lite']);
 
   const detail = useApiQuery<{ data: SkuRow }>(
     '/api/v1/skus/{id}',
@@ -128,15 +124,14 @@ export function SkusPage() {
     void queryClient.invalidateQueries({ queryKey: ['sku-mappings', drawerId] });
   };
 
-  const createMutation = useMutation({
-    mutationFn: (values: Record<string, unknown>) => apiPost('/api/v1/skus', values),
-    onSuccess: () => {
-      void message.success('SKU已创建');
-      setCreateOpen(false);
-      form.resetFields();
+  const statusMutation = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'activate' | 'deactivate' }) =>
+      apiPost(`/api/v1/skus/{id}/${action}`, {}, { id }),
+    onSuccess: (_data, variables) => {
+      void message.success(variables.action === 'activate' ? 'SKU已启用' : 'SKU已停用');
       refreshSku();
     },
-    onError: (error: Error) => void message.error(`创建失败: ${error.message}`),
+    onError: (error: Error) => void message.error(error.message),
   });
 
   const addBarcodeMutation = useMutation({
@@ -291,8 +286,8 @@ export function SkusPage() {
           { title: '颜色', dataIndex: 'color', width: 80 },
           { title: '尺寸', dataIndex: 'size', width: 80 },
           { title: '主条码', dataIndex: 'primaryBarcode', width: 140 },
-          { title: '重量(kg)', dataIndex: 'weightKg', width: 90 },
-          { title: '最新采购价', dataIndex: 'latestPurchasePrice', width: 100 },
+          { title: '重量(g)', dataIndex: 'weightG', width: 90 },
+          { title: '最新采购价(CNY)', dataIndex: 'latestPurchasePrice', width: 130 },
           {
             title: 'SN',
             dataIndex: 'serialTracking',
@@ -313,79 +308,38 @@ export function SkusPage() {
         ]}
       />
 
-      <Modal
-        title="新建SKU"
-        open={createOpen}
-        onCancel={() => setCreateOpen(false)}
-        onOk={() => void form.validateFields().then((values) => createMutation.mutate(values))}
-        confirmLoading={createMutation.isPending}
-      >
-        <Form form={form} layout="vertical">
-          <Form.Item
-            name="productId"
-            label="所属商品"
-            rules={[{ required: true, message: '请选择商品' }]}
-          >
-            <Select
-              showSearch
-              optionFilterProp="label"
-              options={(products.data?.data ?? []).map((product) => ({
-                value: product.id,
-                label: `${product.productCode} ${product.nameZh}`,
-              }))}
-            />
-          </Form.Item>
-          <Form.Item
-            name="nameZh"
-            label="中文名称"
-            rules={[{ required: true, message: '请输入名称' }]}
-          >
-            <Input />
-          </Form.Item>
-          <Space wrap>
-            <Form.Item name="model" label="型号">
-              <Input style={{ width: 140 }} />
-            </Form.Item>
-            <Form.Item name="color" label="颜色">
-              <Input style={{ width: 120 }} />
-            </Form.Item>
-            <Form.Item name="size" label="尺寸">
-              <Input style={{ width: 120 }} />
-            </Form.Item>
-          </Space>
-          <Space wrap>
-            <Form.Item name="weightKg" label="重量(kg)">
-              <InputNumber min={0} step={0.01} style={{ width: 130 }} />
-            </Form.Item>
-            <Form.Item name="lengthCm" label="长(cm)">
-              <InputNumber min={0} step={0.1} style={{ width: 110 }} />
-            </Form.Item>
-            <Form.Item name="widthCm" label="宽(cm)">
-              <InputNumber min={0} step={0.1} style={{ width: 110 }} />
-            </Form.Item>
-            <Form.Item name="heightCm" label="高(cm)">
-              <InputNumber min={0} step={0.1} style={{ width: 110 }} />
-            </Form.Item>
-          </Space>
-          <Form.Item name="latestPurchasePrice" label="最新采购价">
-            <InputNumber min={0} style={{ width: 160 }} />
-          </Form.Item>
-          <Form.Item
-            name="serialTracking"
-            label="SN序列号管理"
-            valuePropName="checked"
-            initialValue={false}
-          >
-            <Switch />
-          </Form.Item>
-        </Form>
-      </Modal>
+      <SkuCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
 
       <Drawer
         title={sku ? `${sku.skuCode} ${sku.nameZh}` : 'SKU详情'}
         width={860}
         open={drawerId !== null}
         onClose={() => setDrawerId(null)}
+        extra={
+          sku !== undefined && (
+            <Space>
+              {sku.status !== 'ACTIVE' && (
+                <Button
+                  size="small"
+                  type="primary"
+                  onClick={() => statusMutation.mutate({ id: sku.id, action: 'activate' })}
+                >
+                  启用
+                </Button>
+              )}
+              {sku.status === 'ACTIVE' && (
+                <Popconfirm
+                  title="确认停用该SKU？"
+                  onConfirm={() => statusMutation.mutate({ id: sku.id, action: 'deactivate' })}
+                >
+                  <Button size="small" danger>
+                    停用
+                  </Button>
+                </Popconfirm>
+              )}
+            </Space>
+          )
+        }
       >
         <Tabs
           items={[
@@ -407,15 +361,36 @@ export function SkusPage() {
                     { key: 'model', label: '型号', children: sku.model ?? '-' },
                     { key: 'color', label: '颜色', children: sku.color ?? '-' },
                     { key: 'size', label: '尺寸', children: sku.size ?? '-' },
-                    { key: 'weight', label: '重量(kg)', children: sku.weightKg ?? '-' },
+                    { key: 'weight', label: '重量(g)', children: sku.weightG ?? '-' },
                     {
                       key: 'price',
-                      label: '最新采购价',
+                      label: '最新采购价(CNY)',
                       children:
-                        sku.latestPurchasePrice !== null ? `${sku.latestPurchasePrice} ${''}` : '-',
+                        sku.latestPurchasePrice !== null ? `¥${sku.latestPurchasePrice}` : '-',
+                    },
+                    {
+                      key: 'purchaseUrl',
+                      label: '采购链接',
+                      children:
+                        sku.purchaseUrl !== null && sku.purchaseUrl !== '' ? (
+                          <a href={sku.purchaseUrl} target="_blank" rel="noreferrer">
+                            {sku.purchaseUrl}
+                          </a>
+                        ) : (
+                          '-'
+                        ),
                     },
                     { key: 'sn', label: 'SN管理', children: sku.serialTracking ? '是' : '否' },
-                    { key: 'status', label: '状态', children: sku.status },
+                    {
+                      key: 'status',
+                      label: '状态',
+                      children:
+                        sku.status === 'ACTIVE'
+                          ? '启用'
+                          : sku.status === 'INACTIVE'
+                            ? '停用'
+                            : sku.status,
+                    },
                   ]}
                 />
               ),

@@ -7983,30 +7983,40 @@
             "type": "object",
             "nullable": true
           },
-          "weightKg": {
+          "weightG": {
             "type": "object",
             "nullable": true,
-            "example": 0.95
+            "example": 950,
+            "description": "Grams (g)"
           },
-          "lengthCm": {
+          "lengthMm": {
             "type": "object",
             "nullable": true,
-            "example": 35.5
+            "example": 355,
+            "description": "Millimeters (integer)"
           },
-          "widthCm": {
+          "widthMm": {
             "type": "object",
             "nullable": true,
-            "example": 12.2
+            "example": 122,
+            "description": "Millimeters (integer)"
           },
-          "heightCm": {
+          "heightMm": {
             "type": "object",
             "nullable": true,
-            "example": 3.4
+            "example": 34,
+            "description": "Millimeters (integer)"
           },
-          "volumeCm3": {
+          "volumeMm3": {
             "type": "object",
             "nullable": true,
-            "description": "Backend-computed: length x width x height (read-only)"
+            "description": "Backend-computed: length_mm x width_mm x height_mm (read-only)"
+          },
+          "purchaseUrl": {
+            "type": "object",
+            "nullable": true,
+            "maxLength": 1000,
+            "description": "Procurement link"
           },
           "latestPurchasePrice": {
             "type": "object",
@@ -8053,11 +8063,12 @@
           "model",
           "color",
           "size",
-          "weightKg",
-          "lengthCm",
-          "widthCm",
-          "heightCm",
-          "volumeCm3",
+          "weightG",
+          "lengthMm",
+          "widthMm",
+          "heightMm",
+          "volumeMm3",
+          "purchaseUrl",
           "latestPurchasePrice",
           "movingAverageCost",
           "costCurrency",
@@ -8160,30 +8171,40 @@
             "type": "object",
             "nullable": true
           },
-          "weightKg": {
+          "weightG": {
             "type": "object",
             "nullable": true,
-            "example": 0.95
+            "example": 950,
+            "description": "Grams (g)"
           },
-          "lengthCm": {
+          "lengthMm": {
             "type": "object",
             "nullable": true,
-            "example": 35.5
+            "example": 355,
+            "description": "Millimeters (integer)"
           },
-          "widthCm": {
+          "widthMm": {
             "type": "object",
             "nullable": true,
-            "example": 12.2
+            "example": 122,
+            "description": "Millimeters (integer)"
           },
-          "heightCm": {
+          "heightMm": {
             "type": "object",
             "nullable": true,
-            "example": 3.4
+            "example": 34,
+            "description": "Millimeters (integer)"
           },
-          "volumeCm3": {
+          "volumeMm3": {
             "type": "object",
             "nullable": true,
-            "description": "Backend-computed: length x width x height (read-only)"
+            "description": "Backend-computed: length_mm x width_mm x height_mm (read-only)"
+          },
+          "purchaseUrl": {
+            "type": "object",
+            "nullable": true,
+            "maxLength": 1000,
+            "description": "Procurement link"
           },
           "latestPurchasePrice": {
             "type": "object",
@@ -8253,11 +8274,12 @@
           "model",
           "color",
           "size",
-          "weightKg",
-          "lengthCm",
-          "widthCm",
-          "heightCm",
-          "volumeCm3",
+          "weightG",
+          "lengthMm",
+          "widthMm",
+          "heightMm",
+          "volumeMm3",
+          "purchaseUrl",
           "latestPurchasePrice",
           "movingAverageCost",
           "costCurrency",
@@ -8309,22 +8331,31 @@
             "example": "87键",
             "maxLength": 100
           },
-          "weightKg": {
+          "weightG": {
             "type": "number",
-            "example": 0.95
+            "example": 950,
+            "description": "Grams (g)"
           },
-          "lengthCm": {
+          "lengthMm": {
             "type": "number",
-            "example": 35.5,
-            "description": "Provide with width and height or not at all"
+            "example": 355,
+            "description": "Millimeters, integer. Provide with width and height or not at all"
           },
-          "widthCm": {
+          "widthMm": {
             "type": "number",
-            "example": 12.2
+            "example": 122,
+            "description": "Millimeters, integer"
           },
-          "heightCm": {
+          "heightMm": {
             "type": "number",
-            "example": 3.4
+            "example": 34,
+            "description": "Millimeters, integer"
+          },
+          "purchaseUrl": {
+            "type": "string",
+            "example": "https://detail.1688.com/offer/123.html",
+            "maxLength": 1000,
+            "description": "Procurement link (1688 / taobao / ...)"
           },
           "latestPurchasePrice": {
             "type": "number",
@@ -8376,18 +8407,26 @@
             "type": "string",
             "maxLength": 100
           },
-          "weightKg": {
-            "type": "number"
-          },
-          "lengthCm": {
+          "weightG": {
             "type": "number",
-            "description": "Provide with width and height or not at all"
+            "description": "Grams (g)"
           },
-          "widthCm": {
-            "type": "number"
+          "lengthMm": {
+            "type": "number",
+            "description": "Millimeters, integer. Provide with width and height or not at all"
           },
-          "heightCm": {
-            "type": "number"
+          "widthMm": {
+            "type": "number",
+            "description": "Millimeters, integer"
+          },
+          "heightMm": {
+            "type": "number",
+            "description": "Millimeters, integer"
+          },
+          "purchaseUrl": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "Procurement link"
           },
           "latestPurchasePrice": {
             "type": "number"

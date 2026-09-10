@@ -12,8 +12,9 @@ import {
   Table,
   Tag,
 } from 'antd';
-import { useState } from 'react';
-import { apiPost, useApiQuery } from '../../api/hooks';
+import { useState, useEffect } from 'react';
+import { apiPatch, apiPost, useApiQuery } from '../../api/hooks';
+import { SkuCreateModal } from '../../components/SkuCreateModal';
 
 interface ProductRow {
   id: string;
@@ -43,6 +44,11 @@ interface ProductDetail {
   }>;
 }
 
+const brandCategorySelect = {
+  showSearch: true,
+  optionFilterProp: 'label',
+} as const;
+
 const STATUS_TAG: Record<string, { color: string; label: string }> = {
   DRAFT: { color: 'default', label: '草稿' },
   ACTIVE: { color: 'green', label: '启用' },
@@ -57,7 +63,15 @@ export function ProductsPage() {
   const [status, setStatus] = useState<string | undefined>();
   const [createOpen, setCreateOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [brandModalOpen, setBrandModalOpen] = useState(false);
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [skuModalOpen, setSkuModalOpen] = useState(false);
   const [form] = Form.useForm();
+  const [brandForm] = Form.useForm();
+  const [categoryForm] = Form.useForm();
+  const [editForm] = Form.useForm();
 
   const list = useApiQuery<{ data: ProductRow[]; meta: { total: number } }>(
     '/api/v1/products',
@@ -83,6 +97,27 @@ export function ProductsPage() {
     detailId !== null,
   );
   const productDetail = detail.data?.data;
+  const editDetail = useApiQuery<{ data: ProductDetail }>(
+    '/api/v1/products/{id}',
+    {},
+    ['product-edit', editId],
+    { id: editId ?? '' },
+    editId !== null,
+  );
+  const editSource = editDetail.data?.data?.product;
+
+  useEffect(() => {
+    if (editSource !== undefined && editOpen) {
+      editForm.setFieldsValue({
+        productCode: editSource.productCode,
+        nameZh: editSource.nameZh,
+        nameRu: editSource.nameRu ?? undefined,
+        brandId: editSource.brandId ?? undefined,
+        categoryId: editSource.categoryId ?? undefined,
+        remark: editSource.remark ?? undefined,
+      });
+    }
+  }, [editSource, editOpen, editForm]);
 
   const createMutation = useMutation({
     mutationFn: (values: { nameZh: string; brandId?: string; categoryId?: string }) =>
@@ -104,6 +139,60 @@ export function ProductsPage() {
       void queryClient.invalidateQueries({ queryKey: ['products'] });
     },
     onError: (error: Error) => void message.error(error.message),
+  });
+
+  const createBrandMutation = useMutation({
+    mutationFn: (values: { code: string; nameZh: string; nameEn?: string; nameRu?: string }) =>
+      apiPost<{ id: string }>('/api/v1/brands', values),
+    onSuccess: (brand) => {
+      void message.success('品牌已创建');
+      setBrandModalOpen(false);
+      brandForm.resetFields();
+      void queryClient.invalidateQueries({ queryKey: ['brands'] });
+      form.setFieldValue('brandId', brand.id);
+      editForm.setFieldValue('brandId', brand.id);
+    },
+    onError: (error: Error) => void message.error(`创建品牌失败: ${error.message}`),
+  });
+
+  const createCategoryMutation = useMutation({
+    mutationFn: (values: { code: string; nameZh: string; nameRu?: string; parentId?: string }) =>
+      apiPost<{ id: string }>('/api/v1/categories', values),
+    onSuccess: (category) => {
+      void message.success('分类已创建');
+      setCategoryModalOpen(false);
+      categoryForm.resetFields();
+      void queryClient.invalidateQueries({ queryKey: ['categories'] });
+      form.setFieldValue('categoryId', category.id);
+      editForm.setFieldValue('categoryId', category.id);
+    },
+    onError: (error: Error) => void message.error(`创建分类失败: ${error.message}`),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({
+      id,
+      values,
+    }: {
+      id: string;
+      values: {
+        nameZh: string;
+        nameRu?: string;
+        brandId?: string;
+        categoryId?: string;
+        remark?: string;
+      };
+    }) => apiPatch('/api/v1/products/{id}', values, { id }),
+    onSuccess: () => {
+      void message.success('商品已更新');
+      setEditOpen(false);
+      setEditId(null);
+      editForm.resetFields();
+      void queryClient.invalidateQueries({ queryKey: ['products'] });
+      void queryClient.invalidateQueries({ queryKey: ['product-detail'] });
+      void queryClient.invalidateQueries({ queryKey: ['product-edit'] });
+    },
+    onError: (error: Error) => void message.error(`更新失败: ${error.message}`),
   });
 
   const flatCategories = (categories.data?.data ?? []).flatMap((node) => [
@@ -173,9 +262,18 @@ export function ProductsPage() {
           },
           {
             title: '操作',
-            width: 150,
+            width: 190,
             render: (_, record) => (
               <Space onClick={(event) => event.stopPropagation()}>
+                <Button
+                  size="small"
+                  onClick={() => {
+                    setEditId(record.id);
+                    setEditOpen(true);
+                  }}
+                >
+                  编辑
+                </Button>
                 {record.status !== 'ACTIVE' && (
                   <Button
                     size="small"
@@ -214,18 +312,50 @@ export function ProductsPage() {
           >
             <Input placeholder="留空编号则自动生成 PRD000001" />
           </Form.Item>
-          <Form.Item name="brandId" label="品牌">
+          <Form.Item
+            name="brandId"
+            label={
+              <Space size={4}>
+                品牌
+                <Button
+                  type="link"
+                  size="small"
+                  style={{ padding: 0, height: 'auto' }}
+                  onClick={() => setBrandModalOpen(true)}
+                >
+                  + 新增品牌
+                </Button>
+              </Space>
+            }
+          >
             <Select
               allowClear
+              {...brandCategorySelect}
               options={(brands.data?.data ?? []).map((brand) => ({
                 value: brand.id,
                 label: brand.nameZh,
               }))}
             />
           </Form.Item>
-          <Form.Item name="categoryId" label="分类">
+          <Form.Item
+            name="categoryId"
+            label={
+              <Space size={4}>
+                分类
+                <Button
+                  type="link"
+                  size="small"
+                  style={{ padding: 0, height: 'auto' }}
+                  onClick={() => setCategoryModalOpen(true)}
+                >
+                  + 新增分类
+                </Button>
+              </Space>
+            }
+          >
             <Select
               allowClear
+              {...brandCategorySelect}
               options={flatCategories.map((category) => ({
                 value: category.id,
                 label: category.nameZh,
@@ -235,11 +365,200 @@ export function ProductsPage() {
         </Form>
       </Modal>
 
+      <Modal
+        title={`编辑商品${editSource !== undefined ? ` ${editSource.productCode}` : ''}`}
+        open={editOpen}
+        onCancel={() => {
+          setEditOpen(false);
+          setEditId(null);
+        }}
+        onOk={() =>
+          void editForm.validateFields().then((values) => {
+            if (editId === null) return;
+            updateMutation.mutate({ id: editId, values });
+          })
+        }
+        confirmLoading={updateMutation.isPending}
+      >
+        <Form form={editForm} layout="vertical">
+          <Form.Item name="productCode" label="商品编号">
+            <Input disabled />
+          </Form.Item>
+          <Form.Item
+            name="nameZh"
+            label="中文名称"
+            rules={[{ required: true, message: '请输入名称' }]}
+          >
+            <Input maxLength={500} />
+          </Form.Item>
+          <Form.Item name="nameRu" label="俄文名称（选填）">
+            <Input maxLength={500} />
+          </Form.Item>
+          <Form.Item
+            name="brandId"
+            label={
+              <Space size={4}>
+                品牌
+                <Button
+                  type="link"
+                  size="small"
+                  style={{ padding: 0, height: 'auto' }}
+                  onClick={() => setBrandModalOpen(true)}
+                >
+                  + 新增品牌
+                </Button>
+              </Space>
+            }
+          >
+            <Select
+              allowClear
+              {...brandCategorySelect}
+              options={(brands.data?.data ?? []).map((brand) => ({
+                value: brand.id,
+                label: brand.nameZh,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item
+            name="categoryId"
+            label={
+              <Space size={4}>
+                分类
+                <Button
+                  type="link"
+                  size="small"
+                  style={{ padding: 0, height: 'auto' }}
+                  onClick={() => setCategoryModalOpen(true)}
+                >
+                  + 新增分类
+                </Button>
+              </Space>
+            }
+          >
+            <Select
+              allowClear
+              {...brandCategorySelect}
+              options={flatCategories.map((category) => ({
+                value: category.id,
+                label: category.nameZh,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="remark" label="备注">
+            <Input.TextArea rows={2} maxLength={2000} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <SkuCreateModal
+        open={skuModalOpen}
+        onClose={() => setSkuModalOpen(false)}
+        fixedProduct={
+          productDetail === undefined
+            ? undefined
+            : {
+                id: productDetail.product.id,
+                productCode: productDetail.product.productCode,
+                nameZh: productDetail.product.nameZh,
+              }
+        }
+      />
+
+      <Modal
+        title="新增品牌"
+        open={brandModalOpen}
+        onCancel={() => setBrandModalOpen(false)}
+        onOk={() =>
+          void brandForm.validateFields().then((values) => createBrandMutation.mutate(values))
+        }
+        confirmLoading={createBrandMutation.isPending}
+      >
+        <Form form={brandForm} layout="vertical">
+          <Form.Item
+            name="code"
+            label="品牌编码"
+            rules={[{ required: true, message: '请输入品牌编码' }]}
+          >
+            <Input placeholder="唯一编码，如 VALKYRIE" maxLength={100} />
+          </Form.Item>
+          <Form.Item
+            name="nameZh"
+            label="中文名称"
+            rules={[{ required: true, message: '请输入中文名称' }]}
+          >
+            <Input maxLength={200} />
+          </Form.Item>
+          <Form.Item name="nameEn" label="英文名称（选填）">
+            <Input maxLength={200} />
+          </Form.Item>
+          <Form.Item name="nameRu" label="俄文名称（选填）">
+            <Input maxLength={200} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="新增分类"
+        open={categoryModalOpen}
+        onCancel={() => setCategoryModalOpen(false)}
+        onOk={() =>
+          void categoryForm.validateFields().then((values) => createCategoryMutation.mutate(values))
+        }
+        confirmLoading={createCategoryMutation.isPending}
+      >
+        <Form form={categoryForm} layout="vertical">
+          <Form.Item
+            name="code"
+            label="分类编码"
+            rules={[{ required: true, message: '请输入分类编码' }]}
+          >
+            <Input placeholder="唯一编码，如 KEYBOARD" maxLength={100} />
+          </Form.Item>
+          <Form.Item
+            name="nameZh"
+            label="中文名称"
+            rules={[{ required: true, message: '请输入中文名称' }]}
+          >
+            <Input maxLength={200} />
+          </Form.Item>
+          <Form.Item name="parentId" label="父分类（选填，不选则为顶级分类）">
+            <Select
+              allowClear
+              options={flatCategories.map((category) => ({
+                value: category.id,
+                label: category.nameZh,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="nameRu" label="俄文名称（选填）">
+            <Input maxLength={200} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
       <Drawer
         title={productDetail?.product.productCode ?? '商品详情'}
         width={720}
         open={detailId !== null}
         onClose={() => setDetailId(null)}
+        extra={
+          productDetail !== undefined && (
+            <Space>
+              <Button
+                size="small"
+                onClick={() => {
+                  setEditId(productDetail.product.id);
+                  setEditOpen(true);
+                }}
+              >
+                编辑
+              </Button>
+              <Button type="primary" size="small" onClick={() => setSkuModalOpen(true)}>
+                新建SKU
+              </Button>
+            </Space>
+          )
+        }
       >
         {productDetail !== undefined && (
           <Space direction="vertical" style={{ width: '100%' }} size="large">
