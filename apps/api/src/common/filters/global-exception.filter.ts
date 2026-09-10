@@ -115,17 +115,21 @@ export class GlobalExceptionFilter implements NestExceptionFilterInterface<unkno
   }
 
   private normalizeHttpException(status: number, body: string | object): NormalizedError {
-    const code =
-      status === 400 /* HttpStatus.BAD_REQUEST */ && this.isValidationBody(body)
-        ? 'COMMON_VALIDATION_FAILED'
-        : (HTTP_STATUS_TO_CODE[status] ?? 'COMMON_HTTP_ERROR');
+    // code and message must share the exact same predicate: a Nest default
+    // 404 body ({message, error, statusCode}) also satisfies the shape check,
+    // so gating on status === 400 is what keeps 404s from being mislabeled
+    // as validation failures.
+    const isValidation = status === 400 && this.isValidationBody(body);
+    const code = isValidation
+      ? 'COMMON_VALIDATION_FAILED'
+      : (HTTP_STATUS_TO_CODE[status] ?? 'COMMON_HTTP_ERROR');
 
     let message: string;
     const details: Record<string, unknown> = {};
 
     if (typeof body === 'string') {
       message = body;
-    } else if (this.isValidationBody(body)) {
+    } else if (isValidation) {
       details.validationErrors = body.message;
       message = 'Request validation failed';
     } else if ('message' in body && typeof body.message === 'string') {

@@ -49,14 +49,17 @@ async function bootstrap(): Promise<void> {
     .addCookieAuth('wcies_session')
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
-  // Document paths must match real URLs: add the /api/v1 global prefix to
-  // everything except /health* (excluded from the prefix at runtime).
+  // Document paths must match real URLs. NestJS 11 already includes the
+  // /api/v1 global prefix in document.paths; only patch paths that are
+  // missing it (health* stays outside the prefix at runtime).
   {
     const apiPrefix = '/api/v1';
     const originalPaths = document.paths as unknown as Record<string, object>;
     const rewritten: Record<string, object> = {};
     for (const [path, item] of Object.entries(originalPaths)) {
-      rewritten[path.startsWith('/health') ? path : `${apiPrefix}${path}`] = item;
+      rewritten[
+        path.startsWith('/health') || path.startsWith(apiPrefix) ? path : `${apiPrefix}${path}`
+      ] = item;
     }
     (document as { paths: Record<string, object> }).paths = rewritten;
   }
