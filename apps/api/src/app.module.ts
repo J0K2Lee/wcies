@@ -5,6 +5,7 @@ import { GlobalExceptionFilter } from './common/filters/global-exception.filter'
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { createRootConfigModule } from './config/root-config.module';
 import { CryptoModule } from './infrastructure/crypto/crypto.module';
+import { BusinessCodeModule } from './infrastructure/business-code/business-code.module';
 import { QueueRootModule } from './infrastructure/queue/queue-root.module';
 import { RedisModule } from './infrastructure/redis/redis.module';
 import { ObjectStorageModule } from './infrastructure/storage/object-storage.module';
@@ -46,6 +47,7 @@ import { SyncModule } from './modules/sync/sync.module';
     QueueRootModule,
     ObjectStorageModule,
     CryptoModule,
+    BusinessCodeModule,
     HealthModule,
     AuthModule,
     OperationLogModule,

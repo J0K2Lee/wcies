@@ -7350,8 +7350,7 @@
           },
           "storeCode": {
             "type": "string",
-            "example": "OZON-A",
-            "maxLength": 100
+            "description": "Auto-generated ({prefix}-%03d, e.g. ON-001) when omitted; immutable after creation"
           },
           "name": {
             "type": "string",
@@ -7373,7 +7372,7 @@
             "description": "Free-form store settings"
           }
         },
-        "required": ["platformId", "storeCode", "name"]
+        "required": ["platformId", "name"]
       },
       "UpdateStoreRequestDto": {
         "type": "object",
@@ -7542,8 +7541,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "example": "VALKYRIE",
-            "maxLength": 100
+            "description": "Auto-generated (BN%05d) when omitted"
           },
           "nameZh": {
             "type": "string",
@@ -7561,7 +7559,7 @@
             "maxLength": 200
           }
         },
-        "required": ["code", "nameZh"]
+        "required": ["nameZh"]
       },
       "UpdateBrandRequestDto": {
         "type": "object",
@@ -7707,8 +7705,8 @@
           },
           "code": {
             "type": "string",
-            "example": "KEYBOARD",
-            "maxLength": 100
+            "example": "CN00251",
+            "description": "Auto-generated (CN%05d) when omitted"
           },
           "nameZh": {
             "type": "string",
@@ -7725,7 +7723,7 @@
             "example": 0
           }
         },
-        "required": ["code", "nameZh"]
+        "required": ["nameZh"]
       },
       "UpdateCategoryRequestDto": {
         "type": "object",
@@ -7913,8 +7911,8 @@
         "properties": {
           "productCode": {
             "type": "string",
-            "example": "PRD000001",
-            "description": "Auto-generated (PRD%06d) when omitted"
+            "example": "PN000001",
+            "description": "Auto-generated (PN%06d) when omitted; read-only after creation"
           },
           "nameZh": {
             "type": "string",
@@ -8097,10 +8095,6 @@
       "UpdateProductRequestDto": {
         "type": "object",
         "properties": {
-          "productCode": {
-            "type": "string",
-            "description": "Business code is editable; the UUID never changes (task §16)"
-          },
           "nameZh": {
             "type": "string",
             "maxLength": 500
@@ -8300,8 +8294,8 @@
         "properties": {
           "skuCode": {
             "type": "string",
-            "example": "VK87-BLK",
-            "description": "Auto-generated (SKU%06d) when omitted"
+            "example": "SKU000001001",
+            "description": "Auto-generated (SKU{product seq 6}{in-product seq 3}) when omitted; frozen after creation"
           },
           "productId": {
             "type": "string",
@@ -8383,10 +8377,6 @@
       "UpdateSkuRequestDto": {
         "type": "object",
         "properties": {
-          "skuCode": {
-            "type": "string",
-            "description": "Business code is editable; the UUID never changes"
-          },
           "nameZh": {
             "type": "string",
             "maxLength": 500
@@ -8759,8 +8749,7 @@
         "properties": {
           "warehouseCode": {
             "type": "string",
-            "example": "SZ01",
-            "maxLength": 100
+            "description": "Auto-generated ({prefix}-%02d, e.g. ZG-01) when omitted; immutable after creation"
           },
           "name": {
             "type": "string",
@@ -8805,7 +8794,7 @@
             "maxLength": 2000
           }
         },
-        "required": ["warehouseCode", "name", "warehouseType"]
+        "required": ["name", "warehouseType"]
       },
       "UpdateWarehouseRequestDto": {
         "type": "object",

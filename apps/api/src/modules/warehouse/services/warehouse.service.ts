@@ -5,6 +5,7 @@ import {
   OperationLogService,
   diffOf,
 } from '../../operation-log/operation-log.service';
+import { BusinessCodeService } from '../../../infrastructure/business-code/business-code.service';
 import { WarehouseEntity } from '../entities/warehouse.entity';
 import {
   WarehouseCodeAlreadyExistsError,
@@ -27,6 +28,7 @@ const ENTITY_TYPE = 'WAREHOUSE';
 export class WarehouseService {
   constructor(
     private readonly repository: WarehouseRepository,
+    private readonly businessCode: BusinessCodeService,
     private readonly operationLog: OperationLogService,
   ) {}
 
@@ -53,12 +55,19 @@ export class WarehouseService {
     dto: CreateWarehouseRequestDto,
     operator: OperatorContext,
   ): Promise<WarehouseResponseDto> {
-    const existing = await this.repository.findWarehouseByCode(dto.warehouseCode);
-    if (existing !== null) {
-      throw new WarehouseCodeAlreadyExistsError(dto.warehouseCode);
+    // Auto-coded per warehouse type scope (ZG/PT/SF/TH-%02d) when omitted
+    // (decision #3); the type itself is immutable after creation.
+    const manualCode = dto.warehouseCode?.trim();
+    if (manualCode !== undefined && manualCode !== '') {
+      const existing = await this.repository.findWarehouseByCode(manualCode);
+      if (existing !== null) {
+        throw new WarehouseCodeAlreadyExistsError(manualCode);
+      }
     }
+    const warehouseCode =
+      manualCode || (await this.businessCode.nextWarehouseCode(dto.warehouseType));
     const warehouse = await this.repository.insertWarehouse({
-      warehouseCode: dto.warehouseCode,
+      warehouseCode,
       name: dto.name,
       warehouseType: dto.warehouseType,
       countryCode: dto.countryCode ?? null,

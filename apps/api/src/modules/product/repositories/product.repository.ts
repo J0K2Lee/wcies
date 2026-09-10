@@ -97,14 +97,6 @@ export class ProductRepository {
     return this.repository.findOneBy({ productCode });
   }
 
-  async nextProductCode(): Promise<string> {
-    const result = await this.repository.query<{ nextval: string }[]>(
-      "SELECT nextval('seq_product_code') AS nextval",
-    );
-    const value = Number(result[0]?.nextval ?? 1);
-    return `PRD${String(value).padStart(6, '0')}`;
-  }
-
   async insert(product: Partial<ProductEntity>): Promise<ProductEntity> {
     const created = this.repository.create(product as unknown as DeepPartial<ProductEntity>);
     return this.repository.save(created);

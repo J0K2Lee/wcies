@@ -28,7 +28,9 @@ beforeAll(async () => {
   const storeId = store.rows[0]?.id as string;
 
   const product = await db.query<{ id: string }>(
-    'INSERT INTO products (product_code, name_zh, status) VALUES ($1, $2, $3) RETURNING id',
+    `INSERT INTO products (product_code, code_seq, name_zh, status)
+     SELECT $1, (SELECT COALESCE(MAX(code_seq), 999999) + 1 FROM products), $2, $3
+     RETURNING id`,
     [`${PREFIX}-PERFPRD`, 'perf product', 'ACTIVE'],
   );
   const productId = product.rows[0]?.id as string;

@@ -963,8 +963,10 @@ describe('list performance with 5000 balances (task §74)', () => {
       if (Number(existing.rows[0]!.count) < 5000) {
         // Read-performance fixture only (bulk SQL, never a business movement).
         await pg.query(
-          `INSERT INTO products (product_code, name_zh, status)
-           SELECT $1 || '-P' || g, 'perf-product-' || g, 'ACTIVE'
+          `INSERT INTO products (product_code, code_seq, name_zh, status)
+           SELECT $1 || '-P' || g,
+                  (SELECT COALESCE(MAX(code_seq), 999999) FROM products) + g,
+                  'perf-product-' || g, 'ACTIVE'
            FROM generate_series(1, 5000) g
            ON CONFLICT DO NOTHING`,
           [PREFIX],

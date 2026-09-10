@@ -135,7 +135,7 @@ describe('products + skus (task §78/§79)', () => {
   let categoryId = '';
   let brandId = '';
 
-  it('creates a product with auto code PRD%06d (task §16)', async () => {
+  it('creates a product with auto code PN%06d (task §16, Sprint 6)', async () => {
     const tree =
       await client.get<
         Array<{ id: string; code: string; children: Array<{ id: string; code: string }> }>
@@ -156,7 +156,7 @@ describe('products + skus (task §78/§79)', () => {
         brandId,
       },
     );
-    expect(created.body.data.productCode).toMatch(/^PRD\d{6}$/);
+    expect(created.body.data.productCode).toMatch(/^PN\d{6}$/);
     expect(created.body.data.status).toBe('DRAFT');
     productId = created.body.data.id;
   });
@@ -194,7 +194,7 @@ describe('products + skus (task §78/§79)', () => {
       latestPurchasePrice: 299,
       serialTracking: true,
     });
-    expect(black.body.data.skuCode).toMatch(/^SKU\d{6}$/);
+    expect(black.body.data.skuCode).toMatch(/^SKU\d{9}$/);
     expect(black.body.data.volumeMm3).toBe(355 * 122 * 34);
     expect(black.body.data.serialTracking).toBe(true);
 

@@ -4,6 +4,7 @@ import {
   OperationLogService,
   diffOf,
 } from '../operation-log/operation-log.service';
+import { BusinessCodeService } from '../../infrastructure/business-code/business-code.service';
 import { BrandEntity } from './entities/brand.entity';
 import { CategoryEntity } from './entities/category.entity';
 import {
@@ -29,6 +30,7 @@ import {
 export class CatalogService {
   constructor(
     private readonly repository: CatalogRepository,
+    private readonly businessCode: BusinessCodeService,
     private readonly operationLog: OperationLogService,
   ) {}
 
@@ -43,12 +45,17 @@ export class CatalogService {
     dto: CreateBrandRequestDto,
     operator: OperatorContext,
   ): Promise<BrandResponseDto> {
-    const existing = await this.repository.findBrandByCode(dto.code);
-    if (existing !== null) {
-      throw new BrandCodeAlreadyExistsError(dto.code);
+    // Auto-coded (BN%05d) when omitted (decision #5).
+    const manualCode = dto.code?.trim();
+    if (manualCode !== undefined && manualCode !== '') {
+      const existing = await this.repository.findBrandByCode(manualCode);
+      if (existing !== null) {
+        throw new BrandCodeAlreadyExistsError(manualCode);
+      }
     }
+    const code = manualCode || (await this.businessCode.nextBrandCode());
     const brand = await this.repository.insertBrand({
-      code: dto.code,
+      code,
       nameZh: dto.nameZh,
       nameEn: dto.nameEn ?? null,
       nameRu: dto.nameRu ?? null,
@@ -121,10 +128,16 @@ export class CatalogService {
     dto: CreateCategoryRequestDto,
     operator: OperatorContext,
   ): Promise<CategoryResponseDto> {
-    const existing = await this.repository.findCategoryByCode(dto.code);
-    if (existing !== null) {
-      throw new CategoryCodeAlreadyExistsError(dto.code);
+    // Auto-coded (CN%05d) when omitted (decision #6); all three levels share
+    // one sequence.
+    const manualCode = dto.code?.trim();
+    if (manualCode !== undefined && manualCode !== '') {
+      const existing = await this.repository.findCategoryByCode(manualCode);
+      if (existing !== null) {
+        throw new CategoryCodeAlreadyExistsError(manualCode);
+      }
     }
+    const code = manualCode || (await this.businessCode.nextCategoryCode());
     if (dto.parentId !== undefined && dto.parentId !== null) {
       const parent = await this.repository.findCategoryById(dto.parentId);
       if (parent === null) {
@@ -133,7 +146,7 @@ export class CatalogService {
     }
     const category = await this.repository.insertCategory({
       parentId: dto.parentId ?? null,
-      code: dto.code,
+      code,
       nameZh: dto.nameZh,
       nameRu: dto.nameRu ?? null,
       sortOrder: dto.sortOrder ?? 0,

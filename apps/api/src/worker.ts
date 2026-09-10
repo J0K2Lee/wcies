@@ -7,6 +7,7 @@ import { createRootConfigModule } from './config/root-config.module';
 import { QueueRootModule } from './infrastructure/queue/queue-root.module';
 import { DatabaseModule } from './database/database.module';
 import { ObjectStorageModule } from './infrastructure/storage/object-storage.module';
+import { BusinessCodeModule } from './infrastructure/business-code/business-code.module';
 import { WorkersModule } from './workers/workers.module';
 
 /**
@@ -20,6 +21,9 @@ import { WorkersModule } from './workers/workers.module';
     DatabaseModule,
     QueueRootModule,
     ObjectStorageModule,
+    // Global module (code numbering) must be registered in this context too:
+    // import services take codes through BusinessCodeService.
+    BusinessCodeModule,
     WorkersModule,
   ],
 })

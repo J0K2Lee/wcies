@@ -8,6 +8,7 @@ import {
   OperationLogService,
   diffOf,
 } from '../../operation-log/operation-log.service';
+import { BusinessCodeService } from '../../../infrastructure/business-code/business-code.service';
 import { ProductEntity } from '../entities/product.entity';
 import { ProductCodeAlreadyExistsError, ProductNotFoundError } from '../errors/product-errors';
 import { ProductRepository, ProductRowWithCounts } from '../repositories/product.repository';
@@ -34,6 +35,7 @@ export class ProductService {
     private readonly repository: ProductRepository,
     private readonly catalogService: CatalogService,
     private readonly skuService: SkuService,
+    private readonly businessCode: BusinessCodeService,
     private readonly operationLog: OperationLogService,
   ) {}
 
@@ -76,10 +78,11 @@ export class ProductService {
       }
     }
 
-    let productCode = dto.productCode?.trim();
-    if (productCode === undefined || productCode === '') {
-      productCode = await this.repository.nextProductCode();
-    } else {
+    // The sequence number is ALWAYS taken from the product scope (even for
+    // manual codes) so code_seq stays a dense, collision-free fact source.
+    const generated = await this.businessCode.nextProductCode();
+    const productCode = dto.productCode?.trim() || generated.productCode;
+    if (productCode !== generated.productCode) {
       const existing = await this.repository.findByCode(productCode);
       if (existing !== null) {
         throw new ProductCodeAlreadyExistsError(productCode);
@@ -88,6 +91,7 @@ export class ProductService {
 
     const product = await this.repository.insert({
       productCode,
+      codeSeq: generated.codeSeq,
       nameZh: dto.nameZh,
       nameRu: dto.nameRu ?? null,
       categoryId: dto.categoryId ?? null,
@@ -140,15 +144,8 @@ export class ProductService {
     const existing = await this.findRowOrThrow(id);
     const before = this.snapshot(existing.product);
 
-    if (dto.productCode !== undefined) {
-      const trimmed = dto.productCode.trim();
-      if (trimmed !== existing.product.productCode) {
-        const conflict = await this.repository.findByCode(trimmed);
-        if (conflict !== null && conflict.id !== id) {
-          throw new ProductCodeAlreadyExistsError(trimmed);
-        }
-      }
-    }
+    // productCode is read-only after creation (decision 0002): derived SKU
+    // codes would lose their anchor if it changed.
     if (dto.brandId !== undefined && dto.brandId !== null) {
       const brand = await this.catalogService.findBrandEntityById(dto.brandId);
       if (brand === null) {
@@ -166,7 +163,6 @@ export class ProductService {
     }
 
     const patch: Partial<ProductEntity> = { updatedBy: operator.userId };
-    if (dto.productCode !== undefined) patch.productCode = dto.productCode.trim();
     if (dto.nameZh !== undefined) patch.nameZh = dto.nameZh;
     if (dto.nameRu !== undefined) patch.nameRu = dto.nameRu;
     if (dto.categoryId !== undefined) patch.categoryId = dto.categoryId;
@@ -228,9 +224,10 @@ export class ProductService {
     },
     operator: OperatorContext,
   ): Promise<ProductEntity> {
-    const productCode = await this.repository.nextProductCode();
+    const { productCode, codeSeq } = await this.businessCode.nextProductCode();
     const product = await this.repository.insert({
       productCode,
+      codeSeq,
       nameZh: input.nameZh,
       nameRu: input.nameRu ?? null,
       brandId: input.brandId ?? null,

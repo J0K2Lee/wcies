@@ -23,8 +23,8 @@ import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
 
 export class CreateProductRequestDto {
   @ApiPropertyOptional({
-    example: 'PRD000001',
-    description: 'Auto-generated (PRD%06d) when omitted',
+    example: 'PN000001',
+    description: 'Auto-generated (PN%06d) when omitted; read-only after creation',
   })
   @IsOptional()
   @IsString()
@@ -59,14 +59,6 @@ export class CreateProductRequestDto {
 }
 
 export class UpdateProductRequestDto {
-  @ApiPropertyOptional({
-    description: 'Business code is editable; the UUID never changes (task §16)',
-  })
-  @IsOptional()
-  @IsString()
-  @Length(1, 100)
-  productCode?: string;
-
   @ApiPropertyOptional({ maxLength: 500 })
   @IsOptional()
   @IsString()
@@ -190,8 +182,9 @@ export class ProductListItemDto extends ProductResponseDto {
 
 export class CreateSkuRequestDto {
   @ApiPropertyOptional({
-    example: 'VK87-BLK',
-    description: 'Auto-generated (SKU%06d) when omitted',
+    example: 'SKU000001001',
+    description:
+      'Auto-generated (SKU{product seq 6}{in-product seq 3}) when omitted; frozen after creation',
   })
   @IsOptional()
   @IsString()
@@ -301,12 +294,6 @@ export class CreateSkuRequestDto {
 }
 
 export class UpdateSkuRequestDto {
-  @ApiPropertyOptional({ description: 'Business code is editable; the UUID never changes' })
-  @IsOptional()
-  @IsString()
-  @Length(1, 100)
-  skuCode?: string;
-
   @ApiPropertyOptional({ maxLength: 500 })
   @IsOptional()
   @IsString()

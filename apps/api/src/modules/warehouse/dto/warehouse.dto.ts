@@ -21,10 +21,14 @@ import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
 // ---------------------------------------------------------------------------
 
 export class CreateWarehouseRequestDto {
-  @ApiProperty({ example: 'SZ01', maxLength: 100 })
+  @ApiPropertyOptional({
+    description:
+      'Auto-generated ({prefix}-%02d, e.g. ZG-01) when omitted; immutable after creation',
+  })
+  @IsOptional()
   @IsString()
   @Length(1, 100)
-  warehouseCode!: string;
+  warehouseCode?: string;
 
   @ApiProperty({ example: '深圳自管仓', maxLength: 200 })
   @IsString()

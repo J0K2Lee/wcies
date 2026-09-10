@@ -20,6 +20,10 @@ export class ProductEntity {
   @Column({ type: 'varchar', length: 100, name: 'product_code', unique: true })
   productCode!: string;
 
+  /** Integer fact source of the product sequence; SKU codes derive from it (decision 0002). */
+  @Column({ type: 'integer', name: 'code_seq', unique: true })
+  codeSeq!: number;
+
   @Column({ type: 'varchar', length: 500, name: 'name_zh' })
   nameZh!: string;
 

@@ -185,12 +185,23 @@ async function main(): Promise<void> {
       await client.query<{ id: string }>(`SELECT id FROM products WHERE product_code = 'PRD-VK87'`)
     ).rows[0]?.id;
     if (productId === undefined) {
+      // code_seq comes from the product scope so it can never collide with
+      // future auto-generated PN codes (decision 0001/0002).
+      const codeSeq = (
+        await client.query<{ next_value: string }>(
+          `INSERT INTO business_code_sequences (scope_key, next_value, updated_at)
+           VALUES ('product', 1, now())
+           ON CONFLICT (scope_key)
+           DO UPDATE SET next_value = business_code_sequences.next_value + 1, updated_at = now()
+           RETURNING next_value`,
+        )
+      ).rows[0]?.next_value as string;
       productId = (
         await client.query<{ id: string }>(
-          `INSERT INTO products (product_code, name_zh, name_ru, category_id, brand_id, status)
-           VALUES ('PRD-VK87', 'VALKYRIE VK87 MAX V2 机械键盘', 'Клавиатура VALKYRIE VK87 MAX V2', $1, $2, 'ACTIVE')
+          `INSERT INTO products (product_code, code_seq, name_zh, name_ru, category_id, brand_id, status)
+           VALUES ('PRD-VK87', $1, 'VALKYRIE VK87 MAX V2 机械键盘', 'Клавиатура VALKYRIE VK87 MAX V2', $2, $3, 'ACTIVE')
            RETURNING id`,
-          [keyboardId, brandId],
+          [Number(codeSeq), keyboardId, brandId],
         )
       ).rows[0]?.id;
     }

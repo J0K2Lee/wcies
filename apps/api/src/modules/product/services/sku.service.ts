@@ -5,6 +5,7 @@ import {
   OperationLogService,
   diffOf,
 } from '../../operation-log/operation-log.service';
+import { BusinessCodeService } from '../../../infrastructure/business-code/business-code.service';
 import { ObjectStorageService } from '../../../infrastructure/storage/object-storage.service';
 import { SkuEntity } from '../entities/sku.entity';
 import { ImageNotFoundError } from '../errors/image-errors';
@@ -56,7 +57,8 @@ export function assertDimensionsConsistent(
 /**
  * Internal SKU master data (task §20-§27).
  *
- * sku_code: auto-generated (SKU%06d) when omitted, always globally unique.
+ * sku_code: auto-generated (SKU{product seq 6}{in-product seq 3}, decision
+ * 0002) when omitted, always globally unique and frozen after creation.
  * Units (2026-09-09 convention): weight in g, dimensions in integer mm;
  * volume_mm3 is backend-computed from L x W x H, never accepted from clients.
  * moving_average_cost: reserved, stays null until the purchase sprint.
@@ -68,6 +70,7 @@ export class SkuService {
     private readonly productRepository: ProductRepository,
     private readonly imageRepository: SkuImageRepository,
     private readonly objectStorage: ObjectStorageService,
+    private readonly businessCode: BusinessCodeService,
     private readonly operationLog: OperationLogService,
   ) {}
 
@@ -118,7 +121,7 @@ export class SkuService {
 
     let skuCode = dto.skuCode?.trim();
     if (skuCode === undefined || skuCode === '') {
-      skuCode = await this.repository.nextSkuCode();
+      skuCode = await this.businessCode.nextSkuCode(product.id, product.codeSeq);
     } else {
       const existing = await this.repository.findByCode(skuCode);
       if (existing !== null) {
@@ -179,15 +182,8 @@ export class SkuService {
     const found = await this.findWithProductOrThrow(id);
     const before = this.snapshot(found.sku);
 
-    if (dto.skuCode !== undefined) {
-      const trimmed = dto.skuCode.trim();
-      if (trimmed !== found.sku.skuCode) {
-        const conflict = await this.repository.findByCode(trimmed);
-        if (conflict !== null && conflict.id !== id) {
-          throw new SkuCodeAlreadyExistsError(trimmed);
-        }
-      }
-    }
+    // skuCode is frozen after generation (decision 0002): printed labels and
+    // historical documents reference it.
 
     const mergedLength = dto.lengthMm !== undefined ? dto.lengthMm : found.sku.lengthMm;
     const mergedWidth = dto.widthMm !== undefined ? dto.widthMm : found.sku.widthMm;
@@ -196,7 +192,6 @@ export class SkuService {
     const volumeMm3 = computeVolumeMm3(mergedLength, mergedWidth, mergedHeight);
 
     const patch: Partial<SkuEntity> = {};
-    if (dto.skuCode !== undefined) patch.skuCode = dto.skuCode.trim();
     if (dto.nameZh !== undefined) patch.nameZh = dto.nameZh;
     if (dto.nameRu !== undefined) patch.nameRu = dto.nameRu;
     if (dto.model !== undefined) patch.model = dto.model;

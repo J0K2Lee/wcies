@@ -8,10 +8,14 @@ export class CreateStoreRequestDto {
   @IsUUID()
   platformId!: string;
 
-  @ApiProperty({ example: 'OZON-A', maxLength: 100 })
+  @ApiPropertyOptional({
+    description:
+      'Auto-generated ({prefix}-%03d, e.g. ON-001) when omitted; immutable after creation',
+  })
+  @IsOptional()
   @IsString()
   @Length(1, 100)
-  storeCode!: string;
+  storeCode?: string;
 
   @ApiProperty({ example: 'OZON 店铺 A', maxLength: 200 })
   @IsString()

@@ -116,7 +116,7 @@ export class BarcodeImportHandler implements ImportHandler {
 }
 
 interface WarehouseRowData {
-  warehouseCode: string;
+  warehouseCode: string | undefined;
   name: string;
   warehouseType: string;
   countryCode: string | null;
@@ -145,7 +145,9 @@ export class WarehouseImportHandler implements ImportHandler {
 
     for (const { rowNumber, cells } of rows) {
       const before = errors.length;
-      const warehouseCode = requiredField(rowNumber, cells, 'warehouse_code', errors);
+      // Empty warehouse_code -> auto-generated on import (Sprint 6 decision #3);
+      // a provided code still goes through duplicate rejection (master-data §10).
+      const warehouseCode = optionalField(cells, 'warehouse_code');
       const name = requiredField(rowNumber, cells, 'name', errors);
       const warehouseType = requiredField(rowNumber, cells, 'warehouse_type', errors);
       if (!(WAREHOUSE_TYPES as readonly string[]).includes(warehouseType)) {
@@ -156,23 +158,25 @@ export class WarehouseImportHandler implements ImportHandler {
           message: `warehouse_type 必须是 ${WAREHOUSE_TYPES.join('/')}`,
         });
       }
-      if (warehouseCode !== '' && codesInFile.has(warehouseCode)) {
-        errors.push({
-          row: rowNumber,
-          field: 'warehouse_code',
-          code: 'WAREHOUSE_CODE_ALREADY_EXISTS',
-          message: `文件内重复的 warehouse_code: ${warehouseCode}`,
-        });
-      } else if (warehouseCode !== '') {
-        codesInFile.add(warehouseCode);
-        const existing = await this.warehouseService.getEntityByCode(warehouseCode);
-        if (existing !== null) {
+      if (warehouseCode !== null) {
+        if (codesInFile.has(warehouseCode)) {
           errors.push({
             row: rowNumber,
             field: 'warehouse_code',
             code: 'WAREHOUSE_CODE_ALREADY_EXISTS',
-            message: `仓库编码已存在: ${warehouseCode}`,
+            message: `文件内重复的 warehouse_code: ${warehouseCode}`,
           });
+        } else {
+          codesInFile.add(warehouseCode);
+          const existing = await this.warehouseService.getEntityByCode(warehouseCode);
+          if (existing !== null) {
+            errors.push({
+              row: rowNumber,
+              field: 'warehouse_code',
+              code: 'WAREHOUSE_CODE_ALREADY_EXISTS',
+              message: `仓库编码已存在: ${warehouseCode}`,
+            });
+          }
         }
       }
       if (errors.length > before) {
@@ -181,7 +185,7 @@ export class WarehouseImportHandler implements ImportHandler {
       validRows.push({
         rowNumber,
         data: {
-          warehouseCode,
+          warehouseCode: warehouseCode ?? undefined,
           name,
           warehouseType,
           countryCode: optionalField(cells, 'country_code'),

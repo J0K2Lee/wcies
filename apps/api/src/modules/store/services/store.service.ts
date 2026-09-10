@@ -5,6 +5,7 @@ import {
   OperatorContext,
   diffOf,
 } from '../../operation-log/operation-log.service';
+import { BusinessCodeService } from '../../../infrastructure/business-code/business-code.service';
 import { PlatformService } from '../../platform/platform.service';
 import { PlatformNotFoundError } from '../../platform/errors/platform-errors';
 import { StoreEntity } from '../entities/store.entity';
@@ -27,6 +28,7 @@ export class StoreService {
   constructor(
     private readonly repository: StoreRepository,
     private readonly platformService: PlatformService,
+    private readonly businessCode: BusinessCodeService,
     private readonly operationLog: OperationLogService,
   ) {}
 
@@ -54,14 +56,19 @@ export class StoreService {
     if (platform === null) {
       throw new PlatformNotFoundError(dto.platformId);
     }
-    const existing = await this.repository.findByPlatformAndCode(platform.id, dto.storeCode);
-    if (existing !== null) {
-      throw new StoreCodeAlreadyExistsError(platform.id, dto.storeCode);
+    // Auto-coded per platform scope (ON/WS/YX-%03d) when omitted (decision #4).
+    const manualCode = dto.storeCode?.trim();
+    if (manualCode !== undefined && manualCode !== '') {
+      const existing = await this.repository.findByPlatformAndCode(platform.id, manualCode);
+      if (existing !== null) {
+        throw new StoreCodeAlreadyExistsError(platform.id, manualCode);
+      }
     }
+    const storeCode = manualCode || (await this.businessCode.nextStoreCode(platform.code));
 
     const store = await this.repository.insert({
       platformId: platform.id,
-      storeCode: dto.storeCode,
+      storeCode,
       name: dto.name,
       sellerId: dto.sellerId ?? null,
       defaultCurrency: dto.defaultCurrency ?? null,

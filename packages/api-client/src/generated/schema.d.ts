@@ -2157,8 +2157,8 @@ export interface components {
              * @description Platform the store belongs to
              */
             platformId: string;
-            /** @example OZON-A */
-            storeCode: string;
+            /** @description Auto-generated ({prefix}-%03d, e.g. ON-001) when omitted; immutable after creation */
+            storeCode?: string;
             /** @example OZON 店铺 A */
             name: string;
             /** @example 123456 */
@@ -2240,8 +2240,8 @@ export interface components {
             updatedAt: string;
         };
         CreateBrandRequestDto: {
-            /** @example VALKYRIE */
-            code: string;
+            /** @description Auto-generated (BN%05d) when omitted */
+            code?: string;
             /** @example VALKYRIE */
             nameZh: string;
             /** @example Valkyrie */
@@ -2298,8 +2298,11 @@ export interface components {
         CreateCategoryRequestDto: {
             /** Format: uuid */
             parentId?: Record<string, never> | null;
-            /** @example KEYBOARD */
-            code: string;
+            /**
+             * @description Auto-generated (CN%05d) when omitted
+             * @example CN00251
+             */
+            code?: string;
             /** @example 键盘 */
             nameZh: string;
             /** @example Клавиатуры */
@@ -2369,8 +2372,8 @@ export interface components {
         };
         CreateProductRequestDto: {
             /**
-             * @description Auto-generated (PRD%06d) when omitted
-             * @example PRD000001
+             * @description Auto-generated (PN%06d) when omitted; read-only after creation
+             * @example PN000001
              */
             productCode?: string;
             /** @example VALKYRIE VK87 MAX V2 机械键盘 */
@@ -2443,8 +2446,6 @@ export interface components {
             skus: components["schemas"]["SkuResponseDto"][];
         };
         UpdateProductRequestDto: {
-            /** @description Business code is editable; the UUID never changes (task §16) */
-            productCode?: string;
             nameZh?: string;
             nameRu?: string;
             /** Format: uuid */
@@ -2525,8 +2526,8 @@ export interface components {
         };
         CreateSkuRequestDto: {
             /**
-             * @description Auto-generated (SKU%06d) when omitted
-             * @example VK87-BLK
+             * @description Auto-generated (SKU{product seq 6}{in-product seq 3}) when omitted; frozen after creation
+             * @example SKU000001001
              */
             skuCode?: string;
             /** Format: uuid */
@@ -2583,8 +2584,6 @@ export interface components {
             remark?: string;
         };
         UpdateSkuRequestDto: {
-            /** @description Business code is editable; the UUID never changes */
-            skuCode?: string;
             nameZh?: string;
             nameRu?: string;
             model?: string;
@@ -2726,8 +2725,8 @@ export interface components {
             updatedAt: string;
         };
         CreateWarehouseRequestDto: {
-            /** @example SZ01 */
-            warehouseCode: string;
+            /** @description Auto-generated ({prefix}-%02d, e.g. ZG-01) when omitted; immutable after creation */
+            warehouseCode?: string;
             /** @example 深圳自管仓 */
             name: string;
             /**

@@ -5,10 +5,11 @@ import { IsIn, IsInt, IsOptional, IsString, IsUUID, Length, MaxLength, Min } fro
 const COMMON_STATUSES = ['ACTIVE', 'INACTIVE'] as const;
 
 export class CreateBrandRequestDto {
-  @ApiProperty({ example: 'VALKYRIE', maxLength: 100 })
+  @ApiPropertyOptional({ description: 'Auto-generated (BN%05d) when omitted' })
+  @IsOptional()
   @IsString()
   @Length(1, 100)
-  code!: string;
+  code?: string;
 
   @ApiProperty({ example: 'VALKYRIE', maxLength: 200 })
   @IsString()
@@ -85,10 +86,11 @@ export class CreateCategoryRequestDto {
   @IsUUID()
   parentId?: string | null;
 
-  @ApiProperty({ example: 'KEYBOARD', maxLength: 100 })
+  @ApiPropertyOptional({ example: 'CN00251', description: 'Auto-generated (CN%05d) when omitted' })
+  @IsOptional()
   @IsString()
   @Length(1, 100)
-  code!: string;
+  code?: string;
 
   @ApiProperty({ example: '键盘', maxLength: 200 })
   @IsString()

@@ -194,14 +194,6 @@ export class SkuRepository {
     return this.repository.findOneBy({ skuCode });
   }
 
-  async nextSkuCode(): Promise<string> {
-    const result = await this.repository.query<{ nextval: string }[]>(
-      "SELECT nextval('seq_sku_code') AS nextval",
-    );
-    const value = Number(result[0]?.nextval ?? 1);
-    return `SKU${String(value).padStart(6, '0')}`;
-  }
-
   async insert(sku: Partial<SkuEntity>): Promise<SkuEntity> {
     const created = this.repository.create(sku as unknown as DeepPartial<SkuEntity>);
     return this.repository.save(created);
