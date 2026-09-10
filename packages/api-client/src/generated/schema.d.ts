@@ -4592,7 +4592,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
             };
         };
     };
@@ -4878,7 +4884,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
             };
         };
     };
@@ -4976,7 +4988,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
             };
         };
     };
@@ -5112,7 +5130,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
             };
         };
     };
@@ -5306,7 +5330,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
             };
         };
     };
@@ -5730,7 +5760,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
             };
         };
     };
@@ -5921,7 +5957,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
             };
         };
     };
@@ -6114,7 +6156,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
             };
         };
     };
@@ -6358,7 +6406,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
             };
         };
     };

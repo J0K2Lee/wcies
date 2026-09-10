@@ -13,7 +13,11 @@ import {
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PageMeta } from '@wcies/shared';
 import { ok, okPage } from '../../../common/dto/api-response';
-import { ApiOkEnvelope, ApiOkPagedEnvelope } from '../../../common/swagger/api-envelope';
+import {
+  ApiOkEnvelope,
+  ApiOkNoDataEnvelope,
+  ApiOkPagedEnvelope,
+} from '../../../common/swagger/api-envelope';
 import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
 import { CurrentOperator } from '../../../common/decorators/current-operator.decorator';
 import { OperatorContext } from '../../operation-log/operation-log.service';
@@ -106,12 +110,13 @@ export class WarehouseController {
   @Delete('warehouses/:id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a warehouse with zero references (else WAREHOUSE_IN_USE)' })
+  @ApiOkNoDataEnvelope()
   async remove(
     @Param('id') id: string,
     @CurrentOperator() operator: OperatorContext,
-  ): Promise<{ success: true; data: null }> {
+  ): Promise<{ success: true }> {
     await this.warehouseService.remove(id, operator);
-    return ok(null);
+    return ok({});
   }
 }
 
@@ -192,13 +197,14 @@ export class WarehouseBinController {
   @Delete('warehouses/:warehouseId/bins/:binId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a bin with zero references (else BIN_IN_USE)' })
+  @ApiOkNoDataEnvelope()
   async removeBin(
     @Param('warehouseId') warehouseId: string,
     @Param('binId') binId: string,
     @CurrentOperator() operator: OperatorContext,
-  ): Promise<{ success: true; data: null }> {
+  ): Promise<{ success: true }> {
     await this.binService.remove(warehouseId, binId, operator);
-    return ok(null);
+    return ok({});
   }
 }
 
@@ -281,12 +287,13 @@ export class StoreWarehouseBindingController {
   @Delete('stores/:storeId/warehouse-bindings/:id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a store-warehouse binding' })
+  @ApiOkNoDataEnvelope()
   async removeBinding(
     @Param('storeId') storeId: string,
     @Param('id') bindingId: string,
     @CurrentOperator() operator: OperatorContext,
-  ): Promise<{ success: true; data: null }> {
+  ): Promise<{ success: true }> {
     await this.bindingService.remove(storeId, bindingId, operator);
-    return ok(null);
+    return ok({});
   }
 }

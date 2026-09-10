@@ -94,12 +94,13 @@ export class SkuController {
   @Delete('skus/:id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a SKU with zero references (else SKU_IN_USE)' })
+  @ApiOkNoDataEnvelope()
   async remove(
     @Param('id') id: string,
     @CurrentOperator() operator: OperatorContext,
-  ): Promise<{ success: true; data: null }> {
+  ): Promise<{ success: true }> {
     await this.skuService.remove(id, operator);
-    return ok(null);
+    return ok({});
   }
 
   @Post('skus/:id/activate')

@@ -149,12 +149,13 @@ export class ListingController {
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a listing with zero mappings (else LISTING_IN_USE)' })
+  @ApiOkNoDataEnvelope()
   async remove(
     @Param('id') id: string,
     @CurrentOperator() operator: OperatorContext,
-  ): Promise<{ success: true; data: null }> {
+  ): Promise<{ success: true }> {
     await this.listingService.remove(id, operator);
-    return ok(null);
+    return ok({});
   }
 
   @Post(':listingId/skus')

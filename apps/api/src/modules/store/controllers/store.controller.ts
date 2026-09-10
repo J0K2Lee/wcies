@@ -13,7 +13,7 @@ import {
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PageMeta } from '@wcies/shared';
 import { ok, okPage } from '../../../common/dto/api-response';
-import { ApiOkEnvelope, ApiOkPagedEnvelope } from '../../../common/swagger/api-envelope';
+import { ApiOkEnvelope, ApiOkNoDataEnvelope, ApiOkPagedEnvelope } from '../../../common/swagger/api-envelope';
 import { CurrentOperator } from '../../../common/decorators/current-operator.decorator';
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import {
@@ -93,11 +93,12 @@ export class StoreController {
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a store with zero references (else STORE_IN_USE)' })
+  @ApiOkNoDataEnvelope()
   async remove(
     @Param('id') id: string,
     @CurrentOperator() operator: OperatorContext,
-  ): Promise<{ success: true; data: null }> {
+  ): Promise<{ success: true }> {
     await this.storeService.remove(id, operator);
-    return ok(null);
+    return ok({});
   }
 }
