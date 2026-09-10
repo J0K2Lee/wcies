@@ -1,0 +1,46 @@
+/* WCIES global styles — neutral business workbench (Phase 1 redesign §5-§9). */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #f6f7f9;
+  color: #172033;
+  font-family: 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Numbers align in columns across tables, KPIs and rails. */
+table,
+.tabular,
+.ant-statistic-content-value {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Quiet, visible keyboard focus everywhere (task §67). */
+:focus-visible {
+  outline: 2px solid #496f96;
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+/* Thin scrollbars so dense tables/rails stay calm. */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #d6dae2;
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #bfc5d0;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
