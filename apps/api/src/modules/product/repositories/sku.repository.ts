@@ -52,7 +52,7 @@ export class SkuRepository {
       .addSelect('product.productCode', 'product_code')
       .addSelect('product.nameZh', 'product_name')
       .addSelect('product.brand_id', 'brand_id')
-      .addSelect('brand.name_zh', 'brand_name')
+      .addSelect('brand.name', 'brand_name')
       .addSelect(
         (sub) =>
           sub

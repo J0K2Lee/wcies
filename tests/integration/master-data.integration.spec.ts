@@ -106,27 +106,35 @@ describe('catalog (task §13/§14)', () => {
   it('creates brands and a 2-level category tree', async () => {
     const brand = await client.post<IdDto>('/api/v1/brands', {
       code: `${PREFIX}-BRAND`,
-      nameZh: `${PREFIX} 测试品牌`,
+      name: `${PREFIX} 测试品牌`,
+      nameZh: `${PREFIX} 测试品牌（中文）`,
     });
     expect(brand.body.success).toBe(true);
 
-    const root = await client.post<IdDto>('/api/v1/categories', {
+    const root = await client.post<IdDto & { level: number }>('/api/v1/categories', {
       code: `${PREFIX}-3C`,
-      nameZh: '3C',
+      nameZh: `${PREFIX}-3C数码`,
     });
-    const child = await client.post<IdDto>('/api/v1/categories', {
+    expect(root.body.data.level).toBe(1);
+    const child = await client.post<IdDto & { level: number }>('/api/v1/categories', {
       parentId: root.body.data.id,
       code: `${PREFIX}-KBD`,
       nameZh: '键盘',
     });
-    expect(child.body.success).toBe(true);
+    expect(child.body.data.level).toBe(2);
+    const leaf = await client.post<IdDto & { level: number }>('/api/v1/categories', {
+      parentId: child.body.data.id,
+      nameZh: '机械键盘',
+    });
+    expect(leaf.body.data.level).toBe(3);
 
     const tree =
-      await client.get<Array<{ code: string; children: Array<{ code: string }> }>>(
-        '/api/v1/categories',
-      );
+      await client.get<
+        Array<{ code: string; children: Array<{ code: string; children: Array<{ code: string }> }> }>
+      >('/api/v1/categories');
     const node = tree.body.data.find((category) => category.code === `${PREFIX}-3C`);
-    expect(node?.children.map((leaf) => leaf.code)).toEqual([`${PREFIX}-KBD`]);
+    expect(node?.children.map((leafNode) => leafNode.code)).toEqual([`${PREFIX}-KBD`]);
+    expect(node?.children[0]?.children.length).toBe(1);
   });
 });
 
@@ -136,12 +144,15 @@ describe('products + skus (task §78/§79)', () => {
   let brandId = '';
 
   it('creates a product with auto code PN%06d (task §16, Sprint 6)', async () => {
-    const tree =
-      await client.get<
-        Array<{ id: string; code: string; children: Array<{ id: string; code: string }> }>
-      >('/api/v1/categories');
+    const tree = await client.get<
+      Array<{
+        code: string;
+        children: Array<{ code: string; children: Array<{ id: string; code: string }> }>;
+      }>
+    >('/api/v1/categories');
     categoryId =
-      tree.body.data.find((category) => category.code === `${PREFIX}-3C`)?.children[0]?.id ?? '';
+      tree.body.data.find((category) => category.code === `${PREFIX}-3C`)?.children[0]?.children[0]
+        ?.id ?? '';
     const brands = await client.get<Array<{ id: string; code: string }>>(
       `/api/v1/brands?keyword=${PREFIX}`,
     );

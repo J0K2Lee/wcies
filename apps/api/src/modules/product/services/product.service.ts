@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PageMeta } from '@wcies/shared';
 import { CatalogService } from '../../catalog/catalog.service';
 import { BrandNotFoundError } from '../../catalog/errors/catalog-errors';
-import { CategoryNotFoundError } from '../../catalog/errors/catalog-errors';
+import { CategoryLevelInvalidError, CategoryNotFoundError } from '../../catalog/errors/catalog-errors';
 import {
   OperatorContext,
   OperationLogService,
@@ -71,10 +71,14 @@ export class ProductService {
         throw new BrandNotFoundError(dto.brandId);
       }
     }
-    if (dto.categoryId !== undefined) {
+    if (dto.categoryId !== undefined && dto.categoryId !== null) {
       const category = await this.catalogService.findCategoryEntityById(dto.categoryId);
       if (category === null) {
         throw new CategoryNotFoundError(dto.categoryId);
+      }
+      // Products may only reference level-3 categories (decision 0005).
+      if (category.level !== 3) {
+        throw new CategoryLevelInvalidError(dto.categoryId, category.level);
       }
     }
 
@@ -156,6 +160,9 @@ export class ProductService {
       const category = await this.catalogService.findCategoryEntityById(dto.categoryId);
       if (category === null) {
         throw new CategoryNotFoundError(dto.categoryId);
+      }
+      if (category.level !== 3) {
+        throw new CategoryLevelInvalidError(dto.categoryId, category.level);
       }
     }
     if (dto.mainImageId !== undefined && dto.mainImageId !== null) {
@@ -255,7 +262,7 @@ export class ProductService {
     let brandName: string | null = null;
     if (product.brandId !== null) {
       const brand = await this.catalogService.findBrandEntityById(product.brandId);
-      brandName = brand?.nameZh ?? null;
+      brandName = brand?.name ?? null;
     }
     let categoryName: string | null = null;
     if (product.categoryId !== null) {

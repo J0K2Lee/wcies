@@ -37,11 +37,11 @@ async function main(): Promise<void> {
 
     // ---- Brand + categories ----
     await client.query(
-      `INSERT INTO brands (code, name_zh, name_en) VALUES ('VALKYRIE', 'VALKYRIE', 'Valkyrie')
+      `INSERT INTO brands (code, name, name_zh, name_en) VALUES ('VALKYRIE', 'VALKYRIE', 'VALKYRIE', 'Valkyrie')
        ON CONFLICT (code) DO NOTHING`,
     );
     const rootCategory = await client.query<{ id: string }>(
-      `INSERT INTO categories (code, name_zh, sort_order) VALUES ('3C', '3C数码', 0)
+      `INSERT INTO categories (code, name_zh, level, sort_order) VALUES ('3C', '3C数码', 1, 0)
        ON CONFLICT (code) DO NOTHING RETURNING id`,
     );
     let rootCategoryId = rootCategory.rows[0]?.id;
@@ -56,7 +56,7 @@ async function main(): Promise<void> {
       ['HEADSET', '耳机', 3],
     ] as const) {
       await client.query(
-        `INSERT INTO categories (parent_id, code, name_zh, sort_order) VALUES ($1, $2, $3, $4)
+        `INSERT INTO categories (parent_id, code, name_zh, level, sort_order) VALUES ($1, $2, $3, 2, $4)
          ON CONFLICT (code) DO NOTHING`,
         [rootCategoryId, code, name, sort],
       );

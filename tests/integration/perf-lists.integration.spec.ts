@@ -27,11 +27,18 @@ beforeAll(async () => {
   );
   const storeId = store.rows[0]?.id as string;
 
+  // Reserve one number from the product scope so the raw insert can never
+  // collide with numbers the scope hands out later.
+  const reserved = await db.query<{ first_seq: string }>(
+    `INSERT INTO business_code_sequences (scope_key, next_value, updated_at)
+     VALUES ('product', 1, now())
+     ON CONFLICT (scope_key)
+     DO UPDATE SET next_value = business_code_sequences.next_value + 1, updated_at = now()
+     RETURNING (next_value - 1 + 1)::text AS first_seq`,
+  );
   const product = await db.query<{ id: string }>(
-    `INSERT INTO products (product_code, code_seq, name_zh, status)
-     SELECT $1, (SELECT COALESCE(MAX(code_seq), 999999) + 1 FROM products), $2, $3
-     RETURNING id`,
-    [`${PREFIX}-PERFPRD`, 'perf product', 'ACTIVE'],
+    'INSERT INTO products (product_code, code_seq, name_zh, status) VALUES ($1, $2, $3, $4) RETURNING id',
+    [`${PREFIX}-PERFPRD`, Number(reserved.rows[0]?.first_seq ?? 1), 'perf product', 'ACTIVE'],
   );
   const productId = product.rows[0]?.id as string;
 

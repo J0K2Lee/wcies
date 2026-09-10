@@ -11,10 +11,16 @@ export class CreateBrandRequestDto {
   @Length(1, 100)
   code?: string;
 
-  @ApiProperty({ example: 'VALKYRIE', maxLength: 200 })
+  @ApiProperty({ example: 'Valkyrie', description: 'General name; default display name' })
   @IsString()
   @Length(1, 200)
-  nameZh!: string;
+  name!: string;
+
+  @ApiPropertyOptional({ example: '瓦尔基里', maxLength: 200 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  nameZh?: string;
 
   @ApiPropertyOptional({ example: 'Valkyrie', maxLength: 200 })
   @IsOptional()
@@ -22,7 +28,7 @@ export class CreateBrandRequestDto {
   @MaxLength(200)
   nameEn?: string;
 
-  @ApiPropertyOptional({ example: 'VALKYRIE', maxLength: 200 })
+  @ApiPropertyOptional({ example: 'ВАЛЬКИРИЯ', maxLength: 200 })
   @IsOptional()
   @IsString()
   @MaxLength(200)
@@ -34,6 +40,12 @@ export class UpdateBrandRequestDto {
   @IsOptional()
   @IsString()
   @Length(1, 200)
+  name?: string;
+
+  @ApiPropertyOptional({ maxLength: 200 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
   nameZh?: string;
 
   @ApiPropertyOptional({ maxLength: 200 })
@@ -58,11 +70,14 @@ export class BrandResponseDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
-  @ApiProperty({ example: 'VALKYRIE' })
+  @ApiProperty({ example: 'BN00001' })
   code!: string;
 
-  @ApiProperty({ example: 'VALKYRIE' })
-  nameZh!: string;
+  @ApiProperty({ example: 'Valkyrie' })
+  name!: string;
+
+  @ApiProperty({ example: '瓦尔基里', nullable: true })
+  nameZh!: string | null;
 
   @ApiProperty({ nullable: true })
   nameEn!: string | null;
@@ -149,7 +164,7 @@ export class CategoryResponseDto {
   @ApiProperty({ format: 'uuid', nullable: true })
   parentId!: string | null;
 
-  @ApiProperty({ example: 'KEYBOARD' })
+  @ApiProperty({ example: 'CN00251' })
   code!: string;
 
   @ApiProperty({ example: '键盘' })
@@ -157,6 +172,9 @@ export class CategoryResponseDto {
 
   @ApiProperty({ nullable: true })
   nameRu!: string | null;
+
+  @ApiProperty({ example: 3, description: '1..3; products may only reference level 3' })
+  level!: number;
 
   @ApiProperty({ example: 0 })
   sortOrder!: number;

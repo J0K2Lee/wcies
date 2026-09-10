@@ -6,7 +6,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
-/** Product brand master data (e.g. VALKYRIE, iKF) - task §13. */
+/** Product brand master data (e.g. VALKYRIE, iKF) - task §13; Sprint 6 decision 0006. */
 @Entity('brands')
 export class BrandEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -15,8 +15,12 @@ export class BrandEntity {
   @Column({ type: 'varchar', length: 100, unique: true })
   code!: string;
 
-  @Column({ type: 'varchar', length: 200, name: 'name_zh' })
-  nameZh!: string;
+  /** General name: required, the default display name everywhere. */
+  @Column({ type: 'varchar', length: 200 })
+  name!: string;
+
+  @Column({ type: 'varchar', length: 200, name: 'name_zh', nullable: true })
+  nameZh!: string | null;
 
   @Column({ type: 'varchar', length: 200, name: 'name_en', nullable: true })
   nameEn!: string | null;

@@ -2226,10 +2226,12 @@ export interface components {
         BrandResponseDto: {
             /** Format: uuid */
             id: string;
-            /** @example VALKYRIE */
+            /** @example BN00001 */
             code: string;
-            /** @example VALKYRIE */
-            nameZh: string;
+            /** @example Valkyrie */
+            name: string;
+            /** @example 瓦尔基里 */
+            nameZh: Record<string, never> | null;
             nameEn: Record<string, never> | null;
             nameRu: Record<string, never> | null;
             /** @example ACTIVE */
@@ -2242,14 +2244,20 @@ export interface components {
         CreateBrandRequestDto: {
             /** @description Auto-generated (BN%05d) when omitted */
             code?: string;
-            /** @example VALKYRIE */
-            nameZh: string;
+            /**
+             * @description General name; default display name
+             * @example Valkyrie
+             */
+            name: string;
+            /** @example 瓦尔基里 */
+            nameZh?: string;
             /** @example Valkyrie */
             nameEn?: string;
-            /** @example VALKYRIE */
+            /** @example ВАЛЬКИРИЯ */
             nameRu?: string;
         };
         UpdateBrandRequestDto: {
+            name?: string;
             nameZh?: string;
             nameEn?: string;
             nameRu?: string;
@@ -2261,11 +2269,16 @@ export interface components {
             id: string;
             /** Format: uuid */
             parentId: Record<string, never> | null;
-            /** @example KEYBOARD */
+            /** @example CN00251 */
             code: string;
             /** @example 键盘 */
             nameZh: string;
             nameRu: Record<string, never> | null;
+            /**
+             * @description 1..3; products may only reference level 3
+             * @example 3
+             */
+            level: number;
             /** @example 0 */
             sortOrder: number;
             /** @example ACTIVE */
@@ -2281,11 +2294,16 @@ export interface components {
             id: string;
             /** Format: uuid */
             parentId: Record<string, never> | null;
-            /** @example KEYBOARD */
+            /** @example CN00251 */
             code: string;
             /** @example 键盘 */
             nameZh: string;
             nameRu: Record<string, never> | null;
+            /**
+             * @description 1..3; products may only reference level 3
+             * @example 3
+             */
+            level: number;
             /** @example 0 */
             sortOrder: number;
             /** @example ACTIVE */

@@ -39,7 +39,7 @@ export class ProductRepository {
       .createQueryBuilder('product')
       .leftJoin('brands', 'brand', 'brand.id = product.brand_id')
       .leftJoin('categories', 'category', 'category.id = product.category_id')
-      .addSelect('brand.name_zh', 'brand_name')
+      .addSelect('brand.name', 'brand_name')
       .addSelect('category.name_zh', 'category_name')
       .addSelect(
         (sub) =>
@@ -57,7 +57,14 @@ export class ProductRepository {
       qb.andWhere('product.brand_id = :brandId', { brandId: filters.brandId });
     }
     if (filters.categoryId !== undefined) {
-      qb.andWhere('product.category_id = :categoryId', { categoryId: filters.categoryId });
+      // Subtree filter (decision 0005 §9.5): selecting a level-1/2 category
+      // must include products of all descendant categories.
+      const subtreeIds = await this.findCategorySubtreeIds(filters.categoryId);
+      if (subtreeIds.length === 0) {
+        qb.andWhere('1 = 0');
+      } else {
+        qb.andWhere('product.category_id IN (:...subtreeIds)', { subtreeIds });
+      }
     }
     if (filters.status !== undefined) {
       qb.andWhere('product.status = :status', { status: filters.status });
@@ -104,5 +111,19 @@ export class ProductRepository {
 
   async update(id: string, patch: Partial<ProductEntity>): Promise<void> {
     await this.repository.update({ id }, patch);
+  }
+
+  /** Category id plus every descendant id (recursive CTE). */
+  private async findCategorySubtreeIds(categoryId: string): Promise<string[]> {
+    const rows = await this.repository.query<Array<{ id: string }>>(
+      `WITH RECURSIVE t AS (
+         SELECT id FROM categories WHERE id = $1
+         UNION ALL
+         SELECT c.id FROM categories c JOIN t ON c.parent_id = t.id
+       )
+       SELECT id::text AS id FROM t`,
+      [categoryId],
+    );
+    return rows.map((row) => row.id);
   }
 }

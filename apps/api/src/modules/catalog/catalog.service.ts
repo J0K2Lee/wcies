@@ -12,6 +12,9 @@ import {
   BrandNotFoundError,
   CategoryCodeAlreadyExistsError,
   CategoryCycleInvalidError,
+  CategoryDepthExceededError,
+  CategoryLevelInvalidError,
+  CategoryNameDuplicatedError,
   CategoryNotFoundError,
 } from './errors/catalog-errors';
 import { CatalogRepository } from './repositories/catalog.repository';
@@ -25,7 +28,7 @@ import {
   UpdateCategoryRequestDto,
 } from './dto/catalog.dto';
 
-/** Brand + Category master data (task §13/§14). */
+/** Brand + Category master data (task §13/§14; Sprint 6 decisions 0005/0006). */
 @Injectable()
 export class CatalogService {
   constructor(
@@ -56,7 +59,8 @@ export class CatalogService {
     const code = manualCode || (await this.businessCode.nextBrandCode());
     const brand = await this.repository.insertBrand({
       code,
-      nameZh: dto.nameZh,
+      name: dto.name,
+      nameZh: dto.nameZh ?? null,
       nameEn: dto.nameEn ?? null,
       nameRu: dto.nameRu ?? null,
       status: 'ACTIVE',
@@ -66,7 +70,7 @@ export class CatalogService {
       entityId: brand.id,
       entityCode: brand.code,
       action: 'CREATE',
-      changes: { code: { from: null, to: brand.code }, nameZh: { from: null, to: brand.nameZh } },
+      changes: { code: { from: null, to: brand.code }, name: { from: null, to: brand.name } },
       operator,
     });
     return this.brandToResponse(brand);
@@ -82,12 +86,14 @@ export class CatalogService {
       throw new BrandNotFoundError(id);
     }
     const before = {
+      name: brand.name,
       nameZh: brand.nameZh,
       nameEn: brand.nameEn,
       nameRu: brand.nameRu,
       status: brand.status,
     };
     const patch: Partial<BrandEntity> = {};
+    if (dto.name !== undefined) patch.name = dto.name;
     if (dto.nameZh !== undefined) patch.nameZh = dto.nameZh;
     if (dto.nameEn !== undefined) patch.nameEn = dto.nameEn;
     if (dto.nameRu !== undefined) patch.nameRu = dto.nameRu;
@@ -102,6 +108,7 @@ export class CatalogService {
       entityCode: brand.code,
       action: 'UPDATE',
       changes: diffOf(before, {
+        name: updated?.name,
         nameZh: updated?.nameZh,
         nameEn: updated?.nameEn,
         nameRu: updated?.nameRu,
@@ -138,15 +145,33 @@ export class CatalogService {
       }
     }
     const code = manualCode || (await this.businessCode.nextCategoryCode());
+
+    let level = 1;
     if (dto.parentId !== undefined && dto.parentId !== null) {
       const parent = await this.repository.findCategoryById(dto.parentId);
       if (parent === null) {
         throw new CategoryNotFoundError(dto.parentId);
       }
+      level = parent.level + 1;
+      if (level > 3) {
+        throw new CategoryDepthExceededError(dto.parentId, level);
+      }
     }
+
+    // Same-name sibling under the same parent (incl. between roots); the DB
+    // unique index is the backstop, this gives the friendly error.
+    const duplicate = await this.repository.findSiblingByName(
+      dto.parentId ?? null,
+      dto.nameZh,
+    );
+    if (duplicate !== null) {
+      throw new CategoryNameDuplicatedError(dto.nameZh, dto.parentId ?? null);
+    }
+
     const category = await this.repository.insertCategory({
       parentId: dto.parentId ?? null,
       code,
+      level,
       nameZh: dto.nameZh,
       nameRu: dto.nameRu ?? null,
       sortOrder: dto.sortOrder ?? 0,
@@ -160,6 +185,8 @@ export class CatalogService {
       changes: {
         code: { from: null, to: category.code },
         nameZh: { from: null, to: category.nameZh },
+        parentId: { from: null, to: category.parentId },
+        level: { from: null, to: category.level },
       },
       operator,
     });
@@ -175,27 +202,36 @@ export class CatalogService {
     if (category === null) {
       throw new CategoryNotFoundError(id);
     }
-    if (dto.parentId !== undefined) {
-      if (dto.parentId === id) {
-        throw new CategoryCycleInvalidError(id);
-      }
-      if (dto.parentId !== null) {
-        const parent = await this.repository.findCategoryById(dto.parentId);
-        if (parent === null) {
-          throw new CategoryNotFoundError(dto.parentId);
-        }
-        await this.assertNoCycle(id, dto.parentId);
+
+    if (
+      dto.nameZh !== undefined &&
+      dto.nameZh.trim() !== '' &&
+      dto.nameZh !== category.nameZh
+    ) {
+      const duplicate = await this.repository.findSiblingByName(
+        category.parentId,
+        dto.nameZh,
+        id,
+      );
+      if (duplicate !== null) {
+        throw new CategoryNameDuplicatedError(dto.nameZh, category.parentId);
       }
     }
+
+    if (dto.parentId !== undefined && dto.parentId !== category.parentId) {
+      await this.reparentWithDepthRules(id, category, dto.parentId);
+    }
+
     const before = {
       parentId: category.parentId,
       nameZh: category.nameZh,
       nameRu: category.nameRu,
       sortOrder: category.sortOrder,
       status: category.status,
+      level: category.level,
     };
     const patch: Partial<CategoryEntity> = {};
-    if (dto.parentId !== undefined) patch.parentId = dto.parentId;
+    // parentId/level only change through reparentWithDepthRules above.
     if (dto.nameZh !== undefined) patch.nameZh = dto.nameZh;
     if (dto.nameRu !== undefined) patch.nameRu = dto.nameRu;
     if (dto.sortOrder !== undefined) patch.sortOrder = dto.sortOrder;
@@ -215,10 +251,53 @@ export class CatalogService {
         nameRu: updated?.nameRu,
         sortOrder: updated?.sortOrder,
         status: updated?.status,
+        level: updated?.level,
       }),
       operator,
     });
     return this.categoryToResponse(updated as CategoryEntity);
+  }
+
+  /**
+   * Re-parent rules (decision 0005, §9.4): the check must consider the
+   * height of the WHOLE subtree (not just the moved node), and a subtree
+   * carrying products can never shift levels (products only live on
+   * level-3 nodes).
+   */
+  private async reparentWithDepthRules(
+    id: string,
+    category: CategoryEntity,
+    newParentId: string | null,
+  ): Promise<void> {
+    let newParentLevel = 0;
+    if (newParentId !== null) {
+      if (newParentId === id) {
+        throw new CategoryCycleInvalidError(id);
+      }
+      const parent = await this.repository.findCategoryById(newParentId);
+      if (parent === null) {
+        throw new CategoryNotFoundError(newParentId);
+      }
+      await this.assertNoCycle(id, newParentId);
+      newParentLevel = parent.level;
+    }
+    const newLevel = newParentLevel + 1;
+    const height = await this.repository.subtreeHeight(id);
+    const resultingDepth = newLevel + height - 1;
+    if (resultingDepth > 3) {
+      throw new CategoryDepthExceededError(id, resultingDepth);
+    }
+    const delta = newLevel - category.level;
+    if (delta !== 0) {
+      const productCount = await this.repository.countProductsInSubtree(id);
+      if (productCount > 0) {
+        // Scenario C: moving would re-level nodes that carry products.
+        throw new CategoryLevelInvalidError(id, 3);
+      }
+    }
+    if (delta !== 0 || newParentId !== category.parentId) {
+      await this.repository.reparentCategory(id, newParentId, delta);
+    }
   }
 
   /** Cross-module validation for Product service. */
@@ -264,6 +343,7 @@ export class CatalogService {
     return {
       id: brand.id,
       code: brand.code,
+      name: brand.name,
       nameZh: brand.nameZh,
       nameEn: brand.nameEn,
       nameRu: brand.nameRu,
@@ -280,6 +360,7 @@ export class CatalogService {
       code: category.code,
       nameZh: category.nameZh,
       nameRu: category.nameRu,
+      level: category.level,
       sortOrder: category.sortOrder,
       status: category.status,
       createdAt: category.createdAt,

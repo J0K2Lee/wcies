@@ -77,7 +77,7 @@ describe('scoped auto-coding (decision 0001)', () => {
 
   it('auto-codes brands and categories (BN%05d / CN%05d)', async () => {
     const brand = await client.post<{ code: string }>('/api/v1/brands', {
-      nameZh: `${PREFIX} 测试品牌`,
+      name: `${PREFIX} 测试品牌`,
     });
     expect(brand.body.data.code).toMatch(/^BN\d{5,}$/);
 

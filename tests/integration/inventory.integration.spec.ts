@@ -962,14 +962,23 @@ describe('list performance with 5000 balances (task §74)', () => {
       );
       if (Number(existing.rows[0]!.count) < 5000) {
         // Read-performance fixture only (bulk SQL, never a business movement).
+        // Reserve a block of 5000 numbers FROM the product scope (atomic,
+        // single statement) so raw fixtures never collide with numbers the
+        // scope will hand out later.
+        const reserved = await pg.query<{ first_seq: string }>(
+          `INSERT INTO business_code_sequences (scope_key, next_value, updated_at)
+           VALUES ('product', 5000, now())
+           ON CONFLICT (scope_key)
+           DO UPDATE SET next_value = business_code_sequences.next_value + 5000, updated_at = now()
+           RETURNING (next_value - 5000 + 1)::text AS first_seq`,
+        );
+        const firstSeq = Number(reserved.rows[0]?.first_seq ?? 1);
         await pg.query(
           `INSERT INTO products (product_code, code_seq, name_zh, status)
-           SELECT $1 || '-P' || g,
-                  (SELECT COALESCE(MAX(code_seq), 999999) FROM products) + g,
-                  'perf-product-' || g, 'ACTIVE'
+           SELECT $1 || '-P' || g, $2 + g - 1, 'perf-product-' || g, 'ACTIVE'
            FROM generate_series(1, 5000) g
            ON CONFLICT DO NOTHING`,
-          [PREFIX],
+          [PREFIX, firstSeq],
         );
         await pg.query(
           `INSERT INTO skus (product_id, sku_code, name_zh, status)
