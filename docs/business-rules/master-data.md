@@ -8,20 +8,30 @@
 
 ## 1. 编码规则
 
-| 对象 | 编码 | 生成规则 | 可否人工修改 |
-|---|---|---|---|
-| Product | `product_code` | PostgreSQL sequence，`PRD%06d`（如 PRD000001） | 可（UUID 永不变） |
-| SKU | `sku_code` | sequence，`SKU%06d` | 可（UUID 永不变） |
-| 内部条码 | `barcode`(INTERNAL) | sequence，`WCSKU%08d` | — |
-| Bin 条码 | `barcode` | `BIN-{warehouseCode}-{binCode}` | 可 |
+> 2026-09-11 起按决策 `docs/decisions/0001`、`0002` 执行：集中式序号表 + 作用域递增。
 
-所有业务编码全局唯一，由数据库 UNIQUE 约束兜底；并发分配使用数据库 sequence（原子）。
+| 对象 | 编码 | 生成规则 | 序号作用域 | 可否人工修改 |
+|---|---|---|---|---|
+| Warehouse | `warehouse_code` | `{前缀}-%02d`：SELF→`ZG`、PLATFORM→`PT`、THIRD_PARTY→`SF`、RETURN_TEMP→`TH`，如 `ZG-01` | `warehouse:{TYPE}` | 创建时可留空自动生成；创建后不可改 |
+| Store | `store_code` | `{前缀}-%03d`：OZON→`ON`、WB→`WS`、YANDEX→`YX`，如 `ON-001` | `store:{PLATFORM}` | 同上 |
+| Brand | `code` | `BN%05d`，如 `BN00001` | `brand` | 同上 |
+| Category | `code` | `CN%05d`，一/二/三级共用一条序列 | `category` | 同上 |
+| Product | `product_code` | `PN%06d`，如 `PN000001` | `product` | 创建后只读（决策 0002） |
+| SKU | `sku_code` | `SKU{商品序号 6 位}{商品内 SKU 序号 3 位}`，如 `SKU000001001` | `sku:{productId}` | 生成后冻结（决策 0002） |
+| 内部条码 | `barcode`(INTERNAL) | PG sequence，`WCSKU%08d`（保持独立，不与 SKU 编码合并） | 现有 sequence | — |
+| Bin 条码 | `barcode` | `BIN-{warehouseCode}-{binCode}` | — | 可 |
+
+序号由集中式序号表 `business_code_sequences` + `BusinessCodeService` 原子取号（单条 `INSERT ... ON CONFLICT DO UPDATE ... RETURNING`，无读-改-写窗口）；并发取同一作用域必然得到互不重复的号。
+
+作用域语义：仓库按**类型**各自递增（第一个自管仓 `ZG-01`，第一个第三方仓 `SF-01`）；店铺按**平台**各自递增（第一个 OZON 店 `ON-001`，第一个 WB 店 `WS-001`）；SKU 按**商品**各自递增（每个商品的第一个 SKU 都是 `001`）。
+
+宽度是**最小宽度**，序号溢出自然进位（`%02d` 对 100 输出 `100`），不报错。仓库**类型**创建后不可改（编码前缀依赖类型）。
 
 ## 2. 状态模型
 
 - Product/SKU：`DRAFT → ACTIVE ⇄ INACTIVE`；已被引用的主数据禁止物理删除，只允许停用。
-- Store/Warehouse/Binding/Listing：`ACTIVE / INACTIVE(DISABLED)`；不提供硬 DELETE。
-- 例外（spec §117）：无业务引用的 Barcode、SKU 图片、错误创建的数据允许物理删除。
+- Store/Warehouse/Binding/Listing：`ACTIVE / INACTIVE(DISABLED)`。
+- 删除策略（决策 `docs/decisions/0003`，2026-09-11 起）：**零引用才可物理删除**。服务层逐一引用检查——存在任何引用 → 返回 `*_IN_USE` 错误码 + 提示"该记录已被引用，只能停用不能删除"；零引用 → 真删 + 记 operation log。覆盖 Warehouse / Bin / Store / Binding / Brand / Category / Product / Sku / Listing / ListingSku。Platform 只读，不提供删除。
 
 ## 3. 条码规则（task §28-§32）
 
@@ -99,6 +109,26 @@ Sprint 5 起，平台同步会产生**未映射**的平台 SKU 事实：
 
 `PRODUCT_NOT_FOUND`、`PRODUCT_CODE_ALREADY_EXISTS`、`SKU_NOT_FOUND`、`SKU_CODE_ALREADY_EXISTS`、`SKU_BARCODE_ALREADY_EXISTS`、`BRAND_NOT_FOUND`、`CATEGORY_NOT_FOUND`、`PLATFORM_NOT_FOUND`、`STORE_NOT_FOUND`、`STORE_CODE_ALREADY_EXISTS`、`WAREHOUSE_NOT_FOUND`、`WAREHOUSE_CODE_ALREADY_EXISTS`、`WAREHOUSE_BIN_ALREADY_EXISTS`、`STORE_WAREHOUSE_BINDING_INVALID`、`LISTING_NOT_FOUND`、`LISTING_ALREADY_EXISTS`、`LISTING_SKU_MAPPING_NOT_FOUND`、`LISTING_SKU_RESOLVE_FAILED`、`LISTING_SKU_RESOLVE_AMBIGUOUS`、`FILE_INVALID_TYPE`、`IMPORT_VALIDATION_FAILED` 及过程码（`SKU_DIMENSIONS_INVALID`、`CREDENTIAL_ALREADY_EXISTS` 等）。
 
+Sprint 6 新增（T2/T3/T4，2026-09-11）：
+
+- 删除保护（决策 0003）：`WAREHOUSE_IN_USE`、`BIN_IN_USE`、`STORE_IN_USE`、`BINDING_IN_USE`、`BRAND_IN_USE`、`CATEGORY_IN_USE`、`PRODUCT_IN_USE`、`SKU_IN_USE`、`LISTING_IN_USE`、`LISTING_SKU_MAPPING_IN_USE`。
+- 分类层级（决策 0005）：`CATEGORY_DEPTH_EXCEEDED`、`CATEGORY_LEVEL_INVALID`、`CATEGORY_NAME_DUPLICATED`、`CATEGORY_HAS_CHILDREN`。
+
 ## 13. 修改本文档的条件
 
 变更以下内容必须先改文档：编码规则、状态模型、条码唯一性、体积计算、履约模式集合或匹配规则、Listing 唯一性、Resolver 语义、导入模板或重复处理策略。
+
+## 14. 分类层级（三级）
+
+> 2026-09-11 起按决策 `docs/decisions/0005` 执行。
+
+1. 分类树**最多三级**：`level ∈ {1,2,3}`，数据库 CHECK 兜底（`level BETWEEN 1 AND 3` 且 `(level = 1) = (parent_id IS NULL)`），任何代码路径不可绕过。
+2. 商品分类**选填**；填则该分类必须为三级（`CATEGORY_LEVEL_INVALID`）。
+3. **同父下名称唯一**（含根级之间）：唯一索引 `(parent_id, lower(name_zh)) NULLS NOT DISTINCT`；服务层预检给友好提示（`CATEGORY_NAME_DUPLICATED`）；跨父允许同名。
+4. 创建/改父时计算**整棵子树最终深度**，超过三级拒绝（`CATEGORY_DEPTH_EXCEEDED`）；`level` 随改父在同一事务内整棵子树更新。
+5. 已有商品的节点移动后不再是三级 → 拒绝（`CATEGORY_LEVEL_INVALID`）。
+6. 停用不级联子节点；停用节点及其子树在商品表单不可选，数据库层级与商品挂载关系不变，重新启用即恢复。
+7. 删除：有子节点 → `CATEGORY_HAS_CHILDREN`；有商品 → `CATEGORY_IN_USE`；零引用 → 真删。
+8. 分类编码 `CN%05d`，一/二/三级共用一条序列，编码不出现在前端表单。
+9. `GET /products?categoryId=` 为**含子树**筛选（递归 CTE），选一/二级分类能查出其下三级分类的商品。
+10. 品牌命名（决策 `docs/decisions/0006`）：`name`（一般名称，必填，主显示名）/ `name_zh`（中文名，可空）/ `name_en` / `name_ru`；全站默认显示一般名称。
