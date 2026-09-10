@@ -207,9 +207,9 @@ async function main(): Promise<void> {
       if (skuId === undefined) {
         skuId = (
           await client.query<{ id: string }>(
-            `INSERT INTO skus (product_id, sku_code, name_zh, model, color, weight_kg,
-               length_cm, width_cm, height_cm, volume_cm3, latest_purchase_price, cost_currency, status)
-             VALUES ($1, $2, $3, 'VK87MAX', $4, 0.95, 35.5, 12.2, 3.4, 1472.54, 299, 'CNY', 'ACTIVE')
+            `INSERT INTO skus (product_id, sku_code, name_zh, model, color, weight_g,
+               length_mm, width_mm, height_mm, volume_mm3, latest_purchase_price, cost_currency, status)
+             VALUES ($1, $2, $3, 'VK87MAX', $4, 950, 355, 122, 34, 1472540, 299, 'CNY', 'ACTIVE')
              RETURNING id`,
             [productId, sku.code, sku.name, sku.color],
           )
