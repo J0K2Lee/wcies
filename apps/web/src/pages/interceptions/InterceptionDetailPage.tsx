@@ -162,7 +162,7 @@ export function InterceptionDetailPage() {
         {item === null ? (
           '缺少订单行信息'
         ) : (
-          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          <Space orientation="vertical" size={8} style={{ width: '100%' }}>
             <div style={{ fontSize: 20, fontWeight: 700 }}>
               {item.skuCode} ×{Number(item.remainingQty)}
               <span style={{ fontSize: 14, fontWeight: 400, marginLeft: 12 }}>{item.skuName}</span>
@@ -201,7 +201,7 @@ export function InterceptionDetailPage() {
           }
           style={{ borderColor: '#1677ff' }}
         >
-          <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          <Space orientation="vertical" style={{ width: '100%' }} size={12}>
             <Input
               size="large"
               placeholder="扫描 SKU 条码…"

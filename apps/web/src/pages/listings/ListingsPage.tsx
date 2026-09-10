@@ -143,7 +143,7 @@ export function ListingsPage() {
     .map((store) => ({ value: store.id, label: `${store.storeCode} ${store.name}` }));
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+    <Space orientation="vertical" style={{ width: '100%' }} size="middle">
       <Space wrap>
         <Select
           allowClear
@@ -358,7 +358,7 @@ export function ListingsPage() {
             ? `${listingDetail.platformCode} / ${listingDetail.storeCode} / ${listingDetail.platformProductId}`
             : 'Listing详情'
         }
-        width={720}
+        size={720}
         open={detailId !== null}
         onClose={() => setDetailId(null)}
       >

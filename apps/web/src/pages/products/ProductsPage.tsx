@@ -201,7 +201,7 @@ export function ProductsPage() {
   ]);
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+    <Space orientation="vertical" style={{ width: '100%' }} size="middle">
       <Space wrap>
         <Input.Search
           placeholder="搜索商品编号 / 名称"
@@ -538,7 +538,7 @@ export function ProductsPage() {
 
       <Drawer
         title={productDetail?.product.productCode ?? '商品详情'}
-        width={720}
+        size={720}
         open={detailId !== null}
         onClose={() => setDetailId(null)}
         extra={
@@ -561,7 +561,7 @@ export function ProductsPage() {
         }
       >
         {productDetail !== undefined && (
-          <Space direction="vertical" style={{ width: '100%' }} size="large">
+          <Space orientation="vertical" style={{ width: '100%' }} size="large">
             <Descriptions
               column={2}
               size="small"

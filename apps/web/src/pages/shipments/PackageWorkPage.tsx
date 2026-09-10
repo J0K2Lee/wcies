@@ -172,7 +172,7 @@ export function PackageWorkPage() {
           title={<span style={{ fontSize: 16 }}>扫码装箱（每次 1 件，回车提交；不改动库存）</span>}
           style={{ borderColor: '#1677ff' }}
         >
-          <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          <Space orientation="vertical" style={{ width: '100%' }} size={12}>
             <Input
               ref={barcodeRef}
               size="large"

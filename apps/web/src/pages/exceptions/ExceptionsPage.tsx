@@ -150,27 +150,27 @@ export function ExceptionsPage() {
   const openCount = useApiQuery<Envelope<ExceptionRow[]>>(
     '/api/v1/exceptions',
     { page: 1, pageSize: 1, status: 'OPEN' },
-    ['exceptions-count', 'OPEN'],
+    ['exceptions', 'count', 'OPEN'],
   );
   const resolvedCount = useApiQuery<Envelope<ExceptionRow[]>>(
     '/api/v1/exceptions',
     { page: 1, pageSize: 1, status: 'RESOLVED' },
-    ['exceptions-count', 'RESOLVED'],
+    ['exceptions', 'count', 'RESOLVED'],
   );
   const ignoredCount = useApiQuery<Envelope<ExceptionRow[]>>(
     '/api/v1/exceptions',
     { page: 1, pageSize: 1, status: 'IGNORED' },
-    ['exceptions-count', 'IGNORED'],
+    ['exceptions', 'count', 'IGNORED'],
   );
   const openSample = useApiQuery<Envelope<ExceptionRow[]>>(
     '/api/v1/exceptions',
     { page: 1, pageSize: 100, status: 'OPEN' },
-    ['exceptions-open-sample'],
+    ['exceptions', 'open-sample'],
   );
 
   const stores = useApiQuery<
     Envelope<Array<{ id: string; storeCode: string; name: string; platformCode: string }>>
-  >('/api/v1/stores', { page: 1, pageSize: 100 }, ['stores-for-exceptions']);
+  >('/api/v1/stores', { page: 1, pageSize: 100 }, ['stores', 'for-exceptions']);
   const storeMap = useMemo(
     () => new Map((stores.data?.data ?? []).map((store) => [store.id, store])),
     [stores.data],
@@ -319,7 +319,7 @@ export function ExceptionsPage() {
             </ContextSection>
           )}
           <ContextAction>
-            <Space direction="vertical" style={{ width: '100%' }} size={8}>
+            <Space orientation="vertical" style={{ width: '100%' }} size={8}>
               <Button block onClick={() => setDetailId(selectedRow.id)}>
                 查看完整详情
               </Button>
@@ -561,13 +561,13 @@ export function ExceptionsPage() {
       {/* ---- Detail drawer ---- */}
       <Drawer
         title={detailRow !== null ? `异常详情 · ${detailRow.exceptionNo}` : '异常详情'}
-        width={640}
+        size={640}
         open={detailId !== null}
         onClose={() => setDetailId(null)}
         destroyOnHidden
       >
         {detailRow !== null ? (
-          <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          <Space orientation="vertical" size="large" style={{ width: '100%' }}>
             <section>
               <DrawerSectionTitle>基础信息</DrawerSectionTitle>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
@@ -653,7 +653,7 @@ export function ExceptionsPage() {
             {buildEntityActions(detailRow).length > 0 && (
               <section>
                 <DrawerSectionTitle>关联操作</DrawerSectionTitle>
-                <Space direction="vertical" size={8} style={{ alignItems: 'flex-start' }}>
+                <Space orientation="vertical" size={8} style={{ alignItems: 'flex-start' }}>
                   {buildEntityActions(detailRow).map((action) => (
                     <EntityLink
                       key={action.key}

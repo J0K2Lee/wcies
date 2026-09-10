@@ -147,28 +147,28 @@ export function SyncCenterPage() {
   );
   const stores = useApiQuery<
     Envelope<Array<{ id: string; storeCode: string; name: string; platformCode: string }>>
-  >('/api/v1/stores', { page: 1, pageSize: 100 }, ['stores-for-sync']);
+  >('/api/v1/stores', { page: 1, pageSize: 100 }, ['stores', 'for-sync']);
 
   // KPI totals per status — lightweight pageSize=1 count queries (task §14).
   const runningCount = useApiQuery<Envelope<SyncJobRow[]>>(
     '/api/v1/sync/jobs',
     { page: 1, pageSize: 1, status: 'RUNNING' },
-    ['sync-jobs-count', 'RUNNING'],
+    ['sync-jobs', 'count', 'RUNNING'],
   );
   const pendingCount = useApiQuery<Envelope<SyncJobRow[]>>(
     '/api/v1/sync/jobs',
     { page: 1, pageSize: 1, status: 'PENDING' },
-    ['sync-jobs-count', 'PENDING'],
+    ['sync-jobs', 'count', 'PENDING'],
   );
   const failedCount = useApiQuery<Envelope<SyncJobRow[]>>(
     '/api/v1/sync/jobs',
     { page: 1, pageSize: 1, status: 'FAILED' },
-    ['sync-jobs-count', 'FAILED'],
+    ['sync-jobs', 'count', 'FAILED'],
   );
   const successCount = useApiQuery<Envelope<SyncJobRow[]>>(
     '/api/v1/sync/jobs',
     { page: 1, pageSize: 1, status: 'SUCCESS' },
-    ['sync-jobs-count', 'SUCCESS'],
+    ['sync-jobs', 'count', 'SUCCESS'],
   );
 
   // Poll while any visible job is in flight (task §12 "看懂正在同步什么").
@@ -194,11 +194,21 @@ export function SyncCenterPage() {
   );
 
   const triggerMutation = useMutation({
-    mutationFn: ({ type, storeId: target }: { type: 'orders' | 'listings'; storeId: string }) =>
-      apiPost<SyncJobRow>(`/api/v1/sync/${type}`, { storeId: target }),
-    onSuccess: (job) => {
+    mutationFn: ({
+      type,
+      storeId,
+      storeLabel,
+    }: {
+      type: 'orders' | 'listings';
+      storeId: string;
+      storeLabel: string;
+    }) =>
+      apiPost<SyncJobRow>(`/api/v1/sync/${type}`, { storeId }).then((job) => ({ job, storeLabel })),
+    onSuccess: ({ job, storeLabel }) => {
+      // The trigger response returns the job before enrichment (empty
+      // storeCode), so the message uses the label from the request context.
       void message.success(
-        `同步任务已创建（${SYNC_TYPE_META[job.syncType] ?? ''} · ${job.storeCode}），状态将自动刷新`,
+        `同步任务已创建（${SYNC_TYPE_META[job.syncType] ?? ''} · ${storeLabel}），状态将自动刷新`,
       );
       setTriggerOpen(false);
       triggerForm.resetFields();
@@ -294,7 +304,7 @@ export function SyncCenterPage() {
             </ContextSection>
           )}
           <ContextAction>
-            <Space direction="vertical" style={{ width: '100%' }} size={8}>
+            <Space orientation="vertical" style={{ width: '100%' }} size={8}>
               <Button block onClick={() => setDetailJobId(selectedJob.id)}>
                 查看完整详情
               </Button>
@@ -306,6 +316,7 @@ export function SyncCenterPage() {
                   triggerMutation.mutate({
                     type: selectedJob.syncType === 'ORDER_SYNC' ? 'orders' : 'listings',
                     storeId: selectedJob.storeId,
+                    storeLabel: selectedJob.storeCode,
                   })
                 }
               >
@@ -660,13 +671,13 @@ export function SyncCenterPage() {
       {/* ---- Job detail drawer (task §19) ---- */}
       <Drawer
         title="同步任务详情"
-        width={640}
+        size={640}
         open={detailJobId !== null}
         onClose={() => setDetailJobId(null)}
         destroyOnHidden
       >
         {detailJob !== null ? (
-          <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          <Space orientation="vertical" size="large" style={{ width: '100%' }}>
             <section>
               <DrawerSectionTitle>Summary</DrawerSectionTitle>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
@@ -764,7 +775,7 @@ export function SyncCenterPage() {
 
             <section>
               <DrawerSectionTitle>游标（Cursor）</DrawerSectionTitle>
-              <Space direction="vertical" size={6} style={{ width: '100%' }}>
+              <Space orientation="vertical" size={6} style={{ width: '100%' }}>
                 <CursorField label="Cursor Before" value={detailJob.cursorBefore} />
                 <CursorField label="Cursor After" value={detailJob.cursorAfter} />
               </Space>
@@ -778,6 +789,7 @@ export function SyncCenterPage() {
                 triggerMutation.mutate({
                   type: detailJob.syncType === 'ORDER_SYNC' ? 'orders' : 'listings',
                   storeId: detailJob.storeId,
+                  storeLabel: detailJob.storeCode,
                 })
               }
             >
@@ -794,13 +806,13 @@ export function SyncCenterPage() {
       {/* ---- Webhook event payload drawer (existing feature, restyled) ---- */}
       <Drawer
         title={eventDetail ? `${eventDetail.platform} / ${eventDetail.eventType}` : '事件详情'}
-        width={640}
+        size={640}
         open={eventDetail !== null}
         onClose={() => setEventDetail(null)}
         destroyOnHidden
       >
         {eventDetail !== null && (
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
               <DrawerField
                 label="事件 ID"
@@ -866,14 +878,17 @@ export function SyncCenterPage() {
       <Modal
         title="立即同步"
         open={triggerOpen}
+        forceRender
         onCancel={() => setTriggerOpen(false)}
         onOk={() =>
-          void triggerForm.validateFields().then((values) =>
+          void triggerForm.validateFields().then((values) => {
+            const store = (stores.data?.data ?? []).find((item) => item.id === values.storeId);
             triggerMutation.mutate({
               type: values.type as 'orders' | 'listings',
               storeId: values.storeId as string,
-            }),
-          )
+              storeLabel: store === undefined ? '' : `${store.platformCode} / ${store.storeCode}`,
+            });
+          })
         }
         confirmLoading={triggerMutation.isPending}
       >

@@ -36,7 +36,7 @@ export function HealthTestPage() {
         <Card type="inner" title="GET /health/live" style={{ marginBottom: 16 }}>
           {liveness.isPending ? <Spin /> : null}
           {liveness.isError ? (
-            <Alert type="error" message={`请求失败: ${liveness.error.message}`} />
+            <Alert type="error" title={`请求失败: ${liveness.error.message}`} />
           ) : null}
           {liveness.data !== undefined ? (
             <Descriptions column={1} size="small">
@@ -50,7 +50,7 @@ export function HealthTestPage() {
         <Card type="inner" title="GET /health/ready">
           {readiness.isPending ? <Spin /> : null}
           {readiness.isError ? (
-            <Alert type="error" message={`请求失败: ${readiness.error.message}`} />
+            <Alert type="error" title={`请求失败: ${readiness.error.message}`} />
           ) : null}
           {readiness.data !== undefined ? (
             <Descriptions column={1} size="small">

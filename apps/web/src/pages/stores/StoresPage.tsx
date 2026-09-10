@@ -187,7 +187,7 @@ export function StoresPage() {
   const recentJobs = useApiQuery<Envelope<SyncJobLite[]>>(
     '/api/v1/sync/jobs',
     { page: 1, pageSize: 100 },
-    ['sync-jobs-recent'],
+    ['sync-jobs', 'recent'],
   );
 
   const rows = list.data?.data ?? [];
@@ -433,7 +433,7 @@ export function StoresPage() {
             )}
           </ContextSection>
           <ContextAction>
-            <Space direction="vertical" style={{ width: '100%' }} size={8}>
+            <Space orientation="vertical" style={{ width: '100%' }} size={8}>
               <Button block onClick={() => setDetailId(selectedRow.id)}>
                 查看详情
               </Button>
@@ -732,7 +732,7 @@ export function StoresPage() {
       {/* ---- Store detail drawer (task §11) ---- */}
       <Drawer
         title={detailRow !== null ? `${detailRow.name}（${detailRow.storeCode}）` : '店铺详情'}
-        width={640}
+        size={640}
         open={detailId !== null}
         onClose={() => setDetailId(null)}
         destroyOnHidden
@@ -765,6 +765,7 @@ export function StoresPage() {
       <Modal
         title="添加店铺"
         open={createOpen}
+        forceRender
         onCancel={() => setCreateOpen(false)}
         onOk={() => void form.validateFields().then((values) => createMutation.mutate(values))}
         confirmLoading={createMutation.isPending}
@@ -806,6 +807,7 @@ export function StoresPage() {
       <Modal
         title="配置 MAIN_API 凭证"
         open={credentialOpen}
+        forceRender
         onCancel={() => setCredentialOpen(false)}
         onOk={() =>
           void credentialForm.validateFields().then((values) => credentialMutation.mutate(values))
@@ -864,7 +866,7 @@ function StoreDetailBody({
   toggling: boolean;
 }) {
   return (
-    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+    <Space orientation="vertical" size="large" style={{ width: '100%' }}>
       <section>
         <SectionTitle>基础信息</SectionTitle>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', rowGap: 0 }}>

@@ -427,7 +427,7 @@ export function ShipmentDetailPage() {
         onCancel={() => setTrackingOpen(false)}
         onOk={() => trackingMutation.mutate()}
       >
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           <Input
             size="large"
             placeholder="物流单号 trackingNumber"

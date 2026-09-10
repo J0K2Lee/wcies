@@ -47,7 +47,7 @@ export function BinsPage() {
   });
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+    <Space orientation="vertical" style={{ width: '100%' }} size="middle">
       <Space wrap>
         <Select
           placeholder="选择仓库"

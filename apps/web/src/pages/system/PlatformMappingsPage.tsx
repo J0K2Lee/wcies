@@ -75,28 +75,28 @@ export function PlatformMappingsPage() {
       ...(mappingState ? { mappingState } : {}),
       ...(platformId ? { platformId } : {}),
     },
-    ['mappings-overview', page, effectiveKeyword, mappingState, platformId],
+    ['listings', 'overview', page, effectiveKeyword, mappingState, platformId],
   );
 
   const mappedCount = useApiQuery<Envelope<ListingRow[]>>(
     '/api/v1/listings',
     { page: 1, pageSize: 1, mappingState: 'MAPPED' },
-    ['mappings-count', 'MAPPED'],
+    ['listings', 'count', 'MAPPED'],
   );
   const unmappedCount = useApiQuery<Envelope<ListingRow[]>>(
     '/api/v1/listings',
     { page: 1, pageSize: 1, mappingState: 'UNMAPPED' },
-    ['mappings-count', 'UNMAPPED'],
+    ['listings', 'count', 'UNMAPPED'],
   );
   const mappingExceptions = useApiQuery<Envelope<Array<{ id: string }>>>(
     '/api/v1/exceptions',
     { page: 1, pageSize: 1, status: 'OPEN', exceptionType: 'ORDER_SKU_MAPPING_FAILED' },
-    ['mapping-exception-count'],
+    ['exceptions', 'mapping-overview'],
   );
   const platforms = useApiQuery<Envelope<Array<{ id: string; code: string }>>>(
     '/api/v1/platforms',
     {},
-    ['platforms-for-mappings'],
+    ['platforms', 'for-mappings'],
   );
 
   const rows = list.data?.data ?? [];
@@ -217,7 +217,7 @@ export function PlatformMappingsPage() {
               <Button
                 icon={<ReloadOutlined />}
                 onClick={() =>
-                  void queryClient.invalidateQueries({ queryKey: ['mappings-overview'] })
+                  void queryClient.invalidateQueries({ queryKey: ['listings', 'overview'] })
                 }
               >
                 刷新
@@ -301,7 +301,9 @@ export function PlatformMappingsPage() {
         {list.isError ? (
           <ErrorState
             description={(list.error as Error | null)?.message}
-            onRetry={() => void queryClient.invalidateQueries({ queryKey: ['mappings-overview'] })}
+            onRetry={() =>
+              void queryClient.invalidateQueries({ queryKey: ['listings', 'overview'] })
+            }
             retrying={list.isFetching}
           />
         ) : (

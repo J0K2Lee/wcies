@@ -37,7 +37,7 @@ export function NotificationBell() {
   const query = useApiQuery<{ data: NotificationItem[] }>(
     '/api/v1/notifications',
     { page: 1, pageSize: 6 },
-    ['notifications-recent'],
+    ['notifications', 'recent'],
     undefined,
     true,
   );

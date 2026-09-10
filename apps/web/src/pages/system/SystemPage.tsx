@@ -90,8 +90,8 @@ const ENTRIES: Array<{ to: string; title: string; description: string; icon: Rea
 ];
 
 export function SystemPage() {
-  const health = useApiQuery<HealthData>('/health/ready', {}, ['health-ready']);
-  const me = useApiQuery<MeData>('/api/v1/auth/me', {}, ['auth-me']);
+  const health = useApiQuery<{ data: HealthData }>('/health/ready', {}, ['health-ready']);
+  const me = useApiQuery<{ data: MeData }>('/api/v1/auth/me', {}, ['auth-me']);
   const platforms = useApiQuery<{ data: PlatformRow[] }>('/api/v1/platforms', {}, [
     'platforms-list',
   ]);
@@ -106,25 +106,31 @@ export function SystemPage() {
               label="API"
               value={
                 <StatusBadge
-                  tone={health.data?.status === 'ok' ? 'success' : 'danger'}
+                  tone={health.data?.data?.status === 'ok' ? 'success' : 'danger'}
                   label={
-                    health.isLoading ? '检测中' : health.data?.status === 'ok' ? '正常' : '异常'
+                    health.isLoading
+                      ? '检测中'
+                      : health.data?.data?.status === 'ok'
+                        ? '正常'
+                        : '异常'
                   }
                 />
               }
             />
             <ContextMetric
               label="PostgreSQL"
-              value={health.data?.checks.postgres === 'up' ? '正常' : health.data ? '异常' : '—'}
+              value={
+                health.data?.data?.checks.postgres === 'up' ? '正常' : health.data ? '异常' : '—'
+              }
             />
             <ContextMetric
               label="Redis"
-              value={health.data?.checks.redis === 'up' ? '正常' : health.data ? '异常' : '—'}
+              value={health.data?.data?.checks.redis === 'up' ? '正常' : health.data ? '异常' : '—'}
             />
           </ContextSection>
           <ContextSection title="当前账号">
-            <ContextMetric label="用户" value={me.data?.username ?? '—'} />
-            <ContextMetric label="角色" value={me.data?.role ?? '—'} />
+            <ContextMetric label="用户" value={me.data?.data?.username ?? '—'} />
+            <ContextMetric label="角色" value={me.data?.data?.role ?? '—'} />
           </ContextSection>
         </>
       ),
@@ -207,14 +213,14 @@ export function SystemPage() {
                       tone={
                         health.isLoading
                           ? 'neutral'
-                          : health.data?.status === 'ok'
+                          : health.data?.data?.status === 'ok'
                             ? 'success'
                             : 'danger'
                       }
                       label={
                         health.isLoading
                           ? '检测中…'
-                          : health.data?.status === 'ok'
+                          : health.data?.data?.status === 'ok'
                             ? '运行正常'
                             : '异常'
                       }
@@ -225,8 +231,8 @@ export function SystemPage() {
                   label="PostgreSQL"
                   value={
                     <StatusBadge
-                      tone={health.data?.checks.postgres === 'up' ? 'success' : 'warning'}
-                      label={health.data?.checks.postgres === 'up' ? '已连接' : '未知'}
+                      tone={health.data?.data?.checks.postgres === 'up' ? 'success' : 'warning'}
+                      label={health.data?.data?.checks.postgres === 'up' ? '已连接' : '未知'}
                     />
                   }
                 />
@@ -234,8 +240,8 @@ export function SystemPage() {
                   label="Redis"
                   value={
                     <StatusBadge
-                      tone={health.data?.checks.redis === 'up' ? 'success' : 'warning'}
-                      label={health.data?.checks.redis === 'up' ? '已连接' : '未知'}
+                      tone={health.data?.data?.checks.redis === 'up' ? 'success' : 'warning'}
+                      label={health.data?.data?.checks.redis === 'up' ? '已连接' : '未知'}
                     />
                   }
                 />
@@ -246,14 +252,14 @@ export function SystemPage() {
           <SectionCard title="当前账号">
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <Avatar size={40} style={{ background: colors.primary, fontSize: 16 }}>
-                {me.data?.username.slice(0, 1).toUpperCase() ?? '—'}
+                {(me.data?.data?.username ?? '—').slice(0, 1).toUpperCase()}
               </Avatar>
               <div>
                 <div style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary }}>
-                  {me.data?.username ?? '加载中…'}
+                  {me.data?.data?.username ?? '加载中…'}
                 </div>
                 <div style={{ fontSize: 12.5, color: colors.textTertiary }}>
-                  {me.data?.email ?? ''} · {me.data?.role ?? ''}
+                  {me.data?.data?.email ?? ''} · {me.data?.data?.role ?? ''}
                 </div>
               </div>
             </div>

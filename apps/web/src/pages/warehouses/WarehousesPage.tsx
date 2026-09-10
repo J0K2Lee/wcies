@@ -381,6 +381,7 @@ export function WarehousesPage() {
       <Modal
         title="新建仓库"
         open={createOpen}
+        forceRender
         onCancel={() => setCreateOpen(false)}
         onOk={() => void form.validateFields().then((values) => createMutation.mutate(values))}
         confirmLoading={createMutation.isPending}
@@ -422,13 +423,13 @@ export function WarehousesPage() {
       {/* ---- Warehouse detail drawer (task §27) ---- */}
       <Drawer
         title={detailRow !== null ? `${detailRow.name}（${detailRow.warehouseCode}）` : '仓库详情'}
-        width={720}
+        size={720}
         open={detailId !== null}
         onClose={() => setDetailId(null)}
         destroyOnHidden
       >
         {detailRow !== null && (
-          <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          <Space orientation="vertical" size="large" style={{ width: '100%' }}>
             <section>
               <SectionTitle>基本信息</SectionTitle>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
@@ -547,6 +548,7 @@ export function WarehousesPage() {
       <Modal
         title={`批量创建库位 — ${detailRow?.warehouseCode ?? ''}`}
         open={batchOpen}
+        forceRender
         onCancel={() => setBatchOpen(false)}
         onOk={() => void batchForm.validateFields().then((values) => batchMutation.mutate(values))}
         confirmLoading={batchMutation.isPending}

@@ -97,7 +97,7 @@ export function ImportPage() {
   });
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+    <Space orientation="vertical" style={{ width: '100%' }} size="middle">
       <Space wrap>
         <Select
           value={importType}
@@ -121,7 +121,7 @@ export function ImportPage() {
       <Alert
         type="info"
         showIcon
-        message="导入流程：上传 → 校验（精确到行/字段/错误码）→ 确认导入（后台队列执行）。重复的业务键（sku_code/条码/仓库编码等）会被拒绝，不会静默覆盖。"
+        title="导入流程：上传 → 校验（精确到行/字段/错误码）→ 确认导入（后台队列执行）。重复的业务键（sku_code/条码/仓库编码等）会被拒绝，不会静默覆盖。"
       />
 
       <Typography.Title level={5}>导入任务</Typography.Title>
@@ -187,7 +187,7 @@ export function ImportPage() {
         }
       >
         {previewJob !== null && (
-          <Space direction="vertical" style={{ width: '100%' }}>
+          <Space orientation="vertical" style={{ width: '100%' }}>
             <Space size="large">
               <span>总计 {previewJob.totalRows} 行</span>
               <span>
