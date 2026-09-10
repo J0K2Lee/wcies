@@ -1,6 +1,6 @@
 import { Route, Routes } from 'react-router';
 import { HealthTestPage } from '../pages/HealthTestPage';
-import { HomePage } from '../pages/HomePage';
+import { DashboardPage } from '../pages/DashboardPage';
 import { LoginPage } from '../pages/LoginPage';
 import { AppLayout } from './AppLayout';
 import { ProductsPage } from '../pages/products/ProductsPage';
@@ -30,7 +30,7 @@ export function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route element={<AppLayout />}>
-        <Route path="/" element={<HomePage />} />
+        <Route path="/" element={<DashboardPage />} />
         <Route path="/health-test" element={<HealthTestPage />} />
         <Route path="/products" element={<ProductsPage />} />
         <Route path="/skus" element={<SkusPage />} />

@@ -376,7 +376,6 @@ export function AppLayout() {
         {/* ---- Overlay rail for <=1366 (task §17) ---- */}
         <Drawer
           placement="right"
-          width={320}
           open={overlayOpen && tier === 'narrow' && railContent !== null}
           onClose={() => setOverlayOpen(false)}
           title="上下文"

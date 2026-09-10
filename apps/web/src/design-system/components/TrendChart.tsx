@@ -173,9 +173,7 @@ export function TrendChart({ points, height = 220 }: TrendChartProps) {
 }
 
 function niceCeiling(value: number): number {
-  if (value <= 5) {
-    return 5;
-  }
-  const magnitude = 10 ** Math.floor(Math.log10(value));
-  return Math.ceil(value / magnitude) * magnitude;
+  // Multiples of 4 keep quarter ticks integral (0/¼/½/¾/max).
+  const candidates = [4, 8, 20, 40, 80, 200, 400, 800, 2000, 4000, 8000];
+  return candidates.find((candidate) => candidate >= value) ?? Math.ceil(value / 4) * 4;
 }
