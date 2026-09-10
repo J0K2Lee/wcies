@@ -203,6 +203,36 @@ export class SkuRepository {
     await this.repository.update({ id }, patch);
   }
 
+  /** Tables whose sku rows block a hard delete (decision 0003; FKs verified). */
+  async countReferences(id: string): Promise<Array<{ table: string; count: number }>> {
+    const rows = await this.repository.query<Array<Record<string, string | number>>>(
+      `SELECT
+        (SELECT COUNT(*) FROM sku_barcodes WHERE sku_id = $1) AS sku_barcodes,
+        (SELECT COUNT(*) FROM sku_images WHERE sku_id = $1) AS sku_images,
+        (SELECT COUNT(*) FROM sku_bundle_components WHERE bundle_sku_id = $1 OR component_sku_id = $1) AS sku_bundle_components,
+        (SELECT COUNT(*) FROM inventory_balances WHERE sku_id = $1) AS inventory_balances,
+        (SELECT COUNT(*) FROM inventory_safety_stocks WHERE sku_id = $1) AS inventory_safety_stocks,
+        (SELECT COUNT(*) FROM inventory_reservations WHERE sku_id = $1) AS inventory_reservations,
+        (SELECT COUNT(*) FROM inventory_serials WHERE sku_id = $1) AS inventory_serials,
+        (SELECT COUNT(*) FROM inventory_transactions WHERE sku_id = $1) AS inventory_transactions,
+        (SELECT COUNT(*) FROM order_items WHERE sku_id = $1) AS order_items,
+        (SELECT COUNT(*) FROM picking_task_items WHERE sku_id = $1) AS picking_task_items,
+        (SELECT COUNT(*) FROM package_items WHERE sku_id = $1) AS package_items,
+        (SELECT COUNT(*) FROM package_item_serials WHERE sku_id = $1) AS package_item_serials,
+        (SELECT COUNT(*) FROM platform_listing_skus WHERE sku_id = $1) AS platform_listing_skus,
+        (SELECT COUNT(*) FROM shipment_items WHERE sku_id = $1) AS shipment_items`,
+      [id],
+    );
+    return Object.entries(rows[0] ?? {}).map(([table, count]) => ({
+      table,
+      count: Number(count),
+    }));
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.repository.delete({ id });
+  }
+
   async listByProductIds(productIds: string[]): Promise<SkuEntity[]> {
     if (productIds.length === 0) {
       return [];

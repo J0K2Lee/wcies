@@ -27,3 +27,13 @@ export class SkuDimensionsInvalidError extends DomainError {
     super('length, width and height must be provided together');
   }
 }
+
+/** Zero-reference delete policy (Sprint 6 decision 0003): still referenced. */
+export class SkuInUseError extends DomainError {
+  readonly code = 'SKU_IN_USE';
+  readonly httpStatus = 409;
+
+  constructor(sources: string[]) {
+    super(`该记录已被引用（${sources.join('、')}），只能停用不能删除`, { sources });
+  }
+}

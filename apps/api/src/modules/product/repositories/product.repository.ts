@@ -113,6 +113,22 @@ export class ProductRepository {
     await this.repository.update({ id }, patch);
   }
 
+  /** Tables referencing products that block a hard delete (decision 0003). */
+  async countReferences(id: string): Promise<Array<{ table: string; count: number }>> {
+    const rows = await this.repository.query<Array<Record<string, string | number>>>(
+      'SELECT (SELECT COUNT(*) FROM skus WHERE product_id = $1) AS skus',
+      [id],
+    );
+    return Object.entries(rows[0] ?? {}).map(([table, count]) => ({
+      table,
+      count: Number(count),
+    }));
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.repository.delete({ id });
+  }
+
   /** Category id plus every descendant id (recursive CTE). */
   private async findCategorySubtreeIds(categoryId: string): Promise<string[]> {
     const rows = await this.repository.query<Array<{ id: string }>>(

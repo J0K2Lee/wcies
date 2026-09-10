@@ -83,3 +83,23 @@ export class ListingSkuMappingInvalidStateError extends DomainError {
     });
   }
 }
+
+/** Zero-reference delete policy (Sprint 6 decision 0003): still referenced. */
+export class ListingInUseError extends DomainError {
+  readonly code = 'LISTING_IN_USE';
+  readonly httpStatus = 409;
+
+  constructor(sources: string[]) {
+    super(`该记录已被引用（${sources.join('、')}），只能停用不能删除`, { sources });
+  }
+}
+
+/** The mapping already appears in order history (spec §66, Sprint 6 T4). */
+export class ListingSkuMappingInUseError extends DomainError {
+  readonly code = 'LISTING_SKU_MAPPING_IN_USE';
+  readonly httpStatus = 409;
+
+  constructor(mappingId: string) {
+    super('该记录已被引用（存在订单行），只能停用不能删除', { mappingId });
+  }
+}

@@ -118,6 +118,35 @@ export class WarehouseRepository {
     await this.warehouseRepository.update({ id }, patch);
   }
 
+  /** Tables whose warehouse_id rows block a hard delete (decision 0003). */
+  async countWarehouseReferences(id: string): Promise<Array<{ table: string; count: number }>> {
+    const rows = await this.warehouseRepository.query<
+      Array<Record<string, string | number>>
+    >(
+      `SELECT
+        (SELECT COUNT(*) FROM warehouse_bins WHERE warehouse_id = $1) AS warehouse_bins,
+        (SELECT COUNT(*) FROM store_warehouse_bindings WHERE warehouse_id = $1) AS store_warehouse_bindings,
+        (SELECT COUNT(*) FROM inventory_balances WHERE warehouse_id = $1) AS inventory_balances,
+        (SELECT COUNT(*) FROM inventory_safety_stocks WHERE warehouse_id = $1) AS inventory_safety_stocks,
+        (SELECT COUNT(*) FROM inventory_reservations WHERE warehouse_id = $1) AS inventory_reservations,
+        (SELECT COUNT(*) FROM inventory_serials WHERE warehouse_id = $1) AS inventory_serials,
+        (SELECT COUNT(*) FROM inventory_transactions WHERE warehouse_id = $1) AS inventory_transactions,
+        (SELECT COUNT(*) FROM order_items WHERE warehouse_id = $1) AS order_items,
+        (SELECT COUNT(*) FROM order_interceptions WHERE warehouse_id = $1) AS order_interceptions,
+        (SELECT COUNT(*) FROM picking_tasks WHERE warehouse_id = $1) AS picking_tasks,
+        (SELECT COUNT(*) FROM shipments WHERE warehouse_id = $1) AS shipments`,
+      [id],
+    );
+    return Object.entries(rows[0] ?? {}).map(([table, count]) => ({
+      table,
+      count: Number(count),
+    }));
+  }
+
+  async deleteWarehouse(id: string): Promise<void> {
+    await this.warehouseRepository.delete({ id });
+  }
+
   // ---- Bins ----
 
   async listBins(
@@ -183,6 +212,26 @@ export class WarehouseRepository {
 
   async updateBin(id: string, patch: Partial<WarehouseBinEntity>): Promise<void> {
     await this.binRepository.update({ id }, patch);
+  }
+
+  /** Tables whose bin_id rows block a hard delete (decision 0003). */
+  async countBinReferences(id: string): Promise<Array<{ table: string; count: number }>> {
+    const rows = await this.binRepository.query<Array<Record<string, string | number>>>(
+      `SELECT
+        (SELECT COUNT(*) FROM inventory_balances WHERE bin_id = $1) AS inventory_balances,
+        (SELECT COUNT(*) FROM inventory_reservation_lines WHERE bin_id = $1) AS inventory_reservation_lines,
+        (SELECT COUNT(*) FROM inventory_serials WHERE bin_id = $1) AS inventory_serials,
+        (SELECT COUNT(*) FROM inventory_transactions WHERE bin_id = $1) AS inventory_transactions`,
+      [id],
+    );
+    return Object.entries(rows[0] ?? {}).map(([table, count]) => ({
+      table,
+      count: Number(count),
+    }));
+  }
+
+  async deleteBin(id: string): Promise<void> {
+    await this.binRepository.delete({ id });
   }
 
   // ---- Bindings ----
@@ -258,5 +307,9 @@ export class WarehouseRepository {
       { id },
       patch as unknown as QueryDeepPartialEntity<StoreWarehouseBindingEntity>,
     );
+  }
+
+  async deleteBinding(id: string): Promise<void> {
+    await this.bindingRepository.delete({ id });
   }
 }

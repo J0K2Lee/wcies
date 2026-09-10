@@ -43,6 +43,19 @@ export class CatalogRepository {
     await this.brandRepository.update({ id }, patch);
   }
 
+  /** Products whose brand_id references this brand (decision 0003). */
+  async countBrandReferences(id: string): Promise<number> {
+    const rows = await this.brandRepository.query<Array<{ count: string }>>(
+      'SELECT COUNT(*)::text AS count FROM products WHERE brand_id = $1',
+      [id],
+    );
+    return Number(rows[0]?.count ?? 0);
+  }
+
+  async deleteBrand(id: string): Promise<void> {
+    await this.brandRepository.delete({ id });
+  }
+
   // ---- Category ----
 
   async listCategories(): Promise<CategoryEntity[]> {
@@ -141,5 +154,19 @@ export class CatalogRepository {
 
   async deleteCategory(id: string): Promise<void> {
     await this.categoryRepository.delete({ id });
+  }
+
+  /** Direct child categories (hierarchy relation, decision 0003). */
+  async countCategoryChildren(id: string): Promise<number> {
+    return this.categoryRepository.count({ where: { parentId: id } });
+  }
+
+  /** Products whose category_id references this category directly. */
+  async countCategoryProducts(id: string): Promise<number> {
+    const rows = await this.categoryRepository.query<Array<{ count: string }>>(
+      'SELECT COUNT(*)::text AS count FROM products WHERE category_id = $1',
+      [id],
+    );
+    return Number(rows[0]?.count ?? 0);
   }
 }

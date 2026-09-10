@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -58,7 +59,7 @@ export class ProductController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update product fields (business code editable, UUID immutable)' })
+  @ApiOperation({ summary: 'Update product fields (code read-only after creation)' })
   @ApiOkEnvelope(ProductResponseDto)
   async update(
     @Param('id') id: string,
@@ -66,6 +67,17 @@ export class ProductController {
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true; data: ProductResponseDto }> {
     return ok(await this.productService.update(id, dto, operator));
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete a product with zero references (else PRODUCT_IN_USE)' })
+  async remove(
+    @Param('id') id: string,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: null }> {
+    await this.productService.remove(id, operator);
+    return ok(null);
   }
 
   @Post(':id/activate')

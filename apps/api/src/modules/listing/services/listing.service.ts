@@ -14,8 +14,10 @@ import {
 import { PlatformListingEntity } from '../entities/platform-listing.entity';
 import {
   ListingAlreadyExistsError,
+  ListingInUseError,
   ListingNotFoundError,
   ListingSkuMappingAlreadyExistsError,
+  ListingSkuMappingInUseError,
   ListingSkuMappingInvalidStateError,
   ListingSkuMappingNotFoundError,
 } from '../errors/listing-errors';
@@ -238,6 +240,23 @@ export class ListingService {
     return this.getDetail(id);
   }
 
+  /** Zero-reference hard delete (decision 0003); referenced -> LISTING_IN_USE. */
+  async remove(id: string, operator: OperatorContext): Promise<void> {
+    const listing = await this.findListingOrThrow(id);
+    if ((await this.repository.countListingReferences(id)) > 0) {
+      throw new ListingInUseError(['platform_listing_skus']);
+    }
+    await this.repository.deleteListing(id);
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: id,
+      entityCode: listing.platformProductId,
+      action: 'DELETE',
+      changes: { deleted: { from: listing.platformProductId, to: null } },
+      operator,
+    });
+  }
+
   // ---- Variant mappings ----
 
   async addMapping(
@@ -337,13 +356,20 @@ export class ListingService {
     });
   }
 
-  /** Allowed while the mapping has no order history (spec §66). */
+  /**
+   * Allowed while the mapping has no order history (spec §66): order lines
+   * referencing the mapping block the delete with a business error instead
+   * of the raw FK failure (Sprint 6 T4 gap fix).
+   */
   async deleteMapping(
     listingId: string,
     mappingId: string,
     operator: OperatorContext,
   ): Promise<void> {
     const mapping = await this.findOwnedMappingOrThrow(listingId, mappingId);
+    if ((await this.repository.countMappingOrderReferences(mappingId)) > 0) {
+      throw new ListingSkuMappingInUseError(mappingId);
+    }
     await this.repository.deleteMapping(mappingId);
     await this.operationLog.record({
       entityType: MAPPING_ENTITY_TYPE,

@@ -9,10 +9,13 @@ import { BrandEntity } from './entities/brand.entity';
 import { CategoryEntity } from './entities/category.entity';
 import {
   BrandCodeAlreadyExistsError,
+  BrandInUseError,
   BrandNotFoundError,
   CategoryCodeAlreadyExistsError,
   CategoryCycleInvalidError,
   CategoryDepthExceededError,
+  CategoryHasChildrenError,
+  CategoryInUseError,
   CategoryLevelInvalidError,
   CategoryNameDuplicatedError,
   CategoryNotFoundError,
@@ -122,6 +125,27 @@ export class CatalogService {
   /** Cross-module validation for Product service. */
   async findBrandEntityById(id: string): Promise<BrandEntity | null> {
     return this.repository.findBrandById(id);
+  }
+
+  /** Zero-reference hard delete (decision 0003); referenced -> BRAND_IN_USE. */
+  async removeBrand(id: string, operator: OperatorContext): Promise<void> {
+    const brand = await this.repository.findBrandById(id);
+    if (brand === null) {
+      throw new BrandNotFoundError(id);
+    }
+    const productCount = await this.repository.countBrandReferences(id);
+    if (productCount > 0) {
+      throw new BrandInUseError(id);
+    }
+    await this.repository.deleteBrand(id);
+    await this.operationLog.record({
+      entityType: 'BRAND',
+      entityId: id,
+      entityCode: brand.code,
+      action: 'DELETE',
+      changes: { deleted: { from: brand.name, to: null } },
+      operator,
+    });
   }
 
   // ---- Category ----
@@ -303,6 +327,32 @@ export class CatalogService {
   /** Cross-module validation for Product service. */
   async findCategoryEntityById(id: string): Promise<CategoryEntity | null> {
     return this.repository.findCategoryById(id);
+  }
+
+  /**
+   * Zero-reference hard delete (decision 0003): children and products each
+   * block with their own error code (children are a hierarchy relation).
+   */
+  async removeCategory(id: string, operator: OperatorContext): Promise<void> {
+    const category = await this.repository.findCategoryById(id);
+    if (category === null) {
+      throw new CategoryNotFoundError(id);
+    }
+    if ((await this.repository.countCategoryChildren(id)) > 0) {
+      throw new CategoryHasChildrenError(id);
+    }
+    if ((await this.repository.countCategoryProducts(id)) > 0) {
+      throw new CategoryInUseError(id);
+    }
+    await this.repository.deleteCategory(id);
+    await this.operationLog.record({
+      entityType: 'CATEGORY',
+      entityId: id,
+      entityCode: category.code,
+      action: 'DELETE',
+      changes: { deleted: { from: category.nameZh, to: null } },
+      operator,
+    });
   }
 
   /** Walks parent links to make sure `newParentId` is not a descendant of id. */

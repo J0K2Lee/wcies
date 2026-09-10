@@ -26,3 +26,13 @@ export class StoreInactiveError extends DomainError {
     super(`Store is inactive: ${storeId}`, { storeId });
   }
 }
+
+/** Zero-reference delete policy (Sprint 6 decision 0003): still referenced. */
+export class StoreInUseError extends DomainError {
+  readonly code = 'STORE_IN_USE';
+  readonly httpStatus = 409;
+
+  constructor(sources: string[]) {
+    super(`该记录已被引用（${sources.join('、')}），只能停用不能删除`, { sources });
+  }
+}

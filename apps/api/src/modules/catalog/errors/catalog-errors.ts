@@ -100,3 +100,13 @@ export class CategoryInUseError extends DomainError {
     super('该记录已被引用（存在商品），只能停用不能删除', { categoryId });
   }
 }
+
+/** Products still reference this brand (decision 0003). */
+export class BrandInUseError extends DomainError {
+  readonly code = 'BRAND_IN_USE';
+  readonly httpStatus = 409;
+
+  constructor(brandId: string) {
+    super('该记录已被引用（存在商品），只能停用不能删除', { brandId });
+  }
+}

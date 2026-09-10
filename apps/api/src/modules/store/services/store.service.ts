@@ -9,7 +9,7 @@ import { BusinessCodeService } from '../../../infrastructure/business-code/busin
 import { PlatformService } from '../../platform/platform.service';
 import { PlatformNotFoundError } from '../../platform/errors/platform-errors';
 import { StoreEntity } from '../entities/store.entity';
-import { StoreCodeAlreadyExistsError, StoreNotFoundError } from '../errors/store-errors';
+import { StoreCodeAlreadyExistsError, StoreInUseError, StoreNotFoundError } from '../errors/store-errors';
 import { StoreRepository, StoreRowWithCounts } from '../repositories/store.repository';
 import {
   CreateStoreRequestDto,
@@ -146,6 +146,25 @@ export class StoreService {
   /** All ACTIVE stores (sync scheduler iteration). */
   async listAllActive(): Promise<StoreEntity[]> {
     return this.repository.listByStatus('ACTIVE');
+  }
+
+  /** Zero-reference hard delete (decision 0003); referenced -> STORE_IN_USE. */
+  async remove(id: string, operator: OperatorContext): Promise<void> {
+    const found = await this.findWithPlatformOrThrow(id);
+    const references = await this.repository.countReferences(id);
+    const used = references.filter((reference) => reference.count > 0);
+    if (used.length > 0) {
+      throw new StoreInUseError(used.map((reference) => reference.table));
+    }
+    await this.repository.delete(id);
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: id,
+      entityCode: found.store.storeCode,
+      action: 'DELETE',
+      changes: { deleted: { from: found.store.storeCode, to: null } },
+      operator,
+    });
   }
 
   /** Cross-module store lookup by platform + store code (webhook routing). */

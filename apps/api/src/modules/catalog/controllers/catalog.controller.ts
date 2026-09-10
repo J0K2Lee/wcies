@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ok } from '../../../common/dto/api-response';
 import { ApiOkEnvelope } from '../../../common/swagger/api-envelope';
@@ -52,6 +52,17 @@ export class CatalogController {
     return ok(await this.catalogService.updateBrand(id, dto, operator));
   }
 
+  @Delete('brands/:id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete a brand with zero references (else BRAND_IN_USE)' })
+  async removeBrand(
+    @Param('id') id: string,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: null }> {
+    await this.catalogService.removeBrand(id, operator);
+    return ok(null);
+  }
+
   // ---- Categories ----
 
   @Get('categories')
@@ -80,5 +91,19 @@ export class CatalogController {
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true; data: CategoryResponseDto }> {
     return ok(await this.catalogService.updateCategory(id, dto, operator));
+  }
+
+  @Delete('categories/:id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Delete a category with zero references (children -> CATEGORY_HAS_CHILDREN, products -> CATEGORY_IN_USE)',
+  })
+  async removeCategory(
+    @Param('id') id: string,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: null }> {
+    await this.catalogService.removeCategory(id, operator);
+    return ok(null);
   }
 }

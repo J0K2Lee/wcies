@@ -67,3 +67,31 @@ export class StoreWarehouseBindingNotFoundError extends DomainError {
     super(`Store warehouse binding not found: ${id}`, { id });
   }
 }
+
+/** Zero-reference delete policy (Sprint 6 decision 0003): still referenced. */
+export class WarehouseInUseError extends DomainError {
+  readonly code = 'WAREHOUSE_IN_USE';
+  readonly httpStatus = 409;
+
+  constructor(sources: string[]) {
+    super(`该记录已被引用（${sources.join('、')}），只能停用不能删除`, { sources });
+  }
+}
+
+export class BinInUseError extends DomainError {
+  readonly code = 'BIN_IN_USE';
+  readonly httpStatus = 409;
+
+  constructor(sources: string[]) {
+    super(`该记录已被引用（${sources.join('、')}），只能停用不能删除`, { sources });
+  }
+}
+
+export class BindingInUseError extends DomainError {
+  readonly code = 'BINDING_IN_USE';
+  readonly httpStatus = 409;
+
+  constructor() {
+    super('该记录已被引用，只能停用不能删除', {});
+  }
+}

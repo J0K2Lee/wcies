@@ -252,6 +252,28 @@ export class ListingRepository {
     await this.mappingRepository.delete({ id });
   }
 
+  async deleteListing(id: string): Promise<void> {
+    await this.listingRepository.delete({ id });
+  }
+
+  /** Variant mappings that block deleting the listing (decision 0003). */
+  async countListingReferences(id: string): Promise<number> {
+    const rows = await this.listingRepository.query<Array<{ count: string }>>(
+      'SELECT COUNT(*)::text AS count FROM platform_listing_skus WHERE listing_id = $1',
+      [id],
+    );
+    return Number(rows[0]?.count ?? 0);
+  }
+
+  /** Order lines referencing a mapping - blocks its delete (spec §66). */
+  async countMappingOrderReferences(mappingId: string): Promise<number> {
+    const rows = await this.listingRepository.query<Array<{ count: string }>>(
+      'SELECT COUNT(*)::text AS count FROM order_items WHERE listing_sku_id = $1',
+      [mappingId],
+    );
+    return Number(rows[0]?.count ?? 0);
+  }
+
   // ---- Resolver ----
 
   /**

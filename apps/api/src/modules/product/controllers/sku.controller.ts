@@ -91,6 +91,17 @@ export class SkuController {
     return ok(await this.skuService.update(id, dto, operator));
   }
 
+  @Delete('skus/:id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete a SKU with zero references (else SKU_IN_USE)' })
+  async remove(
+    @Param('id') id: string,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: null }> {
+    await this.skuService.remove(id, operator);
+    return ok(null);
+  }
+
   @Post('skus/:id/activate')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Activate a SKU' })

@@ -198,6 +198,23 @@ export class StoreWarehouseBindingService {
     return this.toResponse(await this.findOwnedOrThrow(storeId, bindingId));
   }
 
+  /**
+   * Hard delete (decision 0003). A binding is a pure configuration row with
+   * no inbound foreign-key references, so it is always deletable.
+   */
+  async remove(storeId: string, bindingId: string, operator: OperatorContext): Promise<void> {
+    const binding = await this.findOwnedOrThrow(storeId, bindingId);
+    await this.repository.deleteBinding(bindingId);
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: bindingId,
+      entityCode: `${storeId}->${binding.binding.warehouseId}`,
+      action: 'DELETE',
+      changes: { deleted: { from: binding.binding.fulfillmentMode, to: null } },
+      operator,
+    });
+  }
+
   private async findOwnedOrThrow(storeId: string, bindingId: string): Promise<BindingRowWithRefs> {
     const binding = await this.repository.findBindingById(bindingId);
     if (binding === null || binding.storeId !== storeId) {

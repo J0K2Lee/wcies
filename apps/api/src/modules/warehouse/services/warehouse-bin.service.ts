@@ -3,6 +3,7 @@ import { PageMeta } from '@wcies/shared';
 import { OperatorContext, OperationLogService } from '../../operation-log/operation-log.service';
 import { WarehouseBinEntity } from '../entities/warehouse-bin.entity';
 import {
+  BinInUseError,
   WarehouseBinAlreadyExistsError,
   WarehouseBinBatchInvalidError,
   WarehouseBinNotFoundError,
@@ -249,6 +250,25 @@ export class WarehouseBinService {
   /** Cross-module lookups. */
   async getEntityById(id: string): Promise<WarehouseBinEntity | null> {
     return this.repository.findBinById(id);
+  }
+
+  /** Zero-reference hard delete (decision 0003); referenced -> BIN_IN_USE. */
+  async remove(warehouseId: string, binId: string, operator: OperatorContext): Promise<void> {
+    const bin = await this.findOwnedOrThrow(warehouseId, binId);
+    const references = await this.repository.countBinReferences(binId);
+    const used = references.filter((reference) => reference.count > 0);
+    if (used.length > 0) {
+      throw new BinInUseError(used.map((reference) => reference.table));
+    }
+    await this.repository.deleteBin(binId);
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: binId,
+      entityCode: bin.binCode,
+      action: 'DELETE',
+      changes: { deleted: { from: bin.binCode, to: null } },
+      operator,
+    });
   }
 
   /** Import handler lookup: existing bin by warehouse + code. */

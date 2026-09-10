@@ -553,6 +553,28 @@
         "tags": [
           "stores"
         ]
+      },
+      "delete": {
+        "operationId": "StoreController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Delete a store with zero references (else STORE_IN_USE)",
+        "tags": [
+          "stores"
+        ]
       }
     },
     "/api/v1/stores/{id}/activate": {
@@ -1067,6 +1089,28 @@
         "tags": [
           "catalog"
         ]
+      },
+      "delete": {
+        "operationId": "CatalogController_removeBrand",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Delete a brand with zero references (else BRAND_IN_USE)",
+        "tags": [
+          "catalog"
+        ]
       }
     },
     "/api/v1/categories": {
@@ -1202,6 +1246,28 @@
           }
         },
         "summary": "Update a category (cycle-safe parent changes)",
+        "tags": [
+          "catalog"
+        ]
+      },
+      "delete": {
+        "operationId": "CatalogController_removeCategory",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Delete a category with zero references (children -> CATEGORY_HAS_CHILDREN, products -> CATEGORY_IN_USE)",
         "tags": [
           "catalog"
         ]
@@ -1478,7 +1544,29 @@
             }
           }
         },
-        "summary": "Update product fields (business code editable, UUID immutable)",
+        "summary": "Update product fields (code read-only after creation)",
+        "tags": [
+          "products"
+        ]
+      },
+      "delete": {
+        "operationId": "ProductController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Delete a product with zero references (else PRODUCT_IN_USE)",
         "tags": [
           "products"
         ]
@@ -1898,6 +1986,28 @@
           }
         },
         "summary": "Update SKU fields (volume always recomputed server-side)",
+        "tags": [
+          "skus"
+        ]
+      },
+      "delete": {
+        "operationId": "SkuController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Delete a SKU with zero references (else SKU_IN_USE)",
         "tags": [
           "skus"
         ]
@@ -2711,6 +2821,28 @@
         "tags": [
           "warehouses"
         ]
+      },
+      "delete": {
+        "operationId": "WarehouseController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Delete a warehouse with zero references (else WAREHOUSE_IN_USE)",
+        "tags": [
+          "warehouses"
+        ]
       }
     },
     "/api/v1/warehouses/{id}/activate": {
@@ -3067,6 +3199,36 @@
           }
         },
         "summary": "Update a bin",
+        "tags": [
+          "warehouse-bins"
+        ]
+      },
+      "delete": {
+        "operationId": "WarehouseBinController_removeBin",
+        "parameters": [
+          {
+            "name": "warehouseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "binId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Delete a bin with zero references (else BIN_IN_USE)",
         "tags": [
           "warehouse-bins"
         ]
@@ -3459,6 +3621,36 @@
           }
         },
         "summary": "Update a binding",
+        "tags": [
+          "store-warehouse-bindings"
+        ]
+      },
+      "delete": {
+        "operationId": "StoreWarehouseBindingController_removeBinding",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Delete a store-warehouse binding",
         "tags": [
           "store-warehouse-bindings"
         ]
@@ -3961,6 +4153,28 @@
           }
         },
         "summary": "Update listing title/url/rawData",
+        "tags": [
+          "listings"
+        ]
+      },
+      "delete": {
+        "operationId": "ListingController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Delete a listing with zero mappings (else LISTING_IN_USE)",
         "tags": [
           "listings"
         ]

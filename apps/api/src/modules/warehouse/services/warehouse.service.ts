@@ -9,6 +9,7 @@ import { BusinessCodeService } from '../../../infrastructure/business-code/busin
 import { WarehouseEntity } from '../entities/warehouse.entity';
 import {
   WarehouseCodeAlreadyExistsError,
+  WarehouseInUseError,
   WarehouseNotFoundError,
 } from '../errors/warehouse-errors';
 import { WarehouseRepository, WarehouseRowWithCounts } from '../repositories/warehouse.repository';
@@ -146,6 +147,25 @@ export class WarehouseService {
       operator,
     });
     return this.toResponse(await this.findOrThrow(id));
+  }
+
+  /** Zero-reference hard delete (decision 0003); referenced -> WAREHOUSE_IN_USE. */
+  async remove(id: string, operator: OperatorContext): Promise<void> {
+    const existing = await this.findOrThrow(id);
+    const references = await this.repository.countWarehouseReferences(id);
+    const used = references.filter((reference) => reference.count > 0);
+    if (used.length > 0) {
+      throw new WarehouseInUseError(used.map((reference) => reference.table));
+    }
+    await this.repository.deleteWarehouse(id);
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: id,
+      entityCode: existing.warehouseCode,
+      action: 'DELETE',
+      changes: { deleted: { from: existing.warehouseCode, to: null } },
+      operator,
+    });
   }
 
   /** Cross-module lookups (binding / import services). */

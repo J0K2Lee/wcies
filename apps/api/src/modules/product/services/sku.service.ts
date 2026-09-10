@@ -13,6 +13,7 @@ import { ProductNotFoundError } from '../errors/product-errors';
 import {
   SkuCodeAlreadyExistsError,
   SkuDimensionsInvalidError,
+  SkuInUseError,
   SkuNotFoundError,
 } from '../errors/sku-errors';
 import { SkuRepository } from '../repositories/sku.repository';
@@ -259,6 +260,25 @@ export class SkuService {
   /** Cross-module lookups (listing / import services). */
   async getEntityById(id: string): Promise<SkuEntity | null> {
     return this.repository.findById(id);
+  }
+
+  /** Zero-reference hard delete (decision 0003); referenced -> SKU_IN_USE. */
+  async remove(id: string, operator: OperatorContext): Promise<void> {
+    const found = await this.findWithProductOrThrow(id);
+    const references = await this.repository.countReferences(id);
+    const used = references.filter((reference) => reference.count > 0);
+    if (used.length > 0) {
+      throw new SkuInUseError(used.map((reference) => reference.table));
+    }
+    await this.repository.delete(id);
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: id,
+      entityCode: found.sku.skuCode,
+      action: 'DELETE',
+      changes: { deleted: { from: found.sku.skuCode, to: null } },
+      operator,
+    });
   }
 
   async getEntityByCode(skuCode: string): Promise<SkuEntity | null> {

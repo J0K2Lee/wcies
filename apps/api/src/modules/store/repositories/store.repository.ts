@@ -111,4 +111,28 @@ export class StoreRepository {
   async update(id: string, patch: Partial<StoreEntity>): Promise<void> {
     await this.repository.update({ id }, patch as unknown as QueryDeepPartialEntity<StoreEntity>);
   }
+
+  /** Tables whose store_id rows block a hard delete (decision 0003). */
+  async countReferences(id: string): Promise<Array<{ table: string; count: number }>> {
+    const rows = await this.repository.query<Array<Record<string, string | number>>>(
+      `SELECT
+        (SELECT COUNT(*) FROM platform_credentials WHERE store_id = $1) AS platform_credentials,
+        (SELECT COUNT(*) FROM store_warehouse_bindings WHERE store_id = $1) AS store_warehouse_bindings,
+        (SELECT COUNT(*) FROM platform_listings WHERE store_id = $1) AS platform_listings,
+        (SELECT COUNT(*) FROM orders WHERE store_id = $1) AS orders,
+        (SELECT COUNT(*) FROM system_exceptions WHERE store_id = $1) AS system_exceptions,
+        (SELECT COUNT(*) FROM sync_jobs WHERE store_id = $1) AS sync_jobs,
+        (SELECT COUNT(*) FROM sync_cursors WHERE store_id = $1) AS sync_cursors,
+        (SELECT COUNT(*) FROM external_raw_events WHERE store_id = $1) AS external_raw_events`,
+      [id],
+    );
+    return Object.entries(rows[0] ?? {}).map(([table, count]) => ({
+      table,
+      count: Number(count),
+    }));
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.repository.delete({ id });
+  }
 }

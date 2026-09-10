@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -101,6 +102,17 @@ export class WarehouseController {
   ): Promise<{ success: true; data: WarehouseResponseDto }> {
     return ok(await this.warehouseService.setStatus(id, 'INACTIVE', operator));
   }
+
+  @Delete('warehouses/:id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete a warehouse with zero references (else WAREHOUSE_IN_USE)' })
+  async remove(
+    @Param('id') id: string,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: null }> {
+    await this.warehouseService.remove(id, operator);
+    return ok(null);
+  }
 }
 
 @ApiTags('warehouse-bins')
@@ -175,6 +187,18 @@ export class WarehouseBinController {
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true; data: BinResponseDto }> {
     return ok(await this.binService.setStatus(warehouseId, binId, 'ACTIVE', operator));
+  }
+
+  @Delete('warehouses/:warehouseId/bins/:binId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete a bin with zero references (else BIN_IN_USE)' })
+  async removeBin(
+    @Param('warehouseId') warehouseId: string,
+    @Param('binId') binId: string,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: null }> {
+    await this.binService.remove(warehouseId, binId, operator);
+    return ok(null);
   }
 }
 
@@ -252,5 +276,17 @@ export class StoreWarehouseBindingController {
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true; data: BindingResponseDto }> {
     return ok(await this.bindingService.setStatus(storeId, bindingId, 'ACTIVE', operator));
+  }
+
+  @Delete('stores/:storeId/warehouse-bindings/:id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete a store-warehouse binding' })
+  async removeBinding(
+    @Param('storeId') storeId: string,
+    @Param('id') bindingId: string,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: null }> {
+    await this.bindingService.remove(storeId, bindingId, operator);
+    return ok(null);
   }
 }

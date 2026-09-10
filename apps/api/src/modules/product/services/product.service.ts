@@ -10,7 +10,11 @@ import {
 } from '../../operation-log/operation-log.service';
 import { BusinessCodeService } from '../../../infrastructure/business-code/business-code.service';
 import { ProductEntity } from '../entities/product.entity';
-import { ProductCodeAlreadyExistsError, ProductNotFoundError } from '../errors/product-errors';
+import {
+  ProductCodeAlreadyExistsError,
+  ProductInUseError,
+  ProductNotFoundError,
+} from '../errors/product-errors';
 import { ProductRepository, ProductRowWithCounts } from '../repositories/product.repository';
 import {
   CreateProductRequestDto,
@@ -215,6 +219,25 @@ export class ProductService {
   /** Cross-module entity lookup (import / listing services). */
   async getEntityById(id: string): Promise<ProductEntity | null> {
     return this.repository.findById(id);
+  }
+
+  /** Zero-reference hard delete (decision 0003); referenced -> PRODUCT_IN_USE. */
+  async remove(id: string, operator: OperatorContext): Promise<void> {
+    const existing = await this.findRowOrThrow(id);
+    const references = await this.repository.countReferences(id);
+    const used = references.filter((reference) => reference.count > 0);
+    if (used.length > 0) {
+      throw new ProductInUseError(used.map((reference) => reference.table));
+    }
+    await this.repository.delete(id);
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: id,
+      entityCode: existing.product.productCode,
+      action: 'DELETE',
+      changes: { deleted: { from: existing.product.productCode, to: null } },
+      operator,
+    });
   }
 
   async getEntityByCode(code: string): Promise<ProductEntity | null> {

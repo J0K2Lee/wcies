@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -87,5 +88,16 @@ export class StoreController {
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true; data: StoreResponseDto }> {
     return ok(await this.storeService.setStatus(id, 'INACTIVE', operator));
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete a store with zero references (else STORE_IN_USE)' })
+  async remove(
+    @Param('id') id: string,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: null }> {
+    await this.storeService.remove(id, operator);
+    return ok(null);
   }
 }

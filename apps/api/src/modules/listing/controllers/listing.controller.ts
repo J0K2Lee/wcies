@@ -146,6 +146,17 @@ export class ListingController {
     return ok(await this.listingService.setStatus(id, 'INACTIVE', operator));
   }
 
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete a listing with zero mappings (else LISTING_IN_USE)' })
+  async remove(
+    @Param('id') id: string,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: null }> {
+    await this.listingService.remove(id, operator);
+    return ok(null);
+  }
+
   @Post(':listingId/skus')
   @ApiOperation({ summary: 'Add a variant mapping to an existing listing' })
   @ApiOkEnvelope(ListingSkuResponseDto)

@@ -26,3 +26,13 @@ export class ProductStatusInvalidError extends DomainError {
     super(message);
   }
 }
+
+/** Zero-reference delete policy (Sprint 6 decision 0003): still referenced. */
+export class ProductInUseError extends DomainError {
+  readonly code = 'PRODUCT_IN_USE';
+  readonly httpStatus = 409;
+
+  constructor(sources: string[]) {
+    super(`该记录已被引用（${sources.join('、')}），只能停用不能删除`, { sources });
+  }
+}

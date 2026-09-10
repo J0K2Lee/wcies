@@ -169,7 +169,8 @@ export interface paths {
         get: operations["StoreController_getById"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete a store with zero references (else STORE_IN_USE) */
+        delete: operations["StoreController_remove"];
         options?: never;
         head?: never;
         /** Update store fields (code and platform immutable) */
@@ -307,7 +308,8 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete a brand with zero references (else BRAND_IN_USE) */
+        delete: operations["CatalogController_removeBrand"];
         options?: never;
         head?: never;
         /** Update a brand */
@@ -342,7 +344,8 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete a category with zero references (children -> CATEGORY_HAS_CHILDREN, products -> CATEGORY_IN_USE) */
+        delete: operations["CatalogController_removeCategory"];
         options?: never;
         head?: never;
         /** Update a category (cycle-safe parent changes) */
@@ -378,10 +381,11 @@ export interface paths {
         get: operations["ProductController_getById"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete a product with zero references (else PRODUCT_IN_USE) */
+        delete: operations["ProductController_remove"];
         options?: never;
         head?: never;
-        /** Update product fields (business code editable, UUID immutable) */
+        /** Update product fields (code read-only after creation) */
         patch: operations["ProductController_update"];
         trace?: never;
     };
@@ -448,7 +452,8 @@ export interface paths {
         get: operations["SkuController_getById"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete a SKU with zero references (else SKU_IN_USE) */
+        delete: operations["SkuController_remove"];
         options?: never;
         head?: never;
         /** Update SKU fields (volume always recomputed server-side) */
@@ -607,7 +612,8 @@ export interface paths {
         get: operations["WarehouseController_getById"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete a warehouse with zero references (else WAREHOUSE_IN_USE) */
+        delete: operations["WarehouseController_remove"];
         options?: never;
         head?: never;
         /** Update warehouse fields */
@@ -693,7 +699,8 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete a bin with zero references (else BIN_IN_USE) */
+        delete: operations["WarehouseBinController_removeBin"];
         options?: never;
         head?: never;
         /** Update a bin */
@@ -779,7 +786,8 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete a store-warehouse binding */
+        delete: operations["StoreWarehouseBindingController_removeBinding"];
         options?: never;
         head?: never;
         /** Update a binding */
@@ -883,7 +891,8 @@ export interface paths {
         get: operations["ListingController_getById"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete a listing with zero mappings (else LISTING_IN_USE) */
+        delete: operations["ListingController_remove"];
         options?: never;
         head?: never;
         /** Update listing title/url/rawData */
@@ -4568,6 +4577,25 @@ export interface operations {
             };
         };
     };
+    StoreController_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     StoreController_update: {
         parameters: {
             query?: never;
@@ -4835,6 +4863,25 @@ export interface operations {
             };
         };
     };
+    CatalogController_removeBrand: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     CatalogController_updateBrand: {
         parameters: {
             query?: never;
@@ -4911,6 +4958,25 @@ export interface operations {
                         data: components["schemas"]["CategoryResponseDto"];
                     };
                 };
+            };
+        };
+    };
+    CatalogController_removeCategory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -5028,6 +5094,25 @@ export interface operations {
                         data: components["schemas"]["ProductDetailDto"];
                     };
                 };
+            };
+        };
+    };
+    ProductController_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -5203,6 +5288,25 @@ export interface operations {
                         data: components["schemas"]["SkuResponseDto"];
                     };
                 };
+            };
+        };
+    };
+    SkuController_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -5611,6 +5715,25 @@ export interface operations {
             };
         };
     };
+    WarehouseController_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     WarehouseController_update: {
         parameters: {
             query?: never;
@@ -5779,6 +5902,26 @@ export interface operations {
                         data: components["schemas"]["BatchCreateBinsResponseDto"];
                     };
                 };
+            };
+        };
+    };
+    WarehouseBinController_removeBin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                warehouseId: string;
+                binId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -5952,6 +6095,26 @@ export interface operations {
                         data: components["schemas"]["BindingResponseDto"];
                     };
                 };
+            };
+        };
+    };
+    StoreWarehouseBindingController_removeBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                storeId: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -6177,6 +6340,25 @@ export interface operations {
                         data: components["schemas"]["ListingDetailDto"];
                     };
                 };
+            };
+        };
+    };
+    ListingController_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
