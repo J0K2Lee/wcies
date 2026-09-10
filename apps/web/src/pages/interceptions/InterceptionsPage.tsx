@@ -17,6 +17,8 @@ interface InterceptionListItem {
   createdAt: string;
 }
 
+import { INTERCEPTION_STATUS_LABEL } from '../../design-system';
+
 const STATUS_COLORS: Record<string, string> = {
   CREATED: 'blue',
   ASSIGNED: 'geekblue',
@@ -76,7 +78,9 @@ export function InterceptionsPage() {
             dataIndex: 'status',
             key: 'status',
             width: 170,
-            render: (value: string) => <Tag color={STATUS_COLORS[value] ?? 'default'}>{value}</Tag>,
+            render: (value: string) => (
+            <Tag color={STATUS_COLORS[value] ?? 'default'}>{INTERCEPTION_STATUS_LABEL[value] ?? value}</Tag>
+          ),
           },
           {
             title: '指派给',

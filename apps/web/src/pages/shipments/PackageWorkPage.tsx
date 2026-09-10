@@ -13,6 +13,7 @@ import {
 } from 'antd';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiPost, useApiQuery } from '../../api/hooks';
+import { PACKAGE_STATUS_LABEL, SHIPMENT_STATUS_LABEL } from '../../design-system';
 
 /**
  * Package workbench (Sprint 4 task §59): create → scan SKU → progress →
@@ -145,9 +146,14 @@ export function PackageWorkPage() {
             <a href={`#/shipments/${pkg.shipmentId}`}>{workbench.shipmentNo}</a>
           </Descriptions.Item>
           <Descriptions.Item label="包裹状态">
-            <Badge status={pkg.status === 'SEALED' ? 'success' : 'processing'} text={pkg.status} />
+            <Badge
+              status={pkg.status === 'SEALED' ? 'success' : 'processing'}
+              text={PACKAGE_STATUS_LABEL[pkg.status] ?? pkg.status}
+            />
           </Descriptions.Item>
-          <Descriptions.Item label="发货单状态">{workbench.shipmentStatus}</Descriptions.Item>
+          <Descriptions.Item label="发货单状态">
+            {SHIPMENT_STATUS_LABEL[workbench.shipmentStatus] ?? workbench.shipmentStatus}
+          </Descriptions.Item>
         </Descriptions>
         <Progress
           percent={totalRequired === 0 ? 0 : Math.round((totalPacked / totalRequired) * 100)}

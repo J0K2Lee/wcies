@@ -110,14 +110,14 @@ export function InventoryTransactionsPage() {
           { title: '仓库', dataIndex: 'warehouseCode', width: 90 },
           { title: '库位', dataIndex: 'binCode', width: 140 },
           {
-            title: 'Before',
+            title: '变更前',
             dataIndex: 'quantityBefore',
             width: 80,
             align: 'right',
             render: fmtQty,
           },
           {
-            title: 'Change',
+            title: '变更量',
             dataIndex: 'quantityChange',
             width: 80,
             align: 'right',
@@ -127,16 +127,16 @@ export function InventoryTransactionsPage() {
               </span>
             ),
           },
-          { title: 'After', dataIndex: 'quantityAfter', width: 80, align: 'right', render: fmtQty },
+          { title: '变更后', dataIndex: 'quantityAfter', width: 80, align: 'right', render: fmtQty },
           {
-            title: 'Reserved Δ',
+            title: '占用变化',
             dataIndex: 'reservedChange',
             width: 90,
             align: 'right',
             render: (value: string | null) => (value === null ? '-' : fmtQty(value)),
           },
           {
-            title: 'Picked Δ',
+            title: '已拣变化',
             dataIndex: 'pickedChange',
             width: 90,
             align: 'right',

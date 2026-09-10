@@ -3,10 +3,13 @@ import { colors } from '../tokens';
 /**
  * Unified platform identity (task §60): same size everywhere — a 22px mark
  * plus the platform name. No per-page font sizes or random colors.
+ * Keyed by the DB platform code — WB, not WILDBERRIES (the old key never
+ * matched so WB always fell to the fallback, Sprint 6 §11.4).
  */
 const PLATFORM_META: Record<string, { label: string; text: string; bg: string; border: string }> = {
-  OZON: { label: 'OZON', text: '#0C5BFF', bg: '#EEF4FF', border: '#D5E3FF' },
-  WILDBERRIES: { label: 'WB', text: '#A3309B', bg: '#F9EEF9', border: '#EDD9EC' },
+  OZON: { label: 'Ozon', text: '#0C5BFF', bg: '#EEF4FF', border: '#D5E3FF' },
+  WB: { label: 'Wildberries', text: '#A3309B', bg: '#F9EEF9', border: '#EDD9EC' },
+  WILDBERRIES: { label: 'Wildberries', text: '#A3309B', bg: '#F9EEF9', border: '#EDD9EC' },
   YANDEX: { label: 'Yandex', text: '#C00', bg: '#FDEEEE', border: '#F7D8D8' },
   YANDEX_MARKET: { label: 'Yandex', text: '#C00', bg: '#FDEEEE', border: '#F7D8D8' },
 };

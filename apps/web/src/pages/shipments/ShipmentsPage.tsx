@@ -22,6 +22,8 @@ interface ShipmentListItem {
   shippedAt: string | null;
 }
 
+import { SHIPMENT_STATUS_LABEL } from '../../design-system';
+
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: 'default',
   READY_TO_PACK: 'blue',
@@ -129,7 +131,9 @@ export function ShipmentsPage() {
             dataIndex: 'status',
             key: 'status',
             width: 140,
-            render: (value: string) => <Tag color={STATUS_COLORS[value] ?? 'default'}>{value}</Tag>,
+            render: (value: string) => (
+            <Tag color={STATUS_COLORS[value] ?? 'default'}>{SHIPMENT_STATUS_LABEL[value] ?? value}</Tag>
+          ),
           },
           {
             title: '创建时间',

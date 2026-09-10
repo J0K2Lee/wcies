@@ -1,69 +1,74 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { Skeleton, Tabs } from 'antd';
+import { Skeleton } from 'antd';
 import {
   AlertOutlined,
-  AppstoreOutlined,
+  CloudSyncOutlined,
   ShopOutlined,
   TransactionOutlined,
 } from '@ant-design/icons';
 import {
+  colors,
   ContextMetric,
+  ContextRailContent,
   ContextSection,
   DataTable,
-  EmptyState,
-  ERP_STATUS_META,
   MetricCard,
   PageHeader,
   PlatformTag,
+  RelativeTime,
   SectionCard,
   StatusBadge,
   SYNC_STATUS_META,
+  SyncStatusBadge,
   TrendChart,
-  colors,
-  useContextRail,
-  ContextRailContent,
   TrendPoint,
+  useContextRail,
 } from '../design-system';
 import { useApiQuery } from '../api/hooks';
+import { fmtNumber } from '../utils/format';
 
 /**
- * Dashboard (redesign task §20-§25) — the most complete three-column page.
- * All numbers come from existing APIs (list meta.total / light queries);
- * nothing is fabricated for visual effect (task §21).
+ * Dashboard — 运营看板 (operations board).
+ *
+ * Every number on this page comes from a real list API (meta.total or rows
+ * actually returned); nothing is fabricated. Structure:
+ *   1. KPI row: 待处理订单 (orders erpStatus=NEW total) / 待处理异常
+ *      (exceptions status=OPEN total) / 同步失败任务 (FAILED jobs within the
+ *      latest sync-jobs page) / 凭证未配置的活跃店铺 (active stores without
+ *      credentials, derived from the stores list).
+ *   2. 运营待办: top OPEN exceptions + active stores missing credentials.
+ *   3. 订单趋势: daily buckets aggregated from the latest 100 orders.
+ *   4. 同步异常流: FAILED / PARTIAL jobs from the latest sync-jobs page.
+ * Context rail: 同步异常 + 库存预警 (inventory OUT_OF_STOCK rows).
  */
 
 interface OrderListItem {
   id: string;
-  orderNo: string;
-  storeName: string;
-  platformCode: string;
-  erpStatus: string;
   orderedAt: string;
-  itemsCount: number;
-  openExceptionsCount: number;
-  backorderedCount: number;
-  mappingFailedCount: number;
 }
 
-interface StoreItem {
+interface StoreRow {
   id: string;
   name: string;
   storeCode: string;
   platformCode: string;
   status: string;
+  credentialConfigured: boolean;
 }
 
 interface SyncJobItem {
   id: string;
-  storeId: string;
   storeCode: string;
+  storeName: string;
   platformCode: string;
   syncType: string;
   status: string;
+  successCount: number;
+  failedCount: number;
+  errorMessage: string | null;
   finishedAt: string | null;
   createdAt: string;
-  errorMessage: string | null;
 }
 
 interface ExceptionItem {
@@ -76,55 +81,37 @@ interface ExceptionItem {
   createdAt: string;
 }
 
+interface InventoryRow {
+  id: string;
+  skuCode: string;
+  warehouseCode: string;
+  sellableAvailableQty: string;
+}
+
 type Envelope<T> = { data: T; meta: { total: number } };
 
-const RECENT_TAB_GROUPS: Array<{
-  key: string;
-  label: string;
-  match: (row: OrderListItem) => boolean;
-}> = [
-  { key: 'all', label: '全部', match: () => true },
-  {
-    key: 'pending',
-    label: '待处理',
-    match: (row) => row.erpStatus === 'NEW' || row.erpStatus === 'ALLOCATING',
-  },
-  {
-    key: 'processing',
-    label: '处理中',
-    match: (row) =>
-      row.erpStatus === 'READY_TO_PICK' ||
-      row.erpStatus === 'PICKING' ||
-      row.erpStatus === 'PICKED',
-  },
-  {
-    key: 'shipped',
-    label: '已发货',
-    match: (row) => row.erpStatus === 'SHIPPED' || row.erpStatus === 'PARTIALLY_SHIPPED',
-  },
-  {
-    key: 'exception',
-    label: '异常',
-    match: (row) =>
-      row.erpStatus === 'EXCEPTION' ||
-      row.erpStatus === 'BACKORDERED' ||
-      row.erpStatus === 'PARTIALLY_BACKORDERED' ||
-      row.openExceptionsCount > 0,
-  },
-];
+/** Exception type → label (backend enum values only; raw value as fallback). */
+const EXCEPTION_TYPE_LABEL: Record<string, string> = {
+  ORDER_SKU_MAPPING_FAILED: 'SKU 映射失败',
+  ORDER_OUT_OF_STOCK: '订单缺货',
+  ORDER_INVALID_STATE: '订单状态异常',
+  ORDER_INTERCEPTION_FAILED: '拦截失败',
+};
 
-function greeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 6) {
-    return '夜深了';
+/** Sync job type → label. */
+const SYNC_TYPE_LABEL: Record<string, string> = {
+  ORDER_SYNC: '订单同步',
+  LISTING_SYNC: '商品同步',
+};
+
+function severityTone(severity: string): 'danger' | 'warning' | 'neutral' {
+  if (severity === 'HIGH') {
+    return 'danger';
   }
-  if (hour < 12) {
-    return '早上好';
+  if (severity === 'MEDIUM') {
+    return 'warning';
   }
-  if (hour < 18) {
-    return '下午好';
-  }
-  return '晚上好';
+  return 'neutral';
 }
 
 function fmtDate(date: Date): string {
@@ -132,112 +119,80 @@ function fmtDate(date: Date): string {
   return `${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日 星期${weekdays[date.getDay()]}`;
 }
 
-function fmtTime(value: string): string {
-  return value.slice(11, 16);
-}
-
-function fmtRelative(value: string | null): string {
-  if (value === null) {
-    return '—';
-  }
-  const minutes = Math.round((Date.now() - new Date(value).getTime()) / 60000);
-  if (minutes < 1) {
-    return '刚刚';
-  }
-  if (minutes < 60) {
-    return `${minutes} 分钟前`;
-  }
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) {
-    return `${hours} 小时前`;
-  }
-  return `${Math.round(hours / 24)} 天前`;
-}
-
-const EXCEPTION_LABELS: Record<string, string> = {
-  ORDER_SKU_MAPPING_FAILED: 'Mapping 失败',
-  ORDER_OUT_OF_STOCK: '订单缺货',
-  ORDER_INVALID_STATE: '状态非法',
-  ORDER_INTERCEPTION_FAILED: '拦截失败',
+const TODO_ROW_STYLE: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  padding: '7px 0',
+  cursor: 'pointer',
+  borderBottom: `1px solid ${colors.borderSoft}`,
 };
 
 export function DashboardPage() {
-  // ---- Data: existing list APIs only, meta.total drives KPI numbers ----
+  const navigate = useNavigate();
+
+  // ---- Data: real list APIs only (queryKey[0] = entity, shared prefix) ----
+  const pendingOrdersCount = useApiQuery<Envelope<OrderListItem[]>>(
+    '/api/v1/orders',
+    { page: 1, pageSize: 1, erpStatus: 'NEW' },
+    ['orders', 'count', 'NEW'],
+  );
   const recentOrders = useApiQuery<Envelope<OrderListItem[]>>(
     '/api/v1/orders',
     { page: 1, pageSize: 100 },
-    ['dashboard-orders'],
+    ['orders', 'dashboard', 'recent'],
   );
-  const pendingOrders = useApiQuery<Envelope<OrderListItem[]>>(
-    '/api/v1/orders',
-    { page: 1, pageSize: 1, erpStatus: 'NEW' },
-    ['dashboard-orders-pending'],
+  const openExceptions = useApiQuery<Envelope<ExceptionItem[]>>(
+    '/api/v1/exceptions',
+    { page: 1, pageSize: 5, status: 'OPEN' },
+    ['exceptions', 'dashboard', 'OPEN'],
   );
-  const outOfStock = useApiQuery<Envelope<unknown[]>>(
-    '/api/v1/inventory',
-    { page: 1, pageSize: 1, status: 'OUT_OF_STOCK' },
-    ['dashboard-inventory-oos'],
-  );
-  const skusTotal = useApiQuery<Envelope<unknown[]>>('/api/v1/skus', { page: 1, pageSize: 1 }, [
-    'dashboard-skus-total',
-  ]);
-  const skusUnmapped = useApiQuery<Envelope<unknown[]>>(
-    '/api/v1/skus',
-    { page: 1, pageSize: 1, hasListing: 'false' },
-    ['dashboard-skus-unmapped'],
-  );
-  const stores = useApiQuery<Envelope<StoreItem[]>>('/api/v1/stores', { page: 1, pageSize: 100 }, [
-    'dashboard-stores',
-  ]);
   const syncJobs = useApiQuery<Envelope<SyncJobItem[]>>(
     '/api/v1/sync/jobs',
-    { page: 1, pageSize: 20 },
-    ['dashboard-sync-jobs'],
+    { page: 1, pageSize: 100 },
+    ['sync-jobs', 'dashboard', 'recent'],
   );
-  const exceptions = useApiQuery<Envelope<ExceptionItem[]>>(
-    '/api/v1/exceptions',
-    { page: 1, pageSize: 20, status: 'OPEN' },
-    ['dashboard-exceptions'],
+  const activeStores = useApiQuery<Envelope<StoreRow[]>>(
+    '/api/v1/stores',
+    { page: 1, pageSize: 100, status: 'ACTIVE' },
+    ['stores', 'dashboard', 'active'],
+  );
+  const oosInventory = useApiQuery<Envelope<InventoryRow[]>>(
+    '/api/v1/inventory',
+    { page: 1, pageSize: 5, status: 'OUT_OF_STOCK' },
+    ['inventory', 'dashboard', 'oos'],
   );
 
   // ---- Derived numbers (all real, from the queries above) ----
   const orders = recentOrders.data?.data ?? [];
-  const storeList = stores.data?.data ?? [];
+  const exceptions = openExceptions.data?.data ?? [];
   const jobs = syncJobs.data?.data ?? [];
-  const openExceptions = exceptions.data?.data ?? [];
+  const stores = activeStores.data?.data ?? [];
+  const oosRows = oosInventory.data?.data ?? [];
 
-  const platformOptions = useMemo(() => {
-    const codes = new Map<string, number>();
-    for (const store of storeList) {
-      codes.set(store.platformCode, (codes.get(store.platformCode) ?? 0) + 1);
-    }
-    return [...codes.entries()].map(([code, count]) => ({ code, count }));
-  }, [storeList]);
+  const pendingCount = pendingOrdersCount.data?.meta.total ?? 0;
+  const openExceptionTotal = openExceptions.data?.meta.total ?? 0;
+  const oosTotal = oosInventory.data?.meta.total ?? 0;
 
-  const navigate = useNavigate();
-  const [platformFilter, setPlatformFilter] = useState<string | undefined>();
-  const filteredOrders = useMemo(
-    () =>
-      platformFilter === undefined
-        ? orders
-        : orders.filter((order) => order.platformCode === platformFilter),
-    [orders, platformFilter],
+  const failedJobCount = useMemo(
+    () => jobs.filter((job) => job.status === 'FAILED').length,
+    [jobs],
   );
-  const filteredJobs = useMemo(
-    () =>
-      platformFilter === undefined
-        ? jobs
-        : jobs.filter((job) => job.platformCode === platformFilter),
-    [jobs, platformFilter],
+  const partialJobCount = useMemo(
+    () => jobs.filter((job) => job.status === 'PARTIAL').length,
+    [jobs],
+  );
+  const abnormalJobs = useMemo(
+    () => jobs.filter((job) => job.status === 'FAILED' || job.status === 'PARTIAL'),
+    [jobs],
+  );
+  const storesWithoutCredential = useMemo(
+    () => stores.filter((store) => !store.credentialConfigured),
+    [stores],
   );
 
-  const [activeTab, setActiveTab] = useState('all');
-  const tabOrders = useMemo(() => {
-    const group =
-      RECENT_TAB_GROUPS.find((entry) => entry.key === activeTab) ?? RECENT_TAB_GROUPS[0]!;
-    return filteredOrders.filter(group.match);
-  }, [filteredOrders, activeTab]);
-
+  // Trend: daily buckets over the last 7 days, aggregated from the latest
+  // 100 orders returned by /api/v1/orders (real rows, no fabricated points).
   const trendPoints = useMemo<TrendPoint[]>(() => {
     const days = 7;
     const buckets = new Map<string, number>();
@@ -246,7 +201,7 @@ export function DashboardPage() {
       day.setDate(day.getDate() - index);
       buckets.set(day.toISOString().slice(0, 10), 0);
     }
-    for (const order of filteredOrders) {
+    for (const order of orders) {
       const key = order.orderedAt.slice(0, 10);
       if (buckets.has(key)) {
         buckets.set(key, (buckets.get(key) ?? 0) + 1);
@@ -256,150 +211,110 @@ export function DashboardPage() {
       label: `${Number(key.slice(5, 7))}/${Number(key.slice(8, 10))}`,
       value,
     }));
-  }, [filteredOrders]);
+  }, [orders]);
 
-  const mappingCoverage = useMemo(() => {
-    const total = skusTotal.data?.meta.total ?? 0;
-    const unmapped = skusUnmapped.data?.meta.total ?? 0;
-    return { total, unmapped, mapped: Math.max(0, total - unmapped) };
-  }, [skusTotal.data, skusUnmapped.data]);
-
-  const activeStores = storeList.filter((store) => store.status === 'ACTIVE');
-  const failedJobs = filteredJobs.filter(
-    (job) => job.status === 'FAILED' || job.status === 'PARTIAL',
-  );
-  const railStoreList = filteredStoresOf(storeList, platformFilter);
   const todayOrders = trendPoints[trendPoints.length - 1]?.value ?? 0;
   const yesterdayOrders = trendPoints[trendPoints.length - 2]?.value ?? 0;
-  const pendingCount = pendingOrders.data?.meta.total ?? 0;
-  const todoCount = pendingCount + openExceptions.length;
+  const latestException = exceptions[0];
 
-  // ---- Context rail (task §24) ----
+  // ---- Context rail: 同步异常 + 库存预警 (no store list — avoids echoing
+  // the KPI row; both sections rest on the real queries above) ----
   const railContent = useMemo<ContextRailContent>(
     () => ({
       children: (
         <>
-          <ContextSection title="店铺状态" extra={`${railStoreList.length} 家`}>
-            {storeList.length === 0 && stores.isLoading ? (
-              <Skeleton active paragraph={false} />
-            ) : railStoreList.length === 0 ? (
-              <EmptyState title="暂无店铺" description="请先在店铺管理中添加店铺。" />
-            ) : (
-              <>
-                {railStoreList.slice(0, 6).map((store) => {
-                  const lastJob = latestJobFor(jobs, store.id);
-                  return (
-                    <div
-                      key={store.id}
-                      style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '6px 0' }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <PlatformTag code={store.platformCode} />
-                        <span style={{ fontSize: 13, color: colors.textPrimary, fontWeight: 500 }}>
-                          {store.name}
-                        </span>
-                        <span style={{ marginLeft: 'auto' }}>
-                          <StatusBadge
-                            tone={store.status === 'ACTIVE' ? 'success' : 'neutral'}
-                            label={store.status === 'ACTIVE' ? '正常' : store.status}
-                            showDot={false}
-                          />
-                        </span>
-                      </div>
-                      <span style={{ fontSize: 12, color: colors.textTertiary, paddingLeft: 2 }}>
-                        {lastJob === undefined
-                          ? '暂无同步记录'
-                          : `同步${SYNC_STATUS_META[lastJob.status]?.label ?? lastJob.status} · ${fmtRelative(lastJob.finishedAt ?? lastJob.createdAt)}`}
-                      </span>
-                    </div>
-                  );
-                })}
-                {railStoreList.length > 6 && (
-                  <span style={{ fontSize: 12, color: colors.textTertiary, paddingTop: 4 }}>
-                    还有 {railStoreList.length - 6} 家店铺未展示
-                  </span>
-                )}
-              </>
-            )}
-          </ContextSection>
           <ContextSection
             title="同步异常"
-            extra={failedJobs.length === 0 ? undefined : `${failedJobs.length} 项`}
+            extra={abnormalJobs.length === 0 ? undefined : `${abnormalJobs.length} 项`}
           >
-            {failedJobs.length === 0 ? (
-              <span style={{ fontSize: 12.5, color: colors.textTertiary }}>暂无同步异常</span>
+            {syncJobs.isLoading ? (
+              <Skeleton active paragraph={false} />
+            ) : abnormalJobs.length === 0 ? (
+              <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+                最近 {jobs.length} 个任务无失败
+              </span>
             ) : (
-              failedJobs.slice(0, 5).map((job) => (
-                <div
-                  key={job.id}
-                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}
-                >
-                  <StatusBadge tone="danger" label={job.storeCode} showDot={false} />
+              abnormalJobs.slice(0, 5).map((job) => (
+                <div key={job.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                  <StatusBadge
+                    tone={SYNC_STATUS_META[job.status]?.tone ?? 'neutral'}
+                    label={job.storeCode}
+                    hint={job.status}
+                    showDot={false}
+                  />
                   <span style={{ fontSize: 12.5, color: colors.textSecondary }}>
-                    {job.syncType === 'ORDER_SYNC' ? '订单同步' : 'Listing 同步'}
+                    {SYNC_TYPE_LABEL[job.syncType] ?? job.syncType}
                   </span>
                   <span style={{ marginLeft: 'auto', fontSize: 12, color: colors.textTertiary }}>
-                    {fmtRelative(job.finishedAt ?? job.createdAt)}
+                    <RelativeTime value={job.finishedAt ?? job.createdAt} />
                   </span>
                 </div>
               ))
             )}
           </ContextSection>
           <ContextSection
-            title="今日风险"
-            extra={openExceptions.length === 0 ? undefined : `${openExceptions.length} 项`}
+            title="库存预警"
+            extra={oosTotal === 0 ? undefined : `${fmtNumber(oosTotal)} 项`}
           >
-            {openExceptions.length === 0 ? (
-              <span style={{ fontSize: 12.5, color: colors.textTertiary }}>暂无待处理异常</span>
+            {oosInventory.isLoading ? (
+              <Skeleton active paragraph={false} />
+            ) : oosTotal === 0 ? (
+              <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+                暂无可售库存预警
+              </span>
             ) : (
-              openExceptions
-                .slice(0, 5)
-                .map((exception) => (
+              <>
+                {oosRows.map((row) => (
                   <ContextMetric
-                    key={exception.id}
-                    label={
-                      <StatusBadge
-                        tone={exception.severity === 'HIGH' ? 'danger' : 'warning'}
-                        label={EXCEPTION_LABELS[exception.exceptionType] ?? exception.exceptionType}
-                        showDot={false}
-                      />
-                    }
-                    value={fmtRelative(exception.createdAt)}
+                    key={row.id}
+                    label={`${row.skuCode} · ${row.warehouseCode}`}
+                    value={`可售 ${fmtNumber(Number(row.sellableAvailableQty))}`}
+                    onClick={() => void navigate('/inventory?status=OUT_OF_STOCK')}
                   />
-                ))
+                ))}
+                <ContextMetric
+                  label="无可售库存记录"
+                  value={fmtNumber(oosTotal)}
+                  strong
+                  onClick={() => void navigate('/inventory?status=OUT_OF_STOCK')}
+                />
+              </>
             )}
           </ContextSection>
         </>
       ),
     }),
-    [storeList, railStoreList, stores.isLoading, jobs, failedJobs, openExceptions, platformFilter],
+    [
+      syncJobs.isLoading,
+      jobs.length,
+      abnormalJobs,
+      oosInventory.isLoading,
+      oosRows,
+      oosTotal,
+      navigate,
+    ],
   );
   useContextRail(railContent);
+
+  const kpiSkeleton = <Skeleton active paragraph={false} />;
 
   return (
     <div>
       <PageHeader
-        title={`${greeting()}，Admin`}
-        description={`今天是 ${fmtDate(new Date())} · 当前有 ${todoCount} 个待处理事项`}
+        title="运营看板"
+        description={`今天是 ${fmtDate(new Date())} · 待处理订单 ${fmtNumber(pendingCount)} · 待处理异常 ${fmtNumber(openExceptionTotal)} · 同步失败 ${fmtNumber(failedJobCount)}`}
         secondary={
           <Link to="/sync" style={{ fontSize: 13.5, color: colors.primary }}>
             同步中心
           </Link>
         }
-        primary={
-          <PlatformSelect
-            value={platformFilter}
-            onChange={setPlatformFilter}
-            options={platformOptions}
-            allCount={storeList.length}
-          />
-        }
       />
 
+      {/* ---- 1. KPI row (real meta.total / row counts only) ---- */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(196px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
           gap: 16,
           marginBottom: 16,
         }}
@@ -407,43 +322,179 @@ export function DashboardPage() {
         <MetricCard
           icon={<TransactionOutlined />}
           title="待处理订单"
-          value={pendingOrders.isLoading ? <Skeleton active paragraph={false} /> : pendingCount}
-          aux={`今日 ${todayOrders} 单 · 昨日 ${yesterdayOrders} 单`}
+          value={pendingOrdersCount.isLoading ? kpiSkeleton : fmtNumber(pendingCount)}
+          aux={
+            recentOrders.isLoading
+              ? undefined
+              : `今日 ${todayOrders} 单 · 昨日 ${yesterdayOrders} 单`
+          }
+          onClick={() => void navigate('/orders')}
         />
         <MetricCard
           icon={<AlertOutlined />}
-          title="缺货预警"
-          value={
-            outOfStock.isLoading ? (
-              <Skeleton active paragraph={false} />
-            ) : (
-              (outOfStock.data?.meta.total ?? 0)
-            )
+          title="待处理异常"
+          value={openExceptions.isLoading ? kpiSkeleton : fmtNumber(openExceptionTotal)}
+          aux={
+            openExceptions.isLoading || latestException === undefined
+              ? openExceptions.isLoading
+                ? undefined
+                : '暂无待处理异常'
+              : `最近：${EXCEPTION_TYPE_LABEL[latestException.exceptionType] ?? latestException.exceptionType}`
           }
-          aux="无可售库存记录"
+          onClick={() => void navigate('/exceptions')}
         />
         <MetricCard
-          icon={<AppstoreOutlined />}
-          title="Mapping 覆盖率"
-          value={
-            skusTotal.isLoading ? (
-              <Skeleton active paragraph={false} />
-            ) : mappingCoverage.total === 0 ? (
-              '—'
-            ) : (
-              `${Math.round((mappingCoverage.mapped / mappingCoverage.total) * 100)}%`
-            )
+          icon={<CloudSyncOutlined />}
+          title="同步失败任务"
+          value={syncJobs.isLoading ? kpiSkeleton : fmtNumber(failedJobCount)}
+          aux={
+            syncJobs.isLoading
+              ? undefined
+              : `最近 ${jobs.length} 个任务内${partialJobCount > 0 ? ` · 另有部分成功 ${partialJobCount}` : ''}`
           }
-          aux={`${mappingCoverage.mapped} / ${mappingCoverage.total} 个 SKU 已映射`}
+          onClick={() => void navigate('/sync')}
         />
         <MetricCard
           icon={<ShopOutlined />}
-          title="店铺在线"
-          value={stores.isLoading ? <Skeleton active paragraph={false} /> : activeStores.length}
-          aux={`共 ${storeList.length} 家店铺`}
+          title="凭证未配置的活跃店铺"
+          value={activeStores.isLoading ? kpiSkeleton : fmtNumber(storesWithoutCredential.length)}
+          aux={
+            activeStores.isLoading
+              ? undefined
+              : `活跃店铺共 ${fmtNumber(activeStores.data?.meta.total ?? 0)} 家`
+          }
+          onClick={() => void navigate('/stores')}
         />
       </div>
 
+      {/* ---- 2. 运营待办: OPEN exceptions + active stores without credentials ---- */}
+      <SectionCard
+        title="运营待办"
+        style={{ marginBottom: 16 }}
+        extra={
+          <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+            点击条目跳转至对应工作台处理
+          </span>
+        }
+      >
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28 }}>
+          <div style={{ minWidth: 0 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                marginBottom: 4,
+              }}
+            >
+              <span style={{ fontSize: 13.5, fontWeight: 600, color: colors.textPrimary }}>
+                待处理异常
+              </span>
+              <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+                {openExceptionTotal > 0 ? `${fmtNumber(openExceptionTotal)} 项` : ''}
+              </span>
+            </div>
+            {openExceptions.isLoading ? (
+              <Skeleton active paragraph={{ rows: 3 }} />
+            ) : exceptions.length === 0 ? (
+              <span style={{ fontSize: 12.5, color: colors.textTertiary }}>暂无待处理异常</span>
+            ) : (
+              <>
+                {exceptions.map((row) => (
+                  <div
+                    key={row.id}
+                    style={TODO_ROW_STYLE}
+                    onClick={() => void navigate('/exceptions')}
+                  >
+                    <StatusBadge
+                      tone={severityTone(row.severity)}
+                      label={EXCEPTION_TYPE_LABEL[row.exceptionType] ?? row.exceptionType}
+                      hint={`${row.exceptionType} · ${row.severity}`}
+                      showDot={false}
+                    />
+                    <span
+                      title={row.message}
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontSize: 13,
+                        color: colors.textSecondary,
+                      }}
+                    >
+                      {row.message}
+                    </span>
+                    <RelativeTime value={row.createdAt} />
+                  </div>
+                ))}
+                {openExceptionTotal > exceptions.length && (
+                  <span style={{ fontSize: 12, color: colors.textTertiary, paddingTop: 6, display: 'block' }}>
+                    仅显示前 {exceptions.length} 条，共 {fmtNumber(openExceptionTotal)} 条
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                marginBottom: 4,
+              }}
+            >
+              <span style={{ fontSize: 13.5, fontWeight: 600, color: colors.textPrimary }}>
+                未配置凭证的活跃店铺
+              </span>
+              <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+                {storesWithoutCredential.length > 0
+                  ? `${fmtNumber(storesWithoutCredential.length)} 项`
+                  : ''}
+              </span>
+            </div>
+            {activeStores.isLoading ? (
+              <Skeleton active paragraph={{ rows: 3 }} />
+            ) : storesWithoutCredential.length === 0 ? (
+              <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+                活跃店铺凭证均已配置
+              </span>
+            ) : (
+              <>
+                {storesWithoutCredential.slice(0, 5).map((store) => (
+                  <div key={store.id} style={TODO_ROW_STYLE} onClick={() => void navigate('/stores')}>
+                    <PlatformTag code={store.platformCode} />
+                    <span
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontSize: 13,
+                        color: colors.textSecondary,
+                      }}
+                    >
+                      {store.name}
+                    </span>
+                    <span style={{ fontSize: 12, color: colors.textTertiary }}>{store.storeCode}</span>
+                    <StatusBadge tone="warning" label="未配置凭证" hint="credentialConfigured = false" showDot={false} />
+                  </div>
+                ))}
+                {storesWithoutCredential.length > 5 && (
+                  <span style={{ fontSize: 12, color: colors.textTertiary, paddingTop: 6, display: 'block' }}>
+                    仅显示前 5 条，共 {fmtNumber(storesWithoutCredential.length)} 条
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </SectionCard>
+
+      {/* ---- 3. 订单趋势 (real rows: latest 100 orders bucketed by day) ---- */}
       <SectionCard
         title="订单趋势（近 7 日）"
         extra={
@@ -460,134 +511,91 @@ export function DashboardPage() {
         )}
       </SectionCard>
 
+      {/* ---- 4. 同步异常流: FAILED / PARTIAL jobs from the latest page ---- */}
       <SectionCard
-        title="最近订单"
+        title="同步异常流"
         flush
         extra={
-          <Link to="/orders" style={{ fontSize: 13, color: colors.primary }}>
-            查看全部
+          <Link to="/sync" style={{ fontSize: 13, color: colors.primary }}>
+            同步中心
           </Link>
         }
       >
-        <Tabs
-          activeKey={activeTab}
-          onChange={setActiveTab}
-          style={{ padding: '4px 20px 0' }}
-          items={RECENT_TAB_GROUPS.map((group) => ({
-            key: group.key,
-            label: `${group.label} (${filteredOrders.filter(group.match).length})`,
-          }))}
-        />
-        <DataTable<OrderListItem>
+        <DataTable<SyncJobItem>
           rowKey="id"
-          loading={recentOrders.isLoading}
-          dataSource={tabOrders.slice(0, 10)}
+          loading={syncJobs.isLoading}
+          dataSource={abnormalJobs.slice(0, 8)}
           pagination={false}
-          onRow={(record) => ({
+          emptyTitle="暂无同步异常"
+          emptyDescription="最近 100 个同步任务中没有失败或部分成功的任务"
+          onRow={() => ({
             onClick: () => {
-              void navigate(`/orders?keyword=${encodeURIComponent(record.orderNo)}`);
+              void navigate('/sync');
             },
             style: { cursor: 'pointer' },
           })}
           columns={[
-            { title: '订单号', dataIndex: 'orderNo', width: 130 },
             {
-              title: '平台 / 店铺',
-              key: 'platform',
-              width: 200,
-              render: (_: unknown, row: OrderListItem) => (
-                <PlatformTag code={row.platformCode} suffix={row.storeName} />
+              title: '店铺',
+              key: 'store',
+              width: 220,
+              render: (_: unknown, row: SyncJobItem) => (
+                <PlatformTag
+                  code={row.platformCode}
+                  suffix={`${row.storeName}（${row.storeCode}）`}
+                />
               ),
             },
             {
-              title: '商品',
-              key: 'items',
-              width: 90,
-              align: 'right',
-              render: (_: unknown, row: OrderListItem) => `${row.itemsCount} 件`,
+              title: '任务类型',
+              dataIndex: 'syncType',
+              width: 110,
+              render: (value: string) => SYNC_TYPE_LABEL[value] ?? value,
             },
             {
-              title: 'ERP 状态',
-              dataIndex: 'erpStatus',
-              width: 130,
-              render: (value: string, row: OrderListItem) => (
-                <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                  <StatusBadge
-                    tone={ERP_STATUS_META[value]?.tone ?? 'neutral'}
-                    label={ERP_STATUS_META[value]?.label ?? value}
-                    hint={value}
-                    showDot={false}
-                  />
-                  {row.openExceptionsCount > 0 && (
-                    <span style={{ fontSize: 12, color: colors.danger, fontWeight: 600 }}>
-                      异常 {row.openExceptionsCount}
-                    </span>
-                  )}
+              title: '状态',
+              dataIndex: 'status',
+              width: 100,
+              render: (value: string) => <SyncStatusBadge status={value} />,
+            },
+            {
+              title: '成功 / 失败',
+              key: 'counts',
+              width: 110,
+              align: 'right',
+              render: (_: unknown, row: SyncJobItem) => `${row.successCount} / ${row.failedCount}`,
+            },
+            {
+              title: '结束时间',
+              key: 'finishedAt',
+              width: 110,
+              render: (_: unknown, row: SyncJobItem) => (
+                <RelativeTime value={row.finishedAt ?? row.createdAt} />
+              ),
+            },
+            {
+              title: '错误信息',
+              dataIndex: 'errorMessage',
+              render: (value: string | null) => (
+                <span
+                  title={value ?? undefined}
+                  style={{
+                    display: 'block',
+                    maxWidth: 320,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    fontSize: 12.5,
+                    color: colors.textTertiary,
+                  }}
+                >
+                  {value ?? '—'}
                 </span>
               ),
-            },
-            {
-              title: '下单时间',
-              dataIndex: 'orderedAt',
-              width: 90,
-              render: (value: string) => fmtTime(value),
             },
           ]}
         />
       </SectionCard>
-    </div>
-  );
-}
-
-function filteredStoresOf(storeList: StoreItem[], platform: string | undefined): StoreItem[] {
-  return platform === undefined ? storeList : storeList.filter((s) => s.platformCode === platform);
-}
-
-function latestJobFor(jobs: SyncJobItem[], storeId: string): SyncJobItem | undefined {
-  return jobs.find((job) => job.storeId === storeId);
-}
-
-/** Lightweight inline platform filter: 全部店铺 / each platform with count. */
-function PlatformSelect({
-  value,
-  onChange,
-  options,
-  allCount,
-}: {
-  value: string | undefined;
-  onChange: (value: string | undefined) => void;
-  options: Array<{ code: string; count: number }>;
-  allCount: number;
-}) {
-  const itemStyle = (active: boolean): React.CSSProperties => ({
-    padding: '5px 12px',
-    borderRadius: 8,
-    border: `1px solid ${active ? colors.primary : colors.border}`,
-    background: active ? colors.primarySoft : colors.container,
-    color: active ? colors.primaryActive : colors.textSecondary,
-    fontSize: 13,
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
-  });
-  return (
-    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} role="group" aria-label="平台筛选">
-      <button
-        type="button"
-        style={itemStyle(value === undefined)}
-        onClick={() => onChange(undefined)}
-      >
-        全部店铺 · {allCount}
-      </button>
-      {options.map((option) => (
-        <button
-          key={option.code}
-          type="button"
-          style={itemStyle(value === option.code)}
-          onClick={() => onChange(option.code)}
-        >
-          {option.code} · {option.count}
-        </button>
-      ))}
     </div>
   );
 }

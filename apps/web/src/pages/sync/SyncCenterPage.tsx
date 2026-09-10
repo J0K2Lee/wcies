@@ -510,7 +510,7 @@ export function SyncCenterPage() {
           optionFilterProp="label"
           options={(stores.data?.data ?? []).map((store) => ({
             value: store.id,
-            label: `${store.platformCode} / ${store.storeCode}`,
+            label: `${store.storeCode} · ${store.name}`,
           }))}
         />
         <Select
@@ -829,7 +829,7 @@ export function SyncCenterPage() {
                     tone={
                       (EVENT_STATUS_META[eventDetail.status] ?? { tone: 'neutral' as const }).tone
                     }
-                    label={eventDetail.status}
+                    label={EVENT_STATUS_META[eventDetail.status]?.label ?? eventDetail.status}
                     hint={eventDetail.status}
                   />
                 }
@@ -878,7 +878,11 @@ export function SyncCenterPage() {
       <Modal
         title="立即同步"
         open={triggerOpen}
-        forceRender
+        afterOpenChange={(open) => {
+          if (!open) {
+            triggerForm.resetFields();
+          }
+        }}
         onCancel={() => setTriggerOpen(false)}
         onOk={() =>
           void triggerForm.validateFields().then((values) => {
@@ -886,7 +890,7 @@ export function SyncCenterPage() {
             triggerMutation.mutate({
               type: values.type as 'orders' | 'listings',
               storeId: values.storeId as string,
-              storeLabel: store === undefined ? '' : `${store.platformCode} / ${store.storeCode}`,
+              storeLabel: store === undefined ? '' : `${store.storeCode} · ${store.name}`,
             });
           })
         }
@@ -904,7 +908,7 @@ export function SyncCenterPage() {
               placeholder="选择要同步的店铺"
               options={(stores.data?.data ?? []).map((store) => ({
                 value: store.id,
-                label: `${store.platformCode} / ${store.storeCode} · ${store.name}`,
+                label: `${store.storeCode} · ${store.name}`,
               }))}
             />
           </Form.Item>

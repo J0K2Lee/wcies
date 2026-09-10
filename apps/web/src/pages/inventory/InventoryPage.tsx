@@ -17,6 +17,7 @@ import {
   PageHeader,
   SectionCard,
   StatusBadge,
+  TRANSACTION_TYPE_LABEL,
   colors,
   useContextRail,
   ContextRailContent,
@@ -314,8 +315,8 @@ export function InventoryPage() {
           <>
             <ContextSection title="库存汇总">
               <ContextMetric label="On Hand" value={fmtQty(detailRow.totals.onHandQty)} strong />
-              <ContextMetric label="Reserved" value={fmtQty(detailRow.totals.reservedQty)} />
-              <ContextMetric label="Picked" value={fmtQty(detailRow.totals.pickedQty)} />
+              <ContextMetric label="已占用" value={fmtQty(detailRow.totals.reservedQty)} />
+              <ContextMetric label="已拣货" value={fmtQty(detailRow.totals.pickedQty)} />
               <ContextMetric label="Safety" value={fmtQty(detailRow.totals.safetyQty)} />
               <ContextMetric
                 label="可售"
@@ -538,13 +539,13 @@ export function InventoryPage() {
               align: 'right',
             },
             {
-              title: 'Reserved',
+              title: '已占用',
               dataIndex: 'reservedQty',
               width: 95,
               render: fmtQty,
               align: 'right',
             },
-            { title: 'Picked', dataIndex: 'pickedQty', width: 80, render: fmtQty, align: 'right' },
+            { title: '已拣货', dataIndex: 'pickedQty', width: 80, render: fmtQty, align: 'right' },
             { title: 'Safety', dataIndex: 'safetyQty', width: 80, render: fmtQty, align: 'right' },
             {
               title: 'Available',
@@ -679,7 +680,7 @@ export function InventoryPage() {
                           render: fmtQty,
                         },
                         {
-                          title: 'Reserved',
+                          title: '已占用',
                           dataIndex: 'reservedQty',
                           align: 'right',
                           render: fmtQty,
@@ -735,23 +736,28 @@ export function InventoryPage() {
                       emptyTitle="暂无库存流水"
                       emptyDescription="该 SKU 尚未发生库存变动。"
                       columns={[
-                        { title: '类型', dataIndex: 'transactionType', width: 150 },
+                        {
+                          title: '类型',
+                          dataIndex: 'transactionType',
+                          width: 150,
+                          render: (value: string) => TRANSACTION_TYPE_LABEL[value] ?? value,
+                        },
                         { title: '仓库', dataIndex: 'warehouseCode', width: 90 },
                         { title: '库位', dataIndex: 'binCode', width: 140 },
                         {
-                          title: 'Before',
+                          title: '变更前',
                           dataIndex: 'quantityBefore',
                           align: 'right',
                           render: fmtQty,
                         },
                         {
-                          title: 'Change',
+                          title: '变更量',
                           dataIndex: 'quantityChange',
                           align: 'right',
                           render: fmtQty,
                         },
                         {
-                          title: 'After',
+                          title: '变更后',
                           dataIndex: 'quantityAfter',
                           align: 'right',
                           render: fmtQty,

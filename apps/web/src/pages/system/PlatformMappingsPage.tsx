@@ -93,7 +93,7 @@ export function PlatformMappingsPage() {
     { page: 1, pageSize: 1, status: 'OPEN', exceptionType: 'ORDER_SKU_MAPPING_FAILED' },
     ['exceptions', 'mapping-overview'],
   );
-  const platforms = useApiQuery<Envelope<Array<{ id: string; code: string }>>>(
+  const platforms = useApiQuery<Envelope<Array<{ id: string; code: string; name: string }>>>(
     '/api/v1/platforms',
     {},
     ['platforms', 'for-mappings'],
@@ -268,7 +268,7 @@ export function PlatformMappingsPage() {
           }}
           options={(platforms.data?.data ?? []).map((platform) => ({
             value: platform.id,
-            label: platform.code,
+            label: platform.name,
           }))}
         />
         <Select

@@ -5,6 +5,27 @@ import { WciesPaths } from '@wcies/api-client';
 
 type QueryKey = keyof WciesPaths & string;
 
+/**
+ * API error carrying the backend's machine-readable code and details so pages
+ * can distinguish auth expiry / IN_USE guards / validation failures instead
+ * of string-matching messages (decision 0004).
+ */
+export class ApiError extends Error {
+  readonly code?: string;
+  readonly details?: unknown;
+
+  constructor(message: string, code?: string, details?: unknown) {
+    super(message);
+    this.name = 'ApiError';
+    this.code = code;
+    this.details = details;
+  }
+}
+
+export function isAuthError(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'AUTH_UNAUTHORIZED';
+}
+
 /** Debounces a fast-changing value (e.g. Select onSearch) for server-side filtering. */
 export function useDebouncedValue<TValue>(value: TValue, delayMs = 300): TValue {
   const [debounced, setDebounced] = useState(value);
@@ -42,7 +63,7 @@ export function useApiQuery<
         },
       });
       if (error !== undefined) {
-        throw new Error(error.error.message);
+        throw new ApiError(error.error.message, error.error.code, error.error.details);
       }
       // Normalize the { success, data, meta? } envelope into { data, meta }
       // so paginated and plain lists share one page-side shape.
@@ -66,7 +87,7 @@ export async function apiPost<TData>(
     body: body as never,
   });
   if (error !== undefined) {
-    throw new Error(error.error.message);
+    throw new ApiError(error.error.message, error.error.code, error.error.details);
   }
   return (data as { data: TData }).data;
 }
@@ -82,7 +103,7 @@ export async function apiPatch<TData>(
     body: body as never,
   });
   if (error !== undefined) {
-    throw new Error(error.error.message);
+    throw new ApiError(error.error.message, error.error.code, error.error.details);
   }
   return (data as { data: TData }).data;
 }
@@ -98,7 +119,7 @@ export async function apiPut<TData>(
     body: body as never,
   });
   if (error !== undefined) {
-    throw new Error(error.error.message);
+    throw new ApiError(error.error.message, error.error.code, error.error.details);
   }
   return (data as { data: TData }).data;
 }
@@ -107,6 +128,6 @@ export async function apiPut<TData>(
 export async function apiDelete(path: QueryKey, pathParams: Record<string, string>): Promise<void> {
   const { error } = await apiClient.DELETE(path, { params: { path: pathParams as never } });
   if (error !== undefined) {
-    throw new Error(error.error.message);
+    throw new ApiError(error.error.message, error.error.code, error.error.details);
   }
 }

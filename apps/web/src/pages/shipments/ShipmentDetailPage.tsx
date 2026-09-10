@@ -79,6 +79,8 @@ interface ShipmentDetail {
   }>;
 }
 
+import { PACKAGE_STATUS_LABEL, SHIPMENT_STATUS_LABEL } from '../../design-system';
+
 const PACKAGE_STATUS_COLORS: Record<string, string> = {
   OPEN: 'blue',
   SEALED: 'cyan',
@@ -192,7 +194,7 @@ export function ShipmentDetailPage() {
           <Descriptions.Item label="状态">
             <Badge
               status={shipment.status === 'SHIPPED' ? 'success' : 'processing'}
-              text={shipment.status}
+              text={SHIPMENT_STATUS_LABEL[shipment.status] ?? shipment.status}
             />
           </Descriptions.Item>
           <Descriptions.Item label="物流单号">
@@ -291,7 +293,9 @@ export function ShipmentDetailPage() {
                       dataIndex: 'status',
                       key: 'status',
                       width: 100,
-                      render: (value: string) => <Tag color="default">{value}</Tag>,
+                      render: (value: string) => (
+                        <Tag color="default">{SHIPMENT_STATUS_LABEL[value] ?? value}</Tag>
+                      ),
                     },
                     {
                       title: '作废原因',
@@ -349,7 +353,7 @@ export function ShipmentDetailPage() {
               key: 'status',
               width: 150,
               render: (value: string) => (
-                <Tag color={PACKAGE_STATUS_COLORS[value] ?? 'default'}>{value}</Tag>
+                <Tag color={PACKAGE_STATUS_COLORS[value] ?? 'default'}>{PACKAGE_STATUS_LABEL[value] ?? value}</Tag>
               ),
             },
             {

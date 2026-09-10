@@ -1,6 +1,7 @@
 import { useMutation } from '@tanstack/react-query';
-import { App, Button, Card, Form, Input, Typography } from 'antd';
-import { useNavigate } from 'react-router';
+import { App, Alert, Button, Card, Form, Input, Typography } from 'antd';
+import { useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router';
 import { apiClient } from '../api/client';
 
 interface LoginFormValues {
@@ -11,6 +12,16 @@ interface LoginFormValues {
 export function LoginPage() {
   const navigate = useNavigate();
   const { message } = App.useApp();
+  const [searchParams] = useSearchParams();
+  const redirectTo = searchParams.get('redirect');
+  const expired = searchParams.get('reason') === 'expired';
+
+  // Session expiry was signaled by the 401 handler via ?reason=expired.
+  useEffect(() => {
+    if (expired) {
+      void message.warning('登录已过期，请重新登录');
+    }
+  }, [expired, message]);
 
   const loginMutation = useMutation({
     mutationFn: async (values: LoginFormValues) => {
@@ -24,7 +35,8 @@ export function LoginPage() {
     },
     onSuccess: () => {
       void message.success('登录成功');
-      void navigate('/');
+      // Redirect back to where the user was heading (decision 0004).
+      void navigate(redirectTo && redirectTo.startsWith('/') ? redirectTo : '/', { replace: true });
     },
     onError: (error: Error) => {
       void message.error(`登录失败: ${error.message}`);
@@ -37,6 +49,14 @@ export function LoginPage() {
         <Typography.Title level={3} style={{ textAlign: 'center' }}>
           WCIES 登录
         </Typography.Title>
+        {expired && (
+          <Alert
+            type="warning"
+            title="登录已过期，请重新登录"
+            style={{ marginBottom: 16 }}
+            showIcon
+          />
+        )}
         <Form<LoginFormValues>
           layout="vertical"
           onFinish={(values) => loginMutation.mutate(values)}

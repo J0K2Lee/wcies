@@ -171,7 +171,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
         key: `order-${order.id}`,
         icon: <ShoppingOutlined />,
         primary: order.orderNo,
-        secondary: `${order.platformCode} · ${order.storeName}`,
+        secondary: order.storeName,
         type: '订单',
         status: (
           <StatusBadge
@@ -225,7 +225,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
         key: `store-${store.id}`,
         icon: <ShopOutlined />,
         primary: store.name,
-        secondary: `${store.platformCode} · ${store.storeCode}`,
+        secondary: `${store.storeCode} · ${store.name}`,
         type: '店铺',
         onSelect: () =>
           goTo({

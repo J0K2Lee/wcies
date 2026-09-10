@@ -407,8 +407,8 @@ export function OrdersPage() {
           )}
           <ContextSection title="订单概况">
             <ContextMetric label="商品行" value={selectedRow.itemsCount} />
-            <ContextMetric label="Reserved" value={selectedRow.reservedCount} />
-            <ContextMetric label="Picked" value={selectedRow.pickedCount} />
+            <ContextMetric label="已占用" value={selectedRow.reservedCount} />
+            <ContextMetric label="已拣货" value={selectedRow.pickedCount} />
             <ContextMetric
               label="异常"
               value={
@@ -428,7 +428,7 @@ export function OrdersPage() {
                   content: (
                     <div>
                       <div style={{ fontSize: 13, color: colors.textPrimary }}>
-                        {entry.toStatus}
+                        {ERP_STATUS_META[entry.toStatus]?.label ?? entry.toStatus}
                       </div>
                       <div style={{ fontSize: 12, color: colors.textTertiary }}>
                         {fmtDateTime(entry.createdAt)}
@@ -472,7 +472,10 @@ export function OrdersPage() {
       key: 'fulfillmentStatus',
       width: 130,
       render: (value: string) => (
-        <StatusBadge tone={FULFILLMENT_STATUS_META[value] ?? 'neutral'} label={value} />
+        <StatusBadge
+          tone={FULFILLMENT_STATUS_META[value]?.tone ?? 'neutral'}
+          label={FULFILLMENT_STATUS_META[value]?.label ?? value}
+        />
       ),
     },
     {
@@ -599,7 +602,7 @@ export function OrdersPage() {
             )
             .map((store) => ({
               value: store.id,
-              label: `${store.platformCode} · ${store.storeCode} ${store.name}`,
+              label: `${store.storeCode} · ${store.name}`,
             }))}
           value={storeId}
           onChange={(value) => {
@@ -966,7 +969,7 @@ export function OrdersPage() {
                         content: (
                           <div>
                             <span style={{ fontWeight: 600 }}>
-                              {entry.fromStatus ?? '∅'} → {entry.toStatus}
+                              {(ERP_STATUS_META[entry.fromStatus ?? '']?.label ?? entry.fromStatus) ?? '∅'} → {ERP_STATUS_META[entry.toStatus]?.label ?? entry.toStatus}
                             </span>
                             <div style={{ color: colors.textTertiary, fontSize: 12.5 }}>
                               {fmtDateTime(entry.createdAt)} · {entry.operatorName ?? 'system'}

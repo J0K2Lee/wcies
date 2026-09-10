@@ -56,6 +56,8 @@ interface InterceptionDetail {
   }>;
 }
 
+import { INTERCEPTION_STATUS_LABEL } from '../../design-system';
+
 const STATUS_STEPS = ['CREATED', 'LOCATING', 'INTERCEPTED', 'RETURNED_TO_STOCK', 'CLOSED'];
 
 export function InterceptionDetailPage() {
@@ -138,7 +140,7 @@ export function InterceptionDetailPage() {
                     ? 'error'
                     : 'processing'
               }
-              text={detail.status}
+              text={INTERCEPTION_STATUS_LABEL[detail.status] ?? detail.status}
             />
           </Descriptions.Item>
           <Descriptions.Item label="取消原因" span={2}>
@@ -153,7 +155,7 @@ export function InterceptionDetailPage() {
           <Steps
             size="small"
             current={activeStep}
-            items={STATUS_STEPS.map((step) => ({ title: step }))}
+            items={STATUS_STEPS.map((step) => ({ title: INTERCEPTION_STATUS_LABEL[step] ?? step }))}
           />
         )}
       </Card>

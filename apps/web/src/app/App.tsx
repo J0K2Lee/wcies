@@ -2,6 +2,7 @@ import { Route, Routes } from 'react-router';
 import { HealthTestPage } from '../pages/HealthTestPage';
 import { DashboardPage } from '../pages/DashboardPage';
 import { LoginPage } from '../pages/LoginPage';
+import { AuthGate } from './AuthGate';
 import { AppLayout } from './AppLayout';
 import { ProductsPage } from '../pages/products/ProductsPage';
 import { SkusPage } from '../pages/skus/SkusPage';
@@ -32,33 +33,35 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route element={<AppLayout />}>
-        <Route path="/" element={<DashboardPage />} />
-        <Route path="/health-test" element={<HealthTestPage />} />
-        <Route path="/products" element={<ProductsPage />} />
-        <Route path="/skus" element={<SkusPage />} />
-        <Route path="/listings" element={<ListingsPage />} />
-        <Route path="/warehouses" element={<WarehousesPage />} />
-        <Route path="/bins" element={<BinsPage />} />
-        <Route path="/stores" element={<StoresPage />} />
-        <Route path="/store-bindings" element={<StoreBindingsPage />} />
-        <Route path="/import" element={<ImportPage />} />
-        <Route path="/inventory" element={<InventoryPage />} />
-        <Route path="/inventory/transactions" element={<InventoryTransactionsPage />} />
-        <Route path="/inventory/reservations" element={<ReservationsPage />} />
-        <Route path="/orders" element={<OrdersPage />} />
-        <Route path="/picking" element={<PickingPage />} />
-        <Route path="/picking/:id" element={<PickingTaskWorkPage />} />
-        <Route path="/shipments" element={<ShipmentsPage />} />
-        <Route path="/shipments/:id" element={<ShipmentDetailPage />} />
-        <Route path="/packages/:id" element={<PackageWorkPage />} />
-        <Route path="/interceptions" element={<InterceptionsPage />} />
-        <Route path="/interceptions/:id" element={<InterceptionDetailPage />} />
-        <Route path="/notifications" element={<NotificationsPage />} />
-        <Route path="/sync" element={<SyncCenterPage />} />
-        <Route path="/exceptions" element={<ExceptionsPage />} />
-        <Route path="/system" element={<SystemPage />} />
-        <Route path="/platform-mappings" element={<PlatformMappingsPage />} />
+      <Route element={<AuthGate />}>
+        <Route element={<AppLayout />}>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/health-test" element={<HealthTestPage />} />
+          <Route path="/products" element={<ProductsPage />} />
+          <Route path="/skus" element={<SkusPage />} />
+          <Route path="/listings" element={<ListingsPage />} />
+          <Route path="/warehouses" element={<WarehousesPage />} />
+          <Route path="/bins" element={<BinsPage />} />
+          <Route path="/stores" element={<StoresPage />} />
+          <Route path="/store-bindings" element={<StoreBindingsPage />} />
+          <Route path="/import" element={<ImportPage />} />
+          <Route path="/inventory" element={<InventoryPage />} />
+          <Route path="/inventory/transactions" element={<InventoryTransactionsPage />} />
+          <Route path="/inventory/reservations" element={<ReservationsPage />} />
+          <Route path="/orders" element={<OrdersPage />} />
+          <Route path="/picking" element={<PickingPage />} />
+          <Route path="/picking/:id" element={<PickingTaskWorkPage />} />
+          <Route path="/shipments" element={<ShipmentsPage />} />
+          <Route path="/shipments/:id" element={<ShipmentDetailPage />} />
+          <Route path="/packages/:id" element={<PackageWorkPage />} />
+          <Route path="/interceptions" element={<InterceptionsPage />} />
+          <Route path="/interceptions/:id" element={<InterceptionDetailPage />} />
+          <Route path="/notifications" element={<NotificationsPage />} />
+          <Route path="/sync" element={<SyncCenterPage />} />
+          <Route path="/exceptions" element={<ExceptionsPage />} />
+          <Route path="/system" element={<SystemPage />} />
+          <Route path="/platform-mappings" element={<PlatformMappingsPage />} />
+        </Route>
       </Route>
     </Routes>
   );

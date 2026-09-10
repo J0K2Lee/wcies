@@ -41,7 +41,7 @@ const STATUS_TAG: Record<string, { color: string; label: string }> = {
 };
 
 /**
- * Reservation 管理 (task §44/§54): 列表 + 生命周期操作
+ * 库存占用管理 (task §44/§54): 列表 + 生命周期操作
  * (reserve 调试入口 / release / pick / unpick / ship)。
  */
 export function ReservationsPage() {
@@ -82,9 +82,9 @@ export function ReservationsPage() {
 
   const runLifecycle = (record: ReservationRow, op: 'release' | 'pick' | 'unpick' | 'ship') => {
     const labels = {
-      release: '释放占用（Reserved -N）',
-      pick: '拣货（Reserved → Picked）',
-      unpick: '取消拣货（Picked → Reserved，仅拣错纠正）',
+      release: '释放占用（可售 +N）',
+      pick: '拣货（已占用 → 已拣货）',
+      unpick: '取消拣货（已拣货 → 已占用，仅拣错纠正）',
       ship: '出库（Picked -N，On Hand -N）',
     } as const;
     modal.confirm({
@@ -156,7 +156,7 @@ export function ReservationsPage() {
           }))}
         />
         <Typography.Text type="secondary">
-          状态机：ACTIVE → PICKED → CONSUMED；ACTIVE 可释放；PICKED 可取消拣货回 ACTIVE
+          状态机：已占用 → 已拣货 → 已出库；已占用可释放；已拣货可取消拣货回已占用
         </Typography.Text>
       </Space>
 

@@ -27,6 +27,8 @@ const IMPORT_TYPES = [
   { value: 'INITIAL_INVENTORY', label: '库存初始化' },
 ];
 
+import { IMPORT_STATUS_LABEL } from '../../design-system';
+
 const STATUS_TAG: Record<string, string> = {
   VALIDATED: 'blue',
   PENDING_IMPORT: 'orange',
@@ -147,7 +149,9 @@ export function ImportPage() {
             title: '状态',
             dataIndex: 'status',
             width: 110,
-            render: (value: string) => <Tag color={STATUS_TAG[value] ?? 'default'}>{value}</Tag>,
+            render: (value: string) => (
+              <Tag color={STATUS_TAG[value] ?? 'default'}>{IMPORT_STATUS_LABEL[value] ?? value}</Tag>
+            ),
           },
           { title: '总行数', dataIndex: 'totalRows', width: 80 },
           { title: '有效', dataIndex: 'validRows', width: 70 },

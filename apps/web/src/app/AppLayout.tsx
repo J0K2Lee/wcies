@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, Outlet } from 'react-router';
-import { Avatar, Button, Drawer, Menu, Tooltip } from 'antd';
+import { useMutation } from '@tanstack/react-query';
+import { App, Avatar, Button, Drawer, Dropdown, Menu, Tooltip } from 'antd';
+import { LogoutOutlined } from '@ant-design/icons';
 import {
   AppstoreOutlined,
   BarChartOutlined,
@@ -15,6 +17,8 @@ import {
 import { AppRailSetterProvider, colors, layout, ContextRailContent } from '../design-system';
 import { GlobalSearch } from './GlobalSearch';
 import { NotificationBell } from './NotificationBell';
+import { useAuth } from './AuthGate';
+import { apiClient } from '../api/client';
 
 /**
  * WCIES adaptive three-column workbench shell (redesign task §12-§19):
@@ -55,7 +59,7 @@ const MENU_ITEMS = [
     children: [
       { key: '/inventory', label: '库存查询' },
       { key: '/inventory/transactions', label: '库存流水' },
-      { key: '/inventory/reservations', label: 'Reservation' },
+      { key: '/inventory/reservations', label: '库存占用' },
     ],
   },
   {
@@ -118,6 +122,23 @@ export function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const tier = useViewportTier();
+  const { user } = useAuth();
+  const { message } = App.useApp();
+
+  const logoutMutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await apiClient.POST('/api/v1/auth/logout');
+      if (error !== undefined) {
+        throw new Error(error.error.message);
+      }
+    },
+    onSuccess: () => {
+      void navigate('/login', { replace: true });
+    },
+    onError: (error: Error) => {
+      void message.error(`退出登录失败: ${error.message}`);
+    },
+  });
 
   // Focus mode for the picking workbench: shrink nav, no rail (task §46).
   const focusMode = /^\/picking\/[^/]+$/.test(location.pathname);
@@ -322,22 +343,51 @@ export function AppLayout() {
               <Button type="text" aria-label="帮助" icon={<QuestionCircleOutlined />} />
             </Tooltip>
             <NotificationBell />
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '3px 10px 3px 4px',
-                border: `1px solid ${colors.border}`,
-                borderRadius: 999,
-                marginLeft: 4,
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: 'logout',
+                    icon: <LogoutOutlined />,
+                    label: '退出登录',
+                    onClick: () => logoutMutation.mutate(),
+                  },
+                ],
               }}
+              placement="bottomRight"
             >
-              <Avatar size={26} style={{ background: colors.primary, fontSize: 12.5 }}>
-                A
-              </Avatar>
-              <span style={{ fontSize: 13, color: colors.textSecondary }}>Admin</span>
-            </div>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '3px 10px 3px 4px',
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 999,
+                  marginLeft: 4,
+                  cursor: 'pointer',
+                }}
+              >
+                <Avatar size={26} style={{ background: colors.primary, fontSize: 12.5 }}>
+                  {user.username.slice(0, 1).toUpperCase()}
+                </Avatar>
+                <span style={{ fontSize: 13, color: colors.textSecondary }}>
+                  {user.username}
+                </span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: colors.textTertiary,
+                    border: `1px solid ${colors.borderSoft}`,
+                    borderRadius: 4,
+                    padding: '0 4px',
+                    lineHeight: '16px',
+                  }}
+                >
+                  {user.role === 'ADMIN' ? '管理员' : user.role}
+                </span>
+              </div>
+            </Dropdown>
           </header>
 
           <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
