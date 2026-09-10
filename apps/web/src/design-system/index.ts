@@ -31,5 +31,12 @@ export {
 } from './components/ContextRail';
 export type { ContextRailContent } from './components/ContextRail';
 export { EntitySummary } from './components/EntitySummary';
+export { RelativeTime } from './components/RelativeTime';
+export { SyncStatusBadge } from './components/SyncStatusBadge';
+export { ErrorState } from './components/ErrorState';
+export { EntityLink } from './components/EntityLink';
+export { RiskIndicator, riskAccentColor } from './components/RiskIndicator';
+export { CommandPalette } from './components/CommandPalette';
+export type { PaletteItem, PaletteSection } from './components/CommandPalette';
 export { colors, spacing, radius, typography, shadows, layout } from './tokens';
 export { wciesTheme } from './theme';
