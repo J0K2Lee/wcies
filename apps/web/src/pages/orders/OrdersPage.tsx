@@ -415,7 +415,7 @@ export function OrdersPage() {
             <ContextSection title="最近状态">
               <Timeline
                 items={railDetail.history.slice(0, 4).map((entry) => ({
-                  children: (
+                  content: (
                     <div>
                       <div style={{ fontSize: 13, color: colors.textPrimary }}>
                         {entry.toStatus}
@@ -953,7 +953,7 @@ export function OrdersPage() {
                   children: (
                     <Timeline
                       items={detail.history.map((entry) => ({
-                        children: (
+                        content: (
                           <div>
                             <span style={{ fontWeight: 600 }}>
                               {entry.fromStatus ?? '∅'} → {entry.toStatus}
