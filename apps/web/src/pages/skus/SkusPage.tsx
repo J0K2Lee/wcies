@@ -2,7 +2,6 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   App,
   Button,
-  Descriptions,
   Drawer,
   Form,
   Image,
@@ -10,15 +9,35 @@ import {
   Modal,
   Popconfirm,
   Select,
-  Space,
-  Table,
   Tabs,
-  Tag,
   Upload,
 } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { apiDelete, apiPatch, apiPost, useApiQuery } from '../../api/hooks';
 import { SkuCreateModal } from '../../components/SkuCreateModal';
+import {
+  ActionMenu,
+  ContextAction,
+  ContextMetric,
+  ContextSection,
+  DataTable,
+  EntitySummary,
+  FilterBar,
+  InfoGrid,
+  PageHeader,
+  SectionCard,
+  SKU_STATUS_META,
+  StatusBadge,
+  colors,
+  useContextRail,
+  ContextRailContent,
+} from '../../design-system';
+
+/**
+ * SKU management (redesign task §26-§30): header + unified filter bar +
+ * dense table, with a context-rail quick view (row click) and a full detail
+ * drawer (查看 action). Business mutations are unchanged from Sprint 1/5.
+ */
 
 interface SkuRow {
   id: string;
@@ -38,6 +57,8 @@ interface SkuRow {
   primaryBarcode: string | null;
   primaryImageUrl: string | null;
   listingCount: number;
+  brandName: string | null;
+  updatedAt: string;
 }
 
 interface BarcodeRow {
@@ -68,47 +89,104 @@ interface MappingRow {
   status: string;
 }
 
+interface SkuInventorySummary {
+  totals: {
+    onHandQty: string;
+    reservedQty: string;
+    pickedQty: string;
+    safetyQty: string;
+    sellableAvailableQty: string;
+  };
+}
+
+interface BrandItem {
+  id: string;
+  nameZh: string;
+  status: string;
+}
+
+interface CategoryItem {
+  id: string;
+  nameZh: string;
+  status: string;
+}
+
+type Envelope<T> = { data: T; meta: { total: number } };
+
+const fmtQty = (value: string): string => (Number(value) % 1 === 0 ? String(Number(value)) : value);
+
 export function SkusPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState('');
+  const [brandId, setBrandId] = useState<string | undefined>();
+  const [categoryId, setCategoryId] = useState<string | undefined>();
+  const [status, setStatus] = useState<string | undefined>();
   const [hasListing, setHasListing] = useState<string | undefined>();
+  // Three-level interaction (task §19): row click → rail preview, 查看 → drawer.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
   const [barcodeForm] = Form.useForm();
 
-  const list = useApiQuery<{ data: SkuRow[]; meta: { total: number } }>(
+  const list = useApiQuery<Envelope<SkuRow[]>>(
     '/api/v1/skus',
-    { page, pageSize: 50, keyword: keyword || undefined, hasListing },
-    ['skus', page, keyword, hasListing],
+    {
+      page,
+      pageSize: 50,
+      keyword: keyword || undefined,
+      brandId,
+      categoryId,
+      status,
+      hasListing,
+    },
+    ['skus', page, keyword, brandId, categoryId, status, hasListing],
+  );
+  const brands = useApiQuery<Envelope<BrandItem[]>>('/api/v1/brands', { keyword: '' }, [
+    'brands-lite',
+  ]);
+  const categories = useApiQuery<Envelope<CategoryItem[]>>('/api/v1/categories', {}, [
+    'categories-lite',
+  ]);
+
+  const selectedRow = useMemo(
+    () => (list.data?.data ?? []).find((row) => row.id === selectedId) ?? null,
+    [list.data, selectedId],
   );
 
-  const detail = useApiQuery<{ data: SkuRow }>(
+  // Quick-view stock: one detail request while a row stays selected (task §68).
+  const selectedInventory = useApiQuery<{ data: SkuInventorySummary }>(
+    '/api/v1/inventory/skus/{skuId}',
+    {},
+    ['sku-inventory-summary', selectedId],
+    selectedId === null ? undefined : { skuId: selectedId },
+    selectedId !== null,
+  );
+
+  const detail = useApiQuery<Envelope<SkuRow> & { data: SkuRow }>(
     '/api/v1/skus/{id}',
     {},
     ['sku-detail', drawerId],
-    {
-      id: drawerId ?? '',
-    },
+    { id: drawerId ?? '' },
     drawerId !== null,
   );
-  const barcodes = useApiQuery<{ data: BarcodeRow[] }>(
+  const barcodes = useApiQuery<Envelope<BarcodeRow[]>>(
     '/api/v1/skus/{skuId}/barcodes',
     {},
     ['sku-barcodes', drawerId],
     { skuId: drawerId ?? '' },
     drawerId !== null,
   );
-  const images = useApiQuery<{ data: ImageRow[] }>(
+  const images = useApiQuery<Envelope<ImageRow[]>>(
     '/api/v1/skus/{skuId}/images',
     {},
     ['sku-images', drawerId],
     { skuId: drawerId ?? '' },
     drawerId !== null,
   );
-  const mappings = useApiQuery<{ data: MappingRow[] }>(
+  const mappings = useApiQuery<Envelope<MappingRow[]>>(
     '/api/v1/listings/skus/{skuId}/mappings',
     {},
     ['sku-mappings', drawerId],
@@ -122,6 +200,7 @@ export function SkusPage() {
     void queryClient.invalidateQueries({ queryKey: ['sku-barcodes', drawerId] });
     void queryClient.invalidateQueries({ queryKey: ['sku-images', drawerId] });
     void queryClient.invalidateQueries({ queryKey: ['sku-mappings', drawerId] });
+    void queryClient.invalidateQueries({ queryKey: ['sku-inventory-summary'] });
   };
 
   const statusMutation = useMutation({
@@ -172,7 +251,10 @@ export function SkusPage() {
 
   const deleteBarcodeMutation = useMutation({
     mutationFn: (barcodeId: string) =>
-      apiDelete('/api/v1/skus/{skuId}/barcodes/{barcodeId}', { skuId: drawerId ?? '', barcodeId }),
+      apiDelete('/api/v1/skus/{skuId}/barcodes/{barcodeId}', {
+        skuId: drawerId ?? '',
+        barcodeId,
+      }),
     onSuccess: () => {
       void message.success('条码已删除');
       refreshSku();
@@ -216,10 +298,153 @@ export function SkusPage() {
   });
 
   const sku = detail.data?.data;
+  const rows = list.data?.data ?? [];
+
+  // ---- Context rail: quick view of the selected SKU (task §29) ----
+  const railContent = useMemo<ContextRailContent>(() => {
+    if (selectedRow === null) {
+      return {
+        defaultCollapsed: true,
+        children: (
+          <ContextSection title="SKU 概览">
+            <ContextMetric label="当前筛选结果" value={`${list.data?.meta.total ?? 0} 个 SKU`} />
+            <ContextMetric label="本页" value={`${rows.length} 条`} />
+            <span
+              style={{
+                fontSize: 12.5,
+                color: colors.textTertiary,
+                display: 'block',
+                paddingTop: 8,
+              }}
+            >
+              点击表格任意行，在此快速预览 SKU 库存与映射概况。
+            </span>
+          </ContextSection>
+        ),
+      };
+    }
+    const totals = selectedInventory.data?.data.totals;
+    return {
+      defaultCollapsed: true,
+      header: (
+        <EntitySummary
+          image={
+            selectedRow.primaryImageUrl !== null ? (
+              <Image
+                src={selectedRow.primaryImageUrl}
+                width={56}
+                height={56}
+                preview={false}
+                style={{ objectFit: 'cover', borderRadius: 8 }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: 56,
+                  height: 56,
+                  borderRadius: 8,
+                  background: colors.neutralBg,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: colors.textTertiary,
+                  fontSize: 11,
+                }}
+              >
+                无图
+              </div>
+            )
+          }
+          title={selectedRow.skuCode}
+          subtitle={selectedRow.nameZh}
+          badge={
+            <StatusBadge
+              tone={SKU_STATUS_META[selectedRow.status]?.tone ?? 'neutral'}
+              label={SKU_STATUS_META[selectedRow.status]?.label ?? selectedRow.status}
+              hint={selectedRow.status}
+            />
+          }
+        />
+      ),
+      children: (
+        <>
+          <ContextSection title="库存">
+            {selectedInventory.isLoading ? (
+              <ContextMetric label="加载中…" value="—" />
+            ) : totals === undefined ? (
+              <span style={{ fontSize: 12.5, color: colors.textTertiary }}>暂无库存记录</span>
+            ) : (
+              <>
+                <ContextMetric label="On Hand" value={fmtQty(totals.onHandQty)} strong />
+                <ContextMetric label="Reserved" value={fmtQty(totals.reservedQty)} />
+                <ContextMetric label="可售" value={fmtQty(totals.sellableAvailableQty)} strong />
+              </>
+            )}
+          </ContextSection>
+          <ContextSection title="映射与标识">
+            <ContextMetric
+              label="平台映射"
+              value={
+                selectedRow.listingCount > 0 ? `${selectedRow.listingCount} 个 Listing` : '未映射'
+              }
+            />
+            <ContextMetric label="主条码" value={selectedRow.primaryBarcode ?? '—'} />
+            <ContextMetric
+              label="成本"
+              value={
+                selectedRow.latestPurchasePrice !== null
+                  ? `¥${selectedRow.latestPurchasePrice}`
+                  : '—'
+              }
+            />
+          </ContextSection>
+          <ContextAction>
+            <Button block onClick={() => setDrawerId(selectedRow.id)}>
+              打开完整详情
+            </Button>
+          </ContextAction>
+        </>
+      ),
+    };
+  }, [selectedRow, selectedInventory.data, selectedInventory.isLoading, list.data, rows.length]);
+  useContextRail(railContent);
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size="middle">
-      <Space wrap>
+    <div>
+      <PageHeader
+        title="SKU管理"
+        description="管理内部 SKU、条码、成本、库存及平台映射"
+        primary={
+          <Button type="primary" onClick={() => setCreateOpen(true)}>
+            新增SKU
+          </Button>
+        }
+      />
+
+      <FilterBar
+        actions={
+          <>
+            {(keyword !== '' ||
+              brandId !== undefined ||
+              categoryId !== undefined ||
+              status !== undefined ||
+              hasListing !== undefined) && (
+              <Button
+                onClick={() => {
+                  setKeyword('');
+                  setBrandId(undefined);
+                  setCategoryId(undefined);
+                  setStatus(undefined);
+                  setHasListing(undefined);
+                  setPage(1);
+                }}
+              >
+                清除筛选
+              </Button>
+            )}
+          </>
+        }
+      >
         <Input.Search
           placeholder="搜索 SKU / 名称 / 型号"
           allowClear
@@ -227,12 +452,59 @@ export function SkusPage() {
             setPage(1);
             setKeyword(value);
           }}
-          style={{ width: 260 }}
+          style={{ width: 240 }}
+          aria-label="搜索 SKU"
+        />
+        <Select
+          allowClear
+          placeholder="品牌"
+          style={{ width: 140 }}
+          showSearch
+          optionFilterProp="label"
+          value={brandId}
+          onChange={(value) => {
+            setPage(1);
+            setBrandId(value);
+          }}
+          options={(brands.data?.data ?? [])
+            .filter((brand) => brand.status === 'ACTIVE')
+            .map((brand) => ({ value: brand.id, label: brand.nameZh }))}
+        />
+        <Select
+          allowClear
+          placeholder="类目"
+          style={{ width: 140 }}
+          showSearch
+          optionFilterProp="label"
+          value={categoryId}
+          onChange={(value) => {
+            setPage(1);
+            setCategoryId(value);
+          }}
+          options={(categories.data?.data ?? [])
+            .filter((category) => category.status === 'ACTIVE')
+            .map((category) => ({ value: category.id, label: category.nameZh }))}
+        />
+        <Select
+          allowClear
+          placeholder="状态"
+          style={{ width: 110 }}
+          value={status}
+          onChange={(value) => {
+            setPage(1);
+            setStatus(value);
+          }}
+          options={[
+            { value: 'ACTIVE', label: '启用' },
+            { value: 'INACTIVE', label: '停用' },
+            { value: 'DRAFT', label: '草稿' },
+          ]}
         />
         <Select
           allowClear
           placeholder="平台映射"
-          style={{ width: 140 }}
+          style={{ width: 130 }}
+          value={hasListing}
           onChange={(value) => {
             setPage(1);
             setHasListing(value);
@@ -242,85 +514,202 @@ export function SkusPage() {
             { value: 'false', label: '未映射' },
           ]}
         />
-        <Button type="primary" onClick={() => setCreateOpen(true)}>
-          新建SKU
-        </Button>
-      </Space>
+      </FilterBar>
 
-      <Table<SkuRow>
-        rowKey="id"
-        loading={list.isLoading}
-        dataSource={list.data?.data ?? []}
-        pagination={{
-          current: page,
-          pageSize: 50,
-          total: list.data?.meta.total ?? 0,
-          onChange: setPage,
-          showSizeChanger: false,
-        }}
-        onRow={(record) => ({
-          onClick: () => setDrawerId(record.id),
-          style: { cursor: 'pointer' },
-        })}
-        scroll={{ x: 1200 }}
-        columns={[
-          {
-            title: '图片',
-            width: 70,
-            render: (_, record) =>
-              record.primaryImageUrl !== null ? (
-                <Image
-                  src={record.primaryImageUrl}
-                  width={44}
-                  height={44}
-                  style={{ objectFit: 'cover' }}
-                />
-              ) : (
-                '-'
+      <SectionCard flush>
+        <DataTable<SkuRow>
+          rowKey="id"
+          loading={list.isLoading}
+          dataSource={rows}
+          pagination={{
+            current: page,
+            pageSize: 50,
+            total: list.data?.meta.total ?? 0,
+            onChange: setPage,
+            showSizeChanger: false,
+            showTotal: (total) => `共 ${total} 个 SKU`,
+          }}
+          rowClassName={(record) => (record.id === selectedId ? 'wcies-row-selected' : '')}
+          onRow={(record) => ({
+            onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+            style: {
+              cursor: 'pointer',
+              background: record.id === selectedId ? colors.primarySoft : undefined,
+            },
+          })}
+          scroll={{ x: 1080 }}
+          emptyTitle="没有匹配的 SKU"
+          emptyDescription="调整筛选条件或新增 SKU。"
+          columns={[
+            {
+              title: '商品',
+              key: 'product',
+              width: 300,
+              render: (_: unknown, record: SkuRow) => (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  {record.primaryImageUrl !== null ? (
+                    <Image
+                      src={record.primaryImageUrl}
+                      width={44}
+                      height={44}
+                      preview={false}
+                      style={{ objectFit: 'cover', borderRadius: 8, flexShrink: 0 }}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: 8,
+                        background: colors.neutralBg,
+                        flexShrink: 0,
+                      }}
+                    />
+                  )}
+                  <div style={{ minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontSize: 13.5,
+                        fontWeight: 550,
+                        color: colors.textPrimary,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {record.nameZh}
+                    </div>
+                    <div style={{ fontSize: 12.5, color: colors.textSecondary, marginTop: 1 }}>
+                      {record.skuCode}
+                      {record.brandName !== null && ` · ${record.brandName}`}
+                    </div>
+                  </div>
+                </div>
               ),
-          },
-          { title: 'SKU Code', dataIndex: 'skuCode' },
-          { title: '中文名称', dataIndex: 'nameZh', ellipsis: true },
-          { title: 'Product', dataIndex: 'productName', ellipsis: true },
-          { title: '型号', dataIndex: 'model', width: 100 },
-          { title: '颜色', dataIndex: 'color', width: 80 },
-          { title: '尺寸', dataIndex: 'size', width: 80 },
-          { title: '主条码', dataIndex: 'primaryBarcode', width: 140 },
-          { title: '重量(g)', dataIndex: 'weightG', width: 90 },
-          { title: '最新采购价(CNY)', dataIndex: 'latestPurchasePrice', width: 130 },
-          {
-            title: 'SN',
-            dataIndex: 'serialTracking',
-            width: 60,
-            render: (v: boolean) => (v ? '是' : '否'),
-          },
-          { title: 'Listing数', dataIndex: 'listingCount', width: 90 },
-          {
-            title: '状态',
-            dataIndex: 'status',
-            width: 80,
-            render: (value: string) => (
-              <Tag color={value === 'ACTIVE' ? 'green' : 'default'}>
-                {value === 'ACTIVE' ? '启用' : value}
-              </Tag>
-            ),
-          },
-        ]}
-      />
+            },
+            {
+              title: '型号 / 规格',
+              key: 'spec',
+              width: 150,
+              render: (_: unknown, record: SkuRow) => {
+                const spec = [record.model, record.color, record.size].filter(
+                  (part) => part !== null && part !== '',
+                );
+                return spec.length > 0 ? spec.join(' / ') : '—';
+              },
+            },
+            {
+              title: '条码',
+              dataIndex: 'primaryBarcode',
+              width: 150,
+              render: (value: string | null) => value ?? '—',
+            },
+            {
+              title: '成本',
+              dataIndex: 'latestPurchasePrice',
+              width: 100,
+              align: 'right',
+              render: (value: number | null) => (value !== null ? `¥${value}` : '—'),
+            },
+            {
+              title: '平台映射',
+              dataIndex: 'listingCount',
+              width: 110,
+              align: 'right',
+              render: (value: number) =>
+                value > 0 ? (
+                  <span style={{ color: colors.primary, fontWeight: 550 }}>{value} 个</span>
+                ) : (
+                  <span style={{ color: colors.textTertiary }}>未映射</span>
+                ),
+            },
+            {
+              title: '状态',
+              dataIndex: 'status',
+              width: 100,
+              render: (value: string) => (
+                <StatusBadge
+                  tone={SKU_STATUS_META[value]?.tone ?? 'neutral'}
+                  label={SKU_STATUS_META[value]?.label ?? value}
+                  hint={value}
+                  showDot={false}
+                />
+              ),
+            },
+            {
+              title: '更新时间',
+              dataIndex: 'updatedAt',
+              width: 110,
+              render: (value: string) => value.slice(5, 10),
+            },
+            {
+              title: '操作',
+              key: 'actions',
+              width: 110,
+              fixed: 'right',
+              render: (_: unknown, record: SkuRow) => (
+                <ActionMenu
+                  primary={
+                    <Button
+                      type="link"
+                      size="small"
+                      style={{ paddingInline: 4 }}
+                      onClick={() => setDrawerId(record.id)}
+                    >
+                      查看
+                    </Button>
+                  }
+                  items={[
+                    {
+                      key: 'view',
+                      label: '查看详情',
+                      onClick: () => setDrawerId(record.id),
+                    },
+                    record.status === 'ACTIVE'
+                      ? {
+                          key: 'deactivate',
+                          label: '停用',
+                          danger: true,
+                          onClick: () =>
+                            statusMutation.mutate({ id: record.id, action: 'deactivate' }),
+                        }
+                      : {
+                          key: 'activate',
+                          label: '启用',
+                          onClick: () =>
+                            statusMutation.mutate({ id: record.id, action: 'activate' }),
+                        },
+                  ]}
+                />
+              ),
+            },
+          ]}
+        />
+      </SectionCard>
 
       <SkuCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
 
       <Drawer
-        title={sku ? `${sku.skuCode} ${sku.nameZh}` : 'SKU详情'}
-        width={860}
         open={drawerId !== null}
         onClose={() => setDrawerId(null)}
+        size={800}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 16, fontWeight: 650 }}>{sku ? sku.skuCode : 'SKU详情'}</span>
+            {sku !== undefined && (
+              <StatusBadge
+                tone={SKU_STATUS_META[sku.status]?.tone ?? 'neutral'}
+                label={SKU_STATUS_META[sku.status]?.label ?? sku.status}
+                hint={sku.status}
+              />
+            )}
+          </div>
+        }
         extra={
           sku !== undefined && (
-            <Space>
+            <>
               {sku.status !== 'ACTIVE' && (
                 <Button
-                  size="small"
                   type="primary"
                   onClick={() => statusMutation.mutate({ id: sku.id, action: 'activate' })}
                 >
@@ -332,77 +721,69 @@ export function SkusPage() {
                   title="确认停用该SKU？"
                   onConfirm={() => statusMutation.mutate({ id: sku.id, action: 'deactivate' })}
                 >
-                  <Button size="small" danger>
-                    停用
-                  </Button>
+                  <Button danger>停用</Button>
                 </Popconfirm>
               )}
-            </Space>
+            </>
           )
         }
+        styles={{ body: { padding: 0 } }}
+        destroyOnHidden
       >
         <Tabs
+          style={{ paddingInline: 20 }}
           items={[
             {
               key: 'base',
-              label: '基本信息',
+              label: '概览',
               children: sku !== undefined && (
-                <Descriptions
-                  column={2}
-                  size="small"
+                <InfoGrid
                   items={[
-                    { key: 'code', label: 'SKU Code', children: sku.skuCode },
-                    { key: 'name', label: '中文名称', children: sku.nameZh },
+                    { label: 'SKU Code', children: sku.skuCode },
+                    { label: '中文名称', children: sku.nameZh },
                     {
-                      key: 'product',
                       label: '商品',
                       children: `${sku.productCode} ${sku.productName}`,
                     },
-                    { key: 'model', label: '型号', children: sku.model ?? '-' },
-                    { key: 'color', label: '颜色', children: sku.color ?? '-' },
-                    { key: 'size', label: '尺寸', children: sku.size ?? '-' },
-                    { key: 'weight', label: '重量(g)', children: sku.weightG ?? '-' },
+                    { label: '品牌', children: sku.brandName ?? '—' },
+                    { label: '型号', children: sku.model ?? '—' },
                     {
-                      key: 'price',
+                      label: '颜色 / 尺寸',
+                      children: [sku.color, sku.size].filter((v) => v !== null).join(' / ') || '—',
+                    },
+                    { label: '重量(g)', children: sku.weightG ?? '—' },
+                    {
                       label: '最新采购价(CNY)',
                       children:
-                        sku.latestPurchasePrice !== null ? `¥${sku.latestPurchasePrice}` : '-',
+                        sku.latestPurchasePrice !== null ? `¥${sku.latestPurchasePrice}` : '—',
                     },
                     {
-                      key: 'purchaseUrl',
                       label: '采购链接',
+                      span: 2,
                       children:
                         sku.purchaseUrl !== null && sku.purchaseUrl !== '' ? (
                           <a href={sku.purchaseUrl} target="_blank" rel="noreferrer">
                             {sku.purchaseUrl}
                           </a>
                         ) : (
-                          '-'
+                          '—'
                         ),
                     },
-                    { key: 'sn', label: 'SN管理', children: sku.serialTracking ? '是' : '否' },
-                    {
-                      key: 'status',
-                      label: '状态',
-                      children:
-                        sku.status === 'ACTIVE'
-                          ? '启用'
-                          : sku.status === 'INACTIVE'
-                            ? '停用'
-                            : sku.status,
-                    },
+                    { label: 'SN管理', children: sku.serialTracking ? '是' : '否' },
+                    { label: '平台映射', children: `${sku.listingCount} 个 Listing` },
                   ]}
                 />
               ),
             },
             {
               key: 'barcodes',
-              label: '条码',
+              label: `条码 (${barcodes.data?.data.length ?? 0})`,
               children: (
-                <Space direction="vertical" style={{ width: '100%' }}>
-                  <Space>
+                <div
+                  style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingBottom: 20 }}
+                >
+                  <div style={{ display: 'flex', gap: 8 }}>
                     <Button
-                      size="small"
                       type="primary"
                       onClick={() => setBarcodeModalOpen(true)}
                       disabled={drawerId === null}
@@ -410,27 +791,28 @@ export function SkusPage() {
                       添加条码
                     </Button>
                     <Button
-                      size="small"
                       onClick={() => generateInternalMutation.mutate()}
                       disabled={drawerId === null}
                     >
                       生成内部条码
                     </Button>
-                  </Space>
-                  <Table<BarcodeRow>
+                  </div>
+                  <DataTable<BarcodeRow>
                     rowKey="id"
-                    size="small"
                     dataSource={barcodes.data?.data ?? []}
                     pagination={false}
+                    loading={barcodes.isLoading}
+                    emptyTitle="暂无条码"
                     columns={[
                       { title: '条码', dataIndex: 'barcode' },
-                      { title: '类型', dataIndex: 'barcodeType' },
+                      { title: '类型', dataIndex: 'barcodeType', width: 120 },
                       {
                         title: '主条码',
                         dataIndex: 'isPrimary',
+                        width: 120,
                         render: (v: boolean, record) =>
                           v ? (
-                            <Tag color="blue">主</Tag>
+                            <StatusBadge tone="info" label="主条码" showDot={false} />
                           ) : (
                             <Button
                               size="small"
@@ -442,6 +824,7 @@ export function SkusPage() {
                       },
                       {
                         title: '操作',
+                        width: 80,
                         render: (_, record) => (
                           <Popconfirm
                             title="确认删除该条码？"
@@ -455,35 +838,35 @@ export function SkusPage() {
                       },
                     ]}
                   />
-                </Space>
+                </div>
               ),
             },
             {
               key: 'images',
-              label: '图片',
+              label: `图片 (${images.data?.data.length ?? 0})`,
               children: (
-                <Space direction="vertical" style={{ width: '100%' }}>
+                <div
+                  style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingBottom: 20 }}
+                >
                   <Upload
                     accept="image/png,image/jpeg,image/webp,image/gif"
                     showUploadList={false}
                     customRequest={({ file }) => uploadMutation.mutate(file as File)}
                   >
-                    <Button size="small" type="primary">
-                      上传图片
-                    </Button>
+                    <Button type="primary">上传图片</Button>
                   </Upload>
-                  <Space wrap>
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                     {(images.data?.data ?? []).map((image) => (
                       <div key={image.id} style={{ textAlign: 'center' }}>
                         <Image
                           src={image.url}
-                          width={120}
-                          height={120}
-                          style={{ objectFit: 'cover' }}
+                          width={110}
+                          height={110}
+                          style={{ objectFit: 'cover', borderRadius: 8 }}
                         />
-                        <div>
+                        <div style={{ paddingTop: 4 }}>
                           {image.isPrimary ? (
-                            <Tag color="blue">主图</Tag>
+                            <StatusBadge tone="info" label="主图" showDot={false} />
                           ) : (
                             <Button
                               size="small"
@@ -496,21 +879,24 @@ export function SkusPage() {
                         </div>
                       </div>
                     ))}
-                  </Space>
-                </Space>
+                  </div>
+                </div>
               ),
             },
             {
               key: 'mappings',
               label: `平台映射 (${mappings.data?.data.length ?? 0})`,
               children: (
-                <Table<MappingRow>
+                <DataTable<MappingRow>
                   rowKey="id"
                   size="small"
                   dataSource={mappings.data?.data ?? []}
                   pagination={false}
+                  loading={mappings.isLoading}
+                  emptyTitle="暂无平台映射"
+                  emptyDescription="该 SKU 尚未映射到任何平台 Listing。"
                   columns={[
-                    { title: '平台', dataIndex: 'platformCode', width: 80 },
+                    { title: '平台', dataIndex: 'platformCode', width: 90 },
                     { title: '店铺', dataIndex: 'storeCode', width: 110 },
                     { title: 'Platform Product ID', dataIndex: 'platformProductId' },
                     { title: 'Offer ID', dataIndex: 'offerId' },
@@ -525,7 +911,7 @@ export function SkusPage() {
                             {value ?? record.url}
                           </a>
                         ) : (
-                          (value ?? '-')
+                          (value ?? '—')
                         ),
                     },
                   ]}
@@ -571,6 +957,6 @@ export function SkusPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </Space>
+    </div>
   );
 }

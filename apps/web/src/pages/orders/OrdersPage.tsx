@@ -1,29 +1,33 @@
 import { useMemo, useState } from 'react';
-import {
-  App as AntdApp,
-  Badge,
-  Button,
-  Descriptions,
-  Drawer,
-  Empty,
-  Input,
-  Modal,
-  Select,
-  Space,
-  Table,
-  Tabs,
-  Tag,
-  Timeline,
-  Typography,
-} from 'antd';
+import { App as AntdApp, Button, Drawer, Input, Modal, Select, Tabs, Timeline } from 'antd';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Link, useSearchParams } from 'react-router';
 import { apiPost, useApiQuery } from '../../api/hooks';
+import {
+  ActionMenu,
+  ContextAction,
+  ContextMetric,
+  ContextSection,
+  DataTable,
+  EntitySummary,
+  ERP_STATUS_META,
+  FULFILLMENT_STATUS_META,
+  FilterBar,
+  InfoGrid,
+  PageHeader,
+  PlatformTag,
+  SectionCard,
+  StatusBadge,
+  colors,
+  useContextRail,
+  ContextRailContent,
+} from '../../design-system';
 
 /**
- * Orders (Sprint 3 task §61-§65): list with rollup counts + open-exception
- * badges, detail drawer (items / reservations with multi-bin lines / status
- * history / exceptions / interceptions / picking), cancel + backorder retry
- * and the admin normalized-ingest test entry (task §65).
+ * Orders workbench (redesign task §37-§43): status tabs with counts, dense
+ * table, order context rail (risk-first: mapping failed / backordered with
+ * retry) and a full detail drawer. Cancel / retry-allocation / create-picking
+ * / ingest flows are the unchanged Sprint 3 business logic.
  */
 
 interface OrderListItem {
@@ -107,26 +111,17 @@ interface OrderDetail {
   }>;
 }
 
-const ERP_STATUS_COLORS: Record<string, string> = {
-  NEW: 'default',
-  ALLOCATING: 'processing',
-  READY_TO_PICK: 'blue',
-  PARTIALLY_BACKORDERED: 'orange',
-  BACKORDERED: 'red',
-  PICKING: 'cyan',
-  PICKED: 'green',
-  CANCELLED: 'default',
-  EXCEPTION: 'red',
-};
-const ERP_STATUSES = Object.keys(ERP_STATUS_COLORS);
+type Envelope<T> = { data: T; meta: { total: number } };
 
-const FULFILLMENT_COLORS: Record<string, string> = {
-  PENDING: 'default',
-  RESERVED: 'blue',
-  BACKORDERED: 'red',
-  PICKED: 'green',
-  RELEASED: 'default',
-};
+/** Status tabs (task §39) — ERP status mapping per tab. */
+const STATUS_TABS: Array<{ key: string; label: string; erpStatus?: string; risk?: boolean }> = [
+  { key: 'all', label: '全部' },
+  { key: 'pending', label: '待处理', erpStatus: 'NEW' },
+  { key: 'picking', label: '拣货中', erpStatus: 'PICKING' },
+  { key: 'ready', label: '待发货', erpStatus: 'READY_TO_PICK' },
+  { key: 'shipped', label: '已发货', erpStatus: 'SHIPPED' },
+  { key: 'exception', label: '异常', erpStatus: 'EXCEPTION' },
+];
 
 /** 固定 JSON Fixtures（task §66 Case A–F 的单店可复用形态） */
 const FIXTURES: Array<{ label: string; json: Record<string, unknown> }> = [
@@ -163,13 +158,20 @@ const FIXTURES: Array<{ label: string; json: Record<string, unknown> }> = [
   },
 ];
 
+function fmtDateTime(value: string): string {
+  return new Date(value).toLocaleString('zh-CN', { hour12: false });
+}
+
 export function OrdersPage() {
   const { message, modal } = AntdApp.useApp();
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
-  const [keyword, setKeyword] = useState('');
-  const [erpStatus, setErpStatus] = useState<string | undefined>();
+  const [keyword, setKeyword] = useState(() => searchParams.get('keyword') ?? '');
+  const [activeTab, setActiveTab] = useState('all');
   const [storeId, setStoreId] = useState<string | undefined>();
+  const [platformFilter, setPlatformFilter] = useState<string | undefined>();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [ingestOpen, setIngestOpen] = useState(false);
   const [ingestJson, setIngestJson] = useState(
@@ -180,30 +182,43 @@ export function OrdersPage() {
     ),
   );
 
-  const query = useApiQuery<{ data: OrderListItem[]; meta: { total: number } }>(
+  const tabErpStatus = STATUS_TABS.find((tab) => tab.key === activeTab)?.erpStatus;
+  const query = useApiQuery<Envelope<OrderListItem[]>>(
     '/api/v1/orders',
     {
       page,
       pageSize: 20,
       ...(keyword ? { keyword } : {}),
-      ...(erpStatus ? { erpStatus } : {}),
+      ...(tabErpStatus ? { erpStatus: tabErpStatus } : {}),
       ...(storeId ? { storeId } : {}),
     },
-    ['orders', page, keyword, erpStatus, storeId],
+    ['orders', page, keyword, tabErpStatus, storeId],
   );
 
-  const storesQuery = useApiQuery<{ data: Array<{ id: string; name: string; storeCode: string }> }>(
-    '/api/v1/stores',
-    { page: 1, pageSize: 100 },
-    ['stores-for-orders'],
+  // Tab counts: light meta.total queries for the headline tabs (task §39).
+  const pendingCount = useApiQuery<Envelope<OrderListItem[]>>(
+    '/api/v1/orders',
+    { page: 1, pageSize: 1, erpStatus: 'NEW' },
+    ['orders-count-pending'],
+  );
+  const exceptionCount = useApiQuery<Envelope<OrderListItem[]>>(
+    '/api/v1/orders',
+    { page: 1, pageSize: 1, erpStatus: 'EXCEPTION' },
+    ['orders-count-exception'],
   );
 
-  const detailQuery = useApiQuery<{ data: OrderDetail }>(
+  const storesQuery = useApiQuery<
+    Envelope<Array<{ id: string; name: string; storeCode: string; platformCode: string }>>
+  >('/api/v1/stores', { page: 1, pageSize: 100 }, ['stores-for-orders']);
+
+  // One cached detail query shared by the rail preview and the drawer (§68).
+  const railDetailId = selectedId ?? detailId;
+  const detailQuery = useApiQuery<Envelope<OrderDetail> & { data: OrderDetail }>(
     '/api/v1/orders/{id}',
     {},
-    ['order-detail', detailId],
-    detailId === null ? undefined : { id: detailId },
-    detailId !== null,
+    ['order-detail', railDetailId],
+    railDetailId === null ? undefined : { id: railDetailId },
+    railDetailId !== null,
   );
 
   const cancelMutation = useMutation({
@@ -272,102 +287,158 @@ export function OrdersPage() {
 
   const list = query.data?.data ?? [];
   const detail = detailId !== null ? detailQuery.data?.data : undefined;
-
-  const columns = useMemo(
-    () => [
-      { title: '订单号', dataIndex: 'orderNo', key: 'orderNo', width: 130 },
-      {
-        title: '平台 / 店铺',
-        key: 'platform',
-        width: 150,
-        render: (_: unknown, row: OrderListItem) => `${row.platformCode} / ${row.storeName}`,
-      },
-      { title: '平台订单号', dataIndex: 'platformOrderId', key: 'platformOrderId', width: 150 },
-      {
-        title: '下单时间',
-        dataIndex: 'orderedAt',
-        key: 'orderedAt',
-        width: 165,
-        render: (value: string) => new Date(value).toLocaleString('zh-CN'),
-      },
-      {
-        title: 'ERP 状态',
-        dataIndex: 'erpStatus',
-        key: 'erpStatus',
-        width: 170,
-        render: (value: string, row: OrderListItem) => (
-          <Space size={4} wrap>
-            <Badge color={ERP_STATUS_COLORS[value] ?? 'default'} text={value} />
-            {row.openExceptionsCount > 0 && (
-              <Badge count={row.openExceptionsCount} title="未处理异常" />
-            )}
-          </Space>
-        ),
-      },
-      {
-        title: '平台状态',
-        dataIndex: 'platformStatus',
-        key: 'platformStatus',
-        width: 130,
-        render: (v: string | null) => v ?? '-',
-      },
-      {
-        title: '行数',
-        key: 'items',
-        width: 190,
-        render: (_: unknown, row: OrderListItem) => {
-          if (row.mappingFailedCount > 0) {
-            return (
-              <Space size={4}>
-                <span>{row.itemsCount}</span>
-                <Tag color="purple">映射失败 {row.mappingFailedCount}</Tag>
-              </Space>
-            );
-          }
-          return (
-            <Space size={4}>
-              <span>{row.itemsCount}</span>
-              {row.reservedCount > 0 && <Tag color="blue">RESERVED {row.reservedCount}</Tag>}
-              {row.backorderedCount > 0 && <Tag color="red">缺货 {row.backorderedCount}</Tag>}
-              {row.pickedCount > 0 && <Tag color="green">PICKED {row.pickedCount}</Tag>}
-            </Space>
-          );
-        },
-      },
-      {
-        title: '操作',
-        key: 'actions',
-        width: 150,
-        render: (_: unknown, row: OrderListItem) => (
-          <Space>
-            <Button size="small" onClick={() => setDetailId(row.id)}>
-              详情
-            </Button>
-            {row.erpStatus !== 'CANCELLED' && (
-              <Button
-                size="small"
-                danger
-                onClick={() => {
-                  modal.confirm({
-                    title: `取消订单 ${row.orderNo}？`,
-                    content: 'Reserved 行将释放库存；Picked 行将创建拦截任务（不自动恢复库存）。',
-                    okText: '取消订单',
-                    cancelText: '返回',
-                    onOk: () => {
-                      cancelMutation.mutate(row.id);
-                    },
-                  });
-                }}
-              >
-                取消
-              </Button>
-            )}
-          </Space>
-        ),
-      },
-    ],
-    [modal, cancelMutation],
+  const selectedRow = useMemo(
+    () => list.find((row) => row.id === selectedId) ?? null,
+    [list, selectedId],
   );
+  const railDetail = selectedId !== null ? detailQuery.data?.data : undefined;
+
+  // ---- Context rail: risk-first order preview (task §41-§42) ----
+  const railContent = useMemo<ContextRailContent>(() => {
+    if (selectedRow === null) {
+      return {
+        defaultCollapsed: true,
+        children: (
+          <ContextSection title="订单概览">
+            <ContextMetric label="当前筛选" value={`${query.data?.meta.total ?? 0} 单`} />
+            <ContextMetric label="待处理（NEW）" value={pendingCount.data?.meta.total ?? 0} />
+            <ContextMetric
+              label={<span style={{ color: colors.danger }}>异常（EXCEPTION）</span>}
+              value={exceptionCount.data?.meta.total ?? 0}
+            />
+            <span
+              style={{
+                fontSize: 12.5,
+                color: colors.textTertiary,
+                display: 'block',
+                paddingTop: 8,
+              }}
+            >
+              点击订单行快速预览风险与状态；异常订单可直接在右栏重试分配。
+            </span>
+          </ContextSection>
+        ),
+      };
+    }
+    const statusMeta = ERP_STATUS_META[selectedRow.erpStatus] ?? {
+      tone: 'neutral' as const,
+      label: selectedRow.erpStatus,
+    };
+    // Risk section: mapping failed (red) takes priority over backordered (orange).
+    const riskItems =
+      railDetail?.items.filter(
+        (item) =>
+          item.mappingStatus === 'FAILED' ||
+          item.fulfillmentStatus === 'BACKORDERED' ||
+          item.fulfillmentStatus === 'PENDING',
+      ) ?? [];
+    return {
+      defaultCollapsed: true,
+      header: (
+        <EntitySummary
+          title={selectedRow.orderNo}
+          subtitle={null}
+          badge={
+            <StatusBadge
+              tone={statusMeta.tone}
+              label={statusMeta.label}
+              hint={selectedRow.erpStatus}
+            />
+          }
+          meta={<PlatformTag code={selectedRow.platformCode} suffix={selectedRow.storeName} />}
+        />
+      ),
+      children: (
+        <>
+          {selectedRow.mappingFailedCount > 0 && (
+            <ContextSection title="风险">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <StatusBadge
+                  tone="danger"
+                  label={`ORDER_SKU_MAPPING_FAILED ×${selectedRow.mappingFailedCount}`}
+                />
+                <span style={{ fontSize: 12.5, color: colors.textSecondary }}>
+                  平台 SKU 无法映射内部 SKU，请在 SKU映射 中补齐映射后重试分配。
+                </span>
+              </div>
+            </ContextSection>
+          )}
+          {selectedRow.mappingFailedCount === 0 && selectedRow.backorderedCount > 0 && (
+            <ContextSection title="风险">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <StatusBadge
+                  tone="warning"
+                  label={`BACKORDERED ×${selectedRow.backorderedCount}`}
+                />
+                {riskItems
+                  .filter((item) => item.skuId !== null)
+                  .slice(0, 3)
+                  .map((item) => (
+                    <div
+                      key={item.id}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <span style={{ fontSize: 13, color: colors.textSecondary }}>
+                        {item.skuCode} ×{Number(item.quantity)}
+                      </span>
+                      <Button
+                        size="small"
+                        loading={retryMutation.isPending}
+                        style={{ marginLeft: 'auto' }}
+                        onClick={() => retryMutation.mutate(item.id)}
+                      >
+                        重新尝试分配
+                      </Button>
+                    </div>
+                  ))}
+              </div>
+            </ContextSection>
+          )}
+          <ContextSection title="订单概况">
+            <ContextMetric label="商品行" value={selectedRow.itemsCount} />
+            <ContextMetric label="Reserved" value={selectedRow.reservedCount} />
+            <ContextMetric label="Picked" value={selectedRow.pickedCount} />
+            <ContextMetric
+              label="异常"
+              value={
+                selectedRow.openExceptionsCount > 0 ? (
+                  <span style={{ color: colors.danger }}>{selectedRow.openExceptionsCount}</span>
+                ) : (
+                  0
+                )
+              }
+            />
+            <ContextMetric label="下单时间" value={fmtDateTime(selectedRow.orderedAt)} />
+          </ContextSection>
+          {railDetail !== undefined && railDetail.history.length > 0 && (
+            <ContextSection title="最近状态">
+              <Timeline
+                items={railDetail.history.slice(0, 4).map((entry) => ({
+                  children: (
+                    <div>
+                      <div style={{ fontSize: 13, color: colors.textPrimary }}>
+                        {entry.toStatus}
+                      </div>
+                      <div style={{ fontSize: 12, color: colors.textTertiary }}>
+                        {fmtDateTime(entry.createdAt)}
+                      </div>
+                    </div>
+                  ),
+                }))}
+              />
+            </ContextSection>
+          )}
+          <ContextAction>
+            <Button block onClick={() => setDetailId(selectedRow.id)}>
+              查看完整订单
+            </Button>
+          </ContextAction>
+        </>
+      ),
+    };
+  }, [selectedRow, railDetail, retryMutation, query.data, pendingCount.data, exceptionCount.data]);
+  useContextRail(railContent);
 
   const itemColumns = [
     { title: '#', dataIndex: 'lineNo', key: 'lineNo', width: 40 },
@@ -375,58 +446,64 @@ export function OrdersPage() {
       title: 'SKU',
       key: 'sku',
       render: (_: unknown, row: OrderItem) =>
-        row.skuId === null ? <Tag color="purple">无法映射</Tag> : `${row.skuCode} ${row.skuName}`,
+        row.skuId === null ? (
+          <StatusBadge tone="purple" label="无法映射" hint="ORDER_SKU_MAPPING_FAILED" />
+        ) : (
+          <div>
+            <div style={{ fontWeight: 550 }}>{row.skuCode}</div>
+            <div style={{ fontSize: 12.5, color: colors.textSecondary }}>{row.skuName}</div>
+          </div>
+        ),
     },
-    { title: '数量', dataIndex: 'quantity', key: 'quantity', width: 80 },
+    { title: '数量', dataIndex: 'quantity', key: 'quantity', width: 70, align: 'right' as const },
     {
       title: '履约状态',
       dataIndex: 'fulfillmentStatus',
       key: 'fulfillmentStatus',
       width: 130,
-      render: (value: string) => <Tag color={FULFILLMENT_COLORS[value] ?? 'default'}>{value}</Tag>,
-    },
-    {
-      title: '映射状态',
-      dataIndex: 'mappingStatus',
-      key: 'mappingStatus',
-      width: 100,
-      render: (value: string) =>
-        value === 'FAILED' ? <Tag color="purple">FAILED</Tag> : <Tag>{value}</Tag>,
+      render: (value: string) => (
+        <StatusBadge tone={FULFILLMENT_STATUS_META[value] ?? 'neutral'} label={value} />
+      ),
     },
     {
       title: '库存分配（Bin × 数量）',
       key: 'bins',
       render: (_: unknown, row: OrderItem) =>
         row.reservation === null ? (
-          '-'
+          '—'
         ) : (
-          <Space size={4} wrap>
-            <Tag>{row.reservation.reservationNo}</Tag>
+          <span style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+              {row.reservation.reservationNo}
+            </span>
             {row.reservation.lines.map((line, index) => (
-              <Tag key={index} color={line.pickedQty === line.quantity ? 'green' : 'geekblue'}>
-                {line.binCode} ×{Number(line.quantity)}
-              </Tag>
+              <StatusBadge
+                key={index}
+                tone={line.pickedQty === line.quantity ? 'success' : 'info'}
+                label={`${line.binCode} ×${Number(line.quantity)}`}
+                showDot={false}
+              />
             ))}
-          </Space>
+          </span>
         ),
     },
     {
       title: '异常',
       key: 'exceptions',
+      width: 200,
       render: (_: unknown, row: OrderItem) =>
         row.exceptions.length === 0 ? (
-          '-'
+          '—'
         ) : (
-          <Space size={4} wrap>
+          <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
             {row.exceptions.map((exception) => (
-              <Tag
+              <StatusBadge
                 key={exception.exceptionNo}
-                color={exception.status === 'OPEN' ? 'red' : 'default'}
-              >
-                {exception.exceptionType}
-              </Tag>
+                tone={exception.status === 'OPEN' ? 'danger' : 'neutral'}
+                label={exception.exceptionType}
+              />
             ))}
-          </Space>
+          </span>
         ),
     },
     {
@@ -443,8 +520,6 @@ export function OrdersPage() {
         return (
           <Button
             size="small"
-            type="primary"
-            ghost
             loading={retryMutation.isPending}
             onClick={() => retryMutation.mutate(row.id)}
           >
@@ -455,152 +530,421 @@ export function OrdersPage() {
     },
   ];
 
+  const tabLabel = (tab: (typeof STATUS_TABS)[number]): string => {
+    if (tab.key === 'all') {
+      return `全部 (${query.data?.meta.total ?? 0})`;
+    }
+    if (tab.key === 'pending') {
+      return `待处理 (${pendingCount.data?.meta.total ?? 0})`;
+    }
+    if (tab.key === 'exception') {
+      return `异常 (${exceptionCount.data?.meta.total ?? 0})`;
+    }
+    return tab.label;
+  };
+
   return (
     <div>
-      <Space style={{ marginBottom: 16 }} wrap>
+      <PageHeader
+        title="订单管理"
+        description="统一管理各平台订单及内部履约状态"
+        primary={
+          <Button type="primary" onClick={() => setIngestOpen(true)}>
+            摄入测试订单
+          </Button>
+        }
+        extra={
+          <Tabs
+            activeKey={activeTab}
+            onChange={(key) => {
+              setPage(1);
+              setActiveTab(key);
+            }}
+            items={STATUS_TABS.map((tab) => ({ key: tab.key, label: tabLabel(tab) }))}
+          />
+        }
+      />
+
+      <FilterBar>
         <Input.Search
           placeholder="订单号 / 平台订单号"
           allowClear
-          style={{ width: 260 }}
+          defaultValue={keyword}
           onSearch={(value) => {
             setPage(1);
             setKeyword(value);
           }}
-        />
-        <Select
-          allowClear
-          placeholder="ERP 状态"
-          style={{ width: 190 }}
-          options={ERP_STATUSES.map((value) => ({ value, label: value }))}
-          onChange={(value) => {
-            setPage(1);
-            setErpStatus(value);
-          }}
+          style={{ width: 240 }}
+          aria-label="搜索订单"
         />
         <Select
           allowClear
           placeholder="店铺"
           style={{ width: 200 }}
-          options={(storesQuery.data?.data ?? []).map((store) => ({
-            value: store.id,
-            label: `${store.storeCode} ${store.name}`,
-          }))}
+          showSearch
+          optionFilterProp="label"
+          options={(storesQuery.data?.data ?? [])
+            .filter(
+              (store) => platformFilter === undefined || store.platformCode === platformFilter,
+            )
+            .map((store) => ({
+              value: store.id,
+              label: `${store.platformCode} · ${store.storeCode} ${store.name}`,
+            }))}
+          value={storeId}
           onChange={(value) => {
             setPage(1);
             setStoreId(value);
           }}
         />
-        <Button type="primary" onClick={() => setIngestOpen(true)}>
-          摄入测试订单
-        </Button>
-      </Space>
+        <Select
+          allowClear
+          placeholder="平台"
+          style={{ width: 130 }}
+          options={[...new Set((storesQuery.data?.data ?? []).map((s) => s.platformCode))].map(
+            (code) => ({
+              value: code,
+              label: code,
+            }),
+          )}
+          value={platformFilter}
+          onChange={(value) => {
+            setPlatformFilter(value);
+            setStoreId(undefined);
+            setPage(1);
+          }}
+        />
+      </FilterBar>
 
-      <Table<OrderListItem>
-        rowKey="id"
-        size="middle"
-        loading={query.isLoading}
-        columns={columns}
-        dataSource={list}
-        pagination={{
-          current: page,
-          pageSize: 20,
-          total: query.data?.meta.total ?? 0,
-          showTotal: (total) => `共 ${total} 单`,
-          onChange: setPage,
-        }}
-      />
+      <SectionCard flush>
+        <DataTable<OrderListItem>
+          rowKey="id"
+          loading={query.isLoading}
+          dataSource={list}
+          pagination={{
+            current: page,
+            pageSize: 20,
+            total: query.data?.meta.total ?? 0,
+            showTotal: (total) => `共 ${total} 单`,
+            onChange: setPage,
+          }}
+          onRow={(record) => ({
+            onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+            style: {
+              cursor: 'pointer',
+              background: record.id === selectedId ? colors.primarySoft : undefined,
+            },
+          })}
+          emptyTitle="暂无订单"
+          emptyDescription="当前筛选下没有订单，可摄入测试订单验证流程。"
+          columns={[
+            { title: '订单号', dataIndex: 'orderNo', key: 'orderNo', width: 130 },
+            {
+              title: '平台 / 店铺',
+              key: 'platform',
+              width: 190,
+              render: (_: unknown, row: OrderListItem) => (
+                <PlatformTag code={row.platformCode} suffix={row.storeName} />
+              ),
+            },
+            {
+              title: '商品',
+              key: 'items',
+              width: 170,
+              render: (_: unknown, row: OrderListItem) => {
+                if (row.mappingFailedCount > 0) {
+                  return (
+                    <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                      <span>{row.itemsCount} 行</span>
+                      <StatusBadge tone="purple" label={`映射失败 ${row.mappingFailedCount}`} />
+                    </span>
+                  );
+                }
+                return (
+                  <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                    <span>{row.itemsCount} 行</span>
+                    {row.backorderedCount > 0 && (
+                      <StatusBadge tone="warning" label={`缺货 ${row.backorderedCount}`} />
+                    )}
+                    {row.reservedCount > 0 && (
+                      <StatusBadge
+                        tone="info"
+                        label={`Reserved ${row.reservedCount}`}
+                        showDot={false}
+                      />
+                    )}
+                  </span>
+                );
+              },
+            },
+            {
+              title: 'ERP 状态',
+              dataIndex: 'erpStatus',
+              key: 'erpStatus',
+              width: 130,
+              render: (value: string, row: OrderListItem) => (
+                <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                  <StatusBadge
+                    tone={ERP_STATUS_META[value]?.tone ?? 'neutral'}
+                    label={ERP_STATUS_META[value]?.label ?? value}
+                    hint={value}
+                    showDot={false}
+                  />
+                  {row.openExceptionsCount > 0 && (
+                    <span style={{ fontSize: 12, color: colors.danger, fontWeight: 600 }}>
+                      ×{row.openExceptionsCount}
+                    </span>
+                  )}
+                </span>
+              ),
+            },
+            {
+              title: '下单时间',
+              dataIndex: 'orderedAt',
+              key: 'orderedAt',
+              width: 150,
+              render: (value: string) => fmtDateTime(value),
+            },
+            {
+              title: '操作',
+              key: 'actions',
+              width: 120,
+              fixed: 'right',
+              render: (_: unknown, row: OrderListItem) => (
+                <ActionMenu
+                  primary={
+                    <Button
+                      type="link"
+                      size="small"
+                      style={{ paddingInline: 4 }}
+                      onClick={() => setDetailId(row.id)}
+                    >
+                      查看
+                    </Button>
+                  }
+                  items={[
+                    {
+                      key: 'view',
+                      label: '查看详情',
+                      onClick: () => setDetailId(row.id),
+                    },
+                    ...(row.erpStatus !== 'CANCELLED'
+                      ? [
+                          {
+                            key: 'cancel',
+                            label: '取消订单',
+                            danger: true,
+                            onClick: () => {
+                              modal.confirm({
+                                title: `取消订单 ${row.orderNo}？`,
+                                content:
+                                  'Reserved 行将释放库存；Picked 行将创建拦截任务（不自动恢复库存）。',
+                                okText: '取消订单',
+                                cancelText: '返回',
+                                onOk: () => {
+                                  cancelMutation.mutate(row.id);
+                                },
+                              });
+                            },
+                          },
+                        ]
+                      : []),
+                  ]}
+                />
+              ),
+            },
+          ]}
+        />
+      </SectionCard>
 
       <Drawer
-        title={detail ? `订单 ${detail.orderNo}` : '订单详情'}
-        width={960}
         open={detailId !== null}
         onClose={() => setDetailId(null)}
+        size={880}
+        title={
+          detail !== undefined && (
+            <span style={{ fontSize: 16, fontWeight: 650 }}>{detail.orderNo}</span>
+          )
+        }
+        extra={
+          detail !== undefined && (
+            <PlatformTag code={detail.platformCode} suffix={detail.storeName} />
+          )
+        }
+        styles={{ body: { padding: 20 } }}
         destroyOnHidden
       >
         {detail === undefined ? (
-          <Empty description={detailQuery.isLoading ? '加载中…' : '无数据'} />
+          <span style={{ color: colors.textTertiary }}>
+            {detailQuery.isLoading ? '加载中…' : '无数据'}
+          </span>
         ) : (
           <>
-            <Descriptions size="small" column={3} bordered style={{ marginBottom: 16 }}>
-              <Descriptions.Item label="平台订单号">{detail.platformOrderId}</Descriptions.Item>
-              <Descriptions.Item label="平台状态">{detail.platformStatus ?? '-'}</Descriptions.Item>
-              <Descriptions.Item label="ERP 状态">
-                <Badge
-                  color={ERP_STATUS_COLORS[detail.erpStatus] ?? 'default'}
-                  text={detail.erpStatus}
-                />
-              </Descriptions.Item>
-              <Descriptions.Item label="店铺">{`${detail.platformCode} / ${detail.storeName}`}</Descriptions.Item>
-              <Descriptions.Item label="履约模式">
-                {detail.fulfillmentMode ?? '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label="下单时间">
-                {new Date(detail.orderedAt).toLocaleString('zh-CN')}
-              </Descriptions.Item>
-              <Descriptions.Item label="同步来源">
-                {detail.syncSource === null ? (
-                  '-'
-                ) : (
-                  <Tag>
-                    {detail.syncSource === 'POLLING'
-                      ? '定时轮询'
-                      : detail.syncSource === 'WEBHOOK'
-                        ? 'Webhook'
-                        : detail.syncSource === 'API'
-                          ? 'API 摄入'
-                          : detail.syncSource}
-                  </Tag>
-                )}
-              </Descriptions.Item>
-              <Descriptions.Item label="操作" span={3}>
-                <Button
-                  type="primary"
-                  ghost
-                  loading={createPickingMutation.isPending}
-                  disabled={
-                    detail.erpStatus === 'CANCELLED' ||
-                    !detail.items.some((item) => item.fulfillmentStatus === 'RESERVED')
-                  }
-                  onClick={() => createPickingMutation.mutate(detail.id)}
-                >
-                  创建拣货任务
-                </Button>
-              </Descriptions.Item>
-            </Descriptions>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              <StatusBadge
+                tone={ERP_STATUS_META[detail.erpStatus]?.tone ?? 'neutral'}
+                label={ERP_STATUS_META[detail.erpStatus]?.label ?? detail.erpStatus}
+                hint={detail.erpStatus}
+              />
+              <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+                平台状态 {detail.platformStatus ?? '—'}
+              </span>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <InfoGrid
+                items={[
+                  { label: '平台订单号', children: detail.platformOrderId },
+                  { label: '履约模式', children: detail.fulfillmentMode ?? '—' },
+                  { label: '币种', children: detail.currency ?? '—' },
+                  { label: '下单时间', children: fmtDateTime(detail.orderedAt) },
+                  {
+                    label: '同步来源',
+                    children:
+                      detail.syncSource === null
+                        ? '—'
+                        : detail.syncSource === 'POLLING'
+                          ? '定时轮询'
+                          : detail.syncSource === 'WEBHOOK'
+                            ? 'Webhook'
+                            : detail.syncSource === 'API'
+                              ? 'API 摄入'
+                              : detail.syncSource,
+                  },
+                  { label: '商品行', children: `${detail.items.length} 行` },
+                ]}
+              />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <Button
+                type="primary"
+                loading={createPickingMutation.isPending}
+                disabled={
+                  detail.erpStatus === 'CANCELLED' ||
+                  !detail.items.some((item) => item.fulfillmentStatus === 'RESERVED')
+                }
+                onClick={() => createPickingMutation.mutate(detail.id)}
+              >
+                创建拣货任务
+              </Button>
+            </div>
             <Tabs
               items={[
                 {
                   key: 'items',
-                  label: `订单行 (${detail.items.length})`,
+                  label: `商品 (${detail.items.length})`,
                   children: (
-                    <Table<OrderItem>
+                    <DataTable<OrderItem>
                       rowKey="id"
-                      size="small"
-                      columns={itemColumns}
                       dataSource={detail.items}
                       pagination={false}
+                      emptyTitle="无商品行"
+                      columns={itemColumns}
                     />
                   ),
                 },
                 {
-                  key: 'platform-raw',
-                  label: '平台原始数据',
+                  key: 'fulfillment',
+                  label: `履约 (${detail.pickingTasks.length})`,
                   children:
-                    detail.rawData === null ? (
-                      <Empty description="无平台原始数据" />
+                    detail.pickingTasks.length === 0 ? (
+                      <span style={{ color: colors.textTertiary }}>无拣货任务</span>
                     ) : (
-                      <pre
-                        style={{
-                          maxHeight: 420,
-                          overflow: 'auto',
-                          fontSize: 12,
-                          background: '#fafafa',
-                          padding: 12,
-                          borderRadius: 6,
-                        }}
-                      >
-                        {JSON.stringify(detail.rawData, null, 2)}
-                      </pre>
+                      <DataTable<{
+                        id: string;
+                        pickingNo: string;
+                        status: string;
+                        pickedItems: number;
+                        totalItems: number;
+                      }>
+                        rowKey="id"
+                        dataSource={detail.pickingTasks}
+                        pagination={false}
+                        columns={[
+                          { title: '拣货单号', dataIndex: 'pickingNo' },
+                          { title: '状态', dataIndex: 'status', width: 110 },
+                          {
+                            title: '进度',
+                            width: 100,
+                            align: 'right' as const,
+                            render: (
+                              _: unknown,
+                              row: { pickedItems: number; totalItems: number },
+                            ) => `${row.pickedItems} / ${row.totalItems}`,
+                          },
+                          {
+                            title: '',
+                            width: 110,
+                            render: (_: unknown, row: { id: string }) => (
+                              <Link to={`/picking/${row.id}`}>进入作业</Link>
+                            ),
+                          },
+                        ]}
+                      />
+                    ),
+                },
+                {
+                  key: 'exceptions',
+                  label: `异常 (${detail.items.reduce((sum, item) => sum + item.exceptions.length, 0) + detail.interceptions.length})`,
+                  children:
+                    detail.items.every((item) => item.exceptions.length === 0) &&
+                    detail.interceptions.length === 0 ? (
+                      <span style={{ color: colors.textTertiary }}>无异常与拦截</span>
+                    ) : (
+                      <>
+                        {detail.items.some((item) => item.exceptions.length > 0) && (
+                          <DataTable<OrderItem>
+                            rowKey="id"
+                            dataSource={detail.items.filter((item) => item.exceptions.length > 0)}
+                            pagination={false}
+                            columns={[
+                              { title: 'SKU', dataIndex: 'skuCode', width: 140 },
+                              {
+                                title: '异常',
+                                render: (_: unknown, row: OrderItem) => (
+                                  <span
+                                    style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}
+                                  >
+                                    {row.exceptions.map((exception) => (
+                                      <StatusBadge
+                                        key={exception.exceptionNo}
+                                        tone={exception.status === 'OPEN' ? 'danger' : 'neutral'}
+                                        label={exception.exceptionType}
+                                      />
+                                    ))}
+                                  </span>
+                                ),
+                              },
+                              {
+                                title: '说明',
+                                render: (_: unknown, row: OrderItem) =>
+                                  row.exceptions[0]?.message ?? '—',
+                              },
+                            ]}
+                          />
+                        )}
+                        {detail.interceptions.length > 0 && (
+                          <DataTable<{
+                            interceptionNo: string;
+                            status: string;
+                            reason: string | null;
+                            createdAt: string;
+                          }>
+                            rowKey="interceptionNo"
+                            dataSource={detail.interceptions}
+                            pagination={false}
+                            columns={[
+                              { title: '拦截单号', dataIndex: 'interceptionNo' },
+                              { title: '状态', dataIndex: 'status', width: 110 },
+                              { title: '原因', dataIndex: 'reason' },
+                              {
+                                title: '创建时间',
+                                dataIndex: 'createdAt',
+                                render: (value: string) => fmtDateTime(value),
+                              },
+                            ]}
+                          />
+                        )}
+                      </>
                     ),
                 },
                 {
@@ -611,12 +955,11 @@ export function OrdersPage() {
                       items={detail.history.map((entry) => ({
                         children: (
                           <div>
-                            <Typography.Text strong>
+                            <span style={{ fontWeight: 600 }}>
                               {entry.fromStatus ?? '∅'} → {entry.toStatus}
-                            </Typography.Text>
-                            <div style={{ color: '#888' }}>
-                              {new Date(entry.createdAt).toLocaleString('zh-CN')} ·{' '}
-                              {entry.operatorName ?? 'system'}
+                            </span>
+                            <div style={{ color: colors.textTertiary, fontSize: 12.5 }}>
+                              {fmtDateTime(entry.createdAt)} · {entry.operatorName ?? 'system'}
                               {entry.reason ? ` · ${entry.reason}` : ''}
                             </div>
                           </div>
@@ -626,82 +969,25 @@ export function OrdersPage() {
                   ),
                 },
                 {
-                  key: 'picking',
-                  label: `拣货 (${detail.pickingTasks.length})`,
-                  children:
-                    detail.pickingTasks.length === 0 ? (
-                      <Empty description="无拣货任务" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                    ) : (
-                      <Table<{
-                        id: string;
-                        pickingNo: string;
-                        status: string;
-                        pickedItems: number;
-                        totalItems: number;
-                      }>
-                        rowKey="id"
-                        size="small"
-                        pagination={false}
-                        dataSource={detail.pickingTasks}
-                        columns={[
-                          { title: '拣货单号', dataIndex: 'pickingNo' },
-                          { title: '状态', dataIndex: 'status' },
-                          {
-                            title: '进度',
-                            render: (
-                              _: unknown,
-                              row: { pickedItems: number; totalItems: number },
-                            ) => `${row.pickedItems} / ${row.totalItems}`,
-                          },
-                          {
-                            title: '',
-                            render: (_: unknown, row: { id: string }) => (
-                              <Button size="small" href={`#/picking/${row.id}`} target="_blank">
-                                进入作业
-                              </Button>
-                            ),
-                          },
-                        ]}
-                      />
-                    ),
-                },
-                {
-                  key: 'interceptions',
-                  label: `拦截 (${detail.interceptions.length})`,
-                  children:
-                    detail.interceptions.length === 0 ? (
-                      <Empty description="无拦截任务" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                    ) : (
-                      <Table
-                        rowKey="interceptionNo"
-                        size="small"
-                        pagination={false}
-                        dataSource={detail.interceptions}
-                        columns={[
-                          { title: '拦截单号', dataIndex: 'interceptionNo' },
-                          { title: '状态', dataIndex: 'status' },
-                          { title: '原因', dataIndex: 'reason' },
-                        ]}
-                      />
-                    ),
-                },
-                {
                   key: 'raw',
                   label: 'Raw Data',
-                  children: (
-                    <Typography.Paragraph>
+                  children:
+                    detail.rawData === null ? (
+                      <span style={{ color: colors.textTertiary }}>无平台原始数据</span>
+                    ) : (
                       <pre
                         style={{
-                          maxHeight: 300,
+                          maxHeight: 420,
                           overflow: 'auto',
-                          background: '#fafafa',
-                          padding: 8,
+                          fontSize: 12,
+                          background: '#F8F9FB',
+                          padding: 12,
+                          borderRadius: 8,
                         }}
                       >
-                        {JSON.stringify(detail.rawData ?? {}, null, 2)}
+                        {JSON.stringify(detail.rawData, null, 2)}
                       </pre>
-                    </Typography.Paragraph>
-                  ),
+                    ),
                 },
               ]}
             />
@@ -737,8 +1023,8 @@ export function OrdersPage() {
         width={640}
         confirmLoading={ingestMutation.isPending}
       >
-        <Space direction="vertical" style={{ width: '100%' }} size={8}>
-          <Space wrap>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {FIXTURES.map((fixture) => (
               <Button
                 key={fixture.label}
@@ -748,17 +1034,17 @@ export function OrdersPage() {
                 {fixture.label}
               </Button>
             ))}
-          </Space>
-          <Typography.Text type="secondary">
+          </div>
+          <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
             storeId 默认取第一个店铺；items 行使用平台 SKU 标识（platformSkuId / sellerSku /
             offerId）。
-          </Typography.Text>
+          </span>
           <Input.TextArea
             rows={10}
             value={ingestJson}
             onChange={(event) => setIngestJson(event.target.value)}
           />
-        </Space>
+        </div>
       </Modal>
     </div>
   );
