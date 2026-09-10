@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, Outlet } from 'react-router';
-import { Avatar, Badge, Button, Drawer, Input, Menu, Tooltip } from 'antd';
-import { InputRef } from 'antd';
+import { Avatar, Button, Drawer, Menu, Tooltip } from 'antd';
 import {
   AppstoreOutlined,
   BarChartOutlined,
@@ -13,8 +12,9 @@ import {
   ShoppingOutlined,
   ToolOutlined,
 } from '@ant-design/icons';
-import { useRef } from 'react';
 import { AppRailSetterProvider, colors, layout, ContextRailContent } from '../design-system';
+import { GlobalSearch } from './GlobalSearch';
+import { NotificationBell } from './NotificationBell';
 
 /**
  * WCIES adaptive three-column workbench shell (redesign task §12-§19):
@@ -34,7 +34,7 @@ type ViewportTier = 'narrow' | 'mid' | 'wide';
 
 const RAIL_PREF_KEY = 'wcies.rail-expanded';
 
-/** Existing routes regrouped into the Phase 1 nav order (task §13) — no route changes. */
+/** Existing routes regrouped into the nav order — no route changes. */
 const MENU_ITEMS = [
   { key: '/', label: '首页', icon: <HomeOutlined /> },
   {
@@ -45,6 +45,7 @@ const MENU_ITEMS = [
       { key: '/products', label: '商品管理' },
       { key: '/skus', label: 'SKU管理' },
       { key: '/listings', label: 'SKU映射' },
+      { key: '/platform-mappings', label: '映射总览' },
     ],
   },
   {
@@ -77,10 +78,11 @@ const MENU_ITEMS = [
   },
   {
     key: 'platform-group',
-    label: '同步与店铺',
+    label: '同步与异常',
     icon: <CloudSyncOutlined />,
     children: [
       { key: '/sync', label: '同步中心' },
+      { key: '/exceptions', label: '异常中心' },
       { key: '/stores', label: '店铺管理' },
       { key: '/store-bindings', label: '店仓绑定' },
     ],
@@ -90,6 +92,7 @@ const MENU_ITEMS = [
     label: '系统',
     icon: <BarChartOutlined />,
     children: [
+      { key: '/system', label: '系统管理' },
       { key: '/import', label: '导入中心' },
       { key: '/notifications', label: '通知中心' },
     ],
@@ -164,12 +167,14 @@ export function AppLayout() {
   const railAvailable = railContent !== null && !focusMode;
   const railButtonActive = railInline ? railExpanded : overlayOpen;
 
-  const searchRef = useRef<InputRef>(null);
+  // Command palette (Phase 2 task §30): Ctrl/Cmd+K toggles, the topbar search
+  // field is a trigger, not a plain input.
+  const [paletteOpen, setPaletteOpen] = useState(false);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        searchRef.current?.focus();
+        setPaletteOpen((openState) => !openState);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -260,39 +265,45 @@ export function AppLayout() {
               borderBottom: `1px solid ${colors.border}`,
             }}
           >
-            <Input
-              ref={searchRef}
-              allowClear
-              placeholder="搜索订单、商品、SKU、店铺或功能..."
-              prefix={
-                <span aria-hidden style={{ color: colors.textTertiary }}>
-                  ⌕
-                </span>
-              }
-              suffix={
-                <kbd
-                  style={{
-                    fontSize: 11,
-                    color: colors.textTertiary,
-                    border: `1px solid ${colors.border}`,
-                    borderRadius: 4,
-                    padding: '0 5px',
-                    lineHeight: '18px',
-                    background: '#FAFBFC',
-                  }}
-                >
-                  Ctrl K
-                </kbd>
-              }
-              style={{ width: 360, maxWidth: '40vw' }}
-              aria-label="全局搜索"
-              onPressEnter={(event) => {
-                const keyword = event.currentTarget.value.trim();
-                if (keyword !== '') {
-                  void navigate(`/orders?keyword=${encodeURIComponent(keyword)}`);
-                }
+            <button
+              type="button"
+              aria-label="全局搜索（Ctrl K）"
+              onClick={() => setPaletteOpen(true)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                width: 360,
+                maxWidth: '40vw',
+                height: 34,
+                padding: '0 10px 0 12px',
+                background: '#FAFBFC',
+                border: `1px solid ${colors.border}`,
+                borderRadius: 8,
+                cursor: 'pointer',
+                textAlign: 'left',
               }}
-            />
+            >
+              <span aria-hidden style={{ color: colors.textTertiary, fontSize: 14 }}>
+                ⌕
+              </span>
+              <span style={{ fontSize: 13, color: colors.textTertiary, flex: 1 }}>
+                搜索订单、SKU、店铺…
+              </span>
+              <kbd
+                style={{
+                  fontSize: 11,
+                  color: colors.textTertiary,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 4,
+                  padding: '0 5px',
+                  lineHeight: '18px',
+                  background: '#FFFFFF',
+                }}
+              >
+                Ctrl K
+              </kbd>
+            </button>
             <div style={{ flex: 1 }} />
             {railAvailable && (
               <Tooltip
@@ -310,18 +321,7 @@ export function AppLayout() {
             <Tooltip title="帮助">
               <Button type="text" aria-label="帮助" icon={<QuestionCircleOutlined />} />
             </Tooltip>
-            <Tooltip title="通知中心">
-              <Button
-                type="text"
-                aria-label="通知中心"
-                icon={
-                  <Badge dot color="#C2760F" offset={[-2, 2]}>
-                    <BellIcon />
-                  </Badge>
-                }
-                onClick={() => void navigate('/notifications')}
-              />
-            </Tooltip>
+            <NotificationBell />
             <div
               style={{
                 display: 'flex',
@@ -383,6 +383,9 @@ export function AppLayout() {
         >
           {railBody}
         </Drawer>
+
+        {/* ---- Global search / command palette (task §30) ---- */}
+        <GlobalSearch open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       </div>
     </AppRailSetterProvider>
   );
@@ -407,15 +410,5 @@ function useContextRailContentSafe(content: ContextRailContent | null): React.Re
       )}
       <div>{content.children}</div>
     </div>
-  );
-}
-
-function BellIcon() {
-  return (
-    <span aria-hidden style={{ fontSize: 16, lineHeight: 1, display: 'inline-flex' }}>
-      <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor">
-        <path d="M8 1.5a4.5 4.5 0 0 0-4.5 4.5v2.6L2.3 11a.7.7 0 0 0 .6 1.1h10.2a.7.7 0 0 0 .6-1.1l-1.2-2.4V6A4.5 4.5 0 0 0 8 1.5Zm0 13a2 2 0 0 0 1.9-1.4H6.1A2 2 0 0 0 8 14.5Z" />
-      </svg>
-    </span>
   );
 }

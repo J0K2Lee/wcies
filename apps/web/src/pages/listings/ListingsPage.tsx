@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { App, Button, Drawer, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
 import { useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
 
 interface ListingRow {
@@ -32,11 +33,13 @@ interface ListingSkuRow {
 export function ListingsPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [platformId, setPlatformId] = useState<string | undefined>();
   const [storeId, setStoreId] = useState<string | undefined>();
   const [mappingState, setMappingState] = useState<string | undefined>();
-  const [keyword, setKeyword] = useState('');
+  // ?keyword= deep link from the exception center / mapping overview.
+  const [keyword, setKeyword] = useState(() => searchParams.get('keyword') ?? '');
   const [createOpen, setCreateOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [mapTarget, setMapTarget] = useState<ListingSkuRow | null>(null);
@@ -185,6 +188,7 @@ export function ListingsPage() {
         <Input.Search
           placeholder="Platform Product ID / 标题"
           allowClear
+          defaultValue={keyword}
           onSearch={(value) => {
             setPage(1);
             setKeyword(value);

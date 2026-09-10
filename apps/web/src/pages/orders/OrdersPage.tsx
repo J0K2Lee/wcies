@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { App as AntdApp, Button, Drawer, Input, Modal, Select, Tabs, Timeline } from 'antd';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
@@ -181,6 +181,16 @@ export function OrdersPage() {
       2,
     ),
   );
+
+  // Deep link from the global palette / exception center: focus=<orderId>
+  // selects the row and opens its detail drawer (Phase 2 task §33).
+  useEffect(() => {
+    const focus = searchParams.get('focus');
+    if (focus !== null) {
+      setSelectedId(focus);
+      setDetailId(focus);
+    }
+  }, [searchParams]);
 
   const tabErpStatus = STATUS_TABS.find((tab) => tab.key === activeTab)?.erpStatus;
   const query = useApiQuery<Envelope<OrderListItem[]>>(

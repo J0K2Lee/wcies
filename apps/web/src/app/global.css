@@ -44,3 +44,10 @@ table,
 *::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* Command palette spinner. */
+@keyframes wcies-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -12,7 +12,8 @@ import {
   Tabs,
   Upload,
 } from 'antd';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { apiDelete, apiPatch, apiPost, useApiQuery } from '../../api/hooks';
 import { SkuCreateModal } from '../../components/SkuCreateModal';
 import {
@@ -118,8 +119,9 @@ const fmtQty = (value: string): string => (Number(value) % 1 === 0 ? String(Numb
 export function SkusPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
-  const [keyword, setKeyword] = useState('');
+  const [keyword, setKeyword] = useState(() => searchParams.get('keyword') ?? '');
   const [brandId, setBrandId] = useState<string | undefined>();
   const [categoryId, setCategoryId] = useState<string | undefined>();
   const [status, setStatus] = useState<string | undefined>();
@@ -127,9 +129,19 @@ export function SkusPage() {
   // Three-level interaction (task §19): row click → rail preview, 查看 → drawer.
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerId, setDrawerId] = useState<string | null>(null);
-  const [createOpen, setCreateOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(() => searchParams.get('create') === '1');
   const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
   const [barcodeForm] = Form.useForm();
+
+  // Deep link from the global palette: focus=<skuId> selects the row and opens
+  // its drawer (Phase 2 task §33 — jump straight to the entity).
+  useEffect(() => {
+    const focus = searchParams.get('focus');
+    if (focus !== null) {
+      setSelectedId(focus);
+      setDrawerId(focus);
+    }
+  }, [searchParams]);
 
   const list = useApiQuery<Envelope<SkuRow[]>>(
     '/api/v1/skus',
@@ -448,6 +460,7 @@ export function SkusPage() {
         <Input.Search
           placeholder="搜索 SKU / 名称 / 型号"
           allowClear
+          defaultValue={keyword}
           onSearch={(value) => {
             setPage(1);
             setKeyword(value);

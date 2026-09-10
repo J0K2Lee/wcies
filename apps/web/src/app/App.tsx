@@ -24,6 +24,9 @@ import { InterceptionsPage } from '../pages/interceptions/InterceptionsPage';
 import { InterceptionDetailPage } from '../pages/interceptions/InterceptionDetailPage';
 import { NotificationsPage } from '../pages/notifications/NotificationsPage';
 import { SyncCenterPage } from '../pages/sync/SyncCenterPage';
+import { ExceptionsPage } from '../pages/exceptions/ExceptionsPage';
+import { SystemPage } from '../pages/system/SystemPage';
+import { PlatformMappingsPage } from '../pages/system/PlatformMappingsPage';
 
 export function App() {
   return (
@@ -53,6 +56,9 @@ export function App() {
         <Route path="/interceptions/:id" element={<InterceptionDetailPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/sync" element={<SyncCenterPage />} />
+        <Route path="/exceptions" element={<ExceptionsPage />} />
+        <Route path="/system" element={<SystemPage />} />
+        <Route path="/platform-mappings" element={<PlatformMappingsPage />} />
       </Route>
     </Routes>
   );
