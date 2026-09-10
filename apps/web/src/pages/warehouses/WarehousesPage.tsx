@@ -1,8 +1,19 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { App as AntdApp, Button, Drawer, Form, Input, Modal, Select, Space } from 'antd';
+import {
+  App as AntdApp,
+  Button,
+  Drawer,
+  Form,
+  Input,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+} from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
-import { apiPost, useApiQuery } from '../../api/hooks';
+import { apiDelete, apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime } from '../../utils/format';
 import {
   colors,
@@ -16,6 +27,7 @@ import {
   FilterBar,
   PageHeader,
   SectionCard,
+  FULFILLMENT_MODE_LABEL,
   StatusBadge,
   useContextRail,
 } from '../../design-system';
@@ -34,6 +46,10 @@ interface WarehouseRow {
   countryCode: string | null;
   province: string | null;
   city: string | null;
+  address: string | null;
+  contactName: string | null;
+  contactPhone: string | null;
+  remark: string | null;
   status: string;
   binCount: number;
   boundStoreCount: number;
@@ -69,6 +85,7 @@ type Envelope<T> = { data: T; meta: { total: number } };
 
 export function WarehousesPage() {
   const { message } = AntdApp.useApp();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState('');
@@ -77,6 +94,10 @@ export function WarehousesPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
+  // Id snapshot taken when the batch modal opens: the drawer's onClose may
+  // null out detailId while the modal is still open (decision: modal chain
+  // fix) - submissions must never send an empty path parameter.
+  const [batchWarehouseId, setBatchWarehouseId] = useState<string | null>(null);
   const [form] = Form.useForm();
   const [batchForm] = Form.useForm();
 
@@ -134,20 +155,61 @@ export function WarehousesPage() {
     onError: (error: Error) => void message.error(error.message),
   });
 
+  const statusMutation = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'activate' | 'deactivate' }) =>
+      apiPost(`/api/v1/warehouses/{id}/${action}`, {}, { id }),
+    onSuccess: () => {
+      void message.success('状态已更新');
+      void queryClient.invalidateQueries({ queryKey: ['warehouses'] });
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => apiDelete('/api/v1/warehouses/{id}', { id }),
+    onSuccess: (_data, id) => {
+      void message.success('仓库已删除');
+      if (detailId === id) {
+        setDetailId(null);
+      }
+      if (selectedId === id) {
+        setSelectedId(null);
+      }
+      void queryClient.invalidateQueries({ queryKey: ['warehouses'] });
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
   const batchMutation = useMutation({
-    mutationFn: (values: Record<string, string>) =>
+    mutationFn: (values: Record<string, string> & { warehouseId: string }) =>
       apiPost<{ createdCount: number }>('/api/v1/warehouses/{warehouseId}/bins/batch', values, {
-        warehouseId: detailId ?? '',
+        warehouseId: values.warehouseId,
       }),
     onSuccess: (data: { createdCount: number }) => {
       void message.success(`已批量创建 ${data.createdCount} 个库位`);
       setBatchOpen(false);
       batchForm.resetFields();
-      void queryClient.invalidateQueries({ queryKey: ['warehouse-bins', detailId] });
+      void queryClient.invalidateQueries({ queryKey: ['warehouse-bins', batchWarehouseId] });
       void queryClient.invalidateQueries({ queryKey: ['warehouses'] });
     },
     onError: (error: Error) => void message.error(error.message),
   });
+
+  const openBatchModal = (warehouseId: string) => {
+    setBatchWarehouseId(warehouseId);
+    batchForm.resetFields();
+    setBatchOpen(true);
+  };
+
+  const submitBatch = () => {
+    if (batchWarehouseId === null) {
+      void message.error('仓库上下文丢失，请重新打开后重试');
+      return;
+    }
+    void batchForm
+      .validateFields()
+      .then((values) => batchMutation.mutate({ ...values, warehouseId: batchWarehouseId }));
+  };
 
   // ---- Context rail (task §27): 基本信息 + 库存摘要 ----
   const railContent = useMemo<ContextRailContent>(() => {
@@ -381,15 +443,20 @@ export function WarehousesPage() {
       <Modal
         title="新建仓库"
         open={createOpen}
-        forceRender
+        zIndex={1100}
+        afterOpenChange={(open) => {
+          if (!open) {
+            form.resetFields();
+          }
+        }}
         onCancel={() => setCreateOpen(false)}
         onOk={() => void form.validateFields().then((values) => createMutation.mutate(values))}
         confirmLoading={createMutation.isPending}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="warehouseCode" label="仓库编码" rules={[{ required: true }]}>
-            <Input placeholder="如 SZ01" />
-          </Form.Item>
+          <p style={{ color: colors.textTertiary, fontSize: 12.5, marginBottom: 12 }}>
+            仓库编码创建后自动生成（按类型递增：ZG/PT/SF/TH-序号），类型创建后不可修改。
+          </p>
           <Form.Item name="name" label="名称" rules={[{ required: true }]}>
             <Input placeholder="如 深圳自管仓" />
           </Form.Item>
@@ -417,6 +484,15 @@ export function WarehousesPage() {
           <Form.Item name="address" label="地址">
             <Input />
           </Form.Item>
+          <Form.Item name="contactName" label="联系人">
+            <Input style={{ width: 200 }} />
+          </Form.Item>
+          <Form.Item name="contactPhone" label="联系电话">
+            <Input style={{ width: 200 }} />
+          </Form.Item>
+          <Form.Item name="remark" label="备注">
+            <Input.TextArea rows={2} maxLength={2000} />
+          </Form.Item>
         </Form>
       </Modal>
 
@@ -427,6 +503,38 @@ export function WarehousesPage() {
         open={detailId !== null}
         onClose={() => setDetailId(null)}
         destroyOnHidden
+        extra={
+          detailRow !== null && (
+            <Space>
+              {detailRow.status !== 'ACTIVE' ? (
+                <Button
+                  type="primary"
+                  onClick={() =>
+                    statusMutation.mutate({ id: detailRow.id, action: 'activate' })
+                  }
+                >
+                  启用
+                </Button>
+              ) : (
+                <Popconfirm
+                  title="确认停用该仓库？"
+                  onConfirm={() =>
+                    statusMutation.mutate({ id: detailRow.id, action: 'deactivate' })
+                  }
+                >
+                  <Button danger>停用</Button>
+                </Popconfirm>
+              )}
+              <Popconfirm
+                title="确认删除该仓库？"
+                description="仅零引用（无库位/绑定/库存）的仓库可删除；被引用时会返回具体原因。"
+                onConfirm={() => deleteMutation.mutate(detailRow.id)}
+              >
+                <Button danger>删除</Button>
+              </Popconfirm>
+            </Space>
+          )
+        }
       >
         {detailRow !== null && (
           <Space orientation="vertical" size="large" style={{ width: '100%' }}>
@@ -453,6 +561,8 @@ export function WarehousesPage() {
                   label="国家 / 城市"
                   value={`${detailRow.countryCode ?? '—'} / ${detailRow.city ?? '—'}`}
                 />
+                <Field label="联系人" value={detailRow.contactName ?? '—'} />
+                <Field label="联系电话" value={detailRow.contactPhone ?? '—'} />
                 <Field label="创建时间" value={fmtDateTime(detailRow.createdAt)} />
                 <Field label="库位数量" value={`${detailRow.binCount}`} />
                 <Field label="绑定店铺" value={`${detailRow.boundStoreCount} 家`} />
@@ -462,7 +572,11 @@ export function WarehousesPage() {
             <section>
               <SectionTitle
                 action={
-                  <Button size="small" type="primary" onClick={() => setBatchOpen(true)}>
+                  <Button
+                    size="small"
+                    type="primary"
+                    onClick={() => detailRow !== null && openBatchModal(detailRow.id)}
+                  >
                     批量创建库位
                   </Button>
                 }
@@ -514,7 +628,20 @@ export function WarehousesPage() {
             </section>
 
             <section>
-              <SectionTitle>绑定店铺</SectionTitle>
+              <SectionTitle
+                action={
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      void navigate(`/store-bindings?warehouseId=${detailRow.id}`);
+                    }}
+                  >
+                    管理绑定
+                  </Button>
+                }
+              >
+                绑定店铺
+              </SectionTitle>
               <DataTable<BindingRow>
                 rowKey="storeCode"
                 size="small"
@@ -524,7 +651,11 @@ export function WarehousesPage() {
                 emptyTitle="暂无店铺绑定"
                 columns={[
                   { title: '店铺编码', dataIndex: 'storeCode' },
-                  { title: '履约模式', dataIndex: 'fulfillmentMode' },
+                  {
+                    title: '履约模式',
+                    dataIndex: 'fulfillmentMode',
+                    render: (value: string) => FULFILLMENT_MODE_LABEL[value] ?? value,
+                  },
                   {
                     title: '状态',
                     dataIndex: 'status',
@@ -548,9 +679,14 @@ export function WarehousesPage() {
       <Modal
         title={`批量创建库位 — ${detailRow?.warehouseCode ?? ''}`}
         open={batchOpen}
-        forceRender
+        zIndex={1100}
+        afterOpenChange={(open) => {
+          if (!open) {
+            batchForm.resetFields();
+          }
+        }}
         onCancel={() => setBatchOpen(false)}
-        onOk={() => void batchForm.validateFields().then((values) => batchMutation.mutate(values))}
+        onOk={submitBatch}
         confirmLoading={batchMutation.isPending}
       >
         <Form form={batchForm} layout="vertical">

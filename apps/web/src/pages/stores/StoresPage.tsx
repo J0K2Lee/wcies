@@ -8,6 +8,7 @@ import {
   Form,
   Input,
   Modal,
+  Popconfirm,
   Select,
   Space,
   Tooltip,
@@ -20,7 +21,7 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import { useSearchParams, useNavigate } from 'react-router';
-import { apiPost, useApiQuery } from '../../api/hooks';
+import { apiDelete, apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime, fmtNumber } from '../../utils/format';
 import {
   ActionMenu,
@@ -152,6 +153,10 @@ export function StoresPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [credentialOpen, setCredentialOpen] = useState(false);
+  // Id snapshot taken when the credential modal opens: the drawer's onClose
+  // may null out detailId while the modal is open - the submission must use
+  // the store it was opened for (modal chain fix).
+  const [credentialStoreId, setCredentialStoreId] = useState<string | null>(null);
   const [form] = Form.useForm();
   const [credentialForm] = Form.useForm();
 
@@ -249,20 +254,36 @@ export function StoresPage() {
   });
 
   const credentialMutation = useMutation({
-    mutationFn: (values: { clientId: string; apiKey: string }) =>
+    mutationFn: (values: { clientId: string; apiKey: string; storeId: string }) =>
       apiPost(
         '/api/v1/stores/{storeId}/credentials',
-        { credentialType: 'MAIN_API', payload: values },
-        { storeId: detailId ?? '' },
+        { credentialType: 'MAIN_API', payload: { clientId: values.clientId, apiKey: values.apiKey } },
+        { storeId: values.storeId },
       ),
     onSuccess: () => {
       void message.success('凭证已加密保存');
       setCredentialOpen(false);
       credentialForm.resetFields();
-      refreshStore(detailId);
+      refreshStore(credentialStoreId);
     },
     onError: (error: Error) => void message.error(error.message),
   });
+
+  const openCredentialModal = (storeId: string) => {
+    setCredentialStoreId(storeId);
+    credentialForm.resetFields();
+    setCredentialOpen(true);
+  };
+
+  const submitCredential = () => {
+    if (credentialStoreId === null) {
+      void message.error('店铺上下文丢失，请重新打开后重试');
+      return;
+    }
+    void credentialForm
+      .validateFields()
+      .then((values) => credentialMutation.mutate({ ...values, storeId: credentialStoreId }));
+  };
 
   const validateMutation = useMutation({
     mutationFn: (credentialId: string) =>
@@ -300,6 +321,21 @@ export function StoresPage() {
       apiPost(`/api/v1/stores/{id}/${action}`, {}, { id }),
     onSuccess: () => {
       void message.success('状态已更新');
+      refreshStore(null);
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => apiDelete('/api/v1/stores/{id}', { id }),
+    onSuccess: (_data, id) => {
+      void message.success('店铺已删除');
+      if (detailId === id) {
+        setDetailId(null);
+      }
+      if (selectedId === id) {
+        setSelectedId(null);
+      }
       refreshStore(null);
     },
     onError: (error: Error) => void message.error(error.message),
@@ -736,6 +772,29 @@ export function StoresPage() {
         open={detailId !== null}
         onClose={() => setDetailId(null)}
         destroyOnHidden
+        extra={
+          detailRow !== null && (
+            <Space>
+              <Button
+                size="small"
+                onClick={() => {
+                  void navigate(`/store-bindings?storeId=${detailRow.id}`);
+                }}
+              >
+                管理绑定
+              </Button>
+              <Popconfirm
+                title="确认删除该店铺？"
+                description="仅零引用（无凭证/绑定/Listing/订单/同步记录）的店铺可删除；被引用时会返回具体原因。"
+                onConfirm={() => deleteMutation.mutate(detailRow.id)}
+              >
+                <Button size="small" danger>
+                  删除
+                </Button>
+              </Popconfirm>
+            </Space>
+          )
+        }
       >
         {detailRow !== null && (
           <StoreDetailBody
@@ -747,7 +806,7 @@ export function StoresPage() {
             bindingsLoading={bindings.isLoading}
             onValidate={(id) => validateMutation.mutate(id)}
             validating={validateMutation.isPending}
-            onConfigure={() => setCredentialOpen(true)}
+            onConfigure={() => detailRow !== null && openCredentialModal(detailRow.id)}
             onSync={(type) => triggerFor(detailRow.id, type)}
             syncing={syncMutation.isPending}
             onToggle={() =>
@@ -765,22 +824,27 @@ export function StoresPage() {
       <Modal
         title="添加店铺"
         open={createOpen}
-        forceRender
+        zIndex={1100}
+        afterOpenChange={(open) => {
+          if (!open) {
+            form.resetFields();
+          }
+        }}
         onCancel={() => setCreateOpen(false)}
         onOk={() => void form.validateFields().then((values) => createMutation.mutate(values))}
         confirmLoading={createMutation.isPending}
       >
         <Form form={form} layout="vertical">
+          <p style={{ color: colors.textTertiary, fontSize: 12.5, marginBottom: 12 }}>
+            店铺编码创建后自动生成（按平台递增：ON/WS/YX-序号）。
+          </p>
           <Form.Item name="platformId" label="平台" rules={[{ required: true }]}>
             <Select
               options={(platforms.data?.data ?? []).map((platform) => ({
                 value: platform.id,
-                label: `${platform.code} · ${platform.name}`,
+                label: platform.name,
               }))}
             />
-          </Form.Item>
-          <Form.Item name="storeCode" label="店铺编码" rules={[{ required: true }]}>
-            <Input placeholder="如 OZON-A" />
           </Form.Item>
           <Form.Item name="name" label="店铺名称" rules={[{ required: true }]}>
             <Input />
@@ -807,13 +871,29 @@ export function StoresPage() {
       <Modal
         title="配置 MAIN_API 凭证"
         open={credentialOpen}
-        forceRender
+        zIndex={1100}
+        afterOpenChange={(open) => {
+          if (!open) {
+            credentialForm.resetFields();
+          }
+        }}
         onCancel={() => setCredentialOpen(false)}
-        onOk={() =>
-          void credentialForm.validateFields().then((values) => credentialMutation.mutate(values))
-        }
+        onOk={submitCredential}
         confirmLoading={credentialMutation.isPending}
       >
+        {(() => {
+          const configured = (credentials.data?.data ?? [])[0];
+          return configured !== undefined ? (
+            <p style={{ color: colors.textTertiary, fontSize: 12.5, marginBottom: 12 }}>
+              当前已配置：MAIN_API · 更新时间 {fmtDateTime(configured.updatedAt)}。留空提交将覆盖为
+              新值（密钥加密存储，不回显）。
+            </p>
+          ) : (
+            <p style={{ color: colors.textTertiary, fontSize: 12.5, marginBottom: 12 }}>
+              尚未配置凭证。密钥加密存储，不会回显。
+            </p>
+          );
+        })()}
         <Form form={credentialForm} layout="vertical">
           <Form.Item
             name="clientId"
@@ -915,7 +995,13 @@ function StoreDetailBody({
           emptyTitle="暂无凭证"
           emptyDescription="配置 MAIN_API 凭证后才能连接平台"
           columns={[
-            { title: '类型', dataIndex: 'credentialType', width: 110 },
+            {
+              title: '类型',
+              dataIndex: 'credentialType',
+              width: 110,
+              render: (value: string) =>
+                value === 'MAIN_API' ? '主 API' : value,
+            },
             {
               title: '状态',
               dataIndex: 'status',

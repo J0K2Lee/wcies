@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   App,
   Button,
+  Cascader,
   Drawer,
   Form,
   Image,
@@ -28,6 +29,8 @@ import {
   PageHeader,
   SectionCard,
   SKU_STATUS_META,
+  BARCODE_TYPE_LABEL,
+  PlatformTag,
   StatusBadge,
   colors,
   useContextRail,
@@ -47,10 +50,14 @@ interface SkuRow {
   productId: string;
   productCode: string;
   productName: string;
+  nameRu: string | null;
   model: string | null;
   color: string | null;
   size: string | null;
   weightG: number | null;
+  lengthMm: number | null;
+  widthMm: number | null;
+  heightMm: number | null;
   latestPurchasePrice: number | null;
   purchaseUrl: string | null;
   serialTracking: boolean;
@@ -102,22 +109,57 @@ interface SkuInventorySummary {
 
 interface BrandItem {
   id: string;
-  nameZh: string;
+  name: string;
   status: string;
 }
 
-interface CategoryItem {
+interface CategoryNode {
   id: string;
   nameZh: string;
   status: string;
+  level: number;
+  children?: CategoryNode[];
 }
 
 type Envelope<T> = { data: T; meta: { total: number } };
 
+interface CategoryOption {
+  value: string;
+  label: string;
+  children?: CategoryOption[];
+}
+
+function toCategoryOption(node: CategoryNode): CategoryOption {
+  const children = (node.children ?? [])
+    .filter((child) => child.status === 'ACTIVE')
+    .map((child) => toCategoryOption(child));
+  return {
+    value: node.id,
+    label: node.nameZh,
+    ...(children.length > 0 ? { children } : {}),
+  };
+}
+
+/** Path of [value, ...] from the option tree down to the given id. */
+function categoryPathOf(options: CategoryOption[], id: string): string[] | undefined {
+  for (const option of options) {
+    if (option.value === id) {
+      return [option.value];
+    }
+    if (option.children !== undefined) {
+      const nested = categoryPathOf(option.children, id);
+      if (nested !== undefined) {
+        return [option.value, ...nested];
+      }
+    }
+  }
+  return undefined;
+}
+
 const fmtQty = (value: string): string => (Number(value) % 1 === 0 ? String(Number(value)) : value);
 
 export function SkusPage() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
@@ -131,7 +173,13 @@ export function SkusPage() {
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(() => searchParams.get('create') === '1');
   const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [listingCreateOpen, setListingCreateOpen] = useState(false);
+  const [mapExistingOpen, setMapExistingOpen] = useState(false);
   const [barcodeForm] = Form.useForm();
+  const [editForm] = Form.useForm();
+  const [listingForm] = Form.useForm();
+  const [mapExistingForm] = Form.useForm();
 
   // Deep link from the global palette: focus=<skuId> selects the row and opens
   // its drawer (Phase 2 task §33 — jump straight to the entity).
@@ -157,11 +205,19 @@ export function SkusPage() {
     ['skus', page, keyword, brandId, categoryId, status, hasListing],
   );
   const brands = useApiQuery<Envelope<BrandItem[]>>('/api/v1/brands', { keyword: '' }, [
-    'brands-lite',
+    'brands',
   ]);
-  const categories = useApiQuery<Envelope<CategoryItem[]>>('/api/v1/categories', {}, [
-    'categories-lite',
+  const categories = useApiQuery<Envelope<CategoryNode[]>>('/api/v1/categories', {}, [
+    'categories',
   ]);
+  /** Filter cascader options: any level selectable (backend matches subtree). */
+  const categoryOptions = useMemo(
+    () =>
+      (categories.data?.data ?? [])
+        .filter((node) => node.status === 'ACTIVE')
+        .map((node) => toCategoryOption(node)),
+    [categories.data],
+  );
 
   const selectedRow = useMemo(
     () => (list.data?.data ?? []).find((row) => row.id === selectedId) ?? null,
@@ -220,6 +276,28 @@ export function SkusPage() {
       apiPost(`/api/v1/skus/{id}/${action}`, {}, { id }),
     onSuccess: (_data, variables) => {
       void message.success(variables.action === 'activate' ? 'SKU已启用' : 'SKU已停用');
+      refreshSku();
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => apiDelete('/api/v1/skus/{id}', { id }),
+    onSuccess: () => {
+      void message.success('SKU已删除');
+      setDrawerId(null);
+      setSelectedId(null);
+      refreshSku();
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (values: Record<string, unknown>) =>
+      apiPatch('/api/v1/skus/{id}', values, { id: drawerId ?? '' }),
+    onSuccess: () => {
+      void message.success('SKU已更新');
+      setEditOpen(false);
       refreshSku();
     },
     onError: (error: Error) => void message.error(error.message),
@@ -297,14 +375,118 @@ export function SkusPage() {
         body: formData,
         credentials: 'include',
       });
-      const body = (await response.json()) as { success: boolean; error?: { message: string } };
-      if (!body.success) {
-        throw new Error(body.error?.message ?? '上传失败');
+      // Non-JSON bodies (proxy HTML error pages) must not become parse errors.
+      const text = await response.text();
+      let body: { success?: boolean; error?: { message?: string; code?: string } } = {};
+      try {
+        body = JSON.parse(text) as typeof body;
+      } catch {
+        throw new Error(`上传失败（HTTP ${response.status}）`);
+      }
+      if (!response.ok || body.success !== true) {
+        throw new Error(body.error?.message ?? `上传失败（HTTP ${response.status}）`);
       }
     },
     onSuccess: () => {
       void message.success('图片已上传');
       refreshSku();
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const deleteImageMutation = useMutation({
+    mutationFn: (imageId: string) =>
+      apiDelete('/api/v1/skus/{skuId}/images/{imageId}', {
+        skuId: drawerId ?? '',
+        imageId,
+      }),
+    onSuccess: () => {
+      void message.success('图片已删除');
+      refreshSku();
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  // ---- Platform mapping entries (§11.6): map existing UNMAPPED variant or
+  // create a brand-new listing with this SKU as its first variant. ----
+  const platforms = useApiQuery<Envelope<Array<{ id: string; name: string; code: string }>>>(
+    '/api/v1/platforms',
+    {},
+    ['platforms'],
+    undefined,
+    listingCreateOpen,
+  );
+  const listingPlatformId = Form.useWatch('platformId', listingForm);
+  const storesForListing = useApiQuery<
+    Envelope<Array<{ id: string; storeCode: string; name: string; platformId: string }>>
+  >(
+    '/api/v1/stores',
+    { page: 1, pageSize: 100, platformId: listingPlatformId },
+    ['stores', 'for-listing-create', listingPlatformId ?? 'none'],
+    undefined,
+    listingCreateOpen,
+  );
+
+  const createListingMutation = useMutation({
+    mutationFn: (values: {
+      platformId: string;
+      storeId: string;
+      platformProductId: string;
+      title?: string;
+      offerId?: string;
+    }) =>
+      apiPost('/api/v1/listings', {
+        platformId: values.platformId,
+        storeId: values.storeId,
+        platformProductId: values.platformProductId,
+        title: values.title || undefined,
+        skuVariants: [
+          { offerId: values.offerId || undefined, skuId: drawerId ?? '' },
+        ],
+      }),
+    onSuccess: () => {
+      void message.success('Listing已创建并映射到该SKU');
+      setListingCreateOpen(false);
+      listingForm.resetFields();
+      refreshSku();
+      void queryClient.invalidateQueries({ queryKey: ['listings'] });
+    },
+    onError: (error: Error) => void message.error(`创建失败: ${error.message}`),
+  });
+
+  const unmappedListings = useApiQuery<
+    Envelope<Array<{ id: string; storeCode: string; platformProductId: string; title: string | null }>>
+  >(
+    '/api/v1/listings',
+    { page: 1, pageSize: 100, mappingState: 'UNMAPPED' },
+    ['listings', 'unmapped'],
+    undefined,
+    mapExistingOpen,
+  );
+  const mapExistingListingId = Form.useWatch('listingId', mapExistingForm);
+  const unmappedDetail = useApiQuery<{
+    data: { skus: Array<{ id: string; platformSkuId: string | null; offerId: string | null; mappingStatus: string }> };
+  }>(
+    '/api/v1/listings/{id}',
+    {},
+    ['listing-detail', mapExistingListingId],
+    { id: mapExistingListingId ?? '' },
+    mapExistingListingId !== undefined && mapExistingOpen,
+  );
+
+  const mapExistingMutation = useMutation({
+    mutationFn: (values: { listingId: string; mappingId: string }) =>
+      apiPost(
+        '/api/v1/listings/{listingId}/skus/{id}/map',
+        { skuId: drawerId ?? '' },
+        { listingId: values.listingId, id: values.mappingId },
+      ),
+    onSuccess: () => {
+      void message.success('映射完成（后续同步不会覆盖）');
+      setMapExistingOpen(false);
+      mapExistingForm.resetFields();
+      refreshSku();
+      void queryClient.invalidateQueries({ queryKey: ['listings'] });
     },
     onError: (error: Error) => void message.error(error.message),
   });
@@ -481,22 +663,19 @@ export function SkusPage() {
           }}
           options={(brands.data?.data ?? [])
             .filter((brand) => brand.status === 'ACTIVE')
-            .map((brand) => ({ value: brand.id, label: brand.nameZh }))}
+            .map((brand) => ({ value: brand.id, label: brand.name }))}
         />
-        <Select
+        <Cascader
           allowClear
-          placeholder="类目"
-          style={{ width: 140 }}
-          showSearch
-          optionFilterProp="label"
-          value={categoryId}
-          onChange={(value) => {
+          placeholder="类目（含子类）"
+          style={{ width: 180 }}
+          changeOnSelect
+          options={categoryOptions}
+          value={categoryId === undefined ? undefined : categoryPathOf(categoryOptions, categoryId)}
+          onChange={(path) => {
             setPage(1);
-            setCategoryId(value);
+            setCategoryId(path === null || path.length === 0 ? undefined : String(path[path.length - 1]));
           }}
-          options={(categories.data?.data ?? [])
-            .filter((category) => category.status === 'ACTIVE')
-            .map((category) => ({ value: category.id, label: category.nameZh }))}
         />
         <Select
           allowClear
@@ -721,6 +900,30 @@ export function SkusPage() {
         extra={
           sku !== undefined && (
             <>
+              <Button
+                onClick={() => {
+                  if (drawerId === null) {
+                    return;
+                  }
+                  editForm.resetFields();
+                  editForm.setFieldsValue({
+                    nameZh: sku.nameZh,
+                    nameRu: sku.nameRu ?? undefined,
+                    model: sku.model ?? undefined,
+                    color: sku.color ?? undefined,
+                    size: sku.size ?? undefined,
+                    weightG: sku.weightG ?? undefined,
+                    lengthMm: sku.lengthMm ?? undefined,
+                    widthMm: sku.widthMm ?? undefined,
+                    heightMm: sku.heightMm ?? undefined,
+                    purchaseUrl: sku.purchaseUrl ?? undefined,
+                    latestPurchasePrice: sku.latestPurchasePrice ?? undefined,
+                  });
+                  setEditOpen(true);
+                }}
+              >
+                编辑
+              </Button>
               {sku.status !== 'ACTIVE' && (
                 <Button
                   type="primary"
@@ -737,6 +940,22 @@ export function SkusPage() {
                   <Button danger>停用</Button>
                 </Popconfirm>
               )}
+              <Button
+                danger
+                onClick={() => {
+                  modal.confirm({
+                    title: '确认删除该SKU？',
+                    content: '仅零引用（无条码/库存/订单/映射）的SKU可以删除；被引用时会返回具体原因。',
+                    okText: '删除',
+                    okButtonProps: { danger: true },
+                    onOk: () => {
+                      deleteMutation.mutate(sku.id);
+                    },
+                  });
+                }}
+              >
+                删除
+              </Button>
             </>
           )
         }
@@ -783,7 +1002,10 @@ export function SkusPage() {
                         ),
                     },
                     { label: 'SN管理', children: sku.serialTracking ? '是' : '否' },
-                    { label: '平台映射', children: `${sku.listingCount} 个 Listing` },
+                    {
+                      label: '平台映射',
+                      children: `${mappings.data?.data.length ?? 0} 个 Listing`,
+                    },
                   ]}
                 />
               ),
@@ -818,7 +1040,12 @@ export function SkusPage() {
                     emptyTitle="暂无条码"
                     columns={[
                       { title: '条码', dataIndex: 'barcode' },
-                      { title: '类型', dataIndex: 'barcodeType', width: 120 },
+                      {
+                        title: '类型',
+                        dataIndex: 'barcodeType',
+                        width: 120,
+                        render: (value: string) => BARCODE_TYPE_LABEL[value] ?? value,
+                      },
                       {
                         title: '主条码',
                         dataIndex: 'isPrimary',
@@ -864,9 +1091,12 @@ export function SkusPage() {
                   <Upload
                     accept="image/png,image/jpeg,image/webp,image/gif"
                     showUploadList={false}
+                    disabled={uploadMutation.isPending || drawerId === null}
                     customRequest={({ file }) => uploadMutation.mutate(file as File)}
                   >
-                    <Button type="primary">上传图片</Button>
+                    <Button type="primary" loading={uploadMutation.isPending}>
+                      上传图片
+                    </Button>
                   </Upload>
                   <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                     {(images.data?.data ?? []).map((image) => (
@@ -889,6 +1119,14 @@ export function SkusPage() {
                               设为主图
                             </Button>
                           )}
+                          <Popconfirm
+                            title="确认删除该图片？"
+                            onConfirm={() => deleteImageMutation.mutate(image.id)}
+                          >
+                            <Button size="small" type="link" danger>
+                              删除
+                            </Button>
+                          </Popconfirm>
                         </div>
                       </div>
                     ))}
@@ -900,7 +1138,29 @@ export function SkusPage() {
               key: 'mappings',
               label: `平台映射 (${mappings.data?.data.length ?? 0})`,
               children: (
-                <DataTable<MappingRow>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div style={{ display: 'flex', gap: 8, paddingBottom: 4 }}>
+                    <Button
+                      type="primary"
+                      disabled={drawerId === null}
+                      onClick={() => {
+                        listingForm.resetFields();
+                        setListingCreateOpen(true);
+                      }}
+                    >
+                      新建 Listing 并映射
+                    </Button>
+                    <Button
+                      disabled={drawerId === null}
+                      onClick={() => {
+                        mapExistingForm.resetFields();
+                        setMapExistingOpen(true);
+                      }}
+                    >
+                      映射未映射变体
+                    </Button>
+                  </div>
+                  <DataTable<MappingRow>
                   rowKey="id"
                   size="small"
                   dataSource={mappings.data?.data ?? []}
@@ -909,7 +1169,12 @@ export function SkusPage() {
                   emptyTitle="暂无平台映射"
                   emptyDescription="该 SKU 尚未映射到任何平台 Listing。"
                   columns={[
-                    { title: '平台', dataIndex: 'platformCode', width: 90 },
+                    {
+                      title: '平台',
+                      dataIndex: 'platformCode',
+                      width: 110,
+                      render: (value: string) => <PlatformTag code={value} />,
+                    },
                     { title: '店铺', dataIndex: 'storeCode', width: 110 },
                     { title: 'Platform Product ID', dataIndex: 'platformProductId' },
                     { title: 'Offer ID', dataIndex: 'offerId' },
@@ -929,6 +1194,7 @@ export function SkusPage() {
                     },
                   ]}
                 />
+                </div>
               ),
             },
           ]}
@@ -967,6 +1233,166 @@ export function SkusPage() {
                 { value: 'OTHER', label: '其他' },
               ]}
             />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* ---- SKU edit modal (code read-only, decision #8) ---- */}
+      <Modal
+        title="编辑SKU"
+        open={editOpen}
+        zIndex={1100}
+        afterOpenChange={(open) => {
+          if (!open) {
+            editForm.resetFields();
+          }
+        }}
+        onCancel={() => setEditOpen(false)}
+        onOk={() => void editForm.validateFields().then((values) => updateMutation.mutate(values))}
+        confirmLoading={updateMutation.isPending}
+      >
+        <Form form={editForm} layout="vertical">
+          <Form.Item label="SKU 编码（生成后冻结）">
+            <Input value={sku?.skuCode ?? ''} disabled />
+          </Form.Item>
+          <Form.Item name="nameZh" label="中文名称" rules={[{ required: true, message: '请输入名称' }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="nameRu" label="俄文名称">
+            <Input />
+          </Form.Item>
+          <Form.Item name="model" label="型号">
+            <Input />
+          </Form.Item>
+          <Form.Item name="color" label="颜色">
+            <Input />
+          </Form.Item>
+          <Form.Item name="size" label="尺寸">
+            <Input />
+          </Form.Item>
+          <Form.Item name="weightG" label="重量(g)">
+            <Input type="number" />
+          </Form.Item>
+          <Form.Item name="purchaseUrl" label="采购链接">
+            <Input maxLength={1000} />
+          </Form.Item>
+          <Form.Item name="latestPurchasePrice" label="最新采购价（CNY）">
+            <Input type="number" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* ---- Create a new listing mapped to this SKU (§11.6) ---- */}
+      <Modal
+        title="新建 Listing 并映射"
+        open={listingCreateOpen}
+        zIndex={1100}
+        afterOpenChange={(open) => {
+          if (!open) {
+            listingForm.resetFields();
+          }
+        }}
+        onCancel={() => setListingCreateOpen(false)}
+        onOk={() =>
+          void listingForm.validateFields().then((values) => createListingMutation.mutate(values))
+        }
+        confirmLoading={createListingMutation.isPending}
+      >
+        <p style={{ color: colors.textTertiary, fontSize: 12.5 }}>
+          将创建一个新的平台商品链接，并把当前 SKU 作为其第一个变体映射。
+        </p>
+        <Form form={listingForm} layout="vertical">
+          <Form.Item name="platformId" label="平台" rules={[{ required: true, message: '请选择平台' }]}>
+            <Select
+              options={(platforms.data?.data ?? []).map((platform) => ({
+                value: platform.id,
+                label: platform.name,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="storeId" label="店铺" rules={[{ required: true, message: '请选择店铺' }]}>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              options={(storesForListing.data?.data ?? []).map((store) => ({
+                value: store.id,
+                label: `${store.storeCode} · ${store.name}`,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item
+            name="platformProductId"
+            label="Platform Product ID"
+            rules={[{ required: true, message: '请输入平台商品 ID' }]}
+          >
+            <Input placeholder="如 152987456001" />
+          </Form.Item>
+          <Form.Item name="title" label="标题">
+            <Input />
+          </Form.Item>
+          <Form.Item name="offerId" label="Offer ID（可选）">
+            <Input />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* ---- Map an existing UNMAPPED platform variant to this SKU (§11.6) ---- */}
+      <Modal
+        title="映射未映射变体"
+        open={mapExistingOpen}
+        zIndex={1100}
+        afterOpenChange={(open) => {
+          if (!open) {
+            mapExistingForm.resetFields();
+          }
+        }}
+        onCancel={() => setMapExistingOpen(false)}
+        onOk={() =>
+          void mapExistingForm.validateFields().then((values) => {
+            if (drawerId === null) {
+              void message.error('SKU 上下文丢失，请重新打开后重试');
+              return;
+            }
+            mapExistingMutation.mutate({
+              listingId: values.listingId,
+              mappingId: values.mappingId,
+            });
+          })
+        }
+        confirmLoading={mapExistingMutation.isPending}
+      >
+        <p style={{ color: colors.textTertiary, fontSize: 12.5 }}>
+          选择一个同步而来的未映射变体，将其绑定到当前 SKU；后续平台同步不会覆盖该映射。
+        </p>
+        <Form form={mapExistingForm} layout="vertical">
+          <Form.Item name="listingId" label="Listing" rules={[{ required: true, message: '请选择 Listing' }]}>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              options={(unmappedListings.data?.data ?? []).map((listing) => ({
+                value: listing.id,
+                label: `${listing.storeCode} / ${listing.platformProductId}${listing.title !== null ? ` · ${listing.title}` : ''}`,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(prev, next) => prev.listingId !== next.listingId}>
+            {() => (
+              <Form.Item
+                name="mappingId"
+                label="未映射变体"
+                rules={[{ required: true, message: '请选择要映射的变体' }]}
+              >
+                <Select
+                  options={(unmappedDetail.data?.data.skus ?? [])
+                    .filter((variant) => variant.mappingStatus === 'UNMAPPED')
+                    .map((variant) => ({
+                      value: variant.id,
+                      label:
+                        variant.platformSkuId ?? variant.offerId ?? variant.id.slice(0, 8),
+                    }))}
+                />
+              </Form.Item>
+            )}
           </Form.Item>
         </Form>
       </Modal>

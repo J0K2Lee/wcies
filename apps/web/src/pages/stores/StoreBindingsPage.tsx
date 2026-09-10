@@ -6,6 +6,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Popconfirm,
   Select,
   Space,
   Switch,
@@ -13,7 +14,9 @@ import {
   Tag,
 } from 'antd';
 import { useState } from 'react';
-import { apiPost, useApiQuery } from '../../api/hooks';
+import { useSearchParams } from 'react-router';
+import { apiDelete, apiPost, useApiQuery } from '../../api/hooks';
+import { FULFILLMENT_MODE_LABEL, PlatformTag } from '../../design-system';
 
 interface BindingRow {
   id: string;
@@ -47,15 +50,21 @@ const FULFILLMENT_MODES = [
 export function StoreBindingsPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
-  const [storeId, setStoreId] = useState<string | undefined>();
+  const [storeId, setStoreId] = useState<string | undefined>(() =>
+    searchParams.get('storeId') ?? undefined,
+  );
   const [createOpen, setCreateOpen] = useState(false);
   const [form] = Form.useForm();
 
+  const [warehouseId, setWarehouseId] = useState<string | undefined>(() =>
+    searchParams.get('warehouseId') ?? undefined,
+  );
   const list = useApiQuery<{ data: BindingRow[]; meta: { total: number } }>(
     '/api/v1/warehouse-bindings',
-    { page, pageSize: 50, storeId },
-    ['bindings', page, storeId],
+    { page, pageSize: 50, storeId, warehouseId },
+    ['bindings', page, storeId, warehouseId],
   );
   const stores = useApiQuery<{
     data: Array<{ id: string; platformCode: string; storeCode: string; name: string }>;
@@ -63,6 +72,33 @@ export function StoreBindingsPage() {
   const warehouses = useApiQuery<{
     data: Array<{ id: string; warehouseCode: string; name: string }>;
   }>('/api/v1/warehouses', { page: 1, pageSize: 100 }, ['warehouses-lite']);
+
+  const statusMutation = useMutation({
+    mutationFn: ({
+      storeId: sid,
+      id,
+      action,
+    }: {
+      storeId: string;
+      id: string;
+      action: 'enable' | 'disable';
+    }) => apiPost(`/api/v1/stores/{storeId}/warehouse-bindings/{id}/${action}`, {}, { storeId: sid, id }),
+    onSuccess: () => {
+      void message.success('状态已更新');
+      void queryClient.invalidateQueries({ queryKey: ['bindings'] });
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: ({ storeId: sid, id }: { storeId: string; id: string }) =>
+      apiDelete('/api/v1/stores/{storeId}/warehouse-bindings/{id}', { storeId: sid, id }),
+    onSuccess: () => {
+      void message.success('绑定已删除');
+      void queryClient.invalidateQueries({ queryKey: ['bindings'] });
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
 
   const createMutation = useMutation({
     mutationFn: (values: {
@@ -108,7 +144,23 @@ export function StoreBindingsPage() {
           }}
           options={(stores.data?.data ?? []).map((store) => ({
             value: store.id,
-            label: `${store.platformCode} / ${store.storeCode}`,
+            label: `${store.storeCode} · ${store.name}`,
+          }))}
+        />
+        <Select
+          allowClear
+          placeholder="仓库"
+          style={{ width: 220 }}
+          showSearch
+          optionFilterProp="label"
+          value={warehouseId}
+          onChange={(value) => {
+            setPage(1);
+            setWarehouseId(value);
+          }}
+          options={(warehouses.data?.data ?? []).map((warehouse) => ({
+            value: warehouse.id,
+            label: `${warehouse.warehouseCode} ${warehouse.name}`,
           }))}
         />
         <Button type="primary" onClick={() => setCreateOpen(true)}>
@@ -129,11 +181,20 @@ export function StoreBindingsPage() {
         }}
         scroll={{ x: 1100 }}
         columns={[
-          { title: '平台', dataIndex: 'platformCode', width: 80 },
+          {
+            title: '平台',
+            dataIndex: 'platformCode',
+            width: 110,
+            render: (value: string) => <PlatformTag code={value} />,
+          },
           { title: '店铺', dataIndex: 'storeCode' },
           { title: '仓库', dataIndex: 'warehouseCode' },
           { title: '仓库名称', dataIndex: 'warehouseName' },
-          { title: '履约模式', dataIndex: 'fulfillmentMode' },
+          {
+            title: '履约模式',
+            dataIndex: 'fulfillmentMode',
+            render: (value: string) => FULFILLMENT_MODE_LABEL[value] ?? value,
+          },
           { title: '平台仓ID', dataIndex: 'platformWarehouseId' },
           {
             title: '库存来源',
@@ -158,6 +219,42 @@ export function StoreBindingsPage() {
               </Tag>
             ),
           },
+          {
+            title: '操作',
+            key: 'actions',
+            width: 170,
+            render: (_: unknown, row: BindingRow) => (
+              <Space>
+                {row.status === 'ACTIVE' ? (
+                  <Popconfirm
+                    title="确认停用该绑定？"
+                    onConfirm={() =>
+                      statusMutation.mutate({ storeId: row.storeId, id: row.id, action: 'disable' })
+                    }
+                  >
+                    <Button size="small">停用</Button>
+                  </Popconfirm>
+                ) : (
+                  <Button
+                    size="small"
+                    onClick={() =>
+                      statusMutation.mutate({ storeId: row.storeId, id: row.id, action: 'enable' })
+                    }
+                  >
+                    启用
+                  </Button>
+                )}
+                <Popconfirm
+                  title="确认删除该绑定？"
+                  onConfirm={() => deleteMutation.mutate({ storeId: row.storeId, id: row.id })}
+                >
+                  <Button size="small" danger>
+                    删除
+                  </Button>
+                </Popconfirm>
+              </Space>
+            ),
+          },
         ]}
       />
 
@@ -175,7 +272,7 @@ export function StoreBindingsPage() {
               optionFilterProp="label"
               options={(stores.data?.data ?? []).map((store) => ({
                 value: store.id,
-                label: `${store.platformCode} / ${store.storeCode} ${store.name}`,
+                label: `${store.storeCode} · ${store.name}`,
               }))}
             />
           </Form.Item>
@@ -190,7 +287,12 @@ export function StoreBindingsPage() {
             />
           </Form.Item>
           <Form.Item name="fulfillmentMode" label="履约模式" rules={[{ required: true }]}>
-            <Select options={FULFILLMENT_MODES.map((mode) => ({ value: mode, label: mode }))} />
+            <Select
+              options={FULFILLMENT_MODES.map((mode) => ({
+                value: mode,
+                label: FULFILLMENT_MODE_LABEL[mode] ?? mode,
+              }))}
+            />
           </Form.Item>
           <Form.Item name="platformWarehouseId" label="平台仓ID（平台履约时填写）">
             <Input placeholder="如 123456" />

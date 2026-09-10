@@ -1,7 +1,18 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { App, Button, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
+import {
+  App,
+  Button,
+  Form,
+  Input,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+  Table,
+  Tag,
+} from 'antd';
 import { useState } from 'react';
-import { apiPost, useApiQuery } from '../../api/hooks';
+import { apiDelete, apiPost, useApiQuery } from '../../api/hooks';
 
 interface BinRow {
   id: string;
@@ -32,11 +43,15 @@ export function BinsPage() {
     '/api/v1/warehouses/{warehouseId}/bins',
     { page, pageSize: 50, keyword: keyword || undefined },
     ['bins', warehouseId, page, keyword],
+    { warehouseId: warehouseId ?? '' },
+    warehouseId !== undefined,
   );
 
   const createMutation = useMutation({
-    mutationFn: (values: Record<string, string>) =>
-      apiPost('/api/v1/warehouses/{warehouseId}/bins', values, { warehouseId: warehouseId ?? '' }),
+    mutationFn: (values: Record<string, string> & { warehouseId: string }) =>
+      apiPost('/api/v1/warehouses/{warehouseId}/bins', values, {
+        warehouseId: values.warehouseId,
+      }),
     onSuccess: () => {
       void message.success('库位已创建');
       setCreateOpen(false);
@@ -45,6 +60,47 @@ export function BinsPage() {
     },
     onError: (error: Error) => void message.error(error.message),
   });
+
+  const binStatusMutation = useMutation({
+    mutationFn: ({
+      warehouseId: wid,
+      binId,
+      action,
+    }: {
+      warehouseId: string;
+      binId: string;
+      action: 'enable' | 'disable';
+    }) =>
+      apiPost(`/api/v1/warehouses/{warehouseId}/bins/{binId}/${action}`, {}, {
+        warehouseId: wid,
+        binId,
+      }),
+    onSuccess: () => {
+      void message.success('状态已更新');
+      void queryClient.invalidateQueries({ queryKey: ['bins', warehouseId] });
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const binDeleteMutation = useMutation({
+    mutationFn: ({ warehouseId: wid, binId }: { warehouseId: string; binId: string }) =>
+      apiDelete('/api/v1/warehouses/{warehouseId}/bins/{binId}', { warehouseId: wid, binId }),
+    onSuccess: () => {
+      void message.success('库位已删除');
+      void queryClient.invalidateQueries({ queryKey: ['bins', warehouseId] });
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const submitCreate = () => {
+    if (warehouseId === undefined) {
+      void message.error('请先选择仓库');
+      return;
+    }
+    void form
+      .validateFields()
+      .then((values) => createMutation.mutate({ ...values, warehouseId }));
+  };
 
   return (
     <Space orientation="vertical" style={{ width: '100%' }} size="middle">
@@ -111,14 +167,66 @@ export function BinsPage() {
               </Tag>
             ),
           },
+          {
+            title: '操作',
+            key: 'actions',
+            width: 170,
+            render: (_: unknown, row: BinRow) => (
+              <Space>
+                {row.status === 'ACTIVE' ? (
+                  <Popconfirm
+                    title="确认停用该库位？"
+                    onConfirm={() =>
+                      binStatusMutation.mutate({
+                        warehouseId: row.warehouseId,
+                        binId: row.id,
+                        action: 'disable',
+                      })
+                    }
+                  >
+                    <Button size="small">停用</Button>
+                  </Popconfirm>
+                ) : (
+                  <Button
+                    size="small"
+                    onClick={() =>
+                      binStatusMutation.mutate({
+                        warehouseId: row.warehouseId,
+                        binId: row.id,
+                        action: 'enable',
+                      })
+                    }
+                  >
+                    启用
+                  </Button>
+                )}
+                <Popconfirm
+                  title="确认删除该库位？"
+                  description="仅零引用（无库存/流水）的库位可删除；被引用时会返回具体原因。"
+                  onConfirm={() =>
+                    binDeleteMutation.mutate({ warehouseId: row.warehouseId, binId: row.id })
+                  }
+                >
+                  <Button size="small" danger>
+                    删除
+                  </Button>
+                </Popconfirm>
+              </Space>
+            ),
+          },
         ]}
       />
 
       <Modal
         title="新建库位"
         open={createOpen}
+        afterOpenChange={(open) => {
+          if (!open) {
+            form.resetFields();
+          }
+        }}
         onCancel={() => setCreateOpen(false)}
-        onOk={() => void form.validateFields().then((values) => createMutation.mutate(values))}
+        onOk={submitCreate}
         confirmLoading={createMutation.isPending}
       >
         <Form form={form} layout="vertical">

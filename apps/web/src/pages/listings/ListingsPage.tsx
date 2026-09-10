@@ -1,8 +1,28 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { App, Button, Drawer, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
-import { useState } from 'react';
+import { App, Button, Drawer, Form, Input, Modal, Popconfirm, Select, Space } from 'antd';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
+import { apiDelete, apiPatch, apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
+import {
+  ACTIVE_STATUS_LABEL,
+  colors,
+  ContextAction,
+  ContextMetric,
+  ContextRailContent,
+  ContextSection,
+  DataTable,
+  EntitySummary,
+  ErrorState,
+  FilterBar,
+  InfoGrid,
+  PageHeader,
+  PlatformTag,
+  RelativeTime,
+  SectionCard,
+  StatusBadge,
+  labelOf,
+  useContextRail,
+} from '../../design-system';
 
 interface ListingRow {
   id: string;
@@ -15,11 +35,13 @@ interface ListingRow {
   title: string | null;
   url: string | null;
   status: string;
+  updatedAt: string;
   mappingCount: number;
 }
 
 interface ListingSkuRow {
   id: string;
+  listingId: string;
   skuId: string | null;
   skuCode: string | null;
   skuName: string | null;
@@ -29,6 +51,28 @@ interface ListingSkuRow {
   offerId: string | null;
   status: string;
 }
+
+interface ListingDetail {
+  id: string;
+  platformCode: string;
+  storeCode: string;
+  storeName: string;
+  platformProductId: string;
+  title: string | null;
+  url: string | null;
+  status: string;
+  updatedAt: string;
+  lastSeenAt: string | null;
+  skus: ListingSkuRow[];
+}
+
+const listingStatusBadge = (value: string) => (
+  <StatusBadge
+    tone={value === 'ACTIVE' ? 'success' : 'neutral'}
+    label={labelOf(ACTIVE_STATUS_LABEL, value)}
+    hint={value}
+  />
+);
 
 export function ListingsPage() {
   const { message } = App.useApp();
@@ -40,28 +84,17 @@ export function ListingsPage() {
   const [mappingState, setMappingState] = useState<string | undefined>();
   // ?keyword= deep link from the exception center / mapping overview.
   const [keyword, setKeyword] = useState(() => searchParams.get('keyword') ?? '');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
+  // Modal-chain fix: snapshot the variant row (incl. listingId) the map modal
+  // was opened for; the drawer's onClose may null detailId while the modal is
+  // still open.
   const [mapTarget, setMapTarget] = useState<ListingSkuRow | null>(null);
   const [form] = Form.useForm();
   const [mapForm] = Form.useForm();
   const [skuKeyword, setSkuKeyword] = useState('');
   const debouncedSkuKeyword = useDebouncedValue(skuKeyword);
-  const mapMutation = useMutation({
-    mutationFn: (skuId: string) =>
-      apiPost(
-        '/api/v1/listings/{listingId}/skus/{id}/map',
-        { skuId },
-        { listingId: detailId ?? '', id: mapTarget?.id ?? '' },
-      ),
-    onSuccess: () => {
-      void message.success('映射完成（后续同步不会覆盖）');
-      setMapTarget(null);
-      void queryClient.invalidateQueries({ queryKey: ['listing-detail'] });
-      void queryClient.invalidateQueries({ queryKey: ['listings'] });
-    },
-    onError: (error: Error) => void message.error(error.message),
-  });
 
   const list = useApiQuery<{ data: ListingRow[]; meta: { total: number } }>(
     '/api/v1/listings',
@@ -97,14 +130,7 @@ export function ListingsPage() {
     { page: 1, pageSize: 50, keyword: debouncedSkuKeyword || undefined },
     ['skus-for-mapping', debouncedSkuKeyword],
   );
-  const detail = useApiQuery<{
-    data: {
-      platformCode: string;
-      storeCode: string;
-      platformProductId: string;
-      skus: ListingSkuRow[];
-    };
-  }>(
+  const detail = useApiQuery<{ data: ListingDetail }>(
     '/api/v1/listings/{id}',
     {},
     ['listing-detail', detailId],
@@ -114,6 +140,25 @@ export function ListingsPage() {
     detailId !== null,
   );
   const listingDetail = detail.data?.data;
+
+  const refreshListings = () => {
+    void queryClient.invalidateQueries({ queryKey: ['listings'] });
+    void queryClient.invalidateQueries({ queryKey: ['listing-detail'] });
+  };
+
+  const mapMutation = useMutation({
+    mutationFn: (input: { listingId: string; mappingId: string; skuId: string }) =>
+      apiPost('/api/v1/listings/{listingId}/skus/{id}/map', { skuId: input.skuId }, {
+        listingId: input.listingId,
+        id: input.mappingId,
+      }),
+    onSuccess: () => {
+      void message.success('映射完成（后续同步不会覆盖）');
+      setMapTarget(null);
+      refreshListings();
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
 
   const createMutation = useMutation({
     mutationFn: (values: {
@@ -138,13 +183,136 @@ export function ListingsPage() {
     onError: (error: Error) => void message.error(`创建失败: ${error.message}`),
   });
 
+  const listingStatusMutation = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'activate' | 'deactivate' }) =>
+      apiPost(
+        action === 'activate' ? '/api/v1/listings/{id}/activate' : '/api/v1/listings/{id}/deactivate',
+        {},
+        { id },
+      ),
+    onSuccess: () => {
+      void message.success('Listing状态已更新');
+      refreshListings();
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const listingDeleteMutation = useMutation({
+    mutationFn: (id: string) => apiDelete('/api/v1/listings/{id}', { id }),
+    onSuccess: (_data, id) => {
+      void message.success('Listing已删除');
+      if (detailId === id) {
+        setDetailId(null);
+      }
+      if (selectedId === id) {
+        setSelectedId(null);
+      }
+      refreshListings();
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const mappingStatusMutation = useMutation({
+    mutationFn: (input: { listingId: string; mappingId: string; status: 'ACTIVE' | 'INACTIVE' }) =>
+      apiPatch(
+        '/api/v1/listings/{listingId}/skus/{id}',
+        { status: input.status },
+        { listingId: input.listingId, id: input.mappingId },
+      ),
+    onSuccess: () => {
+      void message.success('映射状态已更新');
+      refreshListings();
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const mappingDeleteMutation = useMutation({
+    mutationFn: (input: { listingId: string; mappingId: string }) =>
+      apiDelete('/api/v1/listings/{listingId}/skus/{id}', {
+        listingId: input.listingId,
+        id: input.mappingId,
+      }),
+    onSuccess: () => {
+      void message.success('映射已删除');
+      refreshListings();
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
   const storeOptions = (stores.data?.data ?? [])
     .filter((store) => platformId === undefined || store.platformId === platformId)
     .map((store) => ({ value: store.id, label: `${store.storeCode} ${store.name}` }));
 
+  const rows = list.data?.data ?? [];
+  const selectedRow = useMemo(
+    () => rows.find((row) => row.id === selectedId) ?? null,
+    [rows, selectedId],
+  );
+
+  // ---- Context rail: overview stats when idle, selected listing summary ----
+  const railContent = useMemo<ContextRailContent>(() => {
+    if (selectedRow === null) {
+      return {
+        defaultCollapsed: true,
+        children: (
+          <ContextSection title="映射概览">
+            <ContextMetric label="当前筛选结果" value={`${list.data?.meta.total ?? 0} 个 Listing`} />
+            <ContextMetric label="本页" value={`${list.data?.data.length ?? 0} 条`} />
+            <span
+              style={{
+                fontSize: 12.5,
+                color: colors.textTertiary,
+                display: 'block',
+                paddingTop: 8,
+              }}
+            >
+              点击表格任意行，在此预览 Listing 与变体映射概况。
+            </span>
+          </ContextSection>
+        ),
+      };
+    }
+    return {
+      defaultCollapsed: true,
+      header: (
+        <EntitySummary
+          title={selectedRow.platformProductId}
+          subtitle={`${selectedRow.storeCode} ${selectedRow.storeName}`}
+          badge={listingStatusBadge(selectedRow.status)}
+          meta={<PlatformTag code={selectedRow.platformCode} />}
+        />
+      ),
+      children: (
+        <>
+          <ContextSection title="基本信息">
+            <ContextMetric label="标题" value={selectedRow.title ?? '—'} />
+            <ContextMetric label="变体映射" value={`${selectedRow.mappingCount} 个`} />
+            <ContextMetric label="更新时间" value={<RelativeTime value={selectedRow.updatedAt} />} />
+          </ContextSection>
+          <ContextAction>
+            <Button block onClick={() => setDetailId(selectedRow.id)}>
+              查看详情
+            </Button>
+          </ContextAction>
+        </>
+      ),
+    };
+  }, [selectedRow, list.data]);
+  useContextRail(railContent);
+
   return (
-    <Space orientation="vertical" style={{ width: '100%' }} size="middle">
-      <Space wrap>
+    <div>
+      <PageHeader
+        title="SKU映射"
+        description="管理平台商品（Listing）与内部SKU的变体映射；人工确认的映射不会被后续同步覆盖"
+        primary={
+          <Button type="primary" onClick={() => setCreateOpen(true)}>
+            新建映射
+          </Button>
+        }
+      />
+
+      <FilterBar>
         <Select
           allowClear
           placeholder="平台"
@@ -156,7 +324,7 @@ export function ListingsPage() {
           }}
           options={(platforms.data?.data ?? []).map((platform) => ({
             value: platform.id,
-            label: platform.code,
+            label: platform.name,
           }))}
         />
         <Select
@@ -195,66 +363,113 @@ export function ListingsPage() {
           }}
           style={{ width: 240 }}
         />
-        <Button type="primary" onClick={() => setCreateOpen(true)}>
-          新建Listing映射
-        </Button>
-      </Space>
+      </FilterBar>
 
-      <Table<ListingRow>
-        rowKey="id"
-        loading={list.isLoading}
-        dataSource={list.data?.data ?? []}
-        pagination={{
-          current: page,
-          pageSize: 50,
-          total: list.data?.meta.total ?? 0,
-          onChange: setPage,
-          showSizeChanger: false,
-        }}
-        columns={[
-          { title: '平台', dataIndex: 'platformCode', width: 80 },
-          { title: '店铺', dataIndex: 'storeCode', width: 110 },
-          { title: 'Platform Product ID', dataIndex: 'platformProductId' },
-          {
-            title: '标题',
-            dataIndex: 'title',
-            ellipsis: true,
-            render: (value: string | null, record) =>
-              record.url !== null ? (
-                <a href={record.url} target="_blank" rel="noreferrer">
-                  {value ?? record.url}
-                </a>
-              ) : (
-                (value ?? '-')
-              ),
-          },
-          { title: '映射数', dataIndex: 'mappingCount', width: 80 },
-          {
-            title: '状态',
-            dataIndex: 'status',
-            width: 80,
-            render: (value: string) => (
-              <Tag color={value === 'ACTIVE' ? 'green' : 'default'}>
-                {value === 'ACTIVE' ? '启用' : value}
-              </Tag>
-            ),
-          },
-          {
-            title: '操作',
-            width: 90,
-            render: (_, record) => (
-              <Button size="small" onClick={() => setDetailId(record.id)}>
-                详情
-              </Button>
-            ),
-          },
-        ]}
-      />
+      <SectionCard flush>
+        {list.isError ? (
+          <ErrorState
+            description={(list.error as Error | null)?.message}
+            onRetry={() => void queryClient.invalidateQueries({ queryKey: ['listings'] })}
+            retrying={list.isFetching}
+          />
+        ) : (
+          <DataTable<ListingRow>
+            rowKey="id"
+            loading={list.isLoading}
+            dataSource={rows}
+            emptyTitle="暂无Listing"
+            emptyDescription="调整筛选条件，或点击右上角新建映射"
+            pagination={{
+              current: page,
+              pageSize: 50,
+              total: list.data?.meta.total ?? 0,
+              onChange: setPage,
+              showSizeChanger: false,
+            }}
+            onRow={(record) => ({
+              onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+              style: {
+                cursor: 'pointer',
+                background: record.id === selectedId ? colors.primarySoft : undefined,
+              },
+            })}
+            columns={[
+              {
+                title: '平台',
+                dataIndex: 'platformCode',
+                width: 100,
+                render: (value: string) => <PlatformTag code={value} />,
+              },
+              { title: '店铺', dataIndex: 'storeCode', width: 100 },
+              {
+                title: 'Platform Product ID',
+                dataIndex: 'platformProductId',
+                width: 160,
+                render: (value: string) => (
+                  <span style={{ fontFamily: 'monospace', fontSize: 12.5 }}>{value}</span>
+                ),
+              },
+              {
+                title: '标题',
+                dataIndex: 'title',
+                ellipsis: true,
+                render: (value: string | null, record) =>
+                  record.url !== null ? (
+                    <a href={record.url} target="_blank" rel="noreferrer">
+                      {value ?? record.url}
+                    </a>
+                  ) : (
+                    (value ?? '-')
+                  ),
+              },
+              {
+                title: '变体',
+                dataIndex: 'mappingCount',
+                width: 70,
+                render: (value: number) => `${value} 个`,
+              },
+              {
+                title: '状态',
+                dataIndex: 'status',
+                width: 90,
+                render: (value: string) => listingStatusBadge(value),
+              },
+              {
+                title: '更新时间',
+                dataIndex: 'updatedAt',
+                width: 110,
+                render: (value: string) => <RelativeTime value={value} />,
+              },
+              {
+                title: '操作',
+                key: 'actions',
+                width: 76,
+                render: (_: unknown, record: ListingRow) => (
+                  <Button
+                    type="link"
+                    size="small"
+                    style={{ padding: 0 }}
+                    onClick={() => setDetailId(record.id)}
+                  >
+                    详情
+                  </Button>
+                ),
+              },
+            ]}
+          />
+        )}
+      </SectionCard>
 
       <Modal
         title="新建Listing映射（支持多SKU变体）"
         open={createOpen}
         width={720}
+        zIndex={1100}
+        afterOpenChange={(open) => {
+          if (!open) {
+            form.resetFields();
+          }
+        }}
         onCancel={() => setCreateOpen(false)}
         onOk={() => void form.validateFields().then((values) => createMutation.mutate(values))}
         confirmLoading={createMutation.isPending}
@@ -271,7 +486,7 @@ export function ListingsPage() {
                 onChange={() => form.setFieldValue('storeId', undefined)}
                 options={(platforms.data?.data ?? []).map((platform) => ({
                   value: platform.id,
-                  label: platform.code,
+                  label: platform.name,
                 }))}
               />
             </Form.Item>
@@ -355,66 +570,270 @@ export function ListingsPage() {
       <Drawer
         title={
           listingDetail
-            ? `${listingDetail.platformCode} / ${listingDetail.storeCode} / ${listingDetail.platformProductId}`
+            ? `${listingDetail.storeCode} / ${listingDetail.platformProductId}`
             : 'Listing详情'
         }
         size={720}
         open={detailId !== null}
         onClose={() => setDetailId(null)}
-      >
-        <Table<ListingSkuRow>
-          rowKey="id"
-          size="small"
-          dataSource={listingDetail?.skus ?? []}
-          pagination={false}
-          columns={[
-            {
-              title: '映射状态',
-              dataIndex: 'mappingStatus',
-              width: 90,
-              render: (value: string) =>
-                value === 'MAPPED' ? (
-                  <Tag color="green">MAPPED</Tag>
-                ) : (
-                  <Tag color="orange">UNMAPPED</Tag>
-                ),
-            },
-            {
-              title: '内部SKU',
-              dataIndex: 'skuCode',
-              render: (value: string | null) => value ?? <Tag color="orange">未映射</Tag>,
-            },
-            { title: '名称', dataIndex: 'skuName', render: (value: string | null) => value ?? '-' },
-            { title: 'Platform SKU', dataIndex: 'platformSkuId' },
-            { title: 'Seller SKU', dataIndex: 'sellerSku' },
-            { title: 'Offer ID', dataIndex: 'offerId' },
-            {
-              title: '操作',
-              width: 110,
-              render: (_: unknown, row: ListingSkuRow) =>
-                row.mappingStatus === 'UNMAPPED' ? (
-                  <Button
-                    size="small"
-                    type="primary"
-                    ghost
-                    onClick={() => {
-                      setMapTarget(row);
-                      mapForm.resetFields();
-                    }}
-                  >
-                    人工映射
+        extra={
+          listingDetail !== undefined ? (
+            <Space>
+              {listingDetail.status === 'ACTIVE' ? (
+                <Popconfirm
+                  title="确认停用该Listing？"
+                  description="停用后可随时重新启用。"
+                  onConfirm={() =>
+                    listingStatusMutation.mutate({
+                      id: listingDetail.id,
+                      action: 'deactivate',
+                    })
+                  }
+                >
+                  <Button size="small" danger loading={listingStatusMutation.isPending}>
+                    停用
                   </Button>
-                ) : null,
-            },
-          ]}
-        />
+                </Popconfirm>
+              ) : (
+                <Button
+                  size="small"
+                  type="primary"
+                  loading={listingStatusMutation.isPending}
+                  onClick={() =>
+                    listingStatusMutation.mutate({ id: listingDetail.id, action: 'activate' })
+                  }
+                >
+                  启用
+                </Button>
+              )}
+              <Popconfirm
+                title="确认删除该Listing？"
+                description="存在变体映射的Listing无法删除；被拒时会返回具体原因。"
+                onConfirm={() => listingDeleteMutation.mutate(listingDetail.id)}
+              >
+                <Button size="small" danger loading={listingDeleteMutation.isPending}>
+                  删除
+                </Button>
+              </Popconfirm>
+            </Space>
+          ) : undefined
+        }
+      >
+        {detail.isError ? (
+          <span style={{ color: colors.danger }}>
+            详情加载失败：{(detail.error as Error | null)?.message ?? '请稍后重试'}
+          </span>
+        ) : listingDetail === undefined ? (
+          <span style={{ color: colors.textTertiary }}>加载中…</span>
+        ) : (
+          <Space orientation="vertical" size="large" style={{ width: '100%' }}>
+            <section>
+              <div
+                style={{
+                  fontSize: 14.5,
+                  fontWeight: 600,
+                  color: colors.textPrimary,
+                  marginBottom: 10,
+                }}
+              >
+                基本信息
+              </div>
+              <InfoGrid
+                columns={2}
+                items={[
+                  {
+                    label: '平台',
+                    children: <PlatformTag code={listingDetail.platformCode} />,
+                  },
+                  {
+                    label: '店铺',
+                    children: `${listingDetail.storeCode} ${listingDetail.storeName}`,
+                  },
+                  {
+                    label: '状态',
+                    children: listingStatusBadge(listingDetail.status),
+                  },
+                  {
+                    label: '最近同步发现',
+                    children: (
+                      <RelativeTime value={listingDetail.lastSeenAt} fallback="未发现" />
+                    ),
+                  },
+                  {
+                    label: '标题',
+                    span: 2,
+                    children:
+                      listingDetail.url !== null ? (
+                        <a href={listingDetail.url} target="_blank" rel="noreferrer">
+                          {listingDetail.title ?? listingDetail.url}
+                        </a>
+                      ) : (
+                        (listingDetail.title ?? '—')
+                      ),
+                  },
+                  {
+                    label: 'Platform Product ID',
+                    children: (
+                      <span style={{ fontFamily: 'monospace', fontSize: 12.5 }}>
+                        {listingDetail.platformProductId}
+                      </span>
+                    ),
+                  },
+                  {
+                    label: '更新时间',
+                    children: <RelativeTime value={listingDetail.updatedAt} />,
+                  },
+                ]}
+              />
+            </section>
+
+            <section>
+              <div
+                style={{
+                  fontSize: 14.5,
+                  fontWeight: 600,
+                  color: colors.textPrimary,
+                  marginBottom: 10,
+                }}
+              >
+                变体映射（{listingDetail.skus.length}）
+              </div>
+              <DataTable<ListingSkuRow>
+                rowKey="id"
+                size="small"
+                loading={detail.isLoading}
+                dataSource={listingDetail.skus}
+                pagination={false}
+                emptyTitle="暂无变体"
+                emptyDescription="该Listing尚无变体映射记录"
+                columns={[
+                  {
+                    title: '映射状态',
+                    dataIndex: 'mappingStatus',
+                    width: 90,
+                    render: (value: string) =>
+                      value === 'MAPPED' ? (
+                        <StatusBadge tone="success" label="已映射" />
+                      ) : (
+                        <StatusBadge tone="warning" label="未映射" />
+                      ),
+                  },
+                  {
+                    title: '内部SKU',
+                    dataIndex: 'skuCode',
+                    render: (value: string | null) =>
+                      value ?? <StatusBadge tone="warning" label="未映射" showDot={false} />,
+                  },
+                  {
+                    title: '名称',
+                    dataIndex: 'skuName',
+                    render: (value: string | null) => value ?? '-',
+                  },
+                  {
+                    title: 'Platform SKU',
+                    dataIndex: 'platformSkuId',
+                    render: (value: string | null) => value ?? '—',
+                  },
+                  {
+                    title: 'Seller SKU',
+                    dataIndex: 'sellerSku',
+                    render: (value: string | null) => value ?? '—',
+                  },
+                  {
+                    title: 'Offer ID',
+                    dataIndex: 'offerId',
+                    render: (value: string | null) => value ?? '—',
+                  },
+                  {
+                    title: '操作',
+                    key: 'actions',
+                    width: 180,
+                    render: (_: unknown, row: ListingSkuRow) =>
+                      row.mappingStatus === 'UNMAPPED' ? (
+                        <Button
+                          size="small"
+                          type="primary"
+                          ghost
+                          onClick={() => {
+                            setMapTarget(row);
+                            mapForm.resetFields();
+                          }}
+                        >
+                          人工映射
+                        </Button>
+                      ) : (
+                        <Space size={4}>
+                          {row.status === 'ACTIVE' ? (
+                            <Button
+                              size="small"
+                              loading={mappingStatusMutation.isPending}
+                              onClick={() =>
+                                mappingStatusMutation.mutate({
+                                  listingId: row.listingId,
+                                  mappingId: row.id,
+                                  status: 'INACTIVE',
+                                })
+                              }
+                            >
+                              停用
+                            </Button>
+                          ) : (
+                            <Button
+                              size="small"
+                              type="primary"
+                              ghost
+                              loading={mappingStatusMutation.isPending}
+                              onClick={() =>
+                                mappingStatusMutation.mutate({
+                                  listingId: row.listingId,
+                                  mappingId: row.id,
+                                  status: 'ACTIVE',
+                                })
+                              }
+                            >
+                              启用
+                            </Button>
+                          )}
+                          <Popconfirm
+                            title="确认删除该映射？"
+                            description="已关联订单行的映射无法删除；被拒时会返回具体原因。"
+                            onConfirm={() =>
+                              mappingDeleteMutation.mutate({
+                                listingId: row.listingId,
+                                mappingId: row.id,
+                              })
+                            }
+                          >
+                            <Button size="small" danger loading={mappingDeleteMutation.isPending}>
+                              删除
+                            </Button>
+                          </Popconfirm>
+                        </Space>
+                      ),
+                  },
+                ]}
+              />
+            </section>
+          </Space>
+        )}
 
         <Modal
           title={`人工映射：${mapTarget?.offerId ?? mapTarget?.platformSkuId ?? ''} → Internal SKU`}
           open={mapTarget !== null}
+          zIndex={1100}
           onCancel={() => setMapTarget(null)}
           onOk={() =>
-            void mapForm.validateFields().then((values) => mapMutation.mutate(values.skuId))
+            void mapForm.validateFields().then((values) => {
+              if (mapTarget === null || mapTarget.listingId === '' || mapTarget.id === '') {
+                void message.error('映射上下文丢失，请重新打开后重试');
+                return;
+              }
+              mapMutation.mutate({
+                listingId: mapTarget.listingId,
+                mappingId: mapTarget.id,
+                skuId: values.skuId,
+              });
+            })
           }
           confirmLoading={mapMutation.isPending}
         >
@@ -442,6 +861,6 @@ export function ListingsPage() {
           </Form>
         </Modal>
       </Drawer>
-    </Space>
+    </div>
   );
 }
