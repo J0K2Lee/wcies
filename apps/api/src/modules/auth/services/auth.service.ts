@@ -61,9 +61,16 @@ export class AuthService {
       throw new InvalidCredentialsError();
     }
 
+    // A SUCCESSFUL login resets the counter: the limiter exists to throttle
+    // password guessing, and counting successes instead locked out e.g. a
+    // shared-IP office (or the serial integration suites, which log in once
+    // per spec file through the same shared Redis DB) after five legitimate
+    // logins in a minute.
+    await this.redis.client.del(`auth:login:rate:${clientIp}`);
+
     const token = await this.signToken(user);
     this.setAuthCookie(response, token);
-    this.logger.info('Login successful', { module: 'auth', userId: user.id });
+    this.logger.info('Login successful', { module: 'auth', clientIp, userId: user.id });
     return this.userService.toResponse(user);
   }
 
