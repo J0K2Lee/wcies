@@ -3009,8 +3009,17 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
-            /** @example 2 */
+            /**
+             * @description 该 Listing 的变体映射总数（含未映射）
+             * @example 2
+             */
             mappingCount: number;
+            /**
+             * @description 是否至少有一个 ACTIVE 且已绑定内部 SKU 的变体；与 mappingState 筛选同一判定
+             * @example MAPPED
+             * @enum {string}
+             */
+            mappingStatus: "MAPPED" | "UNMAPPED";
         };
         ListingSkuResponseDto: {
             /** Format: uuid */
@@ -3075,8 +3084,17 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
-            /** @example 2 */
+            /**
+             * @description 该 Listing 的变体映射总数（含未映射）
+             * @example 2
+             */
             mappingCount: number;
+            /**
+             * @description 是否至少有一个 ACTIVE 且已绑定内部 SKU 的变体；与 mappingState 筛选同一判定
+             * @example MAPPED
+             * @enum {string}
+             */
+            mappingStatus: "MAPPED" | "UNMAPPED";
             skus: components["schemas"]["ListingSkuResponseDto"][];
         };
         ListingSkuVariantDto: {

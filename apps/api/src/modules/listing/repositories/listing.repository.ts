@@ -4,6 +4,35 @@ import { DeepPartial, QueryDeepPartialEntity, Repository } from 'typeorm';
 import { PlatformListingEntity } from '../entities/platform-listing.entity';
 import { PlatformListingSkuEntity } from '../entities/platform-listing-sku.entity';
 
+/**
+ * The single definition of "this listing is mapped": it has at least one
+ * ACTIVE variant bound to an internal SKU. Used by the derived status column,
+ * the mapped/unmapped counters and the mappingState filter - they must all
+ * agree, otherwise one page shows a row as 未映射 while its own counter says
+ * 已映射. The `pls.` alias is substituted per query.
+ */
+const MAPPED_VARIANT_CONDITIONS =
+  "pls.status = 'ACTIVE' AND pls.mapping_status = 'MAPPED' AND pls.sku_id IS NOT NULL";
+
+/**
+ * In-memory twin of MAPPED_VARIANT_CONDITIONS for paths that already hold the
+ * mapping rows (create / detail), so the derived status does not need a second
+ * query and cannot diverge from the list query's SQL.
+ */
+export function isMappedVariant(row: {
+  status: string;
+  mappingStatus: string;
+  skuId: string | null;
+}): boolean {
+  return row.status === 'ACTIVE' && row.mappingStatus === 'MAPPED' && row.skuId !== null;
+}
+
+export function deriveMappingStatus(
+  rows: ReadonlyArray<{ status: string; mappingStatus: string; skuId: string | null }>,
+): 'MAPPED' | 'UNMAPPED' {
+  return rows.some((row) => isMappedVariant(row)) ? 'MAPPED' : 'UNMAPPED';
+}
+
 export interface ListingListFilters {
   platformId?: string;
   storeId?: string;
@@ -19,7 +48,10 @@ export interface ListingRowWithRefs {
   platformCode: string;
   storeCode: string;
   storeName: string;
+  /** Total variant rows on the listing (any status). */
   mappingCount: number;
+  /** Derived from MAPPED_VARIANT_CONDITIONS, not from a separate count. */
+  mappingStatus: 'MAPPED' | 'UNMAPPED';
 }
 
 export interface MappingRowWithRefs {
@@ -59,15 +91,27 @@ export class ListingRepository {
       .addSelect('platform.code', 'platform_code')
       .addSelect('store.store_code', 'store_code')
       .addSelect('store.name', 'store_name')
+      // Total variants on the listing. Same meaning as the detail endpoint's
+      // mappingCount, which counts every mapping row.
       .addSelect(
         (sub) =>
           sub
             .select('COUNT(pls.id)')
             .from('platform_listing_skus', 'pls')
-            .where('pls.listing_id = listing.id')
-            .andWhere("pls.status = 'ACTIVE'")
-            .andWhere("pls.mapping_status = 'MAPPED'"),
+            .where('pls.listing_id = listing.id'),
         'mapping_count',
+      )
+      // Derived mapped state, computed from MAPPED_VARIANT_CONDITIONS - the
+      // same fragment the mappingState filter uses, so the status column can
+      // never contradict the mapped/unmapped counters on the same page.
+      .addSelect(
+        (sub) =>
+          sub
+            .select(`CASE WHEN COUNT(pls_mapped.id) > 0 THEN 'MAPPED' ELSE 'UNMAPPED' END`)
+            .from('platform_listing_skus', 'pls_mapped')
+            .where('pls_mapped.listing_id = listing.id')
+            .andWhere(MAPPED_VARIANT_CONDITIONS.replaceAll('pls.', 'pls_mapped.')),
+        'mapping_status',
       );
 
     if (filters.platformId !== undefined) {
@@ -91,8 +135,7 @@ export class ListingRepository {
           .select('1')
           .from('platform_listing_skus', 'pls_filter')
           .where('pls_filter.listing_id = listing.id')
-          .andWhere("pls_filter.status = 'ACTIVE'")
-          .andWhere("pls_filter.mapping_status = 'MAPPED'");
+          .andWhere(MAPPED_VARIANT_CONDITIONS.replaceAll('pls.', 'pls_filter.'));
         if (filters.skuId !== undefined) {
           inner.andWhere('pls_filter.sku_id = :skuIdFilter');
           qb.setParameter('skuIdFilter', filters.skuId);
@@ -118,6 +161,7 @@ export class ListingRepository {
       storeCode: String(raw['store_code'] as string),
       storeName: String(raw['store_name'] as string),
       mappingCount: Number(raw['mapping_count'] ?? 0),
+      mappingStatus: raw['mapping_status'] === 'MAPPED' ? 'MAPPED' : 'UNMAPPED',
     }));
     return { rows, total };
   }

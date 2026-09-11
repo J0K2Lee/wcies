@@ -449,12 +449,15 @@ describe('listing sync (task §17-§20)', () => {
     expect(job.successCount).toBe(2);
 
     // UNMAPPED visible in listing list (mappingState=UNMAPPED filter)
-    const unmapped = await client.get<Array<{ id: string; mappingCount: number }>>(
-      `/api/v1/listings?storeId=${storeA}&mappingState=UNMAPPED&pageSize=100`,
-    );
+    const unmapped = await client.get<
+      Array<{ id: string; mappingCount: number; mappingStatus: string }>
+    >(`/api/v1/listings?storeId=${storeA}&mappingState=UNMAPPED&pageSize=100`);
     const codes = unmapped.body.data.map((l) => l.id);
     expect(unmapped.body.data.length).toBeGreaterThanOrEqual(2);
-    expect(unmapped.body.data.every((l) => l.mappingCount === 0)).toBe(true);
+    // The synced listing carries one UNMAPPED variant fact, so mappingCount
+    // (total variants, matching the detail view's skus.length) is >= 1; what
+    // makes it unmapped is the derived status, which every row must report.
+    expect(unmapped.body.data.every((l) => l.mappingStatus === 'UNMAPPED')).toBe(true);
 
     // human mapping of the listing carrying SYNC-OFFER-1 (list order is not
     // guaranteed between same-timestamp rows)

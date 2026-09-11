@@ -222,8 +222,35 @@ describe('listing filters (task §68)', () => {
     });
     expect(unmapped.body.success).toBe(true);
     const unmappedList = await client.get<
-      Array<{ platformProductId: string; mappingCount: number }>
+      Array<{ platformProductId: string; mappingCount: number; mappingStatus: string }>
     >(`/api/v1/listings?storeId=${storeB}&mappingState=UNMAPPED`);
     expect(unmappedList.body.data.map((row) => row.platformProductId)).toContain(`${PREFIX}-EMPTY`);
+    // A listing with no variants must report UNMAPPED on the row itself, not
+    // only under the filter - otherwise the status column and the counter
+    // derived from this same filter contradict each other on one screen.
+    const emptyRow = unmappedList.body.data.find(
+      (row) => row.platformProductId === `${PREFIX}-EMPTY`,
+    );
+    expect(emptyRow?.mappingStatus).toBe('UNMAPPED');
+  });
+
+  it('row mappingStatus agrees with the mappingState filter', async () => {
+    // Self-contained: make sure an unmapped listing exists in storeA too.
+    await client.post('/api/v1/listings', {
+      platformId: ozonPlatformId,
+      storeId: storeA,
+      platformProductId: `${PREFIX}-EMPTY-A`,
+      skuVariants: [],
+    });
+
+    for (const state of ['MAPPED', 'UNMAPPED'] as const) {
+      const filtered = await client.get<
+        Array<{ platformProductId: string; mappingStatus: string }>
+      >(`/api/v1/listings?storeId=${storeA}&mappingState=${state}&pageSize=50`);
+      expect(filtered.body.data.length).toBeGreaterThan(0);
+      // Every row returned by the filter must carry that same status: the
+      // status column and the counter built on this filter share one meaning.
+      expect(filtered.body.data.every((row) => row.mappingStatus === state)).toBe(true);
+    }
   });
 });

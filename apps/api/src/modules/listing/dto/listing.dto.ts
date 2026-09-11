@@ -263,8 +263,15 @@ export class ListingResponseDto {
   @ApiProperty({ format: 'date-time' })
   updatedAt!: Date;
 
-  @ApiProperty({ example: 2 })
+  @ApiProperty({ example: 2, description: '该 Listing 的变体映射总数（含未映射）' })
   mappingCount!: number;
+
+  @ApiProperty({
+    enum: ['MAPPED', 'UNMAPPED'],
+    example: 'MAPPED',
+    description: '是否至少有一个 ACTIVE 且已绑定内部 SKU 的变体；与 mappingState 筛选同一判定',
+  })
+  mappingStatus!: 'MAPPED' | 'UNMAPPED';
 }
 
 export class ListingDetailDto extends ListingResponseDto {

@@ -97,6 +97,10 @@ Sprint 5 起，平台同步会产生**未映射**的平台 SKU 事实：
 7. 人工映射入口：`POST /listings/:listingId/skus/:mappingId/map {skuId}`（UNMAPPED → MAPPED，记 Operation Log）。
 8. 严禁自动猜测映射（名字相似/条码一致都不是依据）。
 9. `platform_listings.last_seen_at` 记录最近一次被 Listing Sync 观察到的时间；同步未见到某 listing **不做**任何自动下架/删除。
+10. **Listing 级映射状态的唯一定义**（2026-09-11）：当且仅当该 Listing 存在至少一个 `status = ACTIVE` 且 `mapping_status = 'MAPPED'` 且 `sku_id IS NOT NULL` 的变体时，该 Listing 为 **MAPPED（已映射）**，否则为 **UNMAPPED（未映射）**。
+    - 该判定在列表行（`mappingStatus` 字段）、列表筛选（`mappingState`）、详情响应三处**共用同一条件**，不得各写一份——否则会出现「同一页面行显示未映射、而它上方的未映射计数为 0」这类自相矛盾（2026-09-11 实测到的缺陷）。
+    - `mappingCount` 语义：该 Listing 的**变体映射总数（含未映射行）**，与「已映射数量」不是同一个数，界面文案需区分。
+    - 确定性说明：因为没有 `mappingId` 直接绑定 SKU 时会先落 UNMAPPED 行再人工映射，`sku_id IS NOT NULL` 与 `mapping_status = 'MAPPED'` 在现有写路径下同真同假；两者都写进条件是防御性的，使未来新增写路径不会静默改变判定。
 
 ## 9. Listing Resolver（订单安全边界）
 

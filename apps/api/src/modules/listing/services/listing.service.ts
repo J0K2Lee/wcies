@@ -22,6 +22,7 @@ import {
   ListingSkuMappingNotFoundError,
 } from '../errors/listing-errors';
 import {
+  deriveMappingStatus,
   ListingRepository,
   ListingRowWithRefs,
   MappingRowWithRefs,
@@ -86,7 +87,12 @@ export class ListingService {
     const mappings = await this.repository.listMappingsByListingId(id);
     const refs = await this.resolveRefs(listing);
     return {
-      ...this.toResponse({ listing, ...refs, mappingCount: mappings.length }),
+      ...this.toResponse({
+        listing,
+        ...refs,
+        mappingCount: mappings.length,
+        mappingStatus: deriveMappingStatus(mappings.map((row) => row.mapping)),
+      }),
       skus: mappings.map((row) => this.mappingToResponse(row)),
     };
   }
@@ -192,6 +198,7 @@ export class ListingService {
         storeCode: store.storeCode,
         storeName: store.name,
         mappingCount: mappings.length,
+        mappingStatus: deriveMappingStatus(mappings.map((row) => row.mapping)),
       }),
       skus: mappings.map((row) => this.mappingToResponse(row)),
     };
@@ -623,6 +630,7 @@ export class ListingService {
       createdAt: row.listing.createdAt,
       updatedAt: row.listing.updatedAt,
       mappingCount: row.mappingCount,
+      mappingStatus: row.mappingStatus,
     };
   }
 

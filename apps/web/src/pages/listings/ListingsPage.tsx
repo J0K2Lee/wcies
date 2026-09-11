@@ -329,7 +329,7 @@ export function ListingsPage() {
         <>
           <ContextSection title="基本信息">
             <ContextMetric label="标题" value={selectedRow.title ?? '—'} />
-            <ContextMetric label="变体映射" value={`${selectedRow.mappingCount} 个`} />
+            <ContextMetric label="变体（含未映射）" value={`${selectedRow.mappingCount} 个`} />
             <ContextMetric
               label="更新时间"
               value={<RelativeTime value={selectedRow.updatedAt} />}
