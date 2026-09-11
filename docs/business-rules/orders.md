@@ -90,6 +90,10 @@ referenceId   = orderItem.id
 
 `retryBackorder(orderItemId)`（API：`POST /orders/items/:itemId/retry-allocation`）：
 
+两种情况，按行当前的 `mappingStatus` 分流。
+
+### A. 已映射行（`MAPPED` + `BACKORDERED / PENDING`）
+
 ```text
 BACKORDERED / PENDING
 ↓
@@ -98,6 +102,28 @@ BACKORDERED / PENDING
 成功 → RESERVED，解决（RESOLVED）对应 OPEN 异常，订单状态重算
 失败 → 保持 BACKORDERED，不新建异常（已有未解决异常保留）
 ```
+
+### B. 映射失败行（`FAILED`）— 决策 0012
+
+```text
+FAILED
+↓
+按摄入时相同的 store-scoped 规则【重新解析】该行
+   （不信任行上存储的 mappingStatus / skuId：人工可能已修好映射）
+↓
+解析失败 → 保持 FAILED，接口回报解析错误码，异常保持 OPEN
+解析成功 → 行提升为 MAPPED + 写入 skuId
+         → 关闭 ORDER_SKU_MAPPING_FAILED 异常
+         → 走 A 的库存分配
+             成功 → RESERVED
+             失败 → BACKORDERED + ORDER_OUT_OF_STOCK 异常
+```
+
+要点：
+
+1. `FAILED` **不是终点**。人工在 SKU 映射中补齐平台变体映射后，必须能通过重试让订单继续。
+2. 修复后仍缺货时**必须落到 BACKORDERED**。`allocateMappedItem` 在库存不足时只返回 `reserved:false` 而不改行状态——对已是 BACKORDERED 的行没问题，但刚修复的 FAILED 行是 PENDING，若不一并写 BACKORDERED 就会静默停在 PENDING 且无库存异常，操作员看不到任何待办。
+3. 重试成功（`reserved:true` 或转 BACKORDERED）后订单汇总状态重算，以便离开 EXCEPTION。
 
 ---
 

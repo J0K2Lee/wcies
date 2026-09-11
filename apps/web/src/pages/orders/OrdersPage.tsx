@@ -59,6 +59,10 @@ interface OrderItem {
   quantity: string;
   fulfillmentStatus: string;
   mappingStatus: string;
+  /** Platform identifiers of the line; present even when mapping FAILED. */
+  platformSkuId: string | null;
+  offerId: string | null;
+  sellerSku: string | null;
   skuId: string | null;
   reservationId: string | null;
   reservation: {
@@ -252,19 +256,22 @@ export function OrdersPage() {
 
   const retryMutation = useMutation({
     mutationFn: (itemId: string) =>
-      apiPost<{ reserved: boolean }>(
+      apiPost<{ reserved: boolean; fulfillmentStatus: string }>(
         '/api/v1/orders/items/{itemId}/retry-allocation',
         {},
         { itemId },
       ),
-    onSuccess: (result: { reserved: boolean }) => {
+    onSuccess: (result: { reserved: boolean; fulfillmentStatus: string }) => {
       if (result.reserved) {
         message.success('重新分配成功，订单行已 RESERVED');
+      } else if (result.fulfillmentStatus === 'BACKORDERED') {
+        message.warning('映射已修复，但库存不足，订单行保持 BACKORDERED');
       } else {
         message.warning('库存仍然不足，保持 BACKORDERED');
       }
       void queryClient.invalidateQueries({ queryKey: ['orders'] });
       void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
+      void queryClient.invalidateQueries({ queryKey: ['exceptions'] });
     },
     onError: (error: Error) => message.error(`重试失败：${error.message}`),
   });
@@ -342,6 +349,9 @@ export function OrdersPage() {
           item.fulfillmentStatus === 'BACKORDERED' ||
           item.fulfillmentStatus === 'PENDING',
       ) ?? [];
+    // FAILED lines carry no skuId, so they need their own list to stay
+    // clickable in the rail.
+    const failedMappingItems = riskItems.filter((item) => item.mappingStatus === 'FAILED');
     return {
       defaultCollapsed: true,
       header: (
@@ -368,8 +378,28 @@ export function OrdersPage() {
                   label={`ORDER_SKU_MAPPING_FAILED ×${selectedRow.mappingFailedCount}`}
                 />
                 <span style={{ fontSize: 12.5, color: colors.textSecondary }}>
-                  平台 SKU 无法映射内部 SKU，请在 SKU映射 中补齐映射后重试分配。
+                  平台 SKU 无法映射内部 SKU。请先在 SKU映射 中补齐该平台变体的映射，
+                  再点下方按钮重试——重试会按最新映射重新解析该行。
                 </span>
+                {failedMappingItems.slice(0, 3).map((item) => (
+                  <div
+                    key={item.id}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <span style={{ fontSize: 13, color: colors.textSecondary }}>
+                      {item.platformSkuId ?? item.offerId ?? `第 ${item.lineNo} 行`}
+                    </span>
+                    <Button
+                      size="small"
+                      loading={retryMutation.isPending}
+                      style={{ marginLeft: 'auto' }}
+                      onClick={() => retryMutation.mutate(item.id)}
+                    >
+                      重试映射
+                    </Button>
+                  </div>
+                ))}
               </div>
             </ContextSection>
           )}
@@ -524,8 +554,11 @@ export function OrdersPage() {
       key: 'actions',
       width: 130,
       render: (_: unknown, row: OrderItem) => {
+        // FAILED lines are retryable too: the mapping may have been repaired
+        // in the SKU workbench since ingestion, and the backend re-resolves
+        // the line on retry (a FAILED line has no other way out).
         const retryable =
-          row.mappingStatus === 'MAPPED' &&
+          (row.mappingStatus === 'MAPPED' || row.mappingStatus === 'FAILED') &&
           (row.fulfillmentStatus === 'BACKORDERED' || row.fulfillmentStatus === 'PENDING');
         if (!retryable) {
           return null;
@@ -969,7 +1002,10 @@ export function OrdersPage() {
                         content: (
                           <div>
                             <span style={{ fontWeight: 600 }}>
-                              {(ERP_STATUS_META[entry.fromStatus ?? '']?.label ?? entry.fromStatus) ?? '∅'} → {ERP_STATUS_META[entry.toStatus]?.label ?? entry.toStatus}
+                              {ERP_STATUS_META[entry.fromStatus ?? '']?.label ??
+                                entry.fromStatus ??
+                                '∅'}{' '}
+                              → {ERP_STATUS_META[entry.toStatus]?.label ?? entry.toStatus}
                             </span>
                             <div style={{ color: colors.textTertiary, fontSize: 12.5 }}>
                               {fmtDateTime(entry.createdAt)} · {entry.operatorName ?? 'system'}

@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { App, Button, Drawer, Form, Input, Modal, Popconfirm, Select, Space } from 'antd';
+import { App, Alert, Button, Drawer, Form, Input, Modal, Popconfirm, Select, Space } from 'antd';
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { apiDelete, apiPatch, apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
@@ -521,6 +521,13 @@ export function ListingsPage() {
         confirmLoading={createMutation.isPending}
       >
         <Form form={form} layout="vertical">
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+            title="平台已同步的商品请勿在此新建"
+            description="若平台商品已同步到系统，本表单会因「该店铺+Platform Product ID 已存在」而失败。请先搜索该商品，在其详情里把已同步的未映射变体「人工映射」到内部 SKU——这样映射会带上平台标识，订单才匹配得到。"
+          />
           <Space wrap>
             <Form.Item
               name="platformId"
@@ -573,6 +580,11 @@ export function ListingsPage() {
           <Form.List name="skuVariants" initialValue={[{}]}>
             {(fields, { add, remove }) => (
               <>
+                <p style={{ fontSize: 12.5, color: colors.textTertiary, marginBottom: 10 }}>
+                  每个变体至少要填一个平台标识（Platform SKU ID / Seller SKU / Offer ID）：
+                  订单靠这些标识反查内部 SKU，三个都空则该映射永远不会被订单匹配到。 OZON 的 Offer
+                  ID 即卖家货号，Platform SKU ID 填平台返回的 sku。
+                </p>
                 {fields.map((field) => (
                   <Space key={field.key} align="baseline" wrap>
                     <Form.Item
@@ -592,7 +604,34 @@ export function ListingsPage() {
                         }))}
                       />
                     </Form.Item>
-                    <Form.Item name={[field.name, 'platformSkuId']}>
+                    <Form.Item
+                      name={[field.name, 'platformSkuId']}
+                      dependencies={[
+                        ['skuVariants', field.name, 'sellerSku'],
+                        ['skuVariants', field.name, 'offerId'],
+                      ]}
+                      rules={[
+                        ({ getFieldValue }) => ({
+                          validator: (_rule, value: unknown) => {
+                            const variants = getFieldValue('skuVariants') as Array<{
+                              platformSkuId?: string;
+                              sellerSku?: string;
+                              offerId?: string;
+                            }>;
+                            const row = variants?.[field.name];
+                            const text = (input: unknown): string =>
+                              typeof input === 'string' ? input.trim() : '';
+                            const hasAny =
+                              text(value) !== '' ||
+                              text(row?.sellerSku) !== '' ||
+                              text(row?.offerId) !== '';
+                            return hasAny
+                              ? Promise.resolve()
+                              : Promise.reject(new Error('至少填一个平台标识'));
+                          },
+                        }),
+                      ]}
+                    >
                       <Input placeholder="Platform SKU ID" style={{ width: 150 }} />
                     </Form.Item>
                     <Form.Item name={[field.name, 'sellerSku']}>

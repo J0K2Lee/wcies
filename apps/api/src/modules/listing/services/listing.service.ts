@@ -17,6 +17,7 @@ import {
   ListingInUseError,
   ListingNotFoundError,
   ListingSkuMappingAlreadyExistsError,
+  ListingSkuMappingIdentifierRequiredError,
   ListingSkuMappingInUseError,
   ListingSkuMappingInvalidStateError,
   ListingSkuMappingNotFoundError,
@@ -553,17 +554,32 @@ export class ListingService {
     if (sku === null) {
       throw new SkuNotFoundError(variant.skuId);
     }
+
+    // Decision 0012: a human-created mapping must carry at least one platform
+    // identifier. Without one the resolver can never match it (orders carry
+    // platformSkuId/offerId/sellerSku), so the row would be a dead end that
+    // only shows up later as an inexplicable ORDER_SKU_MAPPING_FAILED.
+    // Checked after the duplicate test so "already mapped" keeps winning when
+    // both apply - it is the more specific diagnosis.
     const duplicate = await this.repository.findMappingByListingAndSku(listingId, variant.skuId);
     if (duplicate !== null) {
       throw new ListingSkuMappingAlreadyExistsError(listingId, variant.skuId);
     }
+
+    const platformSkuId = variant.platformSkuId?.trim() || null;
+    const sellerSku = variant.sellerSku?.trim() || null;
+    const offerId = variant.offerId?.trim() || null;
+    if (platformSkuId === null && sellerSku === null && offerId === null) {
+      throw new ListingSkuMappingIdentifierRequiredError(listingId);
+    }
+
     const mapping = await this.repository.insertMapping({
       listingId,
       skuId: variant.skuId,
       mappingStatus: 'MAPPED',
-      platformSkuId: variant.platformSkuId ?? null,
-      sellerSku: variant.sellerSku ?? null,
-      offerId: variant.offerId ?? null,
+      platformSkuId,
+      sellerSku,
+      offerId,
       status: 'ACTIVE',
       rawData: null,
     });

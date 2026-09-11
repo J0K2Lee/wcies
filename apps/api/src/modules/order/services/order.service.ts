@@ -198,6 +198,15 @@ export class OrderService {
   // Backorder retry (task §24/§73)
   // --------------------------------------------------------------------------
 
+  /**
+   * Retry allocation for one line (task §24).
+   *
+   * Two entry states:
+   *  - MAPPED + (BACKORDERED | PENDING): stock retry, no re-resolution.
+   *  - FAILED: the mapping may have been repaired since ingestion, so the
+   *    line is re-resolved with the same store-scoped rules before allocating
+   *    (leaving FAILED as a dead end would make the repair useless).
+   */
   async retryAllocation(
     orderItemId: string,
     operator: OperatorContext,
@@ -214,17 +223,36 @@ export class OrderService {
     if (order.erpStatus === 'CANCELLED') {
       throw new OrderInvalidStateError('订单已取消，不能重新分配库存', { orderId: order.id });
     }
-    if (item.mappingStatus !== 'MAPPED' || item.skuId === null) {
-      throw new OrderInvalidStateError('订单行未成功映射 SKU，不能重试分配', {
-        orderItemId: item.id,
-        mappingStatus: item.mappingStatus,
-      });
-    }
     if (item.fulfillmentStatus !== 'BACKORDERED' && item.fulfillmentStatus !== 'PENDING') {
       throw new OrderInvalidStateError(
         `订单行状态 ${item.fulfillmentStatus} 不允许重试分配（仅 BACKORDERED / PENDING）`,
         { orderItemId: item.id, fulfillmentStatus: item.fulfillmentStatus },
       );
+    }
+
+    if (item.mappingStatus === 'FAILED') {
+      const retried = await this.ingestionService.retryFailedMappingItem(order, item, operator);
+      if (!retried.resolved) {
+        // Still unmapped: tell the operator exactly what the resolver saw.
+        throw new OrderInvalidStateError(
+          '该订单行仍未匹配到内部 SKU：请确认 SKU 映射中该平台变体已补齐并保存',
+          { orderItemId: item.id, resolveCode: retried.code },
+        );
+      }
+      // retryFailedMappingItem already recomputes the rollup status.
+      const afterRetry = await this.itemRepo.findById(orderItemId);
+      return {
+        orderItemId,
+        fulfillmentStatus: afterRetry?.fulfillmentStatus ?? item.fulfillmentStatus,
+        reserved: retried.reserved,
+      };
+    }
+
+    if (item.mappingStatus !== 'MAPPED' || item.skuId === null) {
+      throw new OrderInvalidStateError('订单行未成功映射 SKU，不能重试分配', {
+        orderItemId: item.id,
+        mappingStatus: item.mappingStatus,
+      });
     }
 
     const outcome = await this.ingestionService.allocateMappedItem(order, item, operator);

@@ -110,6 +110,60 @@ describe('Case A: one internal SKU -> multiple listings, same store (task §84)'
     expect(dup.body.error?.code).toBe('LISTING_ALREADY_EXISTS');
   });
 
+  // Decision 0012: orders resolve by platformSkuId/sellerSku/offerId, so a
+  // mapping carrying none of them can never be matched. Letting it be created
+  // only defers the failure to an inexplicable ORDER_SKU_MAPPING_FAILED.
+  it('rejects a variant mapping with no platform identifier at all', async () => {
+    // Dedicated store + SKU: this case must not add mappings to the shared
+    // SKU/store whose counts other tests assert.
+    const store = await client.post<{ id: string }>('/api/v1/stores', {
+      platformId: ozonPlatformId,
+      storeCode: `${PREFIX}-NOID`,
+      name: 'NOID',
+    });
+    const product = await client.post<{ id: string }>('/api/v1/products', {
+      nameZh: `${PREFIX} NOID`,
+    });
+    const sku = await client.post<{ id: string }>('/api/v1/skus', {
+      productId: product.body.data.id,
+      nameZh: `${PREFIX} NOID`,
+    });
+    const noId = await client.post('/api/v1/listings', {
+      platformId: ozonPlatformId,
+      storeId: store.body.data.id,
+      platformProductId: `${PREFIX}-NOID`,
+      skuVariants: [{ skuId: sku.body.data.id }],
+    });
+    expect(noId.status).toBe(422);
+    expect(noId.body.error?.code).toBe('LISTING_SKU_MAPPING_IDENTIFIER_REQUIRED');
+  });
+
+  it('accepts a variant mapping that carries only an offer id', async () => {
+    const store = await client.post<{ id: string }>('/api/v1/stores', {
+      platformId: ozonPlatformId,
+      storeCode: `${PREFIX}-OFFONLY`,
+      name: 'OFFONLY',
+    });
+    const product = await client.post<{ id: string }>('/api/v1/products', {
+      nameZh: `${PREFIX} OFFONLY`,
+    });
+    const sku = await client.post<{ id: string }>('/api/v1/skus', {
+      productId: product.body.data.id,
+      nameZh: `${PREFIX} OFFONLY`,
+    });
+    const offerOnly = await client.post<{ skus: Array<{ id: string; offerId: string | null }> }>(
+      '/api/v1/listings',
+      {
+        platformId: ozonPlatformId,
+        storeId: store.body.data.id,
+        platformProductId: `${PREFIX}-OFFONLY`,
+        skuVariants: [{ skuId: sku.body.data.id, offerId: `${PREFIX}-OFFONLY-1` }],
+      },
+    );
+    expect(offerOnly.status).toBe(201);
+    expect(offerOnly.body.data.skus[0]?.offerId).toBe(`${PREFIX}-OFFONLY-1`);
+  });
+
   it('shows all three mappings on the SKU (task §91 key acceptance)', async () => {
     const mappings = await client.get<Array<{ storeCode: string; platformProductId: string }>>(
       `/api/v1/listings/skus/${skuBlack}/mappings`,

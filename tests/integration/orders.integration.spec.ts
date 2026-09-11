@@ -409,6 +409,66 @@ describe('order ingestion + allocation (task §67-§73)', () => {
     ).toBe(1);
   });
 
+  it('mapping repair after FAILED: retry re-resolves the line and closes the exception', async () => {
+    // The line arrives before any mapping exists -> FAILED + exception.
+    const skuId = await newSku('REPAIR');
+    await initialize({ skuId, binId: binA01, quantity: '5' });
+    const result = await ingest({
+      items: [{ platformSkuId: `${PREFIX}-REPAIR-1`, quantity: '1' }],
+    });
+    const item = result.body.data.itemResults[0]!;
+    expect(item.mappingStatus).toBe('FAILED');
+
+    // Without a repair the retry must stay a no-op that reports the reason.
+    const stillFailed = await client.post(
+      `/api/v1/orders/items/${item.orderItemId}/retry-allocation`,
+    );
+    expect(stillFailed.status).toBe(409);
+    expect(stillFailed.body.error?.code).toBe('ORDER_INVALID_STATE');
+
+    // Human repairs the mapping in the SKU workbench ...
+    await mapSku(skuId, `${PREFIX}-REPAIR-1`);
+
+    // ... and the retry must pick the repair up: FAILED is not a dead end.
+    const retry = await client.post<{ reserved: boolean; fulfillmentStatus: string }>(
+      `/api/v1/orders/items/${item.orderItemId}/retry-allocation`,
+    );
+    expect(retry.status).toBe(200);
+    expect(retry.body.data.reserved).toBe(true);
+    expect(retry.body.data.fulfillmentStatus).toBe('RESERVED');
+
+    const exceptions = await client.get<ExceptionDto[]>(
+      `/api/v1/exceptions?referenceType=ORDER_ITEM&referenceId=${item.orderItemId}&pageSize=100`,
+    );
+    expect(exceptions.body.data.filter((e) => e.status === 'OPEN').length).toBe(0);
+
+    const detail = await orderDetail(result.body.data.orderId);
+    expect(detail.erpStatus).toBe('READY_TO_PICK');
+  });
+
+  it('mapping repair with no stock: retry records BACKORDERED, not a stuck PENDING', async () => {
+    const skuId = await newSku('REPAIR2');
+    // No inventory initialized for this SKU.
+    const result = await ingest({
+      items: [{ platformSkuId: `${PREFIX}-REPAIR2-1`, quantity: '1' }],
+    });
+    const item = result.body.data.itemResults[0]!;
+    expect(item.mappingStatus).toBe('FAILED');
+
+    await mapSku(skuId, `${PREFIX}-REPAIR2-1`);
+    const retry = await client.post<{ reserved: boolean; fulfillmentStatus: string }>(
+      `/api/v1/orders/items/${item.orderItemId}/retry-allocation`,
+    );
+    expect(retry.status).toBe(200);
+    expect(retry.body.data.reserved).toBe(false);
+    // A repaired line starts from PENDING, so a failed reservation must be
+    // recorded as BACKORDERED - staying PENDING would hide the stock problem.
+    expect(retry.body.data.fulfillmentStatus).toBe('BACKORDERED');
+
+    const detail = await orderDetail(result.body.data.orderId);
+    expect(detail.erpStatus).toBe('BACKORDERED');
+  });
+
   it('concurrent duplicate ingest -> exactly one order (§84)', async () => {
     const skuId = await newSku('RACE');
     await initialize({ skuId, binId: binA01, quantity: '10' });

@@ -40,6 +40,24 @@ export class ListingSkuMappingAlreadyExistsError extends DomainError {
 }
 
 /**
+ * Decision 0012: a mapping must name the platform variant it resolves.
+ * Orders resolve by storeId + (platformSkuId | sellerSku | offerId), so a row
+ * with none of them can never be matched - it would silently become an
+ * ORDER_SKU_MAPPING_FAILED the operator cannot explain.
+ */
+export class ListingSkuMappingIdentifierRequiredError extends DomainError {
+  readonly code = 'LISTING_SKU_MAPPING_IDENTIFIER_REQUIRED';
+  readonly httpStatus = 422;
+
+  constructor(listingId: string) {
+    super(
+      '至少需要填写一个平台标识（Platform SKU ID / Seller SKU / Offer ID）：订单按这些标识解析内部 SKU，全空则该映射永远无法被订单匹配',
+      { listingId },
+    );
+  }
+}
+
+/**
  * No candidate matched within the store scope (task §54).
  * Order sync will later turn this into ORDER_SKU_MAPPING_FAILED.
  */

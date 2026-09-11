@@ -171,6 +171,37 @@ export class OrderIngestionService {
   }
 
   /**
+   * Store-scoped resolution of one line (task §15-§16). Extracted so the
+   * retry path re-resolves a previously FAILED line with the SAME rules
+   * instead of trusting a stale mappingStatus.
+   */
+  private async resolveItemSku(
+    order: OrderEntity,
+    item: OrderItemEntity,
+  ): Promise<
+    | { ok: true; skuId: string; listingSkuId: string | null }
+    | { ok: false; code: string; details: Record<string, unknown> }
+  > {
+    try {
+      const resolved = await this.resolver.resolveInternalSku({
+        storeId: order.storeId,
+        platformSkuId: item.platformSkuId ?? undefined,
+        sellerSku: item.sellerSku ?? undefined,
+        offerId: item.offerId ?? undefined,
+      });
+      return { ok: true, skuId: resolved.internalSkuId, listingSkuId: resolved.listingSkuId };
+    } catch (error: unknown) {
+      if (
+        error instanceof ListingSkuResolveFailedError ||
+        error instanceof ListingSkuResolveAmbiguousError
+      ) {
+        return { ok: false, code: error.code, details: error.details };
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Maps one line to an internal SKU and reserves stock; every outcome is
    * persisted line-locally (task §17/§19/§22).
    */
@@ -180,28 +211,12 @@ export class OrderIngestionService {
     operator: OperatorContext,
   ): Promise<void> {
     // 1. Store-scoped resolution via the existing resolver (task §15-§16).
-    let resolvedSkuId: string | null = null;
-    let resolvedListingSkuId: string | null = null;
-    let resolveFailure: { code: string; details: Record<string, unknown> } | null = null;
-    try {
-      const resolved = await this.resolver.resolveInternalSku({
-        storeId: order.storeId,
-        platformSkuId: item.platformSkuId ?? undefined,
-        sellerSku: item.sellerSku ?? undefined,
-        offerId: item.offerId ?? undefined,
-      });
-      resolvedSkuId = resolved.internalSkuId;
-      resolvedListingSkuId = resolved.listingSkuId;
-    } catch (error: unknown) {
-      if (
-        error instanceof ListingSkuResolveFailedError ||
-        error instanceof ListingSkuResolveAmbiguousError
-      ) {
-        resolveFailure = { code: error.code, details: error.details };
-      } else {
-        throw error;
-      }
-    }
+    const resolution = await this.resolveItemSku(order, item);
+    const resolveFailure = resolution.ok
+      ? null
+      : { code: resolution.code, details: resolution.details };
+    const resolvedSkuId = resolution.ok ? resolution.skuId : null;
+    const resolvedListingSkuId = resolution.ok ? resolution.listingSkuId : null;
 
     if (resolveFailure !== null) {
       // No guessing (task §70): FAILED + exception, other lines continue.
@@ -300,6 +315,87 @@ export class OrderIngestionService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Re-resolves a previously FAILED line and allocates it (task §24).
+   *
+   * A human may have repaired the listing mapping after the line failed, so
+   * the stored mappingStatus/skuId are stale evidence and must not gate the
+   * retry - resolution runs again with the same store-scoped rules. On
+   * success the line is promoted to MAPPED and the OPEN
+   * ORDER_SKU_MAPPING_FAILED exception is closed.
+   */
+  async retryFailedMappingItem(
+    order: OrderEntity,
+    item: OrderItemEntity,
+    operator: OperatorContext,
+  ): Promise<
+    | { resolved: false; code: string }
+    | { resolved: true; reserved: boolean; reservationId: string | null }
+  > {
+    const resolution = await this.resolveItemSku(order, item);
+    if (!resolution.ok) {
+      // Still unresolvable: keep FAILED, keep the exception, report the code.
+      return { resolved: false, code: resolution.code };
+    }
+
+    await this.dataSource.transaction(async (runner) => {
+      await this.itemRepo.updateMapping(runner, item.id, {
+        mappingStatus: 'MAPPED',
+        skuId: resolution.skuId,
+        listingSkuId: resolution.listingSkuId,
+      });
+    });
+    // The mapping blocker is gone: close its exception so the order can roll
+    // up out of EXCEPTION (a stock exception may still be raised below).
+    await this.dataSource.transaction(async (runner) => {
+      await this.exceptionService.resolveByReferenceInTx(runner, {
+        exceptionType: 'ORDER_SKU_MAPPING_FAILED',
+        referenceType: 'ORDER_ITEM',
+        referenceId: item.id,
+      });
+    });
+    this.logger.log('Order line re-resolved after mapping repair', {
+      module: 'order',
+      orderNo: order.orderNo,
+      lineNo: item.lineNo,
+      skuId: resolution.skuId,
+    });
+
+    const fresh = (await this.itemRepo.findById(item.id)) as OrderItemEntity;
+    const outcome = await this.allocateMappedItem(order, fresh, operator);
+
+    if (!outcome.reserved) {
+      // The line entered this path as FAILED (i.e. never allocated), so a
+      // failed reservation must be recorded the same way ingestion records
+      // it - otherwise the line sits in PENDING with no stock exception and
+      // no path forward.
+      await this.dataSource.transaction(async (runner) => {
+        await this.itemRepo.updateFulfillment(runner, item.id, {
+          fulfillmentStatus: 'BACKORDERED',
+        });
+        await this.exceptionService.createInTx(runner, {
+          exceptionType: 'ORDER_OUT_OF_STOCK',
+          severity: 'MEDIUM',
+          referenceType: 'ORDER_ITEM',
+          referenceId: item.id,
+          storeId: order.storeId,
+          message: `订单 ${order.orderNo} 第 ${item.lineNo} 行映射修复后仍库存不足`,
+          details: { orderNo: order.orderNo, lineNo: item.lineNo, skuId: resolution.skuId },
+        });
+      });
+    }
+    // The mapping blocker is gone either way: roll the order status up so it
+    // can leave EXCEPTION (a stock blocker now shows as BACKORDERED).
+    await this.statusService.recomputeOrderStatus(
+      order.id,
+      operator,
+      outcome.reserved
+        ? `第 ${item.lineNo} 行映射修复后分配成功`
+        : `第 ${item.lineNo} 行映射修复后仍库存不足`,
+    );
+    return { resolved: true, ...outcome };
   }
 
   /** Retry entry shared with OrderService.retryAllocation (task §24). */
