@@ -36,3 +36,7 @@ Thumbs.db
 tmp/
 .cache/
 .playwright-mcp/
+
+# Agent session tooling artifacts (plans, throwaway scripts) - not project code
+.zcode/
+gui-*-screenshots/

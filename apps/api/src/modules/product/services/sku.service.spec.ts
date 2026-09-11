@@ -1,6 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { SkuDimensionsInvalidError } from '../errors/sku-errors';
-import { assertDimensionsConsistent, computeVolumeMm3 } from './sku.service';
+import { assertDimensionsConsistent, computeVolumeMm3, toNumeric } from './sku.service';
+
+describe('toNumeric (cleared InputNumber must not become "null" in SQL)', () => {
+  it('serializes finite numbers for numeric columns', () => {
+    expect(toNumeric(0)).toBe('0');
+    expect(toNumeric(950)).toBe('950');
+    expect(toNumeric(299.5)).toBe('299.5');
+  });
+
+  it('maps null/undefined to SQL NULL (the SKU-create failure of 2026-09-11)', () => {
+    // antd InputNumber sends null when the user clears the field. Treating it
+    // like a value produced the literal string "null", which Postgres rejected
+    // with `invalid input syntax for type numeric`, surfacing to the user as an
+    // opaque "Database error" on a perfectly valid form submission.
+    expect(toNumeric(null)).toBeNull();
+    expect(toNumeric(undefined)).toBeNull();
+  });
+
+  it('maps non-finite values to SQL NULL rather than letting them reach the driver', () => {
+    expect(toNumeric(Number.NaN)).toBeNull();
+    expect(toNumeric(Number.POSITIVE_INFINITY)).toBeNull();
+    expect(toNumeric(Number.NEGATIVE_INFINITY)).toBeNull();
+  });
+});
 
 describe('computeVolumeMm3 (task §23: volume is backend-computed; integer mm)', () => {
   it('computes length x width x height', () => {

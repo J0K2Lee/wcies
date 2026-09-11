@@ -7,12 +7,14 @@ import {
 } from '../../operation-log/operation-log.service';
 import { BusinessCodeService } from '../../../infrastructure/business-code/business-code.service';
 import { ObjectStorageService } from '../../../infrastructure/storage/object-storage.service';
+import { SKU_HISTORY_TABLES } from '../constants/sku-delete.constants';
 import { SkuEntity } from '../entities/sku.entity';
 import { ImageNotFoundError } from '../errors/image-errors';
 import { ProductNotFoundError } from '../errors/product-errors';
 import {
   SkuCodeAlreadyExistsError,
   SkuDimensionsInvalidError,
+  SkuHasHistoryError,
   SkuInUseError,
   SkuNotFoundError,
 } from '../errors/sku-errors';
@@ -144,14 +146,13 @@ export class SkuService {
       model: dto.model ?? null,
       color: dto.color ?? null,
       size: dto.size ?? null,
-      weightG: dto.weightG === undefined ? null : String(dto.weightG),
+      weightG: toNumeric(dto.weightG),
       lengthMm,
       widthMm,
       heightMm,
-      volumeMm3: volumeMm3 === null ? null : String(volumeMm3),
+      volumeMm3: toNumeric(volumeMm3),
       purchaseUrl: dto.purchaseUrl ?? null,
-      latestPurchasePrice:
-        dto.latestPurchasePrice === undefined ? null : String(dto.latestPurchasePrice),
+      latestPurchasePrice: toNumeric(dto.latestPurchasePrice),
       movingAverageCost: null,
       costCurrency: dto.costCurrency ?? 'CNY',
       serialTracking: dto.serialTracking ?? false,
@@ -198,18 +199,16 @@ export class SkuService {
     if (dto.model !== undefined) patch.model = dto.model;
     if (dto.color !== undefined) patch.color = dto.color;
     if (dto.size !== undefined) patch.size = dto.size;
-    if (dto.weightG !== undefined)
-      patch.weightG = dto.weightG === null ? null : String(dto.weightG);
+    if (dto.weightG !== undefined) patch.weightG = toNumeric(dto.weightG);
     if (dto.lengthMm !== undefined) patch.lengthMm = dto.lengthMm;
     if (dto.widthMm !== undefined) patch.widthMm = dto.widthMm;
     if (dto.heightMm !== undefined) patch.heightMm = dto.heightMm;
-    patch.volumeMm3 = volumeMm3 === null ? null : String(volumeMm3);
+    patch.volumeMm3 = toNumeric(volumeMm3);
     if (dto.purchaseUrl !== undefined) {
       patch.purchaseUrl = dto.purchaseUrl === null ? null : dto.purchaseUrl;
     }
     if (dto.latestPurchasePrice !== undefined) {
-      patch.latestPurchasePrice =
-        dto.latestPurchasePrice === null ? null : String(dto.latestPurchasePrice);
+      patch.latestPurchasePrice = toNumeric(dto.latestPurchasePrice);
     }
     if (dto.costCurrency !== undefined) patch.costCurrency = dto.costCurrency;
     if (dto.serialTracking !== undefined) patch.serialTracking = dto.serialTracking;
@@ -281,8 +280,57 @@ export class SkuService {
     });
   }
 
+  /**
+   * Forced delete (decision 0008): cascades master-data children (barcodes,
+   * images, bundle links, platform mappings) and refuses when business history
+   * exists.
+   *
+   * The inventory ledger, order lines, picking tasks and shipments are
+   * evidence that the SKU physically moved; deleting them would break the
+   * audit chain (AGENTS.md §25) and the inventory rules (§10/§17). A seller
+   * who mis-created a SKU can therefore clean it up in one action, but can
+   * never erase what actually happened.
+   */
+  async forceRemove(id: string, operator: OperatorContext): Promise<void> {
+    const found = await this.findWithProductOrThrow(id);
+    const blocking = await this.repository.countReferencesIn(id, SKU_HISTORY_TABLES);
+    const used = blocking.filter((reference) => reference.count > 0);
+    if (used.length > 0) {
+      throw new SkuHasHistoryError(used.map((reference) => reference.table));
+    }
+    await this.repository.deleteWithCascade(id);
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: id,
+      entityCode: found.sku.skuCode,
+      action: 'FORCE_DELETE',
+      changes: { deleted: { from: found.sku.skuCode, to: null } },
+      operator,
+    });
+  }
+
   async getEntityByCode(skuCode: string): Promise<SkuEntity | null> {
     return this.repository.findByCode(skuCode);
+  }
+
+  /**
+   * Business-history references of every SKU under a product, so a forced
+   * product delete can report exactly which SKU and table blocks it
+   * (decision 0008).
+   */
+  async findHistoryBlockersForProduct(
+    skuIds: string[],
+  ): Promise<Array<{ skuId: string; table: string; count: number }>> {
+    const blockers: Array<{ skuId: string; table: string; count: number }> = [];
+    for (const skuId of skuIds) {
+      const references = await this.repository.countReferencesIn(skuId, SKU_HISTORY_TABLES);
+      for (const reference of references) {
+        if (reference.count > 0) {
+          blockers.push({ skuId, table: reference.table, count: reference.count });
+        }
+      }
+    }
+    return blockers;
   }
 
   async assertImageBelongsToProduct(imageId: string, productId: string): Promise<void> {
@@ -362,4 +410,20 @@ export class SkuService {
 
 function numOrNull(value: string | null): number | null {
   return value === null ? null : Number(value);
+}
+
+/**
+ * Serializes a client-supplied number for a numeric/decimal column, or null.
+ *
+ * `null` must be handled explicitly: antd InputNumber sends null when a field
+ * is cleared, and `String(null)` would reach Postgres as the literal "null"
+ * and fail with `invalid input syntax for type numeric`. Number.isFinite also
+ * rejects NaN/Infinity, which the same way would only surface as a database
+ * error.
+ */
+export function toNumeric(value: number | null | undefined): string | null {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return null;
+  }
+  return String(value);
 }

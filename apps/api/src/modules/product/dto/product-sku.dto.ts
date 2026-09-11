@@ -17,6 +17,21 @@ import { PRODUCT_STATUSES } from '../entities/product.entity';
 import { SKU_STATUSES } from '../entities/sku.entity';
 import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
 
+/**
+ * Numeric ceilings mirror the physical column precision so an out-of-range
+ * value fails DTO validation (422, field-level message) instead of reaching
+ * Postgres and surfacing as an opaque COMMON_DATABASE_ERROR:
+ *   skus.weight_g              numeric(12,3) -> 9 digits before the point
+ *   skus.latest_purchase_price numeric(18,4) -> 14 digits before the point
+ *
+ * The price ceiling stops at the integer part: writing out
+ * 99999999999999.9999 would not survive float64 (it rounds up to 1e14, which
+ * the column then rejects), so the bound is the largest exactly-representable
+ * value. Being conservative by <1 unit at 10^14 is irrelevant for a price.
+ */
+const MAX_WEIGHT_G = 999_999_999.999;
+const MAX_PURCHASE_PRICE = 99_999_999_999_999;
+
 // ---------------------------------------------------------------------------
 // Product
 // ---------------------------------------------------------------------------
@@ -224,12 +239,12 @@ export class CreateSkuRequestDto {
   @MaxLength(100)
   size?: string;
 
-  @ApiPropertyOptional({ example: 950, description: 'Grams (g)' })
+  @ApiPropertyOptional({ example: 950, description: 'Grams (g), up to 3 decimals' })
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 3 })
   @Min(0)
-  @Max(1_000_000_000)
+  @Max(MAX_WEIGHT_G)
   weightG?: number;
 
   @ApiPropertyOptional({
@@ -269,11 +284,15 @@ export class CreateSkuRequestDto {
   @MaxLength(1000)
   purchaseUrl?: string;
 
-  @ApiPropertyOptional({ example: 299.0, description: 'Manually maintained in Sprint 1' })
+  @ApiPropertyOptional({
+    example: 299.0,
+    description: 'Manually maintained in Sprint 1; up to 4 decimals',
+  })
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 4 })
   @Min(0)
+  @Max(MAX_PURCHASE_PRICE)
   latestPurchasePrice?: number;
 
   @ApiPropertyOptional({ example: 'CNY', default: 'CNY', maxLength: 10 })
@@ -324,12 +343,12 @@ export class UpdateSkuRequestDto {
   @MaxLength(100)
   size?: string;
 
-  @ApiPropertyOptional({ description: 'Grams (g)' })
+  @ApiPropertyOptional({ description: 'Grams (g), up to 3 decimals' })
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 3 })
   @Min(0)
-  @Max(1_000_000_000)
+  @Max(MAX_WEIGHT_G)
   weightG?: number;
 
   @ApiPropertyOptional({
@@ -364,11 +383,12 @@ export class UpdateSkuRequestDto {
   @MaxLength(1000)
   purchaseUrl?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Purchase price, up to 4 decimals' })
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 4 })
   @Min(0)
+  @Max(MAX_PURCHASE_PRICE)
   latestPurchasePrice?: number;
 
   @ApiPropertyOptional({ maxLength: 10 })
