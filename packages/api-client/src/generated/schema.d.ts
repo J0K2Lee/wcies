@@ -1770,6 +1770,130 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/suppliers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List suppliers (paged + reference counts) */
+        get: operations["SupplierController_list"];
+        put?: never;
+        /** Create a supplier (code auto-generated when omitted) */
+        post: operations["SupplierController_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/suppliers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get supplier detail */
+        get: operations["SupplierController_getById"];
+        put?: never;
+        post?: never;
+        /** Delete a supplier with zero references (else SUPPLIER_IN_USE) */
+        delete: operations["SupplierController_remove"];
+        options?: never;
+        head?: never;
+        /** Update supplier fields (code immutable) */
+        patch: operations["SupplierController_update"];
+        trace?: never;
+    };
+    "/api/v1/suppliers/{id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Activate a supplier */
+        post: operations["SupplierController_activate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/suppliers/{id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Deactivate a supplier */
+        post: operations["SupplierController_deactivate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 采购单列表（筛选：状态/供应商/日期/关联订单行） */
+        get: operations["PurchaseOrderController_list"];
+        put?: never;
+        /** 登记采购单（同一订单行重复登记会被拒绝） */
+        post: operations["PurchaseOrderController_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 采购单详情（含明细与关联订单号） */
+        get: operations["PurchaseOrderController_getById"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** 修改采购单（仅 ORDERED 状态） */
+        patch: operations["PurchaseOrderController_update"];
+        trace?: never;
+    };
+    "/api/v1/purchase-orders/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 取消采购单（仅未收货） */
+        post: operations["PurchaseOrderController_cancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/shipments": {
         parameters: {
             query?: never;
@@ -1919,77 +2043,6 @@ export interface paths {
         put?: never;
         /** 封箱（OPEN/REPACK_REQUIRED → SEALED；齐全后发货单 READY_TO_SHIP） */
         post: operations["PackageController_seal"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/suppliers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List suppliers (paged + reference counts) */
-        get: operations["SupplierController_list"];
-        put?: never;
-        /** Create a supplier (code auto-generated when omitted) */
-        post: operations["SupplierController_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/suppliers/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get supplier detail */
-        get: operations["SupplierController_getById"];
-        put?: never;
-        post?: never;
-        /** Delete a supplier with zero references (else SUPPLIER_IN_USE) */
-        delete: operations["SupplierController_remove"];
-        options?: never;
-        head?: never;
-        /** Update supplier fields (code immutable) */
-        patch: operations["SupplierController_update"];
-        trace?: never;
-    };
-    "/api/v1/suppliers/{id}/activate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Activate a supplier */
-        post: operations["SupplierController_activate"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/suppliers/{id}/deactivate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Deactivate a supplier */
-        post: operations["SupplierController_deactivate"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3705,6 +3758,11 @@ export interface components {
             fulfillmentStatus: "PENDING" | "RESERVED" | "BACKORDERED" | "PICKED" | "SHIPPED" | "RELEASED";
             /** @enum {string} */
             mappingStatus: "PENDING" | "MAPPED" | "FAILED";
+            /**
+             * @description 派生采购状态（purchase.md §3.5，不落库）；未映射行为 NULL
+             * @enum {string|null}
+             */
+            procurementState?: "NOT_ORDERED" | "ORDERED" | "ARRIVED" | null;
             reservationId: string | null;
             /** @description 库存预约（含多 Bin 分配行，task §49-§50） */
             reservation: Record<string, never> | null;
@@ -4084,6 +4142,154 @@ export interface components {
             /** @example 在暂存区未找到商品 */
             reason?: string;
         };
+        SupplierListItemDto: {
+            id: string;
+            /** @example SUP0001 */
+            code: string;
+            /** @example 深圳华强北电子供应商 */
+            name: string;
+            contactName?: Record<string, never> | null;
+            contactPhone?: Record<string, never> | null;
+            /** @enum {string} */
+            status: "ACTIVE" | "INACTIVE";
+            remark?: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            referenceCount: number;
+        };
+        SupplierResponseDto: {
+            id: string;
+            /** @example SUP0001 */
+            code: string;
+            /** @example 深圳华强北电子供应商 */
+            name: string;
+            contactName?: Record<string, never> | null;
+            contactPhone?: Record<string, never> | null;
+            /** @enum {string} */
+            status: "ACTIVE" | "INACTIVE";
+            remark?: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        CreateSupplierRequestDto: {
+            /** @example 深圳华强北电子供应商 */
+            name: string;
+            /** @description 留空自动生成 SUP%04d；创建后不可改 */
+            code?: string;
+            contactName?: string;
+            contactPhone?: string;
+            remark?: string;
+        };
+        UpdateSupplierRequestDto: {
+            name?: string;
+            contactName?: string;
+            contactPhone?: string;
+            /** @enum {string} */
+            status?: "ACTIVE" | "INACTIVE";
+            remark?: string;
+        };
+        PurchaseOrderListItemDto: {
+            id: string;
+            /** @example PO000001 */
+            poNo: string;
+            supplierId?: Record<string, never> | null;
+            supplierName?: Record<string, never> | null;
+            sourceNote?: Record<string, never> | null;
+            /** @enum {string} */
+            status: "ORDERED" | "PARTIALLY_RECEIVED" | "RECEIVED" | "CANCELLED";
+            /** Format: date-time */
+            orderedAt: string;
+            /** Format: date-time */
+            expectedAt?: string | null;
+            remark?: Record<string, never> | null;
+            itemCount: number;
+            /** @example 2.000 */
+            totalQuantity: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        PurchaseOrderItemDto: {
+            id: string;
+            skuId: string;
+            /** @example SKU000001001 */
+            skuCode: string;
+            /** @example VK87 MAX V2 黑色 */
+            skuName: string;
+            orderItemId?: Record<string, never> | null;
+            /** @description 关联订单号（展示用） */
+            orderNo?: Record<string, never> | null;
+            /** @example 2.000 */
+            quantity: string;
+            /** @example 59.9000 */
+            unitCost?: Record<string, never> | null;
+            /** @example 0.000 */
+            receivedQuantity: string;
+            remark?: Record<string, never> | null;
+        };
+        PurchaseOrderDetailDto: {
+            id: string;
+            /** @example PO000001 */
+            poNo: string;
+            supplierId?: Record<string, never> | null;
+            supplierName?: Record<string, never> | null;
+            sourceNote?: Record<string, never> | null;
+            /** @enum {string} */
+            status: "ORDERED" | "PARTIALLY_RECEIVED" | "RECEIVED" | "CANCELLED";
+            /** Format: date-time */
+            orderedAt: string;
+            /** Format: date-time */
+            expectedAt?: string | null;
+            remark?: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            items: components["schemas"]["PurchaseOrderItemDto"][];
+        };
+        PurchaseOrderItemInputDto: {
+            skuId: string;
+            /** @description 为哪张订单行采购（可空 = 备货采购） */
+            orderItemId?: string;
+            /** @example 2 */
+            quantity: string;
+            /**
+             * @description 单位成本（可空）
+             * @example 59.9000
+             */
+            unitCost?: string;
+            remark?: string;
+        };
+        CreatePurchaseOrderRequestDto: {
+            /** @description 固定供应商（可空） */
+            supplierId?: string;
+            /**
+             * @description 一次性网购的货源说明（如「淘宝 订单号 12345678」）
+             * @example 淘宝 订单号 12345678
+             */
+            sourceNote?: string;
+            /**
+             * Format: date-time
+             * @description 预计到货时间
+             */
+            expectedAt?: string;
+            remark?: string;
+            items: components["schemas"]["PurchaseOrderItemInputDto"][];
+        };
+        UpdatePurchaseOrderRequestDto: {
+            supplierId?: string;
+            sourceNote?: string;
+            /** Format: date-time */
+            expectedAt?: string;
+            remark?: string;
+            /** @description 整体替换明细（仅 ORDERED 状态） */
+            items?: components["schemas"]["PurchaseOrderItemInputDto"][];
+        };
         ShipmentListItemDto: {
             id: string;
             /** @example SHP00000001 */
@@ -4360,56 +4566,6 @@ export interface components {
         SealPackageRequestDto: {
             /** @description 封箱时录入重量/尺寸 */
             dimensions?: components["schemas"]["PackageDimensionsDto"];
-        };
-        SupplierListItemDto: {
-            id: string;
-            /** @example SUP0001 */
-            code: string;
-            /** @example 深圳华强北电子供应商 */
-            name: string;
-            contactName?: Record<string, never> | null;
-            contactPhone?: Record<string, never> | null;
-            /** @enum {string} */
-            status: "ACTIVE" | "INACTIVE";
-            remark?: Record<string, never> | null;
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            updatedAt: string;
-            referenceCount: number;
-        };
-        SupplierResponseDto: {
-            id: string;
-            /** @example SUP0001 */
-            code: string;
-            /** @example 深圳华强北电子供应商 */
-            name: string;
-            contactName?: Record<string, never> | null;
-            contactPhone?: Record<string, never> | null;
-            /** @enum {string} */
-            status: "ACTIVE" | "INACTIVE";
-            remark?: Record<string, never> | null;
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            updatedAt: string;
-        };
-        CreateSupplierRequestDto: {
-            /** @example 深圳华强北电子供应商 */
-            name: string;
-            /** @description 留空自动生成 SUP%04d；创建后不可改 */
-            code?: string;
-            contactName?: string;
-            contactPhone?: string;
-            remark?: string;
-        };
-        UpdateSupplierRequestDto: {
-            name?: string;
-            contactName?: string;
-            contactPhone?: string;
-            /** @enum {string} */
-            status?: "ACTIVE" | "INACTIVE";
-            remark?: string;
         };
         SyncJobDto: {
             id: string;
@@ -7604,6 +7760,8 @@ export interface operations {
                 keyword?: string;
                 erpStatus?: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
                 storeId?: string;
+                /** @description 待采购视图：存在 MAPPED+BACKORDERED 且无未取消采购单覆盖的订单行 */
+                pendingProcurement?: "true";
             };
             header?: never;
             path?: never;
@@ -8205,6 +8363,336 @@ export interface operations {
             };
         };
     };
+    SupplierController_list: {
+        parameters: {
+            query?: {
+                /** @description 编码 / 名称模糊搜索 */
+                keyword?: string;
+                status?: "ACTIVE" | "INACTIVE";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SupplierListItemDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    SupplierController_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSupplierRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SupplierResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    SupplierController_getById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SupplierResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    SupplierController_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
+            };
+        };
+    };
+    SupplierController_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSupplierRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SupplierResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    SupplierController_activate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SupplierResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    SupplierController_deactivate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SupplierResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    PurchaseOrderController_list: {
+        parameters: {
+            query?: {
+                /** @description PO号 / 货源说明 / 供应商名 模糊搜索 */
+                keyword?: string;
+                status?: "ORDERED" | "PARTIALLY_RECEIVED" | "RECEIVED" | "CANCELLED";
+                supplierId?: string;
+                orderItemId?: string;
+                orderedFrom?: string;
+                orderedTo?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PurchaseOrderListItemDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    PurchaseOrderController_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePurchaseOrderRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PurchaseOrderDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    PurchaseOrderController_getById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PurchaseOrderDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    PurchaseOrderController_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePurchaseOrderRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PurchaseOrderDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    PurchaseOrderController_cancel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PurchaseOrderDetailDto"];
+                    };
+                };
+            };
+        };
+    };
     ShipmentController_list: {
         parameters: {
             query?: {
@@ -8502,194 +8990,6 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["SealPackageResultDto"];
-                    };
-                };
-            };
-        };
-    };
-    SupplierController_list: {
-        parameters: {
-            query?: {
-                /** @description 编码 / 名称模糊搜索 */
-                keyword?: string;
-                status?: "ACTIVE" | "INACTIVE";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["SupplierListItemDto"][];
-                        meta: {
-                            page: number;
-                            pageSize: number;
-                            total: number;
-                        };
-                    };
-                };
-            };
-        };
-    };
-    SupplierController_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateSupplierRequestDto"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["SupplierResponseDto"];
-                    };
-                };
-            };
-        };
-    };
-    SupplierController_getById: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["SupplierResponseDto"];
-                    };
-                };
-            };
-        };
-    };
-    SupplierController_remove: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: Record<string, never>;
-                    };
-                };
-            };
-        };
-    };
-    SupplierController_update: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateSupplierRequestDto"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["SupplierResponseDto"];
-                    };
-                };
-            };
-        };
-    };
-    SupplierController_activate: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["SupplierResponseDto"];
-                    };
-                };
-            };
-        };
-    };
-    SupplierController_deactivate: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["SupplierResponseDto"];
                     };
                 };
             };

@@ -22,6 +22,7 @@ import {
 } from '../errors/order.errors';
 import { ORDER_PICKING_STATE_PORT, OrderPickingStatePort } from '../ports/order-picking-state.port';
 import { ORDER_INTERCEPTION_PORT, OrderInterceptionPort } from '../ports/order-interception.port';
+import { ORDER_PROCUREMENT_PORT, OrderProcurementPort } from '../ports/order-procurement.port';
 import { OrderDetailDto, OrderListItemDto } from '../dto/order.dto';
 
 /**
@@ -48,6 +49,8 @@ export class OrderService {
     private readonly pickingState: OrderPickingStatePort,
     @Inject(forwardRef(() => ORDER_INTERCEPTION_PORT))
     private readonly interceptionPort: OrderInterceptionPort,
+    @Inject(forwardRef(() => ORDER_PROCUREMENT_PORT))
+    private readonly procurementPort: OrderProcurementPort,
   ) {}
 
   // --------------------------------------------------------------------------
@@ -55,11 +58,21 @@ export class OrderService {
   // --------------------------------------------------------------------------
 
   async list(
-    filters: OrderListFilters,
+    filters: OrderListFilters & { pendingProcurement?: boolean },
     page: { page: number; pageSize: number },
   ): Promise<{ items: OrderListItemDto[]; meta: PageMeta }> {
+    let effectiveFilters: OrderListFilters = filters;
+    if (filters.pendingProcurement === true) {
+      // 待采购 view (purchase.md §3.5): orders with a MAPPED BACKORDERED line
+      // that no live purchase order covers. The purchase module supplies the
+      // covered line ids through its port; this repo owns the line facts.
+      const activeOrderItemIds = await this.procurementPort.listActiveOrderItemIds();
+      const orderIds =
+        await this.orderRepo.findOrderIdsWithUncoveredBackorderedLines(activeOrderItemIds);
+      effectiveFilters = { ...filters, orderIds };
+    }
     const { rows, total } = await this.orderRepo.listWithAggregates(
-      filters,
+      effectiveFilters,
       page.pageSize,
       (page.page - 1) * page.pageSize,
     );
@@ -138,6 +151,9 @@ export class OrderService {
           quantity: item.quantity,
           fulfillmentStatus: item.fulfillmentStatus,
           mappingStatus: item.mappingStatus,
+          // Derived procurement state (purchase.md §3.5) - NULL for unmapped
+          // lines where procurement is meaningless.
+          procurementState: null as string | null,
           reservationId: item.reservationId,
           reservation,
           rawData: item.rawData,
@@ -153,6 +169,17 @@ export class OrderService {
         };
       }),
     );
+
+    // One port round-trip for the whole order keeps the derived procurement
+    // states consistent and avoids per-line queries (purchase.md §3.5).
+    const mappedItemIds = items
+      .filter(({ item }) => item.skuId !== null)
+      .map(({ item }) => item.id);
+    const procurementStates =
+      await this.procurementPort.getProcurementStatesByOrderItemIds(mappedItemIds);
+    for (const dto of itemDtos) {
+      dto.procurementState = procurementStates[dto.id] ?? null;
+    }
 
     const pickingTasks = await this.pickingState.listTasksForOrder(order.id);
 

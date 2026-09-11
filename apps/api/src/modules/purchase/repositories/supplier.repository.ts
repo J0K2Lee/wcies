@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { SupplierEntity } from '../entities/supplier.entity';
 
 export interface SupplierListFilters {
@@ -12,6 +12,7 @@ export interface SupplierListFilters {
 @Injectable()
 export class SupplierRepository {
   constructor(
+    private readonly dataSource: DataSource,
     @InjectRepository(SupplierEntity)
     private readonly supplierRepository: Repository<SupplierEntity>,
   ) {}
@@ -20,8 +21,17 @@ export class SupplierRepository {
     filters: SupplierListFilters,
     limit: number,
     offset: number,
-  ): Promise<{ rows: SupplierEntity[]; total: number }> {
-    const qb = this.supplierRepository.createQueryBuilder('s');
+  ): Promise<{ rows: Array<{ supplier: SupplierEntity; referenceCount: number }>; total: number }> {
+    const qb = this.supplierRepository
+      .createQueryBuilder('s')
+      .addSelect(
+        (sub) =>
+          sub
+            .select('COUNT(*)')
+            .from('purchase_orders', 'po')
+            .where('po.supplier_id = s.id AND po.status <> :cancelled', { cancelled: 'CANCELLED' }),
+        'reference_count',
+      );
     if (filters.keyword !== undefined && filters.keyword !== '') {
       qb.andWhere('(s.code ILIKE :kw OR s.name ILIKE :kw)', { kw: `%${filters.keyword}%` });
     }
@@ -29,8 +39,15 @@ export class SupplierRepository {
       qb.andWhere('s.status = :status', { status: filters.status });
     }
     qb.orderBy('s.createdAt', 'DESC').skip(offset).take(limit);
-    const [rows, total] = await Promise.all([qb.getMany(), qb.getCount()]);
-    return { rows, total };
+    const [rawRows, total] = await Promise.all([qb.getRawAndEntities(), qb.getCount()]);
+    const rawList = rawRows.raw as Array<Record<string, unknown>>;
+    return {
+      rows: rawRows.entities.map((supplier, index) => ({
+        supplier,
+        referenceCount: Number(rawList[index]?.['reference_count'] ?? 0),
+      })),
+      total,
+    };
   }
 
   async findById(id: string): Promise<SupplierEntity | null> {
@@ -63,10 +80,14 @@ export class SupplierRepository {
 
   /**
    * Reference census for the zero-reference delete guard (decision 0003).
-   * Sprint 7 adds the referencing tables incrementally: purchase_orders in
-   * T3, purchase_receipts in T4 - each task extends this list with its table.
+   * Sprint 7 adds the referencing tables incrementally: purchase_orders here
+   * (T3), purchase_receipts in T4.
    */
-  async countReferences(_id: string): Promise<Array<{ table: string; count: number }>> {
-    return [];
+  async countReferences(id: string): Promise<Array<{ table: string; count: number }>> {
+    const result = await this.dataSource.query<Array<{ table: string; count: string }>>(
+      `SELECT 'purchase_orders' AS table, COUNT(*)::text AS count FROM purchase_orders WHERE supplier_id = $1`,
+      [id],
+    );
+    return result.map((row) => ({ table: row.table, count: Number(row.count) }));
   }
 }

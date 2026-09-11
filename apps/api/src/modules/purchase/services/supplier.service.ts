@@ -46,8 +46,10 @@ export class SupplierService {
       offsetOf(page, pageSize),
     );
     return {
-      // Referencing tables arrive with T3/T4; until then every count is 0.
-      items: rows.map((supplier) => ({ ...this.toResponse(supplier), referenceCount: 0 })),
+      items: rows.map((row) => ({
+        ...this.toResponse(row.supplier),
+        referenceCount: row.referenceCount,
+      })),
       meta: { page, pageSize, total },
     };
   }

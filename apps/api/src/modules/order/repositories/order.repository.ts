@@ -9,6 +9,8 @@ export interface OrderListFilters {
   keyword?: string;
   erpStatus?: string;
   storeId?: string;
+  /** Hard restriction to these order ids (待采购 filter pipeline, T3). */
+  orderIds?: string[];
 }
 
 export interface OrderListRow {
@@ -45,6 +47,26 @@ export class OrderRepository {
 
   async findById(id: string): Promise<OrderEntity | null> {
     return this.dataSource.getRepository(OrderEntity).findOneBy({ id });
+  }
+
+  /**
+   * Orders owning a MAPPED BACKORDERED line that no live purchase order
+   * covers (待采购 view, purchase.md §3.5). `coveredOrderItemIds` comes from
+   * the purchase module's port; this repo owns the order-line facts.
+   */
+  async findOrderIdsWithUncoveredBackorderedLines(
+    coveredOrderItemIds: readonly string[],
+  ): Promise<string[]> {
+    const rows = await this.dataSource.query<Array<{ order_id: string }>>(
+      `SELECT DISTINCT i.order_id
+       FROM order_items i
+       WHERE i.fulfillment_status = 'BACKORDERED'
+         AND i.mapping_status = 'MAPPED'
+         AND i.sku_id IS NOT NULL
+         ${coveredOrderItemIds.length > 0 ? 'AND i.id != ALL($1::uuid[])' : ''}`,
+      coveredOrderItemIds.length > 0 ? [[...coveredOrderItemIds]] : [],
+    );
+    return rows.map((row) => row.order_id);
   }
 
   /**
@@ -155,6 +177,12 @@ export class OrderRepository {
     }
     if (filters.storeId !== undefined) {
       qb.andWhere('o.store_id = :storeId', { storeId: filters.storeId });
+    }
+    if (filters.orderIds !== undefined) {
+      if (filters.orderIds.length === 0) {
+        return { rows: [], total: 0 };
+      }
+      qb.andWhere('o.id IN (:...orderIds)', { orderIds: filters.orderIds });
     }
     qb.orderBy('o.orderedAt', 'DESC').skip(offset).take(limit);
     const [{ raw: rawRows, entities }, total] = await Promise.all([

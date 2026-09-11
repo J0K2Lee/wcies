@@ -1,0 +1,352 @@
+import { Injectable } from '@nestjs/common';
+import { DataSource } from 'typeorm';
+import { PageMeta } from '@wcies/shared';
+import {
+  OperatorContext,
+  OperationLogService,
+  diffOf,
+} from '../../operation-log/operation-log.service';
+import { BusinessCodeService } from '../../../infrastructure/business-code/business-code.service';
+import { SkuService } from '../../product/services/sku.service';
+import { SkuNotFoundError } from '../../product/errors/sku-errors';
+import { OrderService } from '../../order/services/order.service';
+import { formatQty, parseQty } from '../../../common/utils/quantity';
+import { PurchaseOrderEntity } from '../entities/purchase-order.entity';
+import { ProcurementState } from '../enums/purchase.constants';
+import {
+  PurchaseOrderInvalidStateError,
+  PurchaseOrderItemAlreadyOrderedError,
+  PurchaseOrderNotFoundError,
+  SupplierNotFoundError,
+} from '../errors/purchase-errors';
+import {
+  PurchaseOrderRepository,
+  PurchaseOrderListFilters,
+} from '../repositories/purchase-order.repository';
+import { SupplierService } from './supplier.service';
+import {
+  CreatePurchaseOrderRequestDto,
+  PurchaseOrderDetailDto,
+  PurchaseOrderItemInputDto,
+  PurchaseOrderListItemDto,
+  PurchaseOrderListQueryDto,
+  UpdatePurchaseOrderRequestDto,
+} from '../dto/purchase-order.dto';
+import { offsetOf } from '../../../common/dto/pagination.dto';
+
+const ENTITY_TYPE = 'PURCHASE_ORDER';
+
+/**
+ * Purchase order registration (Sprint 7 task §10): answers "already
+ * bought?" so the same order line is never purchased twice and nothing is
+ * forgotten. A PO is INTENT - it never touches stock (decision 0013).
+ */
+@Injectable()
+export class PurchaseOrderService {
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly repository: PurchaseOrderRepository,
+    private readonly supplierService: SupplierService,
+    private readonly skuService: SkuService,
+    private readonly orderService: OrderService,
+    private readonly businessCode: BusinessCodeService,
+    private readonly operationLog: OperationLogService,
+  ) {}
+
+  // --------------------------------------------------------------------------
+  // Create / update / cancel
+  // --------------------------------------------------------------------------
+
+  async create(
+    dto: CreatePurchaseOrderRequestDto,
+    operator: OperatorContext,
+  ): Promise<PurchaseOrderDetailDto> {
+    await this.assertHeaderRefs(dto.supplierId);
+    await this.assertItemsValid(dto.items);
+
+    const created = await this.dataSource.transaction(async (manager) => {
+      // Anti-duplicate guard INSIDE the creation flow (purchase.md §3.4):
+      // a live PO item linked to the same order line refuses this create.
+      for (const item of dto.items) {
+        if (item.orderItemId === undefined) {
+          continue;
+        }
+        const existing = await this.repository.findActiveItemByOrderItemId(item.orderItemId);
+        if (existing !== null) {
+          throw new PurchaseOrderItemAlreadyOrderedError(
+            existing.order.poNo,
+            new Date(existing.order.orderedAt),
+          );
+        }
+      }
+      const poNo = await this.businessCode.nextPurchaseOrderNo();
+      return this.repository.insertWithItems(
+        manager,
+        {
+          poNo,
+          supplierId: dto.supplierId ?? null,
+          sourceNote: dto.sourceNote?.trim() || null,
+          status: 'ORDERED',
+          orderedAt: new Date(),
+          expectedAt: dto.expectedAt ?? null,
+          remark: dto.remark ?? null,
+          createdBy: operator.userId,
+        },
+        dto.items.map((item) => ({
+          skuId: item.skuId,
+          orderItemId: item.orderItemId ?? null,
+          quantity: formatQty(parseQty(item.quantity)),
+          unitCost: item.unitCost ?? null,
+          remark: item.remark ?? null,
+        })),
+      );
+    });
+
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: created.id,
+      entityCode: created.poNo,
+      action: 'CREATE',
+      changes: {
+        poNo: { from: null, to: created.poNo },
+        supplierId: { from: null, to: created.supplierId },
+        sourceNote: { from: null, to: created.sourceNote },
+        itemCount: { from: null, to: dto.items.length },
+      },
+      operator,
+    });
+    return this.getDetail(created.id);
+  }
+
+  /** Only ORDERED may change - receipts freeze the quantities (§3.3). */
+  async update(
+    id: string,
+    dto: UpdatePurchaseOrderRequestDto,
+    operator: OperatorContext,
+  ): Promise<PurchaseOrderDetailDto> {
+    const existing = await this.findOrThrow(id);
+    if (existing.status !== 'ORDERED') {
+      throw new PurchaseOrderInvalidStateError(
+        `采购单状态 ${existing.status} 不允许修改（仅 ORDERED 可改）`,
+        { poNo: existing.poNo, status: existing.status },
+      );
+    }
+    await this.assertHeaderRefs(dto.supplierId ?? existing.supplierId ?? undefined);
+    if (dto.items !== undefined) {
+      await this.assertItemsValid(dto.items);
+    }
+
+    const before = this.snapshot(existing);
+    await this.dataSource.transaction(async (manager) => {
+      const patch: Partial<PurchaseOrderEntity> = {};
+      if (dto.supplierId !== undefined) patch.supplierId = dto.supplierId;
+      if (dto.sourceNote !== undefined) patch.sourceNote = dto.sourceNote?.trim() || null;
+      if (dto.expectedAt !== undefined) patch.expectedAt = dto.expectedAt ?? null;
+      if (dto.remark !== undefined) patch.remark = dto.remark ?? null;
+      if (Object.keys(patch).length > 0) {
+        await this.repository.updateHeader(manager, id, patch);
+      }
+      if (dto.items !== undefined) {
+        // Re-run the duplicate guard against OTHER POs (own items are being
+        // replaced, so they must not collide with themselves).
+        for (const item of dto.items) {
+          if (item.orderItemId === undefined) {
+            continue;
+          }
+          const collision = await this.repository.findActiveItemByOrderItemId(item.orderItemId, id);
+          if (collision !== null) {
+            throw new PurchaseOrderItemAlreadyOrderedError(
+              collision.order.poNo,
+              new Date(collision.order.orderedAt),
+            );
+          }
+        }
+        await this.repository.replaceItems(
+          manager,
+          id,
+          dto.items.map((item) => ({
+            skuId: item.skuId,
+            orderItemId: item.orderItemId ?? null,
+            quantity: formatQty(parseQty(item.quantity)),
+            unitCost: item.unitCost ?? null,
+            remark: item.remark ?? null,
+          })),
+        );
+      }
+    });
+
+    const updated = await this.findOrThrow(id);
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: id,
+      entityCode: updated.poNo,
+      action: 'UPDATE',
+      changes: diffOf(before, this.snapshot(updated)),
+      operator,
+    });
+    return this.getDetail(id);
+  }
+
+  /** Cancel-before-receipt only: any received quantity freezes the PO. */
+  async cancel(
+    id: string,
+    operator: OperatorContext,
+    reason?: string,
+  ): Promise<PurchaseOrderDetailDto> {
+    const existing = await this.findOrThrow(id);
+    if (existing.status === 'CANCELLED') {
+      return this.getDetail(id);
+    }
+    if (existing.status !== 'ORDERED') {
+      throw new PurchaseOrderInvalidStateError(`采购单已发生收货（${existing.status}），不能取消`, {
+        poNo: existing.poNo,
+        status: existing.status,
+      });
+    }
+    await this.dataSource.transaction(async (manager) => {
+      await this.repository.updateHeader(manager, id, { status: 'CANCELLED' });
+    });
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: id,
+      entityCode: existing.poNo,
+      action: 'CANCEL',
+      changes: {
+        status: { from: existing.status, to: 'CANCELLED' },
+        ...(reason ? { reason: { from: null, to: reason } } : {}),
+      },
+      operator,
+    });
+    return this.getDetail(id);
+  }
+
+  // --------------------------------------------------------------------------
+  // Reads
+  // --------------------------------------------------------------------------
+
+  async list(
+    query: PurchaseOrderListQueryDto & { page: number; pageSize: number },
+  ): Promise<{ items: PurchaseOrderListItemDto[]; meta: PageMeta }> {
+    const { page, pageSize } = query;
+    const filters: PurchaseOrderListFilters = {
+      keyword: query.keyword?.trim() || undefined,
+      status: query.status,
+      supplierId: query.supplierId,
+      orderItemId: query.orderItemId,
+      orderedFrom: query.orderedFrom,
+      orderedTo: query.orderedTo,
+    };
+    const { rows, total } = await this.repository.list(filters, pageSize, offsetOf(page, pageSize));
+    return {
+      items: rows.map((row) => ({
+        id: row.order.id,
+        poNo: row.order.poNo,
+        supplierId: row.order.supplierId,
+        supplierName: row.supplierName,
+        sourceNote: row.order.sourceNote,
+        status: row.order.status,
+        orderedAt: row.order.orderedAt,
+        expectedAt: row.order.expectedAt,
+        remark: row.order.remark,
+        itemCount: row.itemCount,
+        totalQuantity: row.totalQuantity,
+        createdAt: row.order.createdAt,
+        updatedAt: row.order.updatedAt,
+      })),
+      meta: { page, pageSize, total },
+    };
+  }
+
+  async getDetail(id: string): Promise<PurchaseOrderDetailDto> {
+    const order = await this.findOrThrow(id);
+    const items = await this.repository.findItemsWithRefs(order.id);
+    return {
+      id: order.id,
+      poNo: order.poNo,
+      supplierId: order.supplierId,
+      supplierName: null,
+      sourceNote: order.sourceNote,
+      status: order.status,
+      orderedAt: order.orderedAt,
+      expectedAt: order.expectedAt,
+      remark: order.remark,
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+      items: items.map((row) => ({
+        id: row.item.id,
+        skuId: row.item.skuId,
+        skuCode: row.skuCode,
+        skuName: row.skuName,
+        orderItemId: row.item.orderItemId,
+        orderNo: row.orderNo,
+        quantity: row.item.quantity,
+        unitCost: row.item.unitCost,
+        receivedQuantity: row.item.receivedQuantity,
+        remark: row.item.remark,
+      })),
+    };
+  }
+
+  // --------------------------------------------------------------------------
+  // Order-module port (purchase.md §3.5): derived procurement state
+  // --------------------------------------------------------------------------
+
+  async getProcurementStatesByOrderItemIds(
+    orderItemIds: readonly string[],
+  ): Promise<Record<string, ProcurementState>> {
+    const states = await this.repository.getProcurementStatesByOrderItemIds(orderItemIds);
+    const result: Record<string, ProcurementState> = {};
+    for (const id of orderItemIds) {
+      result[id] = states[id] ?? 'NOT_ORDERED';
+    }
+    return result;
+  }
+
+  async listActiveOrderItemIds(): Promise<string[]> {
+    return this.repository.listActiveOrderItemIds();
+  }
+
+  // --------------------------------------------------------------------------
+  // Internals
+  // --------------------------------------------------------------------------
+
+  private async assertHeaderRefs(supplierId?: string): Promise<void> {
+    if (supplierId === undefined) {
+      return;
+    }
+    if ((await this.supplierService.getEntityById(supplierId)) === null) {
+      throw new SupplierNotFoundError(supplierId);
+    }
+  }
+
+  private async assertItemsValid(items: PurchaseOrderItemInputDto[]): Promise<void> {
+    for (const item of items) {
+      if ((await this.skuService.getEntityById(item.skuId)) === null) {
+        throw new SkuNotFoundError(item.skuId);
+      }
+      if (item.orderItemId !== undefined) {
+        // Existence + shape check through the order module's public API
+        // (never the order repositories, AGENTS.md §9).
+        await this.orderService.getItemFulfillment(item.orderItemId);
+      }
+    }
+  }
+
+  private async findOrThrow(id: string): Promise<PurchaseOrderEntity> {
+    const order = await this.repository.findById(id);
+    if (order === null) {
+      throw new PurchaseOrderNotFoundError(id);
+    }
+    return order;
+  }
+
+  private snapshot(order: PurchaseOrderEntity): Record<string, unknown> {
+    return {
+      supplierId: order.supplierId,
+      sourceNote: order.sourceNote,
+      expectedAt: order.expectedAt,
+      remark: order.remark,
+      status: order.status,
+    };
+  }
+}

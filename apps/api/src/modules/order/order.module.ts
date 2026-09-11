@@ -10,6 +10,7 @@ import { LoggerModule } from '../../common/logger/logger.module';
 import { PickingModule } from '../picking/picking.module';
 import { NotificationModule } from '../notification/notification.module';
 import { InterceptionModule } from '../interception/interception.module';
+import { PurchaseModule } from '../purchase/purchase.module';
 import { OrderEntity } from './entities/order.entity';
 import { OrderItemEntity } from './entities/order-item.entity';
 import { OrderStatusHistoryEntity } from './entities/order-status-history.entity';
@@ -41,6 +42,7 @@ import { OrderController } from './controllers/order.controller';
     NotificationModule,
     forwardRef(() => PickingModule),
     forwardRef(() => InterceptionModule),
+    forwardRef(() => PurchaseModule),
   ],
   controllers: [OrderController],
   providers: [

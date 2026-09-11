@@ -1,5 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
-import { App as AntdApp, Button, Drawer, Input, Modal, Select, Tabs, Timeline } from 'antd';
+import {
+  App as AntdApp,
+  Button,
+  Drawer,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Select,
+  Tabs,
+  Timeline,
+} from 'antd';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import { apiPost, useApiQuery } from '../../api/hooks';
@@ -61,6 +72,8 @@ interface OrderItem {
   quantity: string;
   fulfillmentStatus: string;
   mappingStatus: string;
+  /** Derived procurement state (purchase.md §3.5); NULL for unmapped lines. */
+  procurementState: string | null;
   /** Platform identifiers of the line; present even when mapping FAILED. */
   platformSkuId: string | null;
   offerId: string | null;
@@ -165,6 +178,12 @@ const FIXTURES: Array<{ label: string; json: Record<string, unknown> }> = [
   },
 ];
 
+const PROCUREMENT_META: Record<string, { tone: 'danger' | 'info' | 'success'; label: string }> = {
+  NOT_ORDERED: { tone: 'danger', label: '待采购' },
+  ORDERED: { tone: 'info', label: '已采购' },
+  ARRIVED: { tone: 'success', label: '已到货' },
+};
+
 function fmtDateTime(value: string): string {
   return new Date(value).toLocaleString('zh-CN', { hour12: false });
 }
@@ -211,6 +230,13 @@ export function OrdersPage() {
   const [activeTab, setActiveTab] = useState('all');
   const [storeId, setStoreId] = useState<string | undefined>();
   const [platformFilter, setPlatformFilter] = useState<string | undefined>();
+  const [pendingProcurement, setPendingProcurement] = useState(false);
+  const [registerItem, setRegisterItem] = useState<OrderItem | null>(null);
+  const [registerForm] = Form.useForm<{
+    sourceNote?: string;
+    quantity: number;
+    unitCost?: number;
+  }>();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [ingestOpen, setIngestOpen] = useState(false);
@@ -241,8 +267,9 @@ export function OrdersPage() {
       ...(keyword ? { keyword } : {}),
       ...(tabErpStatus ? { erpStatus: tabErpStatus } : {}),
       ...(storeId ? { storeId } : {}),
+      ...(pendingProcurement ? { pendingProcurement: 'true' } : {}),
     },
-    ['orders', page, keyword, tabErpStatus, storeId],
+    ['orders', page, keyword, tabErpStatus, storeId, pendingProcurement],
   );
 
   // Tab counts: light meta.total queries for the headline tabs (task §39).
@@ -320,6 +347,32 @@ export function OrdersPage() {
       void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
     },
     onError: (error: Error) => message.error(`创建失败：${error.message}`),
+  });
+
+  const registerPurchaseMutation = useMutation({
+    mutationFn: (values: { sourceNote?: string; quantity: number; unitCost?: number }) => {
+      const item = registerItem as OrderItem;
+      return apiPost<{ poNo: string }>('/api/v1/purchase-orders', {
+        sourceNote: values.sourceNote,
+        items: [
+          {
+            skuId: item.skuId,
+            orderItemId: item.id,
+            quantity: String(values.quantity),
+            ...(values.unitCost !== undefined && values.unitCost !== null
+              ? { unitCost: String(values.unitCost) }
+              : {}),
+          },
+        ],
+      });
+    },
+    onSuccess: (result) => {
+      message.success(`已登记采购：${result.poNo}`);
+      setRegisterItem(null);
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
+    },
+    onError: (error: Error) => message.error(`登记失败：${error.message}`),
   });
 
   const ingestMutation = useMutation({
@@ -580,6 +633,39 @@ export function OrdersPage() {
       ),
     },
     {
+      title: '采购状态',
+      dataIndex: 'procurementState',
+      key: 'procurementState',
+      width: 150,
+      render: (value: string | null, row: OrderItem) => {
+        if (value === null) {
+          return '—';
+        }
+        const meta = PROCUREMENT_META[value] ?? { tone: 'neutral' as const, label: value };
+        const registerable =
+          value === 'NOT_ORDERED' && row.fulfillmentStatus === 'BACKORDERED' && row.skuId !== null;
+        return (
+          <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+            <StatusBadge tone={meta.tone} label={meta.label} hint={value} />
+            {registerable && (
+              <Button
+                size="small"
+                type="primary"
+                ghost
+                onClick={(event) => {
+                  event.stopPropagation();
+                  registerForm.setFieldsValue({ quantity: Number(row.quantity) });
+                  setRegisterItem(row);
+                }}
+              >
+                登记采购
+              </Button>
+            )}
+          </span>
+        );
+      },
+    },
+    {
       title: '库存分配（Bin × 数量）',
       key: 'bins',
       render: (_: unknown, row: OrderItem) =>
@@ -694,6 +780,17 @@ export function OrdersPage() {
           style={{ width: 240 }}
           aria-label="搜索订单"
         />
+        <Button
+          type={pendingProcurement ? 'primary' : 'default'}
+          danger={!pendingProcurement}
+          ghost={pendingProcurement}
+          onClick={() => {
+            setPage(1);
+            setPendingProcurement((value) => !value);
+          }}
+        >
+          待采购
+        </Button>
         <Select
           allowClear
           placeholder="店铺"
@@ -1149,6 +1246,51 @@ export function OrdersPage() {
           </>
         )}
       </Drawer>
+
+      <Modal
+        title={`登记采购：${registerItem?.skuCode ?? ''} ×${registerItem ? Number(registerItem.quantity) : ''}`}
+        open={registerItem !== null}
+        onCancel={() => setRegisterItem(null)}
+        onOk={() => {
+          void registerForm
+            .validateFields()
+            .then((values) => registerPurchaseMutation.mutate(values));
+        }}
+        okText="登记"
+        cancelText="取消"
+        confirmLoading={registerPurchaseMutation.isPending}
+        destroyOnHidden
+      >
+        <Form form={registerForm} layout="vertical" preserve={false}>
+          <span
+            style={{
+              fontSize: 12.5,
+              color: colors.textTertiary,
+              display: 'block',
+              marginBottom: 12,
+            }}
+          >
+            将为订单行 {registerItem?.id.slice(0, 8)}… 登记采购；同一订单行重复登记会被系统拒绝。
+          </span>
+          <Form.Item
+            name="quantity"
+            label="采购数量"
+            rules={[{ required: true, message: '请输入采购数量' }]}
+          >
+            <InputNumber min={1} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="unitCost" label="单位成本（可选，确认收货时计入移动平均）">
+            <InputNumber min={0} style={{ width: '100%' }} placeholder="如 59.9" />
+          </Form.Item>
+          <Form.Item
+            name="sourceNote"
+            label="货源说明（一次性网购填这里）"
+            extra="如：淘宝 订单号 12345678；固定供应商请到采购单页面选择"
+          >
+            <Input maxLength={500} />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Modal
         title="摄入测试订单（NormalizedOrderInput，管理员）"

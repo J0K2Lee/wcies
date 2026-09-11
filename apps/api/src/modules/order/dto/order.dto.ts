@@ -140,6 +140,14 @@ export class OrderListQueryDto extends PaginationQueryDto {
   erpStatus?: string;
 
   @ApiPropertyOptional() @IsOptional() @IsUUID() storeId?: string;
+
+  @ApiPropertyOptional({
+    enum: ['true'],
+    description: '待采购视图：存在 MAPPED+BACKORDERED 且无未取消采购单覆盖的订单行',
+  })
+  @IsOptional()
+  @IsIn(['true'])
+  pendingProcurement?: string;
 }
 
 export class OrderListItemDto {
@@ -205,6 +213,12 @@ export class OrderItemDto {
   @ApiProperty({ example: '2.000' }) quantity!: string;
   @ApiProperty({ enum: ORDER_ITEM_FULFILLMENT_STATUSES }) fulfillmentStatus!: string;
   @ApiProperty({ enum: ORDER_ITEM_MAPPING_STATUSES }) mappingStatus!: string;
+  @ApiPropertyOptional({
+    nullable: true,
+    enum: ['NOT_ORDERED', 'ORDERED', 'ARRIVED'],
+    description: '派生采购状态（purchase.md §3.5，不落库）；未映射行为 NULL',
+  })
+  procurementState!: string | null;
   @ApiProperty({ nullable: true, type: String }) reservationId!: string | null;
   @ApiProperty({
     nullable: true,

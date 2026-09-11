@@ -5557,6 +5557,16 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "pendingProcurement",
+            "required": false,
+            "in": "query",
+            "description": "待采购视图：存在 MAPPED+BACKORDERED 且无未取消采购单覆盖的订单行",
+            "schema": {
+              "type": "string",
+              "enum": ["true"]
+            }
           }
         ],
         "responses": {
@@ -6617,6 +6627,584 @@
         "tags": ["interceptions"]
       }
     },
+    "/api/v1/suppliers": {
+      "get": {
+        "operationId": "SupplierController_list",
+        "parameters": [
+          {
+            "name": "keyword",
+            "required": false,
+            "in": "query",
+            "description": "编码 / 名称模糊搜索",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["ACTIVE", "INACTIVE"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data", "meta"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SupplierListItemDto"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": ["page", "pageSize", "total"],
+                      "properties": {
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "pageSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "List suppliers (paged + reference counts)",
+        "tags": ["suppliers"]
+      },
+      "post": {
+        "operationId": "SupplierController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSupplierRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SupplierResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create a supplier (code auto-generated when omitted)",
+        "tags": ["suppliers"]
+      }
+    },
+    "/api/v1/suppliers/{id}": {
+      "get": {
+        "operationId": "SupplierController_getById",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SupplierResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get supplier detail",
+        "tags": ["suppliers"]
+      },
+      "patch": {
+        "operationId": "SupplierController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSupplierRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SupplierResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Update supplier fields (code immutable)",
+        "tags": ["suppliers"]
+      },
+      "delete": {
+        "operationId": "SupplierController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Delete a supplier with zero references (else SUPPLIER_IN_USE)",
+        "tags": ["suppliers"]
+      }
+    },
+    "/api/v1/suppliers/{id}/activate": {
+      "post": {
+        "operationId": "SupplierController_activate",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SupplierResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Activate a supplier",
+        "tags": ["suppliers"]
+      }
+    },
+    "/api/v1/suppliers/{id}/deactivate": {
+      "post": {
+        "operationId": "SupplierController_deactivate",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SupplierResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Deactivate a supplier",
+        "tags": ["suppliers"]
+      }
+    },
+    "/api/v1/purchase-orders": {
+      "get": {
+        "operationId": "PurchaseOrderController_list",
+        "parameters": [
+          {
+            "name": "keyword",
+            "required": false,
+            "in": "query",
+            "description": "PO号 / 货源说明 / 供应商名 模糊搜索",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["ORDERED", "PARTIALLY_RECEIVED", "RECEIVED", "CANCELLED"]
+            }
+          },
+          {
+            "name": "supplierId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "orderItemId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "orderedFrom",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "date-time",
+              "example": "2026-09-01T00:00:00Z",
+              "type": "string"
+            }
+          },
+          {
+            "name": "orderedTo",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "date-time",
+              "example": "2026-09-30T23:59:59Z",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data", "meta"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PurchaseOrderListItemDto"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": ["page", "pageSize", "total"],
+                      "properties": {
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "pageSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "采购单列表（筛选：状态/供应商/日期/关联订单行）",
+        "tags": ["purchase-orders"]
+      },
+      "post": {
+        "operationId": "PurchaseOrderController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePurchaseOrderRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PurchaseOrderDetailDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "登记采购单（同一订单行重复登记会被拒绝）",
+        "tags": ["purchase-orders"]
+      }
+    },
+    "/api/v1/purchase-orders/{id}": {
+      "get": {
+        "operationId": "PurchaseOrderController_getById",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PurchaseOrderDetailDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "采购单详情（含明细与关联订单号）",
+        "tags": ["purchase-orders"]
+      },
+      "patch": {
+        "operationId": "PurchaseOrderController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePurchaseOrderRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PurchaseOrderDetailDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "修改采购单（仅 ORDERED 状态）",
+        "tags": ["purchase-orders"]
+      }
+    },
+    "/api/v1/purchase-orders/{id}/cancel": {
+      "post": {
+        "operationId": "PurchaseOrderController_cancel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PurchaseOrderDetailDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "取消采购单（仅未收货）",
+        "tags": ["purchase-orders"]
+      }
+    },
     "/api/v1/shipments": {
       "get": {
         "operationId": "ShipmentController_list",
@@ -7136,315 +7724,6 @@
         },
         "summary": "封箱（OPEN/REPACK_REQUIRED → SEALED；齐全后发货单 READY_TO_SHIP）",
         "tags": ["packages"]
-      }
-    },
-    "/api/v1/suppliers": {
-      "get": {
-        "operationId": "SupplierController_list",
-        "parameters": [
-          {
-            "name": "keyword",
-            "required": false,
-            "in": "query",
-            "description": "编码 / 名称模糊搜索",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "status",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": ["ACTIVE", "INACTIVE"]
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data", "meta"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/SupplierListItemDto"
-                      }
-                    },
-                    "meta": {
-                      "type": "object",
-                      "required": ["page", "pageSize", "total"],
-                      "properties": {
-                        "page": {
-                          "type": "integer",
-                          "minimum": 1
-                        },
-                        "pageSize": {
-                          "type": "integer",
-                          "minimum": 1
-                        },
-                        "total": {
-                          "type": "integer",
-                          "minimum": 0
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "List suppliers (paged + reference counts)",
-        "tags": ["suppliers"]
-      },
-      "post": {
-        "operationId": "SupplierController_create",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateSupplierRequestDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/SupplierResponseDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "Create a supplier (code auto-generated when omitted)",
-        "tags": ["suppliers"]
-      }
-    },
-    "/api/v1/suppliers/{id}": {
-      "get": {
-        "operationId": "SupplierController_getById",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/SupplierResponseDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "Get supplier detail",
-        "tags": ["suppliers"]
-      },
-      "patch": {
-        "operationId": "SupplierController_update",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateSupplierRequestDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/SupplierResponseDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "Update supplier fields (code immutable)",
-        "tags": ["suppliers"]
-      },
-      "delete": {
-        "operationId": "SupplierController_remove",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "type": "object"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "Delete a supplier with zero references (else SUPPLIER_IN_USE)",
-        "tags": ["suppliers"]
-      }
-    },
-    "/api/v1/suppliers/{id}/activate": {
-      "post": {
-        "operationId": "SupplierController_activate",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/SupplierResponseDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "Activate a supplier",
-        "tags": ["suppliers"]
-      }
-    },
-    "/api/v1/suppliers/{id}/deactivate": {
-      "post": {
-        "operationId": "SupplierController_deactivate",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/SupplierResponseDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "Deactivate a supplier",
-        "tags": ["suppliers"]
       }
     },
     "/api/v1/sync/orders": {
@@ -11823,6 +12102,12 @@
             "type": "string",
             "enum": ["PENDING", "MAPPED", "FAILED"]
           },
+          "procurementState": {
+            "type": "string",
+            "nullable": true,
+            "enum": ["NOT_ORDERED", "ORDERED", "ARRIVED"],
+            "description": "派生采购状态（purchase.md §3.5，不落库）；未映射行为 NULL"
+          },
           "reservationId": {
             "type": "string",
             "nullable": true
@@ -12985,6 +13270,383 @@
           }
         }
       },
+      "SupplierListItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "example": "SUP0001"
+          },
+          "name": {
+            "type": "string",
+            "example": "深圳华强北电子供应商"
+          },
+          "contactName": {
+            "type": "object",
+            "nullable": true
+          },
+          "contactPhone": {
+            "type": "object",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ACTIVE", "INACTIVE"]
+          },
+          "remark": {
+            "type": "object",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "referenceCount": {
+            "type": "number"
+          }
+        },
+        "required": ["id", "code", "name", "status", "createdAt", "updatedAt", "referenceCount"]
+      },
+      "SupplierResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "example": "SUP0001"
+          },
+          "name": {
+            "type": "string",
+            "example": "深圳华强北电子供应商"
+          },
+          "contactName": {
+            "type": "object",
+            "nullable": true
+          },
+          "contactPhone": {
+            "type": "object",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ACTIVE", "INACTIVE"]
+          },
+          "remark": {
+            "type": "object",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": ["id", "code", "name", "status", "createdAt", "updatedAt"]
+      },
+      "CreateSupplierRequestDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "深圳华强北电子供应商"
+          },
+          "code": {
+            "type": "string",
+            "description": "留空自动生成 SUP%04d；创建后不可改"
+          },
+          "contactName": {
+            "type": "string"
+          },
+          "contactPhone": {
+            "type": "string"
+          },
+          "remark": {
+            "type": "string"
+          }
+        },
+        "required": ["name"]
+      },
+      "UpdateSupplierRequestDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "contactName": {
+            "type": "string"
+          },
+          "contactPhone": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ACTIVE", "INACTIVE"]
+          },
+          "remark": {
+            "type": "string"
+          }
+        }
+      },
+      "PurchaseOrderListItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "poNo": {
+            "type": "string",
+            "example": "PO000001"
+          },
+          "supplierId": {
+            "type": "object",
+            "nullable": true
+          },
+          "supplierName": {
+            "type": "object",
+            "nullable": true
+          },
+          "sourceNote": {
+            "type": "object",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ORDERED", "PARTIALLY_RECEIVED", "RECEIVED", "CANCELLED"]
+          },
+          "orderedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "expectedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "remark": {
+            "type": "object",
+            "nullable": true
+          },
+          "itemCount": {
+            "type": "number"
+          },
+          "totalQuantity": {
+            "type": "string",
+            "example": "2.000"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "poNo",
+          "status",
+          "orderedAt",
+          "itemCount",
+          "totalQuantity",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "PurchaseOrderItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "skuId": {
+            "type": "string"
+          },
+          "skuCode": {
+            "type": "string",
+            "example": "SKU000001001"
+          },
+          "skuName": {
+            "type": "string",
+            "example": "VK87 MAX V2 黑色"
+          },
+          "orderItemId": {
+            "type": "object",
+            "nullable": true
+          },
+          "orderNo": {
+            "type": "object",
+            "nullable": true,
+            "description": "关联订单号（展示用）"
+          },
+          "quantity": {
+            "type": "string",
+            "example": "2.000"
+          },
+          "unitCost": {
+            "type": "object",
+            "nullable": true,
+            "example": "59.9000"
+          },
+          "receivedQuantity": {
+            "type": "string",
+            "example": "0.000"
+          },
+          "remark": {
+            "type": "object",
+            "nullable": true
+          }
+        },
+        "required": ["id", "skuId", "skuCode", "skuName", "quantity", "receivedQuantity"]
+      },
+      "PurchaseOrderDetailDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "poNo": {
+            "type": "string",
+            "example": "PO000001"
+          },
+          "supplierId": {
+            "type": "object",
+            "nullable": true
+          },
+          "supplierName": {
+            "type": "object",
+            "nullable": true
+          },
+          "sourceNote": {
+            "type": "object",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ORDERED", "PARTIALLY_RECEIVED", "RECEIVED", "CANCELLED"]
+          },
+          "orderedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "expectedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "remark": {
+            "type": "object",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PurchaseOrderItemDto"
+            }
+          }
+        },
+        "required": ["id", "poNo", "status", "orderedAt", "createdAt", "updatedAt", "items"]
+      },
+      "PurchaseOrderItemInputDto": {
+        "type": "object",
+        "properties": {
+          "skuId": {
+            "type": "string"
+          },
+          "orderItemId": {
+            "type": "string",
+            "description": "为哪张订单行采购（可空 = 备货采购）"
+          },
+          "quantity": {
+            "type": "string",
+            "example": "2"
+          },
+          "unitCost": {
+            "type": "string",
+            "example": "59.9000",
+            "description": "单位成本（可空）"
+          },
+          "remark": {
+            "type": "string"
+          }
+        },
+        "required": ["skuId", "quantity"]
+      },
+      "CreatePurchaseOrderRequestDto": {
+        "type": "object",
+        "properties": {
+          "supplierId": {
+            "type": "string",
+            "description": "固定供应商（可空）"
+          },
+          "sourceNote": {
+            "type": "string",
+            "description": "一次性网购的货源说明（如「淘宝 订单号 12345678」）",
+            "example": "淘宝 订单号 12345678"
+          },
+          "expectedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "预计到货时间"
+          },
+          "remark": {
+            "type": "string"
+          },
+          "items": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PurchaseOrderItemInputDto"
+            }
+          }
+        },
+        "required": ["items"]
+      },
+      "UpdatePurchaseOrderRequestDto": {
+        "type": "object",
+        "properties": {
+          "supplierId": {
+            "type": "string"
+          },
+          "sourceNote": {
+            "type": "string"
+          },
+          "expectedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "remark": {
+            "type": "string"
+          },
+          "items": {
+            "description": "整体替换明细（仅 ORDERED 状态）",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PurchaseOrderItemInputDto"
+            }
+          }
+        }
+      },
       "ShipmentListItemDto": {
         "type": "object",
         "properties": {
@@ -13812,135 +14474,6 @@
                 "$ref": "#/components/schemas/PackageDimensionsDto"
               }
             ]
-          }
-        }
-      },
-      "SupplierListItemDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string",
-            "example": "SUP0001"
-          },
-          "name": {
-            "type": "string",
-            "example": "深圳华强北电子供应商"
-          },
-          "contactName": {
-            "type": "object",
-            "nullable": true
-          },
-          "contactPhone": {
-            "type": "object",
-            "nullable": true
-          },
-          "status": {
-            "type": "string",
-            "enum": ["ACTIVE", "INACTIVE"]
-          },
-          "remark": {
-            "type": "object",
-            "nullable": true
-          },
-          "createdAt": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "updatedAt": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "referenceCount": {
-            "type": "number"
-          }
-        },
-        "required": ["id", "code", "name", "status", "createdAt", "updatedAt", "referenceCount"]
-      },
-      "SupplierResponseDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string",
-            "example": "SUP0001"
-          },
-          "name": {
-            "type": "string",
-            "example": "深圳华强北电子供应商"
-          },
-          "contactName": {
-            "type": "object",
-            "nullable": true
-          },
-          "contactPhone": {
-            "type": "object",
-            "nullable": true
-          },
-          "status": {
-            "type": "string",
-            "enum": ["ACTIVE", "INACTIVE"]
-          },
-          "remark": {
-            "type": "object",
-            "nullable": true
-          },
-          "createdAt": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "updatedAt": {
-            "format": "date-time",
-            "type": "string"
-          }
-        },
-        "required": ["id", "code", "name", "status", "createdAt", "updatedAt"]
-      },
-      "CreateSupplierRequestDto": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string",
-            "example": "深圳华强北电子供应商"
-          },
-          "code": {
-            "type": "string",
-            "description": "留空自动生成 SUP%04d；创建后不可改"
-          },
-          "contactName": {
-            "type": "string"
-          },
-          "contactPhone": {
-            "type": "string"
-          },
-          "remark": {
-            "type": "string"
-          }
-        },
-        "required": ["name"]
-      },
-      "UpdateSupplierRequestDto": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "contactName": {
-            "type": "string"
-          },
-          "contactPhone": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string",
-            "enum": ["ACTIVE", "INACTIVE"]
-          },
-          "remark": {
-            "type": "string"
           }
         }
       },

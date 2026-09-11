@@ -40,10 +40,18 @@ export class OrderController {
   @ApiOperation({ summary: '订单列表（分页 + 汇总计数 + 未处理异常数）' })
   @ApiOkPagedEnvelope(OrderListItemDto)
   async list(@Query() query: OrderListQueryDto) {
-    const result = await this.orderService.list(query, {
-      page: query.page,
-      pageSize: query.pageSize,
-    });
+    const result = await this.orderService.list(
+      {
+        keyword: query.keyword?.trim() || undefined,
+        erpStatus: query.erpStatus,
+        storeId: query.storeId,
+        pendingProcurement: query.pendingProcurement === 'true',
+      },
+      {
+        page: query.page,
+        pageSize: query.pageSize,
+      },
+    );
     return okPage<OrderListItemDto>(result.items, result.meta);
   }
 

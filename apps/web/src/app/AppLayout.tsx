@@ -67,7 +67,10 @@ const MENU_ITEMS = [
     key: 'purchase-group',
     label: '采购',
     icon: <ShoppingCartOutlined />,
-    children: [{ key: '/suppliers', label: '供应商' }],
+    children: [
+      { key: '/purchase-orders', label: '采购单' },
+      { key: '/suppliers', label: '供应商' },
+    ],
   },
   {
     key: 'order-group',
