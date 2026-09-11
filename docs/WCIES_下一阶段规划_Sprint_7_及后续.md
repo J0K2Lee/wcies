@@ -1,9 +1,11 @@
 # WCIES 下一阶段规划（Sprint 7 及后续）
 
 > 依据：`AGENTS.md`、`docs/` 全部业务规则与架构文档、Sprint 0–6 任务书、`docs/会议纪要.md`、
-> 以及 2026-09-11 生产数据的实际状态（用户真实 OZON 数据已同步）。
+> 用户 2026-09-11 的业务澄清，以及生产数据的实际状态。
 >
 > 本文件是**规划**，不是实施任务书。实施前需先确认第 5 节的决策点。
+>
+> **2026-09-11 修订**：入口从「初始库存导入」改为「采购入库」。原判断有误，理由见 §1.5。
 
 ---
 
@@ -15,10 +17,10 @@
 |---|---|---|
 | 0 | 工程初始化：Monorepo、Auth、BullMQ、MinIO、日志、错误信封、OpenAPI 链路、CI | 已完成 |
 | 1 | 主数据：Product/SKU/条码/图片、平台/店铺/凭证、仓库/库位、店仓绑定、Listing 映射、导入 | 已完成 |
-| 2 | 库存核心：Balance/SafetyStock/Reservation/Transaction、可用量、并发控制、幂等、初期库存导入 | 已完成 |
+| 2 | 库存核心：Balance/SafetyStock/Reservation/Transaction、可用量、并发控制、幂等 | 已完成 |
 | 3 | 订单核心 + 拣货：摄入、SKU 解析、库存占用、Backorder、扫码校验、取消处理 | 已完成 |
 | 4 | 发货 + 拦截：Shipment/Package 出库闭环、Picked 取消的拦截回库 | 已完成 |
-| 5 | 平台集成基座 + OZON：Client/Adapter/Mapper、同步引擎（Listing/Order/Webhook）、游标/单飞/幂等 | 已完成（真实冒烟未执行） |
+| 5 | 平台集成基座 + OZON：Client/Adapter/Mapper、同步引擎、游标/单飞/幂等 | 已完成（真实冒烟未执行） |
 | 6 | 手工测试修复（两轮，35 条问题） | 已完成 |
 
 ## 1.2 系统当前能力边界
@@ -26,166 +28,221 @@
 **已打通的业务闭环**：主数据 → 库存 → 订单 → 拣货 → 发货 → 拦截。
 
 **平台集成现状**（`apps/api/src/modules/integration/`）：
-- 只有 `ozon/` 一个适配器。
-- OZON 适配器**只读**：`validateCredential` / `fetchListings` / `fetchOrders` / `processWebhook` / `fetchOrdersByPlatformIds`。
-  **没有任何写操作**（无推库存、无调价、无发货、无取消）。
+- 只有 `ozon/` 一个适配器，且**只读**：`validateCredential` / `fetchListings` / `fetchOrders` /
+  `processWebhook` / `fetchOrdersByPlatformIds`。**无任何写操作**。
 - 同步类型只有两种：`LISTING_SYNC` / `ORDER_SYNC`（`sync/sync.constants.ts:4`）。
 
 **尚无实现的规划模块**（对照 `docs/WCIES_工程架构与_Monorepo_目录设计_V1.md:985-1089`）：
-
-| 模块 | 规划内容 | 现状 |
-|---|---|---|
-| Purchase 采购 | Supplier / PurchaseOrder / PurchaseReceipt | 无模块目录 |
-| Transfer 调拨 | transferOut / transferIn（跨仓） | 无（仅有同仓 MoveBin） |
-| Return 退货 | ReturnOrder / ReturnQC | 无 |
-| Finance 财务 | 成本、汇率、对账 | 无 |
-| **Inventory Allocator** | 实体可售 → 渠道库存的分配（AGENTS.md §21 冻结规则） | **无**（全仓库搜索 `allocator` 无结果） |
-| WB / Yandex 适配器 | 平台扩展 | 无 |
+Purchase 采购、Transfer 调拨、Return 退货、Finance 财务、Inventory Allocator、WB/Yandex 适配器。
 
 ## 1.3 真实数据状态（关键）
 
-用户已把 1324 个 OZON 商品同步进系统。数据库实测：
+| 项 | 数量 |
+|---|---|
+| `platform_listings`（已同步平台商品） | 1324 |
+| `platform_listing_skus` 未映射 | **1323** |
+| `platform_listing_skus` 已映射 | 1 |
+| `products` / `skus` | **各 1 个** |
+| `inventory_balances` | **0** |
+| `orders` | 4 |
 
-| 项 | 数量 | 含义 |
-|---|---|---|
-| `platform_listings` | 1324 | 平台商品已全量同步 |
-| `platform_listing_skus` 未映射 | **1323** | 几乎全部未映射 |
-| `platform_listing_skus` 已映射 | 1 | 仅用户手工测的那一个 |
-| `products` / `skus` | **各 1 个** | 内部主数据几乎为空 |
-| `inventory_balances` | **0** | 系统内没有任何库存 |
-| `orders` | 4 | 全部曾因映射失败进异常 |
+## 1.4 用户业务模型（2026-09-11 澄清）
 
-**这三个数字连起来说明一件事：系统当前无法承接真实业务。**
+用户明确了三点，直接决定 Sprint 7 的范围：
 
+1. **入库必须先做**，且必须是「真实的收货动作」，**不能用「调整初始库存」代替**——
+   因为初始库存是账目调整，**无法建立库存与实物来源的关系**。
+2. **大部分商品是「先售卖，再进货」**，只有一部分是备货销售。
+3. **核心诉求是管理「有货的商品」**——即需要跟踪实体库存的那部分商品。
+
+## 1.5 原判断的修正
+
+本文档初版把「库存初始化导入」列为进入系统的入口，**这个判断是错的**：
+
+- `INITIAL_INVENTORY` 导入（`initial-inventory-import.handler.ts`）本质是**开账余额**，
+  它只回答「系统上线时账上有多少」，不回答「这批货从哪来、谁送来的、什么时候到的」。
+- 用户要的恰恰是后者——**库存与实物的对应关系**。
+
+而 `docs/WCIES_跨境电商综合管理系统——总体技术架构设计_V1.md:2580-2620` §87
+「第一阶段真正需要跑通」的链路，起点本来就是**采购入库**，不是初始库存：
+
+```text
+创建Product/SKU
+↓
+建立平台映射
+↓
+采购入库          ← 缺失的就是这一环
+↓
+进入Warehouse/Bin
+↓
+形成Inventory Balance
+↓
+Allocator计算渠道库存
+↓
+推送OZON
+↓
+平台生成订单
+↓
+订单同步
+↓
+库存Reservation
+↓
+拣货
+↓
+扫码校验
+↓
+Shipment / Label
+↓
+出库
+↓
+物流同步
 ```
-1323 个商品未映射  →  订单进来必然映射失败  →  无法占用库存
-                        ↓
-                 即使映射好了，inventory_balances = 0  →  仍然必然缺货（BACKORDERED）
-```
 
-## 1.4 业务侧诉求（`docs/会议纪要.md`）
-
-会议纪要明确了团队自己排的优先级：
-
-1. **库存管理为最底层基础**——"必须先理清实体库存与线上商品的映射关系"。
-2. **商品管理次之**——"建立线上商品与线下库存 SKU 的映射表，解决同一商品在不同平台命名不一致"。
-3. **订单管理依赖库存**——"订单状态流转需驱动库存变动，否则流程断裂"。
-
-会议指出的核心痛点：取消信息不同步导致丢货风险、退货无法对应原订单、库存变动未与订单联动、
-打包环节无核验。待办三项：订单取消登记表、打包监控+重量记录、评估马帮。
-
-**这些诉求与本规划的方向一致**：先把库存与映射这两层基础夯实，再谈流程深化。
+**用户的口径与架构文档一致，初版规划偏离了。**
 
 ---
 
 # 2. 下一阶段的核心判断
 
-## 2.1 为什么不能直接做采购/调拨/退货/财务
+## 2.1 链路中真正缺失的只有「入库」一环
 
-这四个模块是规划中剩下的"大块"，但它们**都建立在库存数据之上**。
-当前 `inventory_balances` 为 0——没有库存事实，采购入库无处可入、调拨无货可调、退货无货可退。
+把用户要验证的链路与现有能力逐段对照：
 
-**先有库存，才有围绕库存的流程。** 直接开做四大模块会得到一堆操作空数据的界面。
+| 链路环节 | 现有能力 | 状态 |
+|---|---|---|
+| **入库**（收货） | `POST /inventory/receive` 存在，但标注 "future purchase-receipt primitive"；**无业务单据、无界面、无供应商概念** | ❌ **缺失** |
+| 销售（订单同步 → 占用） | `ORDER_SYNC` + `ListingResolver` + `ReservationService` | ✅ 可用（181 条集成测试覆盖） |
+| 拣货 | Picking 模块 + 扫码校验 | ✅ 可用 |
+| 出库 | Shipment / Package + 面单 | ✅ 可用 |
 
-## 2.2 为什么渠道库存推送（Allocator）是刚需而非优化
+**「先售卖，再进货」这条路径现有系统也已支持**：
 
-AGENTS.md §21 是冻结规则：
+```text
+订单进来 → 映射成功但库存为 0 → BACKORDERED + ORDER_OUT_OF_STOCK 异常 ✅ 已支持
+                                        ↓
+                              （用户去采购，货到）
+                                        ↓
+                          入库 → 重试分配 → RESERVED ✅ 已支持
+                                        ↓
+                                   拣货 → 出库 ✅ 已支持
+```
 
-> 实体可售库存和渠道推送库存必须通过 Inventory Allocator 分离。
+`retry-allocation` 在 2026-09-11 刚修好（提交 `880b0b7`），包括
+「映射修复后重试」与「修复后仍缺货正确落到 BACKORDERED」两条路径。
 
-当前系统**完全没有这个能力**，而业务现实是：
+**结论：Sprint 7 只需要补齐「入库」，链路即可端到端跑通——这是投入产出比最高的一步。**
 
-- 平台上的 1324 个商品**正在售卖**，平台侧库存由卖家手工维护（或平台默认值）。
-- 系统内的库存一旦建立，两边就会**立即不一致**。
-- 如果系统不推送库存，平台库存会停留在手工值 → 超卖风险（AGENTS.md §22 明令 `oversell = false`）。
-- 如果推送了却不走 Allocator，就是用实体库存直接覆盖渠道库存 → 违反 §12、§21。
+## 2.2 为什么采购入库不能做成「再加一个导入模板」
 
-**结论：库存初始化与渠道推送必须同阶段做，不能一个先行。** 只建库存不推送，等于给自己造了一个
-与平台不一致的第二事实源。
+`POST /inventory/receive` 已经是可用的**库存原语**（走 `InventoryService.receiveStock`，
+写 `InventoryTransaction`，符合 AGENTS.md §10/§14）。缺的不是库存操作，而是**它前面的业务单据**：
 
-## 2.3 建议的下一阶段定位
+- 没有单据，就答不出「这 10 件是谁送的、什么价、哪张单」——这正是用户要的**实物来源**。
+- 没有单据，`InventoryTransaction.referenceType` 只能继续用 `MANUAL`，
+  对账时无法区分「盘盈调整」与「真实到货」。
+- 没有单据，将来做采购成本（`moving_average_cost`）时没有数据来源。
 
-**Sprint 7 = 让系统能吃下真实业务**（打通"商品建档 → 映射 → 库存 → 推送"这条主链路），
-而不是继续铺新模块。
+## 2.3 「有货的商品」这个诉求对范围的影响
 
-理由：Sprint 0–6 建成了**完整的流程骨架**（订单→拣货→发货→拦截全通，测试 181 条覆盖），
-但这个骨架**没有血肉**——主数据 1 个 SKU、库存 0 条。当前最高价值的投入是让真实数据流进来，
-验证骨架确实能跑通真实规模（1300+ 商品、真实订单），而不是在空数据上继续加模块。
+用户说核心是管理**有货的商品**，而非全量。这降低了 Sprint 7 的紧迫度排序：
+
+- **不需要**先解决 1323 条未映射（那是全量经营，属于后续）。
+- **只需要**能对「要跟踪库存的那些商品」建 SKU、建映射、收入库、卖出、拣货、发货。
+- 因此**批量建档（原 T1）可以后移**——用户完全可以用现有的单条界面，
+  对少量「有货商品」建档并验证链路。
+
+**Sprint 7 的定位因此收敛为：把「入库」补上，并用真实数据验证端到端链路。**
 
 ---
 
 # 3. Sprint 7 建议范围
 
-## T1 商品/SKU 批量建档（从平台数据反向生成）
+## T1 供应商主数据（最小）
 
-**问题**：1324 个商品要手工在系统里建 SKU，不现实。用户在对话中已明确此阻塞。
+**为什么需要**：实物来源的第一要素是「谁送的」。没有供应商，「建立库存与实物的关系」就缺一半。
 
-**方向**：增加"从平台商品批量生成内部 SKU"的能力。已同步的 `platform_listings` 已带
-`platform_product_id` / `offer_id` / `title`，是现成的数据源。
+**范围**：
+- `suppliers` 表：编码（业务编号，沿用集中式序号表 `business_code_sequences`）、名称、
+  联系人/电话、备注、状态。
+- 标准 CRUD + 零引用删除（沿用决策 0003 的既有模式）。
+- 界面：放在「商品」或新建「采购」一级菜单下（决策点见 §5）。
 
-**需要决策**（见 §5 决策 1）：生成策略——
-- 方案 A：一个平台商品生成一个 Product + 一个 SKU（贴合用户实际：其商品均为单 SKU）。
-- 方案 B：只生成 Product，SKU 由人工补充。
-- 方案 C：以 offer_id 为主键生成，标题作名称。
+**编码规则**：需新增一类业务编码前缀（如 `SUP%04d`），按 `master-data.md §1` 的表格登记。
+**注意**：新增编码规则属于业务规则变更，需同步更新 `docs/business-rules/master-data.md`。
 
-**产出**：批量建档接口 + 界面（勾选/全选平台商品 → 生成 SKU → 回填映射）。
-**要求**：幂等（重复执行不重复建档）、可预览（先看会生成什么再确认）、错误逐行可读
-（复用 `ImportJob` 的 row/field/code 结构）。
+## T2 收货入库单（本 Sprint 核心）
 
-## T2 映射批量补齐
+**这是「入库」的业务载体**，也是本 Sprint 唯一的必做项。
 
-**问题**：1323 条未映射。单条人工映射不现实；T1 完成后可自动回填大部分。
+### 数据模型
 
-**方向**：
-- T1 生成 SKU 时**顺带建立映射**（该商品 → 新建的 SKU），一次动作解决两件事。
-- 补充"按 offer_id / platform_sku_id 匹配导入"作为兜底（Excel 导入已有
-  `LISTING_MAPPING` 模板，`apps/api/src/modules/import/handlers/listing-mapping-import.handler.ts`）。
+```text
+purchase_receipts          收货单（表头）
+  receipt_no               业务编号（集中式序号）
+  supplier_id              供应商（可空？见决策 2）
+  warehouse_id             收货仓库
+  status                   DRAFT / RECEIVED / CANCELLED
+  received_at              实际收货时间
+  remark
+  created_by / created_at
 
-**注意**：现有 `LISTING_MAPPING` 导入模板已实现且**已受决策 0012 约束**
-（必须至少一个平台标识），可直接复用，无需新写。
+purchase_receipt_items     收货单明细
+  receipt_id
+  sku_id                   内部 SKU
+  quantity                 数量（NUMERIC，只增不减）
+  unit_cost                单位成本（可空，见决策 3）
+  bin_id                   目标库位（可空 → 用 ensureDefaultBin）
+  remark
+```
 
-## T3 库存初始化导入
+### 状态机
 
-**问题**：`inventory_balances = 0`。真实库存必须先进入系统。
+```text
+DRAFT ──确认收货──> RECEIVED
+  │                    │
+  └──取消──> CANCELLED  └── 不可撤销（如需修正走库存调整）
+```
 
-**现状**：`INITIAL_INVENTORY` 导入模板已存在
-（`apps/api/src/modules/import/handlers/initial-inventory-import.handler.ts`），
-模板列：`sku_code | warehouse_code | bin_code | quantity | remark`。
-**能力已具备，缺的是"把真实盘点数据整理成这个格式"**——这属于数据准备，不是开发。
+**关键约束**：
+- **确认收货**才写库存：`PurchaseReceiptService.confirm()` → 逐行调用
+  `InventoryService.receiveStock()`（新增引用类型，见决策 4）。
+  采购模块**绝不直接改 `inventory_balances`**（`工程架构文档:1005-1008` 明令）。
+- 收货单一旦 `RECEIVED` 不可改数量——库存已入账，改数量必须走调整（保持流水可追溯）。
+- 同一收货单重复确认必须幂等（`idempotencyKey = PURCHASE_RECEIPT:<receiptId>`）。
+- 整单在一个数据库事务内确认，任一行失败全部回滚。
 
-**需要确认**：真实库存数据的粒度（是否已有库位级盘点？还是只有 SKU 级总量？）。
-若只有 SKU 级，需要决定落到哪个库位（可用虚拟 `DEFAULT` 库位，系统已支持
-`ensureDefaultBin`）。
+### 界面
 
-## T4 渠道库存推送（Inventory Allocator + OZON 写接口）
+- 收货单列表（筛选：供应商 / 状态 / 日期 / 仓库）
+- 新建收货单：选供应商 + 仓库 → 加行（SKU 搜索 + 数量 + 单位成本 + 库位）→ 保存草稿或直接确认
+- 确认前**预览**：本次将入库哪些 SKU、各多少、入到哪个库位
 
-**这是本 Sprint 技术含量最高、风险最大的部分**，因为它是**第一次对平台做真实写操作**。
+## T3 端到端链路验证（本 Sprint 的验收）
 
-**需要实现**：
-1. **Allocator**：按 AGENTS.md §21 的分配模式（`SHARED` / `FIXED` / `RATIO` / `MAX_LIMIT`）
-   把实体可售量分配到渠道。Sprint 7 建议**只实现 `SHARED`**（最简：渠道可用 = 实体可售），
-   其余模式留待有真实需求时再加。
-2. **渠道库存快照**：记录"上次推给平台的值"，用于变更检测（只推变化量，减少 API 调用）。
-3. **OZON 写接口**：`POST /v1/product/import/stocks`（**具体 endpoint 与字段必须先依据
-   官方文档核实**——AGENTS.md §88 明令不得凭记忆猜测；`docs/ozon-seller-openapi.json`
-   是已有的官方规范，应先查证）。
-4. **推送任务**：入 BullMQ（AGENTS.md §50），按 `Store + SyncType` 隔离与单飞（§43/§45）。
-5. **NO_INVENTORY_RECORD ≠ ZERO**（§20，硬规则）：SKU+仓无库存记录时**跳过该 SKU**，
-   不得推 0。这一条必须有测试。
+这条链路是用户明确要求验证的，应作为 Sprint 7 的**验收场景**写成集成测试 + 手工验收脚本：
 
-**必须遵守**：
-- 推送前需 **store 级 opt-in**（Sprint 5 已建立该模式，定时同步默认关闭）。
-- 首次推送必须有**人工确认**，建议先支持"预览将推送什么"再执行。
-- 真实写操作需用户明确知情（AGENTS.md §92）。
+```text
+1. 建立 Product + SKU（或复用 SKU000010001）
+2. 建立平台映射（已有的「人工映射」入口）
+3. 建收货单：供应商 X → 仓库 ZG-01 → SKU × N 件 → 确认收货
+       ↓ 断言：inventory_balances.on_hand = N
+       ↓ 断言：inventory_transactions 有对应流水，reference = 该收货单
+4. 订单进来（真实订单同步 或 手工摄入）→ 占用库存
+       ↓ 断言：reservation RESERVED，available 减少
+5. 生成拣货任务 → 扫码拣货
+       ↓ 断言：Reserved → Picked
+6. 发货
+       ↓ 断言：On Hand 减少，订单行 SHIPPED
+```
 
-## T5 库存同步状态可见
+**注意**：第 4-6 步的代码已存在且有测试覆盖，本 Sprint 要验证的是
+**「入库产生的库存能被订单正常消费」**这条衔接——特别是库存落在哪个库位、
+拣货扫码能否找到该库位、可用量计算是否正确。
 
-**方向**：让用户能看到"系统库存 vs 平台库存"的差异。这是 T4 的安全网——
-推送出问题（限流、失败、被平台拒绝）必须可见，否则用户不知道平台库存是否可信。
+## T4（后移）商品/SKU 批量建档
 
-**可复用**：`SyncJob` 已有完整字段（status/cursor/successCount/failedCount/error），
-`Exception` 体系已有。缺的是"库存推送"这个 syncType 与对应异常类型
-（`INVENTORY_SYNC_FAILED`，AGENTS.md §53 已列出该类型但未实现）。
+原初版 T1。用户已确认当前诉求是「有货的商品」，可先用单条界面处理；
+待链路验证通过、需要覆盖全量 1323 条时再做。**保留为 Sprint 8 候选。**
 
 ---
 
@@ -195,71 +252,102 @@ AGENTS.md §21 是冻结规则：
 
 | 阶段 | 范围 | 前置依赖 | 理由 |
 |---|---|---|---|
-| Sprint 8 | 采购（Supplier / PO / 收货入库） | Sprint 7 库存可用 | 采购入库是库存的主要来源；`moving_average_cost` 预留字段等它在实现（`master-data.md:50`） |
-| Sprint 9 | 调拨 + 退货 | Sprint 8 多仓有货 | 调拨需多仓库存；退货需 `RETURN_TEMP` 仓（系统已有该 warehouseType） |
-| Sprint 10 | 财务（成本、对账） | Sprint 8 采购成本数据 | 财务需要采购/物流成本作为输入 |
-| 按需 | WB / Yandex 适配器 | 无（可并行） | 取决于业务是否要扩平台；底座已就绪，新增平台不改 Inventory Core（AGENTS.md §32） |
+| Sprint 8 | 商品/SKU 批量建档 + 映射批量补齐 | 无 | 覆盖全量经营（1323 条）；Sprint 7 验证过单条链路后再放量 |
+| Sprint 9 | 渠道库存推送（Allocator + OZON 写接口） | Sprint 8（有足够库存数据） | 见下方风险说明 |
+| Sprint 10 | 采购计划（PurchaseOrder）+ 补货 | Sprint 7（收货）、Sprint 8 | 「先售卖再进货」需要「缺货 → 该买什么」的聚合 |
+| Sprint 11 | 调拨 + 退货 | Sprint 10 | 调拨需多仓有货；退货需 `RETURN_TEMP` 仓（已存在该类型） |
+| Sprint 12 | 财务（成本、对账） | Sprint 10（采购成本数据） | `moving_average_cost` 需采购价作为输入 |
+| 按需 | WB / Yandex 适配器 | 无（可并行） | 底座已就绪，新增平台不改 Inventory Core（§32） |
 
-**会议纪要的未覆盖诉求**（建议纳入 Sprint 9 或独立评估）：
-- 订单取消登记表（字段：订单号/下单时间/发货状态/取消时间/原因/物理位置/处理单位）
-- 打包环节监控 + 重量记录
-- 退货临时仓（`RETURN_TEMP` 已存在）
+## 关于渠道库存推送的时机（重要风险提示）
+
+初版把 Allocator 放在 Sprint 7。**修订后建议后移**，理由是范围已在 §2.3 收敛；
+但必须明确风险，不能沉默：
+
+- 用户的商品**正在平台上售卖**，平台侧库存目前由人工维护。
+- 系统内建立库存后，若**不推送**，两边会不一致：系统显示有货、平台可能显示缺货（或少卖）。
+- 若**推送但不走 Allocator**，就是用实体库存直接覆盖渠道库存，违反 AGENTS.md §12/§21。
+
+**因此：在推送能力就绪前，平台侧库存应继续人工维护，系统内库存视为内部账。**
+这个「双轨期」必须被用户知情并接受——见 §5 决策 5。
 
 ---
 
 # 5. 需要用户决策的点
 
-以下事项**在实施前必须确认**，我不擅自决定：
+## 决策 1：收货单是否必须有供应商
 
-## 决策 1：商品/SKU 批量建档的生成策略
+- **A（推荐）**：必填。每批货都能追溯到来源。
+- **B**：可空（临时/自采/退货返修等场景无供应商）。
 
-用户商品均为单 SKU（实测 1324 商品 / 1324 条 SKU 行 / 0 个多 SKU 商品）。
-是按"一商品一 SKU"直接生成，还是保留"先建 Product 再人工建 SKU"的两步？
+推荐 A，但保留可空的字段设计以便将来放宽；若选 B，需在文档写明「无供应商收货」的适用场景。
 
-## 决策 2：Allocator 首批支持哪些分配模式
+## 决策 2：是否本 Sprint 就做采购单（PurchaseOrder）
 
-AGENTS.md §21 列出 `SHARED` / `FIXED` / `RATIO` / `MAX_LIMIT` 四种。
-建议 Sprint 7 只做 `SHARED`（渠道可用 = 实体可售），其余按需再加。
-是否同意？
+- **A（推荐）**：**不做**。只做收货单。理由：用户是「先售卖再进货」，采购单是计划文档，
+  在补货聚合（Sprint 10）之前价值有限；且 `工程架构文档:996` 列的四张表
+  （Supplier/PO/POItem/Receipt）一次做完属于范围蔓延（AGENTS.md §74）。
+  收货单预留 `purchase_order_id` 可空字段，将来接入无需改表。
+- **B**：与收货单一起做。范围明显变大。
 
-## 决策 3：渠道库存推送的触发方式
+推荐 A。
 
-- 手动触发（用户在界面点"推送库存"）
-- 定时触发（BullMQ 周期任务，按 store opt-in）
-- 事件触发（库存变动后自动推）
+## 决策 3：单位成本与移动加权平均
 
-建议 Sprint 7 做**手动 + 定时**，事件触发留后（自动推送风险最高，且需要防抖/合并）。
+`docs/WCIES_跨境电商综合管理系统——总体技术架构设计_V1.md:2509-2520` §86 规定：
 
-## 决策 4：首次真实推送的时机
+> 采购成本采用**移动加权平均**，入库时更新成本。采购未收货不得提前改变库存成本。
 
-这是**对真实店铺的写操作**。按 AGENTS.md §92，实施前需明确：
-- 是否先在某一个店铺试点？
-- 是否需要"只记录不推送"的演练模式（dry-run）先验证？
-- 推送失败的回滚策略？
+而 `moving_average_cost` 当前是预留字段（`master-data.md:50` 写明「采购 Sprint 实现」）——
+**本 Sprint 就是那个采购 Sprint**。选项：
 
-## 决策 5：WB / Yandex 是否纳入近期规划
+- **A（推荐）**：收货单记录 `unit_cost`（可空），确认收货时更新 `moving_average_cost`。
+  符合架构文档规定，且成本数据从第一批货就开始积累。
+- **B**：本 Sprint 只记录 `unit_cost`，暂不计算移动加权平均（等财务 Sprint）。
+  风险：将来补算时历史收货单可能缺成本数据。
 
-取决于业务是否计划扩平台。若近期不扩，Sprint 8+ 的排序不受影响。
+推荐 A。**注意**：这会改变 SKU 成本语义，必须同步更新 `master-data.md` 与
+`docs/business-rules/inventory.md`（AGENTS.md §86 把 Cost 列为必须同步文档的业务）。
+
+## 决策 4：新增库存引用类型
+
+当前 `INVENTORY_REFERENCE_TYPES = ['MANUAL', 'TEST', 'ORDER', 'IMPORT']`
+（`inventory/enums/inventory.constants.ts:76`）。收货入库需要新增一种（如
+`PURCHASE_RECEIPT`），以便流水可按来源对账。
+
+**这属于业务状态/枚举变更**（AGENTS.md §98 要求不得自行增加），需你确认。
+不加的后果：收货流水与手工调整无法区分。
+
+## 决策 5：平台库存的「双轨期」是否接受
+
+见 §4 风险提示。在渠道库存推送就绪前，平台侧库存继续人工维护。
+**需要你明确知情并接受**：此期间系统库存与平台库存可能不一致，且系统不会自动纠正。
+
+## 决策 6：收货单归属哪个菜单
+
+- **A**：新建「采购」一级菜单（为 Sprint 10 的采购单预留位置）。
+- **B**：放在「库存」菜单下作为「收货入库」。
+
+推荐 A，避免将来采购单做好后再迁菜单。
 
 ---
 
 # 6. 本规划不做的事
 
-明确边界，避免范围蔓延：
-
-1. **不改动已冻结的架构规则**（AGENTS.md §101 的 30 条）。
-2. **不引入新依赖**（§73），除非实施时说明必要性并获批准。
-3. **不做真实平台写操作**，直到决策 4 确认。
-4. **不动 25 行 `platform_sku_id = "0"` 的历史数据**——它们靠 offer_id 仍可解析，
-   清理属于独立的数据决策（用户已同意代码层守卫，数据层未定）。
-5. **不做前端 Design System 迁移的收尾**（Phase 2 报告列出的剩余页面）——
-   除非 Sprint 7 涉及具体页面时顺带处理。
+1. **不做初始库存导入作为入库手段**——用户已明确否决（见 §1.5）。
+2. **不改动已冻结的架构规则**（`AGENTS.md` §101 的 30 条；架构文档 §90 的 30 条）。
+3. **不引入新依赖**（§73）。
+4. **不做真实平台写操作**（推送库存/发货/调价）——留待 Sprint 9 且需专项确认。
+5. **不做全量 1323 条的批量建档**——用户当前只关心有货商品（§2.3）。
+6. **不动 25 行 `platform_sku_id = "0"` 的历史数据**——代码层已加守卫（提交 `fa37246`），
+   数据层清理是独立决策。
+7. **不做前端 Design System 收尾迁移**，除非 Sprint 7 涉及的页面顺带处理。
 
 ---
 
 # 7. 验收基线（供实施会话参考）
 
-当前基线（2026-09-11，提交 `fa37246`）：
+当前基线（2026-09-11，提交 `b2b145f`）：
 
 ```
 lint              通过
@@ -273,10 +361,12 @@ build             通过
 
 **集成测试必须串行**：20 个测试文件中 3 个共用端口 3111、6 个共用 Redis DB 8
 （`tests/integration/*.spec.ts`），并行会随机 ECONNRESET。这是既有缺陷，
-修它需要给每个测试文件分配独占端口——属于独立的基础设施任务，未纳入本规划。
+修它需给每个测试文件分配独占端口——独立的基础设施任务，未纳入本规划。
 
 **集成测试库 `wcies_test` 可安全重建**：`npx tsx scripts/ensure-test-db.ts`
 从迁移 + 种子重建（该脚本有环境守卫，拒绝非 test 库）。
+
+**开发库当前无库存数据**：`inventory_balances = 0`，Sprint 7 的验证不会破坏既有事实。
 
 ---
 
@@ -285,13 +375,12 @@ build             通过
 | 内容 | 路径 |
 |---|---|
 | 开发纪律（必读） | `AGENTS.md` |
-| 架构总览 | `docs/architecture/overview.md` |
-| 总体架构设计 | `docs/WCIES_跨境电商综合管理系统——总体技术架构设计_V1.md` |
-| 模块与目录规划 | `docs/WCIES_工程架构与_Monorepo_目录设计_V1.md`（模块职责 `:961-1138`） |
+| 第一阶段完整链路 | `docs/WCIES_跨境电商综合管理系统——总体技术架构设计_V1.md:2580-2620` §87 |
+| 采购模块职责与边界 | `docs/WCIES_工程架构与_Monorepo_目录设计_V1.md:985-1008` §31 |
+| 采购成本规则 | `docs/WCIES_跨境电商综合管理系统——总体技术架构设计_V1.md:2509-2520` §86 |
 | 业务规则 | `docs/business-rules/{inventory,orders,master-data}.md` |
 | 决策记录 | `docs/decisions/0001-0012` |
-| OZON 集成事实 | `docs/integrations/ozon.md` + `docs/ozon-seller-openapi.json`（官方规范） |
-| 业务诉求 | `docs/会议纪要.md` |
-| 前端重构缺口 | `docs/web-redesign-phase2-report.md:138-152`（API Gap 表） |
-| Sprint 5 遗留 | `handoff/wcies-sprint5-final-report.md:199-213` |
+| OZON 集成事实 | `docs/integrations/ozon.md` + `docs/ozon-seller-openapi.json` |
+| 业务诉求（会议纪要） | `docs/会议纪要.md` |
+| 架构总览 | `docs/architecture/overview.md` |
 | 术语表 | `CONTEXT.md` |
