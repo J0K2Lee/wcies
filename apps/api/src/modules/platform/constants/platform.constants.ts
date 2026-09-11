@@ -36,8 +36,49 @@ const FULFILLMENT_MODE_PLATFORM: Record<FulfillmentMode, PlatformCode> = {
   YANDEX_FBY: 'YANDEX',
 };
 
+/**
+ * Business category of a fulfillment mode (business-model layer, 2026-09-11).
+ *
+ * The stored value stays platform-specific (OZON_FBO ...) because order
+ * ingestion and the adapters branch on it - e.g. orders.md §4.6 prefers
+ * non-FBO bindings as inventory source, implemented as
+ * `fulfillmentMode.includes('FBO')` in OrderIngestionService. This category
+ * is a DERIVED, display-facing grouping only: it answers "who holds and ships
+ * the goods?" in the seller's vocabulary. It is never persisted, so it can
+ * not drift from the mode it is derived from.
+ */
+export const FULFILLMENT_CATEGORIES = ['SELF_MANAGED', 'SEMI_MANAGED', 'MANAGED'] as const;
+export type FulfillmentCategory = (typeof FULFILLMENT_CATEGORIES)[number];
+
+/**
+ * 自管仓   - seller holds the stock and fulfils the order (incl. shipping to a
+ *            platform sorting hub, which is still seller-side stock).
+ * 半托管   - seller supplies stock to a platform-partner warehouse; the
+ *            platform runs cross-border delivery and last mile.
+ * 托管仓   - the platform warehouse holds the stock and ships it.
+ */
+const FULFILLMENT_MODE_CATEGORY: Record<FulfillmentMode, FulfillmentCategory> = {
+  OZON_RFBS: 'SELF_MANAGED',
+  OZON_FBS: 'SELF_MANAGED',
+  WB_FBS: 'SELF_MANAGED',
+  YANDEX_FBS: 'SELF_MANAGED',
+  OZON_FBP: 'SEMI_MANAGED',
+  OZON_FBO: 'MANAGED',
+  WB_FBW: 'MANAGED',
+  YANDEX_FBY: 'MANAGED',
+};
+
 export function platformCodeOfFulfillmentMode(mode: FulfillmentMode): PlatformCode {
   return FULFILLMENT_MODE_PLATFORM[mode];
+}
+
+export function fulfillmentCategoryOf(mode: FulfillmentMode): FulfillmentCategory {
+  return FULFILLMENT_MODE_CATEGORY[mode];
+}
+
+/** Modes a store of the given platform may bind (store platform must match). */
+export function fulfillmentModesForPlatform(platformCode: PlatformCode): FulfillmentMode[] {
+  return FULFILLMENT_MODES.filter((mode) => FULFILLMENT_MODE_PLATFORM[mode] === platformCode);
 }
 
 export function isFulfillmentMode(value: string): value is FulfillmentMode {

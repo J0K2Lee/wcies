@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -11,7 +12,11 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ok } from '../../../common/dto/api-response';
-import { ApiOkArrayEnvelope, ApiOkEnvelope } from '../../../common/swagger/api-envelope';
+import {
+  ApiOkArrayEnvelope,
+  ApiOkEnvelope,
+  ApiOkNoDataEnvelope,
+} from '../../../common/swagger/api-envelope';
 import { CurrentOperator } from '../../../common/decorators/current-operator.decorator';
 import { AdminGuard } from '../../auth/guards/admin.guard';
 import { OperatorContext } from '../../operation-log/operation-log.service';
@@ -89,5 +94,32 @@ export class StoreCredentialController {
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true; data: CredentialResponseDto }> {
     return ok(await this.credentialService.disable(storeId, credentialId, operator));
+  }
+
+  @Post(':id/enable')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Re-enable a disabled credential (keeps the stored payload)' })
+  @ApiOkEnvelope(CredentialResponseDto)
+  async enable(
+    @Param('storeId') storeId: string,
+    @Param('id') credentialId: string,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: CredentialResponseDto }> {
+    return ok(await this.credentialService.enable(storeId, credentialId, operator));
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Delete a credential record (a wrong key can be removed and re-entered)',
+  })
+  @ApiOkNoDataEnvelope()
+  async remove(
+    @Param('storeId') storeId: string,
+    @Param('id') credentialId: string,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true }> {
+    await this.credentialService.remove(storeId, credentialId, operator);
+    return ok({});
   }
 }

@@ -35,6 +35,10 @@ export class PlatformCredentialRepository {
     await this.repository.update({ id }, patch);
   }
 
+  async delete(id: string): Promise<void> {
+    await this.repository.delete({ id });
+  }
+
   /** Validation metadata write (Sprint 5 §33); error text already sanitized. */
   async updateValidationMeta(
     id: string,

@@ -112,6 +112,47 @@ export class PlatformCredentialService {
     return this.toResponse(updated as PlatformCredentialEntity);
   }
 
+  /** Re-enables a disabled credential (same payload, no re-entry needed). */
+  async enable(
+    storeId: string,
+    credentialId: string,
+    operator: OperatorContext,
+  ): Promise<CredentialResponseDto> {
+    const credential = await this.findOwnedOrThrow(storeId, credentialId);
+    await this.repository.update(credential.id, { status: 'ACTIVE' });
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: credential.id,
+      entityCode: `${credential.credentialType}@${storeId}`,
+      action: 'ENABLE',
+      changes: { status: { from: credential.status, to: 'ACTIVE' } },
+      operator,
+    });
+    const updated = await this.repository.findById(credential.id);
+    return this.toResponse(updated as PlatformCredentialEntity);
+  }
+
+  /**
+   * Removes a credential record (a wrong/mistyped key must be replaceable).
+   *
+   * Credentials carry no business history — orders and inventory reference the
+   * store, never the credential — so a hard delete is safe here. The audit
+   * entry records the type and status only; the secret is never written to the
+   * operation log (AGENTS.md §29).
+   */
+  async remove(storeId: string, credentialId: string, operator: OperatorContext): Promise<void> {
+    const credential = await this.findOwnedOrThrow(storeId, credentialId);
+    await this.repository.delete(credential.id);
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: credential.id,
+      entityCode: `${credential.credentialType}@${storeId}`,
+      action: 'DELETE',
+      changes: { credentialType: { from: credential.credentialType, to: null } },
+      operator,
+    });
+  }
+
   /** Decrypts a store credential for future platform clients (never logged). */
   async decryptPayload(credential: PlatformCredentialEntity): Promise<Record<string, unknown>> {
     const encrypted = JSON.parse(credential.encryptedPayload) as EncryptedCredential;
