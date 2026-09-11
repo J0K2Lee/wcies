@@ -132,6 +132,19 @@ On Hand
 
 不参与 SELLABLE Available。
 
+## 5.1 实现约束（2026-09-12）
+
+1. **只有 `SELLABLE` 余额计入 SELLABLE Available**。`QC_PENDING` / `DEFECTIVE` /
+   `REPAIR` / `SCRAPPED` 的 on-hand **计入 On Hand 与物理可用**（货确实在库），
+   但**不计入可售**。
+2. 该规则必须在**同一套代码**内实现，不得各处自算：列表行、库位明细、SKU 汇总
+   三处共用 `isSellableCondition()` 与 `sellableOf()`（`inventory-query.service.ts`）。
+   Reservation 分配同样只认 `SELLABLE`，两者必须一致。
+3. **违规后果**（2026-09-12 实测到的缺陷）：若聚合把非 SELLABLE 也算作可售，
+   界面会显示「可售 5」而订单分配报「库存不足」——用户可能据此对平台承诺库存，造成超卖。
+4. 回归测试固定该行为：`tests/integration/inventory.integration.spec.ts`
+   的「non-sellable conditions never reach SELLABLE Available」两条。
+
 ---
 
 # 6. Available 不是独立事实库存

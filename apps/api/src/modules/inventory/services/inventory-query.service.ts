@@ -23,6 +23,22 @@ import { ReservationDto, ReservationService } from './reservation.service';
 import { InventoryCondition } from '../enums/inventory.constants';
 import { InventorySerialEntity } from '../entities/inventory-serial.entity';
 
+/**
+ * Only SELLABLE stock may be promised to a customer (inventory.md §5:
+ * "不可销售 Condition 的库存不参与 SELLABLE Available"). Reservation already
+ * hard-codes SELLABLE, so every availability figure shown to the user must
+ * apply the same rule - otherwise the UI offers stock the order flow refuses.
+ */
+function isSellableCondition(condition: string): boolean {
+  return condition === 'SELLABLE';
+}
+
+/** SELLABLE Available = sellable on-hand - safety, floored at zero. */
+function sellableOf(sellableOnHand: bigint, safety: bigint): bigint {
+  const net = sellableOnHand - safety;
+  return net > 0n ? net : 0n;
+}
+
 export interface InventoryRowDto {
   id: string;
   skuId: string;
@@ -155,17 +171,24 @@ export class InventoryQueryService {
     const bins = rows.map((row) => this.toRowDto(row));
 
     const warehouseMap = new Map<string, SkuInventoryWarehouseDto>();
+    // SELLABLE on-hand per warehouse, tracked separately so a warehouse
+    // holding both sellable and non-sellable stock cannot leak the latter
+    // into SELLABLE Available (inventory.md §5).
+    const sellableOnHandMap = new Map<string, bigint>();
     for (const row of rows) {
+      const sellableOnHand = isSellableCondition(row.balance.inventoryCondition)
+        ? qtyFromDb(row.balance.onHandQty)
+        : 0n;
       const millistream = {
         onHand: qtyFromDb(row.balance.onHandQty),
         reserved: qtyFromDb(row.balance.reservedQty),
         picked: qtyFromDb(row.balance.pickedQty),
         safety: row.safetyQty === null ? 0n : parseQty(row.safetyQty),
+        sellableOnHand,
       };
       const existing = warehouseMap.get(row.balance.warehouseId);
       if (existing === undefined) {
         const physical = millistream.onHand - millistream.reserved - millistream.picked;
-        const sellable = physical - millistream.safety > 0n ? physical - millistream.safety : 0n;
         warehouseMap.set(row.balance.warehouseId, {
           warehouseId: row.balance.warehouseId,
           warehouseCode: row.warehouseCode,
@@ -175,21 +198,26 @@ export class InventoryQueryService {
           pickedQty: formatQty(millistream.picked),
           physicalAvailableQty: formatQty(physical),
           safetyQty: formatQty(millistream.safety),
-          sellableAvailableQty: formatQty(sellable),
+          sellableAvailableQty: formatQty(
+            sellableOf(millistream.sellableOnHand, millistream.safety),
+          ),
         });
+        sellableOnHandMap.set(row.balance.warehouseId, millistream.sellableOnHand);
       } else {
         const onHand = parseQty(existing.onHandQty) + millistream.onHand;
         const reserved = parseQty(existing.reservedQty) + millistream.reserved;
         const picked = parseQty(existing.pickedQty) + millistream.picked;
         const safety = parseQty(existing.safetyQty) + millistream.safety;
         const physical = onHand - reserved - picked;
-        const sellable = physical - safety > 0n ? physical - safety : 0n;
+        const sellableOnHand =
+          (sellableOnHandMap.get(row.balance.warehouseId) ?? 0n) + millistream.sellableOnHand;
+        sellableOnHandMap.set(row.balance.warehouseId, sellableOnHand);
         existing.onHandQty = formatQty(onHand);
         existing.reservedQty = formatQty(reserved);
         existing.pickedQty = formatQty(picked);
         existing.physicalAvailableQty = formatQty(physical);
         existing.safetyQty = formatQty(safety);
-        existing.sellableAvailableQty = formatQty(sellable);
+        existing.sellableAvailableQty = formatQty(sellableOf(sellableOnHand, safety));
       }
     }
 
@@ -358,7 +386,14 @@ export class InventoryQueryService {
       parseQty(row.balance.reservedQty) -
       parseQty(row.balance.pickedQty);
     const safety = row.safetyQty === null ? 0n : parseQty(row.safetyQty);
-    const sellable = physical - safety > 0n ? physical - safety : 0n;
+    // Non-sellable rows (QC_PENDING / DEFECTIVE / ...) contribute nothing to
+    // SELLABLE Available even though they are physically on hand.
+    const sellableOnHand = isSellableCondition(row.balance.inventoryCondition)
+      ? parseQty(row.balance.onHandQty) -
+        parseQty(row.balance.reservedQty) -
+        parseQty(row.balance.pickedQty)
+      : 0n;
+    const sellable = sellableOf(sellableOnHand, safety);
     return {
       id: row.balance.id,
       skuId: row.balance.skuId,

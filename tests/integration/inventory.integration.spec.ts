@@ -24,6 +24,7 @@ interface BalanceRow {
   warehouseId: string;
   binId: string;
   binCode: string;
+  condition: string;
   onHandQty: string;
   reservedQty: string;
   pickedQty: string;
@@ -853,6 +854,80 @@ describe('safety stock (task §11-§12, §71)', () => {
     const safetyList = await client.get(`/api/v1/inventory/safety-stocks?skuId=${safetySkuId}`);
     expect(safetyList.body.data).toHaveLength(1);
     expect(safetyList.body.data[0]?.safetyQty).toBe('3.000');
+  });
+});
+
+describe('non-sellable conditions never reach SELLABLE Available (inventory.md §5)', () => {
+  // Regression: the availability aggregation counted every condition as
+  // sellable while reservation only allocates SELLABLE, so QC stock showed as
+  // "可售 5" in the UI and then failed to allocate ("库存不足").
+  it('QC_PENDING counts toward On Hand but not toward sellable', async () => {
+    const skuId = await newSku('QC');
+    const receive = await client.post<StockChangeResultDto>('/api/v1/inventory/receive', {
+      skuId,
+      warehouseId,
+      binId: binA01,
+      condition: 'QC_PENDING',
+      quantity: '5',
+      referenceType: 'MANUAL',
+      referenceId: warehouseId,
+      idempotencyKey: `IT-QC-RECV:${randomUUID()}`,
+    });
+    expect(receive.status).toBe(200);
+
+    const row = await balanceOf(skuId);
+    expect(row?.condition).toBe('QC_PENDING');
+    // Physically present ...
+    expect(row?.onHandQty).toBe('5.000');
+    // ... but not promiseable to a customer.
+    expect(row?.sellableAvailableQty).toBe('0.000');
+
+    // The SKU-level rollup must agree with the row.
+    const detail = await client.get<{
+      totals: { onHandQty: string; sellableAvailableQty: string };
+    }>(`/api/v1/inventory/skus/${skuId}`);
+    expect(detail.body.data.totals.onHandQty).toBe('5.000');
+    expect(detail.body.data.totals.sellableAvailableQty).toBe('0.000');
+
+    // And the order flow agrees: reservation cannot use QC stock.
+    const reserve = await client.post(`/api/v1/inventory/reservations`, {
+      skuId,
+      warehouseId,
+      quantity: '1',
+      referenceType: 'MANUAL',
+      referenceId: warehouseId,
+      idempotencyKey: `IT-QC-RES:${randomUUID()}`,
+    });
+    expect(reserve.status).toBe(409);
+    expect(reserve.body.error?.code).toBe('INVENTORY_INSUFFICIENT_STOCK');
+  });
+
+  it('a SELLABLE and a QC_PENDING balance in one warehouse do not blend', async () => {
+    const skuId = await newSku('MIX');
+    await initialize({
+      skuId,
+      warehouseId,
+      binId: binA01,
+      quantity: '4',
+      idempotencyKey: `IT-MIX-SELL:${randomUUID()}`,
+    });
+    await client.post('/api/v1/inventory/receive', {
+      skuId,
+      warehouseId,
+      binId: binA02,
+      condition: 'QC_PENDING',
+      quantity: '6',
+      referenceType: 'MANUAL',
+      referenceId: warehouseId,
+      idempotencyKey: `IT-MIX-QC:${randomUUID()}`,
+    });
+
+    const detail = await client.get<{
+      totals: { onHandQty: string; sellableAvailableQty: string };
+    }>(`/api/v1/inventory/skus/${skuId}`);
+    // On Hand counts both balances; sellable counts only the SELLABLE one.
+    expect(detail.body.data.totals.onHandQty).toBe('10.000');
+    expect(detail.body.data.totals.sellableAvailableQty).toBe('4.000');
   });
 });
 
