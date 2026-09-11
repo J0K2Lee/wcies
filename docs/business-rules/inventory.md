@@ -1637,7 +1637,11 @@ SELLABLE / DEFECTIVE / REPAIR / SCRAPPED
 - `reserveStock → RESERVE`（跨 Bin 贪心分配，按 bin_code 顺序）；`release/pick/unpick/ship → RELEASE/PICK/UNPICK/SHIP`。
 - `moveBin → MOVE_BIN`（同一 Event 两条流水：源 -N / 目标 +N；不得移动 Reserved/Picked 占用部分）。
 - `adjustStock → MANUAL_ADJUSTMENT`（仅 On Hand；不得使结果为负或低于占用；必须填写原因）。
-- Reference 类型：`MANUAL / TEST / ORDER / IMPORT`（Reservation 第一阶段仅 `TEST / MANUAL / ORDER`）。
+- Reference 类型：`MANUAL / TEST / ORDER / IMPORT / PURCHASE_RECEIPT`（Sprint 7 新增
+  `PURCHASE_RECEIPT`：收货确认的库存流水按来源对账，决策 0013 §5；Reservation 第一阶段仅 `TEST / MANUAL / ORDER`）。
+- 事务感知 API：`receiveStockInTx`（Sprint 7，与 Sprint 4 `pickStockPartialInTx` 同一模式）——
+  purchase 模块的收货确认在**一个事务**内逐行调用它完成整单原子入库；库存规则仍全部归
+  Inventory 模块，调用方只持有事务边界。
 
 ## 60.5 并发与幂等
 

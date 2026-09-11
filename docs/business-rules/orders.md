@@ -430,9 +430,47 @@ Sprint 4 在此基础上增加三个原子业务命令（显式 QueryRunner + In
 
 `system_exceptions` 至少：exception_type / severity / status / reference_type / reference_id / store_id / message / details / created_at / resolved_at。
 
-- 类型：`ORDER_SKU_MAPPING_FAILED` / `ORDER_OUT_OF_STOCK` / `ORDER_INVALID_STATE`。
+- 类型：`ORDER_SKU_MAPPING_FAILED` / `ORDER_OUT_OF_STOCK` / `ORDER_INVALID_STATE` / `ORDER_INTERCEPTION_FAILED`（Sprint 4）/ `ORDER_SHIPMENT_DEADLINE_NEAR`（Sprint 7，见 §16）。
 - 状态：`OPEN / RESOLVED / IGNORED`；禁止物理删除历史异常。
 - severity 取值：`LOW / MEDIUM / HIGH`（技术必需的分级字段）。
+
+---
+
+# 16. 平台发货时限（Sprint 7）
+
+`orders.shipment_deadline`（TIMESTAMPTZ，可空）：平台要求完成拣货发货的截止时间
+（OZON `shipment_date`，超时后平台按更高费率计费）。
+
+规则：
+
+1. **平台事实，不是 ERP 状态**（AGENTS.md §38）：由平台映射器提取，`raw_data`
+   原文保留（§34）；禁止用它驱动 `erp_status`。
+2. 映射提取**容错**：缺失或非法格式时置 NULL，不抛错——一个字段的缺失不得
+   让整单同步失败（§49）。
+3. 展示分档（前端展示规则）：
+
+| 分档 | 判定 | 呈现 |
+|---|---|---|
+| 已超时 | `deadline < now()` | 红 + 「已超时」 |
+| 紧急 | 剩余 `< 24h` | 红 |
+| 临近 | 剩余 `< 3 天` | 橙 |
+| 正常 | 其余 | 中性 |
+
+4. 异常 `ORDER_SHIPMENT_DEADLINE_NEAR`：订单摄入时若 `shipment_deadline`
+   非空且（已超时或剩余 < 24h），创建该异常（reference = ORDER/orderId）。
+   已超时 severity=HIGH，临近 severity=MEDIUM。同一 (type, reference) 仅一条
+   OPEN（既有部分唯一索引兜底）。
+5. 异常解决：订单全部发货（erpStatus = SHIPPED）或取消时自动 RESOLVED；
+   也可人工 IGNORED/RESOLVED。
+
+---
+
+# 17. 订单行采购状态（Sprint 7，派生）
+
+订单行响应携带派生字段 `procurementState ∈ {NOT_ORDERED, ORDERED, ARRIVED}`，
+由采购单明细实时派生，**不落库**（AGENTS.md §13）。派生规则、防重复采购与
+「待采购」筛选语义见 `docs/business-rules/purchase.md` §3.5（单一事实源，
+本文档不重复定义）。未映射 SKU 的行该字段为 NULL。
 
 ---
 

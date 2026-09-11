@@ -20,6 +20,9 @@
 | SKU | `sku_code` | `SKU{商品序号 6 位}{商品内 SKU 序号 3 位}`，如 `SKU000001001` | `sku:{productId}` | 生成后冻结（决策 0002） |
 | 内部条码 | `barcode`(INTERNAL) | PG sequence，`WCSKU%08d`（保持独立，不与 SKU 编码合并） | 现有 sequence | — |
 | Bin 条码 | `barcode` | `BIN-{warehouseCode}-{binCode}` | — | 可 |
+| Supplier（Sprint 7） | `code` | `SUP%04d`，如 `SUP0001` | `supplier` | 创建时可留空自动生成；创建后不可改 |
+| 采购单（Sprint 7） | `po_no` | `PO%06d`，如 `PO000001` | `purchase_order` | 服务端生成，不可改 |
+| 收货单（Sprint 7） | `receipt_no` | `PR%06d`，如 `PR000001` | `purchase_receipt` | 服务端生成，不可改 |
 
 序号由集中式序号表 `business_code_sequences` + `BusinessCodeService` 原子取号（单条 `INSERT ... ON CONFLICT DO UPDATE ... RETURNING`，无读-改-写窗口）；并发取同一作用域必然得到互不重复的号。
 
@@ -47,7 +50,13 @@
 
 1. `volume_cm3` 只能由后端计算（长×宽×高），前端/API 均不可写入。
 2. 长宽高必须"全有或全无"，保证体积可推导。
-3. `latest_purchase_price` Sprint 1 允许人工维护；`moving_average_cost` 为预留字段，恒为 NULL（采购 Sprint 实现）。
+3. `latest_purchase_price` 允许人工维护（本 Sprint 不自动更新）。
+4. `moving_average_cost`（移动加权平均成本）自 Sprint 7 起由**收货确认**维护
+   （决策 0013 §6，原「预留字段，恒为 NULL」作废）：
+   - 确认收货时 `新平均成本 = (原平均成本 × 原在库数量 + 本次单位成本 × 本次数量) / (原在库数量 + 本次数量)`；
+   - 原值为 NULL 时以本次单位成本为新平均成本；明细 `unit_cost` 为空不更新；
+   - 数量取该 SKU 全仓 on_hand 合计；NUMERIC 运算保留 4 位小数；
+   - 除收货确认外任何路径不得写该字段（人工也不得改，保证与收货事实一致）。
 4. `serial_tracking` 仅是配置；`inventory_serials` 属于库存 Sprint。
 
 ## 5. 平台 / 店铺 / 凭证
@@ -123,7 +132,7 @@ Sprint 5 起，平台同步会产生**未映射**的平台 SKU 事实：
 
 ## 11. 审计
 
-以下写操作记录 `operation_logs`：Product、SKU、Barcode、Store、Credential（不含 Secret）、Warehouse、Bin、StoreWarehouseBinding、Listing、ListingSkuMapping、ImportJob。
+以下写操作记录 `operation_logs`：Product、SKU、Barcode、Store、Credential（不含 Secret）、Warehouse、Bin、StoreWarehouseBinding、Listing、ListingSkuMapping、ImportJob、Supplier、PurchaseOrder、PurchaseReceipt（Sprint 7 起）。
 
 ## 12. 错误码（Sprint 1 集）
 

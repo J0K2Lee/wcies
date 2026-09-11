@@ -21,3 +21,10 @@
 | 拦截 | Interception | Picked 订单取消后的追回流程 |
 | 库位 | Bin | 仓库内的具体储位 |
 | 单据占用号 | Reservation No | 库存占用关联的业务单据编号 |
+| 供应商 | Supplier | 可复用的货源主数据（可空引用） |
+| 货源说明 | Source Note | 一次性采购的来源备注，不进主数据 |
+| 采购单 | Purchase Order | 采购意图登记（可取消，不碰库存） |
+| 收货单 | Purchase Receipt | 收货入库的业务凭证（不可逆库存事实） |
+| 发货时限 | Shipment Deadline | 平台要求的发货截止时间（平台事实，非 ERP 状态） |
+| 待采购 | NOT_ORDERED | 订单行派生采购状态：尚未登记采购 |
+| 移动加权平均成本 | Moving Average Cost | 收货确认时按数量加权更新的 SKU 平均成本 |
