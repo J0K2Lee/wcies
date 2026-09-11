@@ -32,6 +32,10 @@
 - Product/SKU：`DRAFT → ACTIVE ⇄ INACTIVE`；已被引用的主数据禁止物理删除，只允许停用。
 - Store/Warehouse/Binding/Listing：`ACTIVE / INACTIVE(DISABLED)`。
 - 删除策略（决策 `docs/decisions/0003`，2026-09-11 起）：**零引用才可物理删除**。服务层逐一引用检查——存在任何引用 → 返回 `*_IN_USE` 错误码 + 提示"该记录已被引用，只能停用不能删除"；零引用 → 真删 + 记 operation log。覆盖 Warehouse / Bin / Store / Binding / Brand / Category / Product / Sku / Listing / ListingSku。Platform 只读，不提供删除。
+- **强制删除（决策 `docs/decisions/0008`）**：`DELETE /products/:id?force=true`、`DELETE /skus/:id?force=true` 可级联删除**主数据子对象**——商品的 SKU、SKU 的条码 / 图片 / 平台映射 / 捆绑关系（Listing 记录本身保留，只断开映射）。
+  **业务历史永远阻断，勾选强制也不行**：`inventory_balances`、`inventory_safety_stocks`、`inventory_reservations`、`inventory_serials`、`inventory_transactions`、`order_items`、`picking_task_items`、`package_items`、`package_item_serials`、`shipment_items` 任一有引用即返回 `PRODUCT_HAS_BUSINESS_HISTORY` / `SKU_HAS_BUSINESS_HISTORY`，消息中列出具体表名与行数并提示改用停用。
+  理由：主数据子对象是可重建的描述，业务历史是发生过的物理事实。删除账本行等同绕过 InventoryService 修改库存（AGENTS.md §10/§14），并使流水与余额失配（§25 可追溯性）。
+  级联在同一事务内完成；审计动作记为 `FORCE_DELETE` 并记录被级联的 SKU 数量。
 
 ## 3. 条码规则（task §28-§32）
 
@@ -52,6 +56,7 @@
 2. Store 唯一键：`platform_id + store_code`；不同平台允许相同 store_code。
 3. Credential 与 Store 严格分离；一个 Store 每个 `credential_type` 至多一条。
 4. 凭证安全：AES-256-GCM（Sprint 0 `CredentialEncryptionService`）；API 永不返回密文/明文；Operation Log 只记录元数据；写操作仅管理员。
+5. Credential 生命周期（2026-09-11 起）：可创建、**可替换密钥**（`PATCH .../credentials/:id` 重新加密）、可停用/启用（保留已存密钥，无需重录）、**可删除**。删除不适用"零引用"限制——订单与库存引用的是**店铺**而非凭证，凭证本身没有业务引用方，故录错的密钥允许删除后重录。
 
 ## 6. 仓库 / 库位
 
@@ -64,8 +69,11 @@
 
 1. Store N:M Warehouse，通过 `store_warehouse_bindings`；禁止 `warehouse.store_id`。
 2. 履约模式规范值：`OZON_RFBS/OZON_FBS/OZON_FBO/OZON_FBP/WB_FBS/WB_FBW/YANDEX_FBS/YANDEX_FBY`（typed constant，数据库 VARCHAR）。
+   另有**一层仅用于展示的业务类别**（决策 `docs/decisions/0009`，不落库，由模式派生）：`自管仓 SELF_MANAGED = RFBS/FBS`、`半托管 SEMI_MANAGED = FBP`、`托管仓 MANAGED = FBO/FBW/FBY`。
+   存储值必须保持平台专属：`orders.md §4.6` 的"非 FBO 优先"由 `fulfillmentMode.includes('FBO')` 实现，改成通用枚举会使该冻结规则静默失效（AGENTS.md §97）。
+   新增平台时：常量表加值 + 类别映射加一行，前端自动生效。
 3. Service 层校验（不在数据库硬编码）：
-   - 履约模式前缀平台 === 店铺平台（WB 店铺 + OZON_FBO 拒绝，`STORE_WAREHOUSE_BINDING_INVALID`）；
+   - 履约模式前缀平台 === 店铺平台（WB 店铺 + OZON_FBO 拒绝，`STORE_WAREHOUSE_BINDING_INVALID`）；**前端下拉框按店铺平台过滤可选模式**；
    - 仓库类型匹配：FBO/FBY/FBW → PLATFORM 仓；FBS/RFBS/FBP → SELF/THIRD_PARTY 仓。
 4. 平台履约语义只存在于 Binding/Adapter/常量，不得进入 Inventory Core（AGENTS.md §31）。
 

@@ -3,6 +3,9 @@
 > 输入：用户 2026-09-10 人工 GUI 测试的 30 条问题清单（`docs/manual-test-2026-09-10.md`）。
 > 修复窗口：2026-09-11，按《Sprint 6 手工测试修复任务书》T0–T7 执行。
 > 处置状态如实标注：**已修复** / **部分修复** / **未修复（含原因）**。
+>
+> **第二轮**：2026-09-11 用户二次手工测试发现 5 个问题，见文末
+> [第二轮修复](#第二轮修复2026-09-11-二次手工测试)。
 
 ## 处置总览
 
@@ -50,3 +53,39 @@
 2. **SKU 2（图片上传）**：修复的是反馈/容错/删除能力与显示缺陷；上传链路本身经浏览器内实测是通的（详见上表根因说明）。GUI 验收中已复核上传交互。
 3. **用户管理 CRUD**：按决策 #19 本轮不做（需先定权限模型），仅做认证闭环（守卫/回跳/401/真实用户/退出登录）。
 4. **集成测试运行方式**：本机并行运行集成测试会因 `ECONNRESET` 不稳定（已知环境问题），全部结果以**单 worker**（`--maxWorkers=1`）运行为准——单 worker 下 164/164 全部通过；不以"默认并行通过"表述。
+
+---
+
+## 第二轮修复（2026-09-11 二次手工测试）
+
+用户二次测试发现 5 个问题。逐条处置如下。
+
+| # | 问题 | 处置 | 根因与说明 |
+|---|---|---|---|
+| 1 | 商品管理 / SKU管理 / SKU映射 列表行的"更多操作"不统一 | 已修复 | 三页统一为 `ActionMenu`：**编辑 / 启用·停用 / 删除**。SKU管理原先菜单是"查看详情/停用"、SKU映射是裸按钮组（停用/启用/删除），现全部收口 |
+| 2 | 删除需确认窗 + 勾选"强制删除"可级联删除 SKU 及其映射 | 已修复 | 新增共享组件 `DeleteConfirmModal`（确认 + 强制复选框 + 警示文案）；后端 `?force=true` 级联主数据。**边界按你的决策"只级联主数据"**：库存流水 / 订单行 / 拣货 / 发货记录永远阻断，勾选强制也不行，返回具体表名与行数。见 `docs/decisions/0008` |
+| 3 | 已配置的 apikey 无法编辑和删除 | 已修复 | 后端补 `DELETE .../credentials/:id` 与 `.../enable`（`PATCH` 替换密钥原已存在）；前端操作列改为「验证 + ⋯」，⋯ 内含**编辑（替换密钥）/ 停用·启用 / 删除**。密钥始终不回显，审计只记类型与状态 |
+| 4 | 店仓绑定履约模式改为 自管仓 / 半托管 / 托管仓 | 已修复 | 按你选择的**方案 C 两层模型**：存储保留平台专属值（零 Migration、不动冻结规则），新增**派生**的业务类别用于展示；下拉按类别分组且**只列出当前店铺平台适用的模式**（顺带修掉"OZON 店铺能选到 WB_FBS 然后被后端拒绝"的既有缺陷）。见 `docs/decisions/0009` |
+| 5 | 无法创建 SKU，提示"创建失败: Database error" | 已修复 | **根因已定位**：`sku.service.ts` 用 `dto.weightG === undefined ? null : String(dto.weightG)` 序列化数值，而 antd `InputNumber` 在字段被清空时提交 `null` → `String(null)` 变成字符串 `"null"` → Postgres 报 `invalid input syntax for type numeric: "null"`（已在 `docker logs wcies-postgres` 中确认，时间戳与你的测试时间吻合）→ 被全局过滤器转成不透明的 "Database error"。改为统一的 `toNumeric()` 处理 null/undefined/NaN。**同时修掉同源的第二个缺陷**：DTO 允许 `weightG` 到 10 亿、`latestPurchasePrice` 无上限，但列分别是 `numeric(12,3)`/`numeric(18,4)`，超限同样只报 "Database error"；现按列精度设上限，超限返回字段级校验错误 |
+
+### 顺带修复的真实缺陷
+
+- **`runPrefix()` 派生条码导致的测试假通过**（`delete-protection.integration.spec.ts`）：测试用 `PREFIX` 里的数字拼条码，而 `PREFIX` 含时间戳，多次运行会撞上已存在的条码；条码创建 409 被 `void` 吞掉，SKU 变成零引用从而"删除成功"，断言 `SKU_IN_USE` 失败。改为 `Date.now()` 派生唯一条码并断言创建返回 201。
+- **`?force=true` 的级联列假设**：最初按 `sku_id` 单列删除，漏了 `sku_bundle_components` 用的是 `bundle_sku_id`/`component_sku_id`（实测报 `column "sku_id" does not exist`）。现按表声明匹配列，集中定义在 `constants/sku-delete.constants.ts` 供 Repository 与 Service 共用。
+
+### 第二轮验证结果
+
+```text
+lint          通过
+typecheck     通过（packages + api + web）
+check:arch    通过（5 rules）
+unit          122 passed / 17 files
+integration   171 passed / 20 files（单 worker；含新增 force-delete 7 例）
+build         通过
+GUI           商品管理 / SKU管理 / SKU映射 / 店铺详情 四页实测：菜单项一致、
+              强制删除复选框与警示正常、凭证 ⋯ 菜单正常、履约模式三分组正常；
+              三页 Console 均 0 error / 0 warning
+```
+
+> 集成测试仍以单 worker 运行为准（并行 `ECONNRESET` 为已知环境问题），未以"默认并行通过"表述。
+
