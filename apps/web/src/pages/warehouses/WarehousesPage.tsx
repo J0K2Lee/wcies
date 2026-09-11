@@ -181,9 +181,11 @@ export function WarehousesPage() {
   });
 
   const batchMutation = useMutation({
-    mutationFn: (values: Record<string, string> & { warehouseId: string }) =>
-      apiPost<{ createdCount: number }>('/api/v1/warehouses/{warehouseId}/bins/batch', values, {
-        warehouseId: values.warehouseId,
+    // warehouseId travels in the path only: the DTO has no such property and
+    // forbidNonWhitelisted rejects the request body outright when it appears.
+    mutationFn: ({ warehouseId, ...body }: Record<string, string> & { warehouseId: string }) =>
+      apiPost<{ createdCount: number }>('/api/v1/warehouses/{warehouseId}/bins/batch', body, {
+        warehouseId,
       }),
     onSuccess: (data: { createdCount: number }) => {
       void message.success(`已批量创建 ${data.createdCount} 个库位`);
@@ -509,9 +511,7 @@ export function WarehousesPage() {
               {detailRow.status !== 'ACTIVE' ? (
                 <Button
                   type="primary"
-                  onClick={() =>
-                    statusMutation.mutate({ id: detailRow.id, action: 'activate' })
-                  }
+                  onClick={() => statusMutation.mutate({ id: detailRow.id, action: 'activate' })}
                 >
                   启用
                 </Button>

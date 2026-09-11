@@ -1,16 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-  App,
-  Button,
-  Form,
-  Input,
-  Modal,
-  Popconfirm,
-  Select,
-  Space,
-  Table,
-  Tag,
-} from 'antd';
+import { App, Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag } from 'antd';
 import { useState } from 'react';
 import { apiDelete, apiPost, useApiQuery } from '../../api/hooks';
 
@@ -48,10 +37,10 @@ export function BinsPage() {
   );
 
   const createMutation = useMutation({
-    mutationFn: (values: Record<string, string> & { warehouseId: string }) =>
-      apiPost('/api/v1/warehouses/{warehouseId}/bins', values, {
-        warehouseId: values.warehouseId,
-      }),
+    // warehouseId is a path parameter; sending it in the body fails validation
+    // because the DTO does not declare it (forbidNonWhitelisted).
+    mutationFn: ({ warehouseId: wid, ...body }: Record<string, string> & { warehouseId: string }) =>
+      apiPost('/api/v1/warehouses/{warehouseId}/bins', body, { warehouseId: wid }),
     onSuccess: () => {
       void message.success('库位已创建');
       setCreateOpen(false);
@@ -71,10 +60,14 @@ export function BinsPage() {
       binId: string;
       action: 'enable' | 'disable';
     }) =>
-      apiPost(`/api/v1/warehouses/{warehouseId}/bins/{binId}/${action}`, {}, {
-        warehouseId: wid,
-        binId,
-      }),
+      apiPost(
+        `/api/v1/warehouses/{warehouseId}/bins/{binId}/${action}`,
+        {},
+        {
+          warehouseId: wid,
+          binId,
+        },
+      ),
     onSuccess: () => {
       void message.success('状态已更新');
       void queryClient.invalidateQueries({ queryKey: ['bins', warehouseId] });
@@ -97,9 +90,7 @@ export function BinsPage() {
       void message.error('请先选择仓库');
       return;
     }
-    void form
-      .validateFields()
-      .then((values) => createMutation.mutate({ ...values, warehouseId }));
+    void form.validateFields().then((values) => createMutation.mutate({ ...values, warehouseId }));
   };
 
   return (

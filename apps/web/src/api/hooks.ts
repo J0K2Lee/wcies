@@ -26,6 +26,36 @@ export function isAuthError(error: unknown): boolean {
   return error instanceof ApiError && error.code === 'AUTH_UNAUTHORIZED';
 }
 
+/**
+ * Validation failures put the field-level reasons in
+ * `details.validationErrors` while the envelope message stays the constant
+ * "Request validation failed". Appending them keeps the error actionable
+ * (which field, which rule) instead of opaque.
+ */
+function describeValidationErrors(
+  message: string,
+  code: string | undefined,
+  details: unknown,
+): string {
+  if (code !== 'COMMON_VALIDATION_FAILED' || typeof details !== 'object' || details === null) {
+    return message;
+  }
+  const errors = (details as { validationErrors?: unknown }).validationErrors;
+  if (!Array.isArray(errors) || errors.length === 0) {
+    return message;
+  }
+  return `${message}: ${errors.map(String).join('；')}`;
+}
+
+/** Builds the page-facing error from the envelope's `error` object. */
+function toApiError(body: { message: string; code?: string; details?: unknown }): ApiError {
+  return new ApiError(
+    describeValidationErrors(body.message, body.code, body.details),
+    body.code,
+    body.details,
+  );
+}
+
 /** Debounces a fast-changing value (e.g. Select onSearch) for server-side filtering. */
 export function useDebouncedValue<TValue>(value: TValue, delayMs = 300): TValue {
   const [debounced, setDebounced] = useState(value);
@@ -63,7 +93,7 @@ export function useApiQuery<
         },
       });
       if (error !== undefined) {
-        throw new ApiError(error.error.message, error.error.code, error.error.details);
+        throw toApiError(error.error);
       }
       // Normalize the { success, data, meta? } envelope into { data, meta }
       // so paginated and plain lists share one page-side shape.
@@ -87,7 +117,7 @@ export async function apiPost<TData>(
     body: body as never,
   });
   if (error !== undefined) {
-    throw new ApiError(error.error.message, error.error.code, error.error.details);
+    throw toApiError(error.error);
   }
   return (data as { data: TData }).data;
 }
@@ -103,7 +133,7 @@ export async function apiPatch<TData>(
     body: body as never,
   });
   if (error !== undefined) {
-    throw new ApiError(error.error.message, error.error.code, error.error.details);
+    throw toApiError(error.error);
   }
   return (data as { data: TData }).data;
 }
@@ -119,7 +149,7 @@ export async function apiPut<TData>(
     body: body as never,
   });
   if (error !== undefined) {
-    throw new ApiError(error.error.message, error.error.code, error.error.details);
+    throw toApiError(error.error);
   }
   return (data as { data: TData }).data;
 }
@@ -128,6 +158,6 @@ export async function apiPut<TData>(
 export async function apiDelete(path: QueryKey, pathParams: Record<string, string>): Promise<void> {
   const { error } = await apiClient.DELETE(path, { params: { path: pathParams as never } });
   if (error !== undefined) {
-    throw new ApiError(error.error.message, error.error.code, error.error.details);
+    throw toApiError(error.error);
   }
 }
