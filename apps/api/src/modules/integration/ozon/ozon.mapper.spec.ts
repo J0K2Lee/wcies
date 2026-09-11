@@ -62,6 +62,16 @@ describe('mapProductToListing', () => {
     expect(listing.platformStatus).toBe('LISTED');
   });
 
+  // OZON returns sku: 0 for products with no SKU assigned yet. 25 such rows
+  // were observed sharing the fake identifier "0", which would make a line
+  // resolve ambiguously against all of them.
+  it('treats a non-positive sku as absent instead of storing "0"', () => {
+    const listing = mapProductToListing(LIST_ITEM, { ...INFO, sku: 0 });
+    expect(listing.skus[0]?.platformSkuId).toBeNull();
+    // The offer_id remains, so the row is still resolvable.
+    expect(listing.skus[0]?.offerId).toBe(LIST_ITEM.offer_id);
+  });
+
   it('rejects malformed items with PLATFORM_BAD_RESPONSE', () => {
     expect(() =>
       mapProductToListing({ offer_id: 'x' } as unknown as OzonProductListItem, INFO),

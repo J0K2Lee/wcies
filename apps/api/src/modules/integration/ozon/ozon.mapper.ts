@@ -38,7 +38,11 @@ export function mapProductToListing(
   }
 
   const title = typeof info?.name === 'string' && info.name !== '' ? info.name : null;
-  const platformSkuId = typeof info?.sku === 'number' ? String(info.sku) : null;
+  // `sku: 0` is not an identifier: OZON returns it for products that have no
+  // SKU assigned yet (25 such rows were observed in real data). Storing "0"
+  // would make many products share one fake identifier, so a non-positive
+  // value is treated as absent - those rows stay resolvable by offer_id.
+  const platformSkuId = typeof info?.sku === 'number' && info.sku > 0 ? String(info.sku) : null;
   const archived =
     info?.is_archived === true || info?.is_autoarchived === true || listItem.archived === true;
 
@@ -89,9 +93,13 @@ export function mapPostingToOrder(posting: OzonFbsPosting): PlatformOrderRaw {
         throw malformed(`posting.products[${index}]`, 'sku (number) missing');
       }
       const quantity = normalizeQuantity(product.quantity, `posting.products[${index}].quantity`);
+      // Same guard as the listing mapper: a non-positive sku is not an
+      // identifier. Storing "0" would make this line resolve against every
+      // product that also carries "0" -> LISTING_SKU_RESOLVE_AMBIGUOUS.
+      const skuId = product.sku > 0 ? String(product.sku) : null;
       return {
-        platformProductId: String(product.sku),
-        platformSkuId: String(product.sku),
+        platformProductId: skuId,
+        platformSkuId: skuId,
         offerId: product.offer_id,
         sellerSku: null,
         quantity,
