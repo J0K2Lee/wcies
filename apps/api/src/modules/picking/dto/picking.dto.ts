@@ -69,7 +69,7 @@ export class PickingTaskListQueryDto extends PaginationQueryDto {
 
 export class PickingBinLineDto {
   @ApiProperty() binId!: string;
-  @ApiProperty({ example: 'SZ01-A01-01' }) binCode!: string;
+  @ApiProperty({ example: 'ZG-01-A01-1' }) binCode!: string;
   @ApiProperty({ example: '2.000' }) quantity!: string;
   @ApiProperty({ example: '0.000' }) pickedQty!: string;
 }

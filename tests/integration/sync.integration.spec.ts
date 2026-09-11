@@ -391,9 +391,9 @@ beforeAll(async () => {
   warehouseId = warehouse.body.data.id;
   const bins = await client.post<{ bins: Array<{ binCode: string; id: string }> }>(
     `/api/v1/warehouses/${warehouseId}/bins/batch`,
-    { rackFrom: 'A01', rackTo: 'A02', levelFrom: '01', levelTo: '01' },
+    { zone: 'A', rackStart: 1, rackCount: 2, levelsPerRack: 1 },
   );
-  binA01 = bins.body.data.bins.find((b) => b.binCode.endsWith('A01-01'))?.id ?? '';
+  binA01 = bins.body.data.bins.find((b) => b.binCode.endsWith('A01-1'))?.id ?? '';
 
   for (const storeId of [storeA, storeB]) {
     await client.post(`/api/v1/stores/${storeId}/warehouse-bindings`, {

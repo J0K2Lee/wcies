@@ -22,6 +22,31 @@ import { offsetOf } from '../../../common/dto/pagination.dto';
 
 const ENTITY_TYPE = 'WAREHOUSE_BIN';
 const MAX_BATCH_BINS = 2000;
+/** warehouse_bins.bin_code is VARCHAR(100); fail with a domain error, not a DB one. */
+const BIN_CODE_MAX_LENGTH = 100;
+
+/**
+ * The one canonical bin code format, shared by both creation paths:
+ *
+ *   {warehouseCode}-{rack}-{level}[-{position}]   e.g. ZG-01-A05-1
+ *
+ * The warehouse code is part of the string so a printed label identifies its
+ * warehouse on sight; `warehouse_bins` is only unique per warehouse, so the
+ * prefix also keeps the label globally unambiguous. The same string is stored
+ * in `bin_code` AND `barcode`, because bins are resolved by `bin_code` when
+ * scanned - one value means a scanned label always resolves.
+ */
+export function formatBinCode(
+  warehouseCode: string,
+  rack: string,
+  level: string,
+  position?: string | null,
+): string {
+  const base = `${warehouseCode}-${rack}-${level}`;
+  return position === undefined || position === null || position === ''
+    ? base
+    : `${base}-${position}`;
+}
 
 /**
  * Expands an inclusive alphanumeric range like A01..A05 / 01..04.
@@ -57,7 +82,7 @@ export function expandRange(from: string, to: string, label: string): string[] {
 /**
  * Warehouse bins (task §38-§41). bin_code is unique per warehouse only, so
  * the same code may exist in different warehouses. Barcodes are
- * auto-generated as BIN-{warehouseCode}-{binCode} when omitted.
+ * default: barcode = bin_code, so a scanned label always resolves.
  */
 @Injectable()
 export class WarehouseBinService {
@@ -74,11 +99,21 @@ export class WarehouseBinService {
     const { page, pageSize } = query;
     const { rows, total } = await this.repository.listBins(
       warehouseId,
-      { keyword: query.keyword?.trim() || undefined, status: query.status },
+      {
+        keyword: query.keyword?.trim() || undefined,
+        zone: query.zone?.trim() || undefined,
+        status: query.status,
+      },
       pageSize,
       offsetOf(page, pageSize),
     );
     return { items: rows.map((bin) => this.toResponse(bin)), meta: { page, pageSize, total } };
+  }
+
+  /** Zones present in a warehouse; feeds the zone filter dropdown. */
+  async listZones(warehouseId: string): Promise<string[]> {
+    await this.assertWarehouseExists(warehouseId);
+    return this.repository.listBinZones(warehouseId);
   }
 
   async create(
@@ -87,18 +122,27 @@ export class WarehouseBinService {
     operator: OperatorContext,
   ): Promise<BinResponseDto> {
     const warehouse = await this.assertWarehouseExists(warehouseId);
-    const existing = await this.repository.findBinByCode(warehouseId, dto.binCode);
+    const binCode =
+      dto.binCode ??
+      formatBinCode(warehouse.warehouseCode, dto.rack ?? '', dto.level ?? '', dto.position);
+    if (binCode.length > BIN_CODE_MAX_LENGTH) {
+      throw new WarehouseBinBatchInvalidError(
+        `Bin code exceeds ${BIN_CODE_MAX_LENGTH} characters: ${binCode}`,
+      );
+    }
+    const existing = await this.repository.findBinByCode(warehouseId, binCode);
     if (existing !== null) {
-      throw new WarehouseBinAlreadyExistsError(warehouseId, [dto.binCode]);
+      throw new WarehouseBinAlreadyExistsError(warehouseId, [binCode]);
     }
     const bin = await this.repository.insertBin({
       warehouseId,
-      binCode: dto.binCode,
+      binCode,
       zone: dto.zone ?? null,
       rack: dto.rack ?? null,
       level: dto.level ?? null,
       position: dto.position ?? null,
-      barcode: dto.barcode ?? `BIN-${warehouse.warehouseCode}-${dto.binCode}`,
+      // One value: the barcode IS the code, so a scan always resolves.
+      barcode: dto.barcode ?? binCode,
       status: 'ACTIVE',
       remark: dto.remark ?? null,
     });
@@ -114,9 +158,17 @@ export class WarehouseBinService {
   }
 
   /**
-   * Batch creation (task §41): rack A01~A05 x level 01~04 -> SZ01-A01-01 ...
-   * Duplicate codes (in-file or already in DB) are rejected with the full
-   * conflict list before anything is inserted.
+   * Batch creation (task §41, revised 2026-09-11): the caller states the
+   * layout intent and this service owns the bin_code format, because bin_code
+   * is immutable and printed on physical labels.
+   *
+   *   zone 'A', rackStart 1, rackCount 5, levelsPerRack 4
+   *     -> ZG-01-A01-1 … ZG-01-A05-4 (20 bins)
+   *
+   * Rack numbers are zero-padded to at least two digits so lexical order
+   * matches physical walking order; levels stay unpadded (`A05-1`). Duplicate
+   * codes (in-file or already in DB) are rejected with the full conflict list
+   * before anything is inserted.
    */
   async batchCreate(
     warehouseId: string,
@@ -125,52 +177,53 @@ export class WarehouseBinService {
   ): Promise<BatchCreateBinsResponseDto> {
     const warehouse = await this.assertWarehouseExists(warehouseId);
 
-    const racks = expandRange(dto.rackFrom, dto.rackTo, 'rack');
-    const levels = expandRange(dto.levelFrom, dto.levelTo, 'level');
-    const positions =
-      dto.positionFrom !== undefined && dto.positionTo !== undefined
-        ? expandRange(dto.positionFrom, dto.positionTo, 'position')
-        : null;
+    const total = dto.rackCount * dto.levelsPerRack;
+    if (total > MAX_BATCH_BINS) {
+      throw new WarehouseBinBatchInvalidError(
+        `Batch would create ${total} bins, exceeding the ${MAX_BATCH_BINS} limit`,
+      );
+    }
+
+    const zone = dto.zone?.trim() ?? '';
+    const zoneOrNull = zone === '' ? null : zone;
+    const lastRack = dto.rackStart + dto.rackCount - 1;
+    const rackWidth = Math.max(2, String(lastRack).length);
+    const rackNumbers = expandRange(
+      String(dto.rackStart).padStart(rackWidth, '0'),
+      String(lastRack).padStart(rackWidth, '0'),
+      'rack',
+    );
+    const levels = expandRange('1', String(dto.levelsPerRack), 'level');
 
     const bins: Array<Partial<WarehouseBinEntity>> = [];
-    const seen = new Set<string>();
-    for (const rack of racks) {
+    for (const rackNumber of rackNumbers) {
+      const rack = `${zone}${rackNumber}`;
       for (const level of levels) {
-        if (positions === null) {
-          bins.push({
-            warehouseId,
-            binCode: `${warehouse.warehouseCode}-${rack}-${level}`,
-            zone: dto.zone ?? null,
-            rack,
-            level,
-            position: null,
-          });
-        } else {
-          for (const position of positions) {
-            bins.push({
-              warehouseId,
-              binCode: `${warehouse.warehouseCode}-${rack}-${level}-${position}`,
-              zone: dto.zone ?? null,
-              rack,
-              level,
-              position,
-            });
-          }
+        const binCode = formatBinCode(warehouse.warehouseCode, rack, level);
+        if (binCode.length > BIN_CODE_MAX_LENGTH) {
+          throw new WarehouseBinBatchInvalidError(
+            `Generated bin code exceeds ${BIN_CODE_MAX_LENGTH} characters: ${binCode}`,
+          );
         }
+        bins.push({
+          warehouseId,
+          binCode,
+          zone: zoneOrNull,
+          rack,
+          level,
+          position: null,
+          // The barcode is the printed form of the code: one string, so a
+          // scanned label always resolves (bins are looked up by bin_code).
+          barcode: binCode,
+          status: 'ACTIVE',
+        });
       }
     }
 
-    if (bins.length > MAX_BATCH_BINS) {
-      throw new WarehouseBinBatchInvalidError(`Batch exceeds ${MAX_BATCH_BINS} bins`);
-    }
-    for (const bin of bins) {
-      const code = bin.binCode as string;
-      if (seen.has(code)) {
-        throw new WarehouseBinAlreadyExistsError(warehouseId, [code]);
-      }
-      seen.add(code);
-    }
-    const conflicts = await this.repository.findExistingBinCodes(warehouseId, [...seen]);
+    const conflicts = await this.repository.findExistingBinCodes(
+      warehouseId,
+      bins.map((bin) => bin.binCode as string),
+    );
     if (conflicts.length > 0) {
       throw new WarehouseBinAlreadyExistsError(
         warehouseId,
@@ -178,10 +231,6 @@ export class WarehouseBinService {
       );
     }
 
-    for (const bin of bins) {
-      bin.barcode = `BIN-${bin.binCode}`;
-      bin.status = 'ACTIVE';
-    }
     await this.repository.insertBins(bins);
 
     await this.operationLog.record({

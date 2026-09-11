@@ -7,6 +7,7 @@ import {
   Drawer,
   Form,
   Input,
+  InputNumber,
   Modal,
   Popconfirm,
   Select,
@@ -81,6 +82,43 @@ const TYPE_LABEL: Record<string, string> = {
   RETURN_TEMP: '退货暂存仓',
 };
 
+/** Layout intent the server turns into bin codes (server owns the format). */
+interface BatchFormValues {
+  zone?: string;
+  rackStart: number;
+  rackCount: number;
+  levelsPerRack: number;
+}
+
+/**
+ * Mirrors the server's code rule so the dialog can preview exactly what will
+ * be created: rack numbers pad to at least two digits, levels stay plain.
+ */
+function previewBinCodes(
+  warehouseCode: string,
+  values: Partial<BatchFormValues>,
+): { first: string; last: string; total: number } | null {
+  const { rackStart, rackCount, levelsPerRack } = values;
+  if (
+    rackStart === undefined ||
+    rackCount === undefined ||
+    levelsPerRack === undefined ||
+    rackCount < 1 ||
+    levelsPerRack < 1
+  ) {
+    return null;
+  }
+  const zone = values.zone?.trim() ?? '';
+  const lastRack = rackStart + rackCount - 1;
+  const width = Math.max(2, String(lastRack).length);
+  const pad = (value: number): string => String(value).padStart(width, '0');
+  return {
+    first: `${warehouseCode}-${zone}${pad(rackStart)}-1`,
+    last: `${warehouseCode}-${zone}${pad(lastRack)}-${levelsPerRack}`,
+    total: rackCount * levelsPerRack,
+  };
+}
+
 type Envelope<T> = { data: T; meta: { total: number } };
 
 export function WarehousesPage() {
@@ -98,8 +136,11 @@ export function WarehousesPage() {
   // null out detailId while the modal is still open (decision: modal chain
   // fix) - submissions must never send an empty path parameter.
   const [batchWarehouseId, setBatchWarehouseId] = useState<string | null>(null);
+  const [binZone, setBinZone] = useState<string | undefined>();
   const [form] = Form.useForm();
   const [batchForm] = Form.useForm();
+  // Live values drive the modal's "what will be created" preview.
+  const batchValues = Form.useWatch([], batchForm) as Partial<BatchFormValues> | undefined;
 
   const list = useApiQuery<Envelope<WarehouseRow[]>>(
     '/api/v1/warehouses',
@@ -123,10 +164,24 @@ export function WarehousesPage() {
   const warehouse = detail.data?.data;
   const bins = useApiQuery<Envelope<BinRow[]>>(
     '/api/v1/warehouses/{warehouseId}/bins',
-    { page: 1, pageSize: 50 },
-    ['warehouse-bins', detailId],
+    { page: 1, pageSize: 50, ...(binZone ? { zone: binZone } : {}) },
+    ['warehouse-bins', detailId, binZone],
     { warehouseId: detailId ?? '' },
     detailId !== null,
+  );
+  const binZones = useApiQuery<{ data: string[] }>(
+    '/api/v1/warehouses/{warehouseId}/bins/zones',
+    {},
+    ['bin-zones', detailId],
+    { warehouseId: detailId ?? '' },
+    detailId !== null,
+  );
+  const batchPreview = useMemo(
+    () =>
+      warehouse === undefined || batchValues === undefined
+        ? null
+        : previewBinCodes(warehouse.warehouseCode, batchValues),
+    [warehouse, batchValues],
   );
   const bindings = useApiQuery<Envelope<BindingRow[]>>(
     '/api/v1/warehouse-bindings',
@@ -183,15 +238,18 @@ export function WarehousesPage() {
   const batchMutation = useMutation({
     // warehouseId travels in the path only: the DTO has no such property and
     // forbidNonWhitelisted rejects the request body outright when it appears.
-    mutationFn: ({ warehouseId, ...body }: Record<string, string> & { warehouseId: string }) =>
-      apiPost<{ createdCount: number }>('/api/v1/warehouses/{warehouseId}/bins/batch', body, {
-        warehouseId,
-      }),
+    mutationFn: ({ warehouseId, ...body }: BatchFormValues & { warehouseId: string }) =>
+      apiPost<{ createdCount: number; bins: BinRow[] }>(
+        '/api/v1/warehouses/{warehouseId}/bins/batch',
+        body,
+        { warehouseId },
+      ),
     onSuccess: (data: { createdCount: number }) => {
       void message.success(`已批量创建 ${data.createdCount} 个库位`);
       setBatchOpen(false);
       batchForm.resetFields();
       void queryClient.invalidateQueries({ queryKey: ['warehouse-bins', batchWarehouseId] });
+      void queryClient.invalidateQueries({ queryKey: ['bin-zones', batchWarehouseId] });
       void queryClient.invalidateQueries({ queryKey: ['warehouses'] });
     },
     onError: (error: Error) => void message.error(error.message),
@@ -572,13 +630,27 @@ export function WarehousesPage() {
             <section>
               <SectionTitle
                 action={
-                  <Button
-                    size="small"
-                    type="primary"
-                    onClick={() => detailRow !== null && openBatchModal(detailRow.id)}
-                  >
-                    批量创建库位
-                  </Button>
+                  <Space>
+                    <Select
+                      size="small"
+                      allowClear
+                      placeholder="全部库区"
+                      style={{ width: 120 }}
+                      value={binZone}
+                      onChange={(value: string | undefined) => setBinZone(value)}
+                      options={(binZones.data?.data ?? []).map((zone) => ({
+                        value: zone,
+                        label: zone,
+                      }))}
+                    />
+                    <Button
+                      size="small"
+                      type="primary"
+                      onClick={() => detailRow !== null && openBatchModal(detailRow.id)}
+                    >
+                      批量创建库位
+                    </Button>
+                  </Space>
                 }
               >
                 库位（{warehouse?.binCount ?? bins.data?.meta.total ?? 0}）
@@ -675,7 +747,7 @@ export function WarehousesPage() {
         )}
       </Drawer>
 
-      {/* ---- Batch create bins modal (existing flow) ---- */}
+      {/* ---- Batch create bins modal: layout intent in, codes out ---- */}
       <Modal
         title={`批量创建库位 — ${detailRow?.warehouseCode ?? ''}`}
         open={batchOpen}
@@ -691,22 +763,71 @@ export function WarehousesPage() {
       >
         <Form form={batchForm} layout="vertical">
           <Space wrap>
-            <Form.Item name="rackFrom" label="货架从" rules={[{ required: true }]}>
-              <Input placeholder="A01" style={{ width: 100 }} />
+            <Form.Item
+              name="zone"
+              label="库区"
+              rules={[{ max: 20, message: '库区最多 20 个字符' }]}
+            >
+              <Input placeholder="如 A（留空则不分区）" style={{ width: 170 }} />
             </Form.Item>
-            <Form.Item name="rackTo" label="货架到" rules={[{ required: true }]}>
-              <Input placeholder="A05" style={{ width: 100 }} />
+            <Form.Item
+              name="rackStart"
+              label="起始货架号"
+              rules={[{ required: true, message: '请输入起始货架号' }]}
+              initialValue={1}
+            >
+              <InputNumber min={1} max={9999} precision={0} style={{ width: 110 }} />
             </Form.Item>
-            <Form.Item name="levelFrom" label="层从" rules={[{ required: true }]}>
-              <Input placeholder="01" style={{ width: 100 }} />
+            <Form.Item
+              name="rackCount"
+              label="货架数量"
+              rules={[{ required: true, message: '请输入货架数量' }]}
+              initialValue={5}
+            >
+              <InputNumber min={1} max={2000} precision={0} style={{ width: 110 }} />
             </Form.Item>
-            <Form.Item name="levelTo" label="层到" rules={[{ required: true }]}>
-              <Input placeholder="04" style={{ width: 100 }} />
+            <Form.Item
+              name="levelsPerRack"
+              label="每架层数"
+              rules={[{ required: true, message: '请输入每架层数' }]}
+              initialValue={4}
+            >
+              <InputNumber min={1} max={999} precision={0} style={{ width: 110 }} />
             </Form.Item>
           </Space>
-          <p style={{ color: colors.textTertiary, fontSize: 12.5 }}>
-            将生成 {`{仓库编码}-{货架}-{层}`} 格式库位，条码自动生成 BIN- 前缀。重复编码会被拒绝。
-          </p>
+          {batchPreview === null ? (
+            <p style={{ color: colors.textTertiary, fontSize: 12.5, marginBottom: 0 }}>
+              库位编码由系统生成，格式为 仓库-货架-层（如
+              ZG-01-A05-1）。同一仓库内重复编码会被拒绝。
+            </p>
+          ) : (
+            <div
+              style={{
+                background: colors.canvas,
+                border: `1px solid ${colors.borderSoft}`,
+                borderRadius: 6,
+                padding: '10px 12px',
+              }}
+            >
+              <div style={{ fontSize: 13, color: colors.textPrimary }}>
+                将创建 <strong>{batchPreview.total}</strong> 个库位：
+                <span style={{ marginLeft: 6, fontFamily: 'monospace' }}>{batchPreview.first}</span>
+                {batchPreview.total > 1 && (
+                  <>
+                    <span style={{ margin: '0 6px', color: colors.textTertiary }}>…</span>
+                    <span style={{ fontFamily: 'monospace' }}>{batchPreview.last}</span>
+                  </>
+                )}
+              </div>
+              <div style={{ fontSize: 12.5, color: colors.textTertiary, marginTop: 6 }}>
+                货架从第 {batchForm.getFieldValue('rackStart') as number} 号开始
+                {batchForm.getFieldValue('zone')
+                  ? `（区 ${String(batchForm.getFieldValue('zone'))}）`
+                  : ''}
+                ；每架 {batchForm.getFieldValue('levelsPerRack') as number} 层。条码与编码相同。
+              </div>
+            </div>
+          )}
         </Form>
       </Modal>
     </div>

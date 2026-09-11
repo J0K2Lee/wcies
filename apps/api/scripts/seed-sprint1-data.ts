@@ -127,19 +127,21 @@ async function main(): Promise<void> {
       )
     ).rows[0]?.id as string;
 
+    // Decision 0010: bin code is `{warehouseCode}-{rack}-{level}` with the
+    // rack zero-padded to two digits, and barcode === bin_code.
     for (let rack = 1; rack <= 5; rack += 1) {
       for (let level = 1; level <= 4; level += 1) {
-        const rackCode = `A0${rack}`;
-        const levelCode = `0${level}`;
+        const rackCode = `A${String(rack).padStart(2, '0')}`;
+        const levelCode = `${level}`;
         const binCode = `SZ01-${rackCode}-${levelCode}`;
         await client.query(
           `INSERT INTO warehouse_bins (id, warehouse_id, bin_code, zone, rack, level, barcode)
            VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (warehouse_id, bin_code) DO NOTHING`,
-          [randomUUID(), szId, binCode, rackCode, rackCode, levelCode, `BIN-${binCode}`],
+          [randomUUID(), szId, binCode, 'A', rackCode, levelCode, binCode],
         );
       }
     }
-    log('SZ01 bins ready (5 racks x 4 levels = 20)');
+    log('SZ01 bins ready (zone A, 5 racks x 4 levels = 20)');
 
     // ---- Bindings (task §90): guard against duplicates manually (no DB
     // unique constraint by design - same pair may exist with other modes) ----

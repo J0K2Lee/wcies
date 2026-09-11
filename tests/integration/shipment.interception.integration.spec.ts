@@ -292,9 +292,9 @@ beforeAll(async () => {
 
   const bins = await client.post<{ bins: Array<{ binCode: string; id: string }> }>(
     `/api/v1/warehouses/${warehouseId}/bins/batch`,
-    { rackFrom: 'A01', rackTo: 'A02', levelFrom: '01', levelTo: '01' },
+    { zone: 'A', rackStart: 1, rackCount: 2, levelsPerRack: 1 },
   );
-  binA01 = bins.body.data.bins.find((b) => b.binCode.endsWith('A01-01'))?.id ?? '';
+  binA01 = bins.body.data.bins.find((b) => b.binCode.endsWith('A01-1'))?.id ?? '';
 });
 
 afterAll(async () => {
@@ -622,12 +622,12 @@ describe('interception lifecycle (task §71-§79)', () => {
       `/api/v1/picking-tasks?orderId=${order.orderId}`,
     );
     void task;
-    // Bin barcode for the scan: A01-01 of this warehouse.
+    // Bin code scanned into binBarcode: A01-1 of this warehouse.
     const scan = await client.post<{ status: string }>(
       `/api/v1/interceptions/${interception.id}/scan`,
       {
         barcode: interceptionScanBarcode(skuId),
-        binBarcode: `${PREFIX}-SWH-A01-01`,
+        binBarcode: `${PREFIX}-SWH-A01-1`,
       },
     );
     expect(scan.body.data.status).toBe('INTERCEPTED');
@@ -689,7 +689,7 @@ describe('interception lifecycle (task §71-§79)', () => {
     await client.post(`/api/v1/interceptions/${interception.id}/start`, {});
     const scan = await client.post(`/api/v1/interceptions/${interception.id}/scan`, {
       barcode: otherBarcode,
-      binBarcode: `${PREFIX}-SWH-A01-01`,
+      binBarcode: `${PREFIX}-SWH-A01-1`,
     });
     expect(scan.body.error?.code).toBe('INTERCEPTION_SKU_MISMATCH');
     expect(await balancesOf(skuId)).toEqual(before);
@@ -711,7 +711,7 @@ describe('interception lifecycle (task §71-§79)', () => {
     const scan = await client.post(`/api/v1/interceptions/${interception.id}/scan`, {
       barcode: interceptionScanBarcode(skuId),
       serialNumber: inStockSerial,
-      binBarcode: `${PREFIX}-SWH-A01-01`,
+      binBarcode: `${PREFIX}-SWH-A01-1`,
     });
     expect(scan.body.error?.code).toBe('INTERCEPTION_SERIAL_MISMATCH');
   });
@@ -760,7 +760,7 @@ describe('interception lifecycle (task §71-§79)', () => {
     await client.post(`/api/v1/interceptions/${interception.id}/start`, {});
     await client.post(`/api/v1/interceptions/${interception.id}/scan`, {
       barcode: interceptionScanBarcode(skuId),
-      binBarcode: `${PREFIX}-SWH-A01-01`,
+      binBarcode: `${PREFIX}-SWH-A01-1`,
     });
     const returned = await client.post<{ status: string }>(
       `/api/v1/interceptions/${interception.id}/return-to-stock`,
@@ -817,7 +817,7 @@ describe('interception lifecycle (task §71-§79)', () => {
     await client.post(`/api/v1/interceptions/${interception.id}/start`, {});
     await client.post(`/api/v1/interceptions/${interception.id}/scan`, {
       barcode: interceptionScanBarcode(skuId),
-      binBarcode: `${PREFIX}-SWH-A01-01`,
+      binBarcode: `${PREFIX}-SWH-A01-1`,
     });
     const returned = await client.post<{ status: string }>(
       `/api/v1/interceptions/${interception.id}/return-to-stock`,
@@ -874,7 +874,7 @@ describe('interception lifecycle (task §71-§79)', () => {
     await client.post(`/api/v1/interceptions/${lineA.id}/start`, {});
     await client.post(`/api/v1/interceptions/${lineA.id}/scan`, {
       barcode: interceptionScanBarcode(skuA),
-      binBarcode: `${PREFIX}-SWH-A01-01`,
+      binBarcode: `${PREFIX}-SWH-A01-1`,
     });
     const returned = await client.post<{ status: string }>(
       `/api/v1/interceptions/${lineA.id}/return-to-stock`,
@@ -951,7 +951,7 @@ describe('interception lifecycle (task §71-§79)', () => {
     await client.post(`/api/v1/interceptions/${interception.id}/scan`, {
       barcode: interceptionScanBarcode(skuId),
       serialNumber: serial,
-      binBarcode: `${PREFIX}-SWH-A01-01`,
+      binBarcode: `${PREFIX}-SWH-A01-1`,
     });
     const returned = await client.post<{ status: string }>(
       `/api/v1/interceptions/${interception.id}/return-to-stock`,

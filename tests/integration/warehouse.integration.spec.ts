@@ -55,30 +55,65 @@ describe('warehouses + bins (task §81)', () => {
     expect(dup.body.error?.code).toBe('WAREHOUSE_CODE_ALREADY_EXISTS');
   });
 
-  it('batch-creates racks A01~A05 x levels 01~04 = 20 bins with barcodes (task §41)', async () => {
+  it('batch-creates a zone with racks and levels, barcode = code (task §41)', async () => {
     const batch = await client.post<{
       createdCount: number;
-      bins: Array<{ binCode: string; barcode: string }>;
+      bins: Array<{ binCode: string; barcode: string; zone: string; rack: string }>;
     }>(`/api/v1/warehouses/${szId}/bins/batch`, {
-      rackFrom: 'A01',
-      rackTo: 'A05',
-      levelFrom: '01',
-      levelTo: '04',
+      zone: 'A',
+      rackStart: 1,
+      rackCount: 5,
+      levelsPerRack: 4,
     });
     expect(batch.body.data.createdCount).toBe(20);
-    expect(batch.body.data.bins[0]?.binCode).toBe(`${PREFIX}-SZ-A01-01`);
-    expect(batch.body.data.bins[0]?.barcode).toBe(`BIN-${PREFIX}-SZ-A01-01`);
+    expect(batch.body.data.bins[0]?.binCode).toBe(`${PREFIX}-SZ-A01-1`);
+    expect(batch.body.data.bins[0]?.zone).toBe('A');
+    expect(batch.body.data.bins[0]?.rack).toBe('A01');
+    // The printed barcode is the code itself so a scan always resolves.
+    expect(batch.body.data.bins[0]?.barcode).toBe(batch.body.data.bins[0]?.binCode);
+  });
+
+  it('pads rack numbers past 99 so lexical order stays walk order', async () => {
+    // Own warehouse: this batch must not disturb the shared szId bin counts
+    // asserted further down.
+    const paddedWh = await client.post<{ id: string }>('/api/v1/warehouses', {
+      warehouseCode: `${PREFIX}-PAD`,
+      name: `${PREFIX} 补零仓`,
+      warehouseType: 'SELF',
+    });
+    const padded = await client.post<{
+      bins: Array<{ binCode: string }>;
+    }>(`/api/v1/warehouses/${paddedWh.body.data.id}/bins/batch`, {
+      zone: 'B',
+      rackStart: 99,
+      rackCount: 3,
+      levelsPerRack: 1,
+    });
+    expect(padded.body.data.bins.map((bin) => bin.binCode)).toEqual([
+      `${PREFIX}-PAD-B099-1`,
+      `${PREFIX}-PAD-B100-1`,
+      `${PREFIX}-PAD-B101-1`,
+    ]);
   });
 
   it('rejects a conflicting batch before inserting anything', async () => {
     const conflict = await client.post(`/api/v1/warehouses/${szId}/bins/batch`, {
-      rackFrom: 'A02',
-      rackTo: 'A02',
-      levelFrom: '01',
-      levelTo: '02',
+      zone: 'A',
+      rackStart: 1,
+      rackCount: 1,
+      levelsPerRack: 1,
     });
     expect(conflict.status).toBe(409);
     expect(conflict.body.error?.code).toBe('WAREHOUSE_BIN_ALREADY_EXISTS');
+  });
+
+  it('filters bins by zone', async () => {
+    const zoneA = await client.get<Array<{ binCode: string }>>(
+      `/api/v1/warehouses/${szId}/bins?zone=A&pageSize=100`,
+    );
+    expect(zoneA.body.data.length).toBe(20);
+    const zones = await client.get<string[]>(`/api/v1/warehouses/${szId}/bins/zones`);
+    expect(zones.body.data).toEqual(['A']);
   });
 
   it('allows the same bin_code in a DIFFERENT warehouse (task §81)', async () => {
@@ -89,7 +124,7 @@ describe('warehouses + bins (task §81)', () => {
     });
     secondWhId = second.body.data.id;
     const bin = await client.post(`/api/v1/warehouses/${secondWhId}/bins`, {
-      binCode: `${PREFIX}-SZ-A01-01`,
+      binCode: `${PREFIX}-SZ-A01-1`,
     });
     expect(bin.body.success).toBe(true);
   });

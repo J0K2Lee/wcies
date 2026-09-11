@@ -239,7 +239,8 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete a credential record (a wrong key can be removed and re-entered) */
+        delete: operations["StoreCredentialController_remove"];
         options?: never;
         head?: never;
         /** Replace the credential payload (re-encrypted) */
@@ -274,6 +275,23 @@ export interface paths {
         put?: never;
         /** Disable a credential */
         post: operations["StoreCredentialController_disable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/stores/{storeId}/credentials/{id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Re-enable a disabled credential (keeps the stored payload) */
+        post: operations["StoreCredentialController_enable"];
         delete?: never;
         options?: never;
         head?: never;
@@ -683,6 +701,23 @@ export interface paths {
         put?: never;
         /** Batch-create bins (rack A01~A05 x level 01~04) */
         post: operations["WarehouseBinController_batchCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/warehouses/{warehouseId}/bins/zones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Distinct zones present in a warehouse */
+        get: operations["WarehouseBinController_zones"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2569,7 +2604,7 @@ export interface components {
             /** @example 87键 */
             size?: string;
             /**
-             * @description Grams (g)
+             * @description Grams (g), up to 3 decimals
              * @example 950
              */
             weightG?: number;
@@ -2594,7 +2629,7 @@ export interface components {
              */
             purchaseUrl?: string;
             /**
-             * @description Manually maintained in Sprint 1
+             * @description Manually maintained in Sprint 1; up to 4 decimals
              * @example 299
              */
             latestPurchasePrice?: number;
@@ -2616,7 +2651,7 @@ export interface components {
             model?: string;
             color?: string;
             size?: string;
-            /** @description Grams (g) */
+            /** @description Grams (g), up to 3 decimals */
             weightG?: number;
             /** @description Millimeters, integer. Provide with width and height or not at all */
             lengthMm?: number;
@@ -2626,6 +2661,7 @@ export interface components {
             heightMm?: number;
             /** @description Procurement link */
             purchaseUrl?: string;
+            /** @description Purchase price, up to 4 decimals */
             latestPurchasePrice?: number;
             costCurrency?: string;
             serialTracking?: boolean;
@@ -2790,13 +2826,13 @@ export interface components {
             id: string;
             /** Format: uuid */
             warehouseId: string;
-            /** @example SZ01-A01-01 */
+            /** @example ZG-01-A01-1 */
             binCode: string;
             zone: Record<string, never> | null;
             rack: Record<string, never> | null;
             level: Record<string, never> | null;
             position: Record<string, never> | null;
-            /** @example BIN-SZ01-A01-01 */
+            /** @example ZG-01-A01-1 */
             barcode: Record<string, never> | null;
             /** @example ACTIVE */
             status: string;
@@ -2807,19 +2843,22 @@ export interface components {
             updatedAt: string;
         };
         CreateBinRequestDto: {
-            /** @example SZ01-A01-01 */
-            binCode: string;
+            /**
+             * @description 库位编码；留空则由区/架/层/位自动生成（推荐）
+             * @example ZG-01-A01-1
+             */
+            binCode?: string;
             /** @example A */
             zone?: string;
             /** @example A01 */
             rack?: string;
-            /** @example 01 */
+            /** @example 1 */
             level?: string;
             /** @example 01 */
             position?: string;
             /**
-             * @description Auto-generated when omitted
-             * @example BIN-SZ01-A01-01
+             * @description 留空则与库位编码相同
+             * @example ZG-01-A01-1
              */
             barcode?: string;
             remark?: string;
@@ -2831,25 +2870,25 @@ export interface components {
         };
         BatchCreateBinsRequestDto: {
             /**
-             * @description Stored on every generated bin
+             * @description 库区；同时作为货架编码前缀（A → 货架 A01）。留空则货架编码无前缀。
              * @example A
              */
             zone?: string;
-            /** @example A01 */
-            rackFrom: string;
-            /** @example A05 */
-            rackTo: string;
-            /** @example 01 */
-            levelFrom: string;
-            /** @example 04 */
-            levelTo: string;
             /**
-             * @description Position range; omit for no position suffix
-             * @example 01
+             * @description 起始货架号（含）
+             * @example 1
              */
-            positionFrom?: string;
-            /** @example 02 */
-            positionTo?: string;
+            rackStart: number;
+            /**
+             * @description 货架数量
+             * @example 5
+             */
+            rackCount: number;
+            /**
+             * @description 每个货架的层数
+             * @example 4
+             */
+            levelsPerRack: number;
         };
         UpdateBinRequestDto: {
             zone?: string;
@@ -4735,6 +4774,32 @@ export interface operations {
             };
         };
     };
+    StoreCredentialController_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                storeId: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
+            };
+        };
+    };
     StoreCredentialController_updatePayload: {
         parameters: {
             query?: never;
@@ -4792,6 +4857,32 @@ export interface operations {
         };
     };
     StoreCredentialController_disable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                storeId: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["CredentialResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    StoreCredentialController_enable: {
         parameters: {
             query?: never;
             header?: never;
@@ -5854,6 +5945,8 @@ export interface operations {
             query?: {
                 /** @description Matches bin_code / barcode / zone / rack */
                 keyword?: string;
+                /** @description Exact zone match */
+                zone?: string;
                 status?: "ACTIVE" | "INACTIVE";
             };
             header?: never;
@@ -5936,6 +6029,37 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["BatchCreateBinsResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    WarehouseBinController_zones: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                warehouseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        /**
+                         * @example [
+                         *       "A",
+                         *       "B"
+                         *     ]
+                         */
+                        data: string[];
                     };
                 };
             };

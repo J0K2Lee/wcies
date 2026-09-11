@@ -127,7 +127,7 @@ beforeAll(async () => {
   expect(binding.body.error).toBeUndefined();
   const bins = await client.post<{ bins: Array<{ binCode: string; id: string }> }>(
     `/api/v1/warehouses/${warehouseId}/bins/batch`,
-    { rackFrom: 'A01', rackTo: 'A01', levelFrom: '01', levelTo: '01' },
+    { zone: 'A', rackStart: 1, rackCount: 1, levelsPerRack: 1 },
   );
   binA01 = bins.body.data.bins[0]!.id;
 

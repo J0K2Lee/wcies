@@ -53,9 +53,9 @@ beforeAll(async () => {
   warehouseId = warehouse.body.data.id;
   const bins = await client.post<{ bins: Array<{ binCode: string; id: string }> }>(
     `/api/v1/warehouses/${warehouseId}/bins/batch`,
-    { rackFrom: 'A01', rackTo: 'A02', levelFrom: '01', levelTo: '01' },
+    { zone: 'A', rackStart: 1, rackCount: 2, levelsPerRack: 1 },
   );
-  binA01 = bins.body.data.bins.find((bin) => bin.binCode.endsWith('A01-01'))!.id;
+  binA01 = bins.body.data.bins.find((bin) => bin.binCode.endsWith('A01-1'))!.id;
 
   const product = await client.post<{ id: string }>('/api/v1/products', {
     nameZh: `${PREFIX} 导入商品`,
@@ -85,13 +85,13 @@ async function sheet(): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('INITIAL_INVENTORY');
   sheet.addRow(['sku_code', 'warehouse_code', 'bin_code', 'quantity', 'remark']);
-  sheet.addRow([sku1Code, `${PREFIX}-IMPWH`, `${PREFIX}-IMPWH-A01-01`, '10', '首行有效']);
-  sheet.addRow([sku2Code, `${PREFIX}-IMPWH`, `${PREFIX}-IMPWH-A02-01`, '0.5', '小数数量']);
-  sheet.addRow(['NOPE-SKU', `${PREFIX}-IMPWH`, `${PREFIX}-IMPWH-A01-01`, '5', '']); // row 4: unknown sku
-  sheet.addRow([sku1Code, 'NOPE-WH', `${PREFIX}-IMPWH-A01-01`, '5', '']); // row 5: unknown warehouse
+  sheet.addRow([sku1Code, `${PREFIX}-IMPWH`, `${PREFIX}-IMPWH-A01-1`, '10', '首行有效']);
+  sheet.addRow([sku2Code, `${PREFIX}-IMPWH`, `${PREFIX}-IMPWH-A02-1`, '0.5', '小数数量']);
+  sheet.addRow(['NOPE-SKU', `${PREFIX}-IMPWH`, `${PREFIX}-IMPWH-A01-1`, '5', '']); // row 4: unknown sku
+  sheet.addRow([sku1Code, 'NOPE-WH', `${PREFIX}-IMPWH-A01-1`, '5', '']); // row 5: unknown warehouse
   sheet.addRow([sku1Code, `${PREFIX}-IMPWH`, 'NOPE-BIN', '5', '']); // row 6: unknown bin
-  sheet.addRow([sku2Code, `${PREFIX}-IMPWH`, `${PREFIX}-IMPWH-A01-01`, '0', '']); // row 7: qty <= 0 (own dimension)
-  sheet.addRow([sku1Code, `${PREFIX}-IMPWH`, `${PREFIX}-IMPWH-A01-01`, '3', '']); // row 8: duplicate dim of row 2
+  sheet.addRow([sku2Code, `${PREFIX}-IMPWH`, `${PREFIX}-IMPWH-A01-1`, '0', '']); // row 7: qty <= 0 (own dimension)
+  sheet.addRow([sku1Code, `${PREFIX}-IMPWH`, `${PREFIX}-IMPWH-A01-1`, '3', '']); // row 8: duplicate dim of row 2
   const data = await workbook.xlsx.writeBuffer();
   return Buffer.from(data);
 }

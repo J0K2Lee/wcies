@@ -120,9 +120,7 @@ export class WarehouseRepository {
 
   /** Tables whose warehouse_id rows block a hard delete (decision 0003). */
   async countWarehouseReferences(id: string): Promise<Array<{ table: string; count: number }>> {
-    const rows = await this.warehouseRepository.query<
-      Array<Record<string, string | number>>
-    >(
+    const rows = await this.warehouseRepository.query<Array<Record<string, string | number>>>(
       `SELECT
         (SELECT COUNT(*) FROM warehouse_bins WHERE warehouse_id = $1) AS warehouse_bins,
         (SELECT COUNT(*) FROM store_warehouse_bindings WHERE warehouse_id = $1) AS store_warehouse_bindings,
@@ -151,7 +149,7 @@ export class WarehouseRepository {
 
   async listBins(
     warehouseId: string,
-    filters: { keyword?: string; status?: string },
+    filters: { keyword?: string; zone?: string; status?: string },
     limit: number,
     offset: number,
   ): Promise<{ rows: WarehouseBinEntity[]; total: number }> {
@@ -164,12 +162,27 @@ export class WarehouseRepository {
         { kw: `%${filters.keyword}%` },
       );
     }
+    if (filters.zone !== undefined && filters.zone !== '') {
+      qb.andWhere('bin.zone = :zone', { zone: filters.zone });
+    }
     if (filters.status !== undefined) {
       qb.andWhere('bin.status = :status', { status: filters.status });
     }
     qb.orderBy('bin.binCode', 'ASC').skip(offset).take(limit);
     const [rows, total] = await qb.getManyAndCount();
     return { rows, total };
+  }
+
+  /** Distinct non-null zones in a warehouse; drives the zone filter dropdown. */
+  async listBinZones(warehouseId: string): Promise<string[]> {
+    const rows = await this.binRepository
+      .createQueryBuilder('bin')
+      .select('DISTINCT bin.zone', 'zone')
+      .where('bin.warehouse_id = :warehouseId', { warehouseId })
+      .andWhere('bin.zone IS NOT NULL')
+      .orderBy('zone', 'ASC')
+      .getRawMany<{ zone: string }>();
+    return rows.map((row) => row.zone).filter((zone) => zone !== '');
   }
 
   async findBinById(id: string): Promise<WarehouseBinEntity | null> {

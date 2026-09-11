@@ -36,7 +36,7 @@ export class InterceptionScanRequestDto {
   @Length(1, 255)
   serialNumber?: string;
 
-  @ApiProperty({ example: 'SZ01-A01-01', description: '目标回库库位条码（后端验证）' })
+  @ApiProperty({ example: 'ZG-01-A01-1', description: '目标回库库位编码（后端验证）' })
   @IsString()
   @Length(1, 255)
   binBarcode!: string;

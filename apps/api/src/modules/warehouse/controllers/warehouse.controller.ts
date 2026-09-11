@@ -10,7 +10,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PageMeta } from '@wcies/shared';
 import { ok, okPage } from '../../../common/dto/api-response';
 import {
@@ -156,6 +156,26 @@ export class WarehouseBinController {
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true; data: BatchCreateBinsResponseDto }> {
     return ok(await this.binService.batchCreate(warehouseId, dto, operator));
+  }
+
+  @Get('warehouses/:warehouseId/bins/zones')
+  @ApiOperation({ summary: 'Distinct zones present in a warehouse' })
+  // Inline schema: a bare `string[]` via ApiOkArrayEnvelope(String) would
+  // register a properties-less "String" schema and fail check:openapi.
+  @ApiOkResponse({
+    schema: {
+      type: 'object',
+      required: ['success', 'data'],
+      properties: {
+        success: { type: 'boolean', enum: [true] },
+        data: { type: 'array', items: { type: 'string' }, example: ['A', 'B'] },
+      },
+    },
+  })
+  async zones(
+    @Param('warehouseId') warehouseId: string,
+  ): Promise<{ success: true; data: string[] }> {
+    return ok(await this.binService.listZones(warehouseId));
   }
 
   @Patch('warehouses/:warehouseId/bins/:binId')

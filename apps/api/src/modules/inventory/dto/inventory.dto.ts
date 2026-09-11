@@ -79,7 +79,7 @@ export class InventoryRowDto {
   @ApiProperty({ example: 'SZ01' }) warehouseCode!: string;
   @ApiProperty({ example: '深圳自管仓' }) warehouseName!: string;
   @ApiProperty() binId!: string;
-  @ApiProperty({ example: 'SZ01-A01-01' }) binCode!: string;
+  @ApiProperty({ example: 'ZG-01-A01-1' }) binCode!: string;
   @ApiProperty({ enum: INVENTORY_CONDITIONS }) condition!: string;
   @ApiProperty({ example: '10.000' }) onHandQty!: string;
   @ApiProperty({ example: '2.000' }) reservedQty!: string;

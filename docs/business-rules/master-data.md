@@ -63,7 +63,10 @@
 1. Warehouse Type：`SELF / PLATFORM / THIRD_PARTY / RETURN_TEMP`（无 VIRTUAL，无 Warehouse Group）。
 2. 库位唯一键：`warehouse_id + bin_code`；不同仓库允许相同 bin_code。
 3. Bin 表禁止 `sku_id` 列：SKU↔Bin 是 N:M，经库存记录关联（inventory.md §54）。
-4. 批量建位（Rack A01~A05 × Level 01~04）在后端校验文件内与库内重复后一次性插入。
+4. 库位编码格式（2026-09-11 起，决策 0010）：`{仓库编码}-{货架}-{层}[-{位}]`，如 `ZG-01-A05-1`。货架号**至少补零两位**（保证字典序 = 实地行走顺序）；层号不补零；仓库编码前缀一并写入，使标签离仓后仍可辨认归属。编码写入后不可修改（`UpdateBinRequestDto` 不含 `binCode`）。
+5. **条码 = 编码**：`barcode` 与 `bin_code` 存同一字符串。拣货、拦截、导入解析库位时一律按 `bin_code` 匹配（`findByWarehouseAndCode`），因此标签必须印编码本身——印成别的字符串扫码将无法识别。标签条码规格需用 Code128 或二维码（含字母与连字符，非纯数字，不能用 EAN-13）。
+6. 批量建位（2026-09-11 起）：调用方给出**布局意图**——库区、起始货架号、货架数量、每架层数，由服务端生成编码。例：库区 A、起始 1、数量 5、层数 4 → 20 个库位 `ZG-01-A01-1 … ZG-01-A05-4`。库区作为 `zone` 标签写入每个库位，同时作为货架编码前缀；`zone` 不建独立实体。
+7. 批量建位在插入前一次性校验**库内**重复编码并整体拒绝（409 + 冲突清单），不产生部分插入。库区筛选经 `GET /warehouses/:id/bins?zone=` 与 `GET /warehouses/:id/bins/zones`。
 
 ## 7. 店仓绑定
 

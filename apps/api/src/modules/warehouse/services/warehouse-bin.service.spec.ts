@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { WarehouseBinBatchInvalidError } from '../errors/warehouse-errors';
-import { expandRange } from './warehouse-bin.service';
+import { expandRange, formatBinCode } from './warehouse-bin.service';
 
 describe('expandRange (batch bin generation, task §41)', () => {
   it('expands inclusive numeric ranges keeping zero padding', () => {
@@ -26,5 +26,20 @@ describe('expandRange (batch bin generation, task §41)', () => {
 
   it('rejects reversed ranges', () => {
     expect(() => expandRange('A05', 'A01', 'rack')).toThrow(WarehouseBinBatchInvalidError);
+  });
+});
+
+describe('formatBinCode (decision 0010: one string, warehouse-prefixed)', () => {
+  it('builds warehouseCode-rack-level', () => {
+    expect(formatBinCode('ZG-01', 'A05', '1')).toBe('ZG-01-A05-1');
+  });
+
+  it('appends the optional position segment', () => {
+    expect(formatBinCode('ZG-01', 'A05', '1', '02')).toBe('ZG-01-A05-1-02');
+  });
+
+  it('treats an empty or null position as absent', () => {
+    expect(formatBinCode('ZG-01', 'A05', '1', '')).toBe('ZG-01-A05-1');
+    expect(formatBinCode('ZG-01', 'A05', '1', null)).toBe('ZG-01-A05-1');
   });
 });

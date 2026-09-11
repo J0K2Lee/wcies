@@ -146,11 +146,11 @@ beforeAll(async () => {
   warehouseId = warehouse.body.data.id;
   const bins = await client.post<{ bins: Array<{ binCode: string; id: string }> }>(
     `/api/v1/warehouses/${warehouseId}/bins/batch`,
-    { rackFrom: 'A01', rackTo: 'A03', levelFrom: '01', levelTo: '01' },
+    { zone: 'A', rackStart: 1, rackCount: 3, levelsPerRack: 1 },
   );
-  binA01 = bins.body.data.bins.find((bin) => bin.binCode.endsWith('A01-01'))!.id;
-  binA02 = bins.body.data.bins.find((bin) => bin.binCode.endsWith('A02-01'))!.id;
-  binA03 = bins.body.data.bins.find((bin) => bin.binCode.endsWith('A03-01'))!.id;
+  binA01 = bins.body.data.bins.find((bin) => bin.binCode.endsWith('A01-1'))!.id;
+  binA02 = bins.body.data.bins.find((bin) => bin.binCode.endsWith('A02-1'))!.id;
+  binA03 = bins.body.data.bins.find((bin) => bin.binCode.endsWith('A03-1'))!.id;
 
   // Sprint 1 seed data for the task §85 acceptance scenario.
   const skus = await client.get<Array<{ id: string; skuCode: string }>>(
@@ -163,9 +163,9 @@ beforeAll(async () => {
   sz01WarehouseId = warehouses.body.data.find((item) => item.warehouseCode === 'SZ01')?.id ?? '';
   if (vk87BlkSkuId !== '' && sz01WarehouseId !== '') {
     const szBins = await client.get<Array<{ id: string; binCode: string }>>(
-      `/api/v1/warehouses/${sz01WarehouseId}/bins?keyword=A01-01&pageSize=10`,
+      `/api/v1/warehouses/${sz01WarehouseId}/bins?keyword=A01-1&pageSize=10`,
     );
-    sz01A01BinId = szBins.body.data.find((bin) => bin.binCode === 'SZ01-A01-01')?.id ?? '';
+    sz01A01BinId = szBins.body.data.find((bin) => bin.binCode === 'SZ01-A01-1')?.id ?? '';
   }
 });
 
@@ -486,14 +486,14 @@ describe('multi-bin reservation (task §25/§72, §86)', () => {
     expect(created.status).toBe(200);
     expect(created.body.data.lines).toHaveLength(2);
     const byBin = new Map(
-      created.body.data.lines.map((line) => [line.binCode.slice(-6), line.quantity]),
+      created.body.data.lines.map((line) => [line.binCode.slice(-5), line.quantity]),
     );
-    expect(byBin.get('A01-01')).toBe('2.000');
-    expect(byBin.get('A02-01')).toBe('3.000');
+    expect(byBin.get('A01-1')).toBe('2.000');
+    expect(byBin.get('A02-1')).toBe('3.000');
 
     const rows = await balancesOf(multiSkuId);
-    const a01 = rows.find((row) => row.binCode.endsWith('A01-01'));
-    const a02 = rows.find((row) => row.binCode.endsWith('A02-01'));
+    const a01 = rows.find((row) => row.binCode.endsWith('A01-1'));
+    const a02 = rows.find((row) => row.binCode.endsWith('A02-1'));
     expect(a01?.reservedQty).toBe('2.000');
     expect(a02?.reservedQty).toBe('3.000');
 

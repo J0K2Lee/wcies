@@ -9,6 +9,7 @@ import {
   IsString,
   IsUUID,
   Length,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -207,10 +208,14 @@ export class WarehouseListItemDto extends WarehouseResponseDto {
 // ---------------------------------------------------------------------------
 
 export class CreateBinRequestDto {
-  @ApiProperty({ example: 'SZ01-A01-01', maxLength: 100 })
+  @ApiPropertyOptional({
+    example: 'ZG-01-A01-1',
+    description: '库位编码；留空则由区/架/层/位自动生成（推荐）',
+  })
+  @IsOptional()
   @IsString()
   @Length(1, 100)
-  binCode!: string;
+  binCode?: string;
 
   @ApiPropertyOptional({ example: 'A' })
   @IsOptional()
@@ -224,7 +229,7 @@ export class CreateBinRequestDto {
   @MaxLength(100)
   rack?: string;
 
-  @ApiPropertyOptional({ example: '01' })
+  @ApiPropertyOptional({ example: '1' })
   @IsOptional()
   @IsString()
   @MaxLength(100)
@@ -236,7 +241,7 @@ export class CreateBinRequestDto {
   @MaxLength(100)
   position?: string;
 
-  @ApiPropertyOptional({ example: 'BIN-SZ01-A01-01', description: 'Auto-generated when omitted' })
+  @ApiPropertyOptional({ example: 'ZG-01-A01-1', description: '留空则与库位编码相同' })
   @IsOptional()
   @IsString()
   @MaxLength(255)
@@ -296,6 +301,12 @@ export class BinListQueryDto extends PaginationQueryDto {
   @IsString()
   keyword?: string;
 
+  @ApiPropertyOptional({ description: 'Exact zone match' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  zone?: string;
+
   @ApiPropertyOptional({ enum: ['ACTIVE', 'INACTIVE'] })
   @IsOptional()
   @IsIn(['ACTIVE', 'INACTIVE'])
@@ -309,7 +320,7 @@ export class BinResponseDto {
   @ApiProperty({ format: 'uuid' })
   warehouseId!: string;
 
-  @ApiProperty({ example: 'SZ01-A01-01' })
+  @ApiProperty({ example: 'ZG-01-A01-1' })
   binCode!: string;
 
   @ApiProperty({ nullable: true })
@@ -324,7 +335,7 @@ export class BinResponseDto {
   @ApiProperty({ nullable: true })
   position!: string | null;
 
-  @ApiProperty({ example: 'BIN-SZ01-A01-01', nullable: true })
+  @ApiProperty({ example: 'ZG-01-A01-1', nullable: true })
   barcode!: string | null;
 
   @ApiProperty({ example: 'ACTIVE' })
@@ -340,48 +351,43 @@ export class BinResponseDto {
   updatedAt!: Date;
 }
 
-/** Batch creation (task §41): e.g. rack A01~A05 x level 01~04. */
+/**
+ * Batch creation (task §41, revised 2026-09-11): the caller states the layout
+ * intent and the server owns the bin_code format, because bin_code is
+ * immutable and printed on physical labels:
+ *   zone 'A', rackStart 1, rackCount 5, levelsPerRack 4
+ *     -> ZG-01-A01-1 … ZG-01-A05-4 (20 bins)
+ */
 export class BatchCreateBinsRequestDto {
-  @ApiPropertyOptional({ example: 'A', description: 'Stored on every generated bin' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  zone?: string;
-
-  @ApiProperty({ example: 'A01' })
-  @IsString()
-  @MaxLength(100)
-  rackFrom!: string;
-
-  @ApiProperty({ example: 'A05' })
-  @IsString()
-  @MaxLength(100)
-  rackTo!: string;
-
-  @ApiProperty({ example: '01' })
-  @IsString()
-  @MaxLength(100)
-  levelFrom!: string;
-
-  @ApiProperty({ example: '04' })
-  @IsString()
-  @MaxLength(100)
-  levelTo!: string;
-
   @ApiPropertyOptional({
-    example: '01',
-    description: 'Position range; omit for no position suffix',
+    example: 'A',
+    description: '库区；同时作为货架编码前缀（A → 货架 A01）。留空则货架编码无前缀。',
   })
   @IsOptional()
   @IsString()
-  @MaxLength(100)
-  positionFrom?: string;
+  @MaxLength(20)
+  zone?: string;
 
-  @ApiPropertyOptional({ example: '02' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  positionTo?: string;
+  @ApiProperty({ example: 1, description: '起始货架号（含）' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(9999)
+  rackStart!: number;
+
+  @ApiProperty({ example: 5, description: '货架数量' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(2000)
+  rackCount!: number;
+
+  @ApiProperty({ example: 4, description: '每个货架的层数' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(999)
+  levelsPerRack!: number;
 }
 
 export class BatchCreateBinsResponseDto {
