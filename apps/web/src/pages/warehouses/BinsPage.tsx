@@ -14,6 +14,7 @@ import {
 } from 'antd';
 import { useState } from 'react';
 import { apiDelete, apiPost, useApiQuery } from '../../api/hooks';
+import { printTasksBrowser } from '../../printing/print-browser';
 import { colors } from '../../design-system';
 
 interface BinRow {
@@ -315,6 +316,19 @@ export function BinsPage() {
             width: 170,
             render: (_: unknown, row: BinRow) => (
               <Space>
+                <Button
+                  size="small"
+                  onClick={() =>
+                    printTasksBrowser([
+                      {
+                        type: 'BIN_LABEL',
+                        payload: { binCode: row.binCode, copies: 1 },
+                      },
+                    ])
+                  }
+                >
+                  打印
+                </Button>
                 {row.status === 'ACTIVE' ? (
                   <Popconfirm
                     title="确认停用该库位？"

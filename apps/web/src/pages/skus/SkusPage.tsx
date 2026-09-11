@@ -7,6 +7,7 @@ import {
   Form,
   Image,
   Input,
+  InputNumber,
   Modal,
   Popconfirm,
   Select,
@@ -17,6 +18,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { apiDelete, apiPatch, apiPost, useApiQuery } from '../../api/hooks';
 import { SkuCreateModal } from '../../components/SkuCreateModal';
+import { printTasksBrowser } from '../../printing/print-browser';
 import {
   ActionMenu,
   DeleteConfirmModal,
@@ -172,6 +174,9 @@ export function SkusPage() {
   // Three-level interaction (task §19): row click → rail preview, 查看 → drawer.
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerId, setDrawerId] = useState<string | null>(null);
+  const [printFor, setPrintFor] = useState<SkuRow | null>(null);
+  const [printBarcode, setPrintBarcode] = useState<string>('');
+  const [printCopies, setPrintCopies] = useState(1);
   const [createOpen, setCreateOpen] = useState(() => searchParams.get('create') === '1');
 
   // ---- Delete confirmation (normal vs forced cascade) ----
@@ -510,6 +515,16 @@ export function SkusPage() {
   });
 
   const sku = detail.data?.data;
+  const printBarcodes = useApiQuery<{
+    data: Array<{ barcode: string; isPrimary: boolean; barcodeType: string }>;
+  }>(
+    '/api/v1/skus/{skuId}/barcodes',
+    {},
+    ['sku-print-barcodes', printFor?.id],
+    { skuId: printFor?.id ?? '' },
+    printFor !== null,
+  );
+
   const rows = list.data?.data ?? [];
 
   // ---- Context rail: quick view of the selected SKU (task §29) ----
@@ -895,6 +910,16 @@ export function SkusPage() {
                             statusMutation.mutate({ id: record.id, action: 'activate' }),
                         },
                     {
+                      key: 'print',
+                      label: '打印条码标签',
+                      onClick: () => {
+                        const primary = printBarcodes.data?.data.find((b) => b.isPrimary);
+                        setPrintBarcode(primary?.barcode ?? '');
+                        setPrintCopies(1);
+                        setPrintFor(record);
+                      },
+                    },
+                    {
                       key: 'delete',
                       label: '删除',
                       danger: true,
@@ -908,6 +933,56 @@ export function SkusPage() {
           ]}
         />
       </SectionCard>
+
+      <Modal
+        title={`打印条码标签：${printFor?.skuCode ?? ''}`}
+        open={printFor !== null}
+        onCancel={() => setPrintFor(null)}
+        onOk={() => {
+          if (printBarcode === '') {
+            message.warning('请选择要打印的条码');
+            return;
+          }
+          printTasksBrowser([
+            {
+              type: 'SKU_LABEL',
+              payload: {
+                barcode: printBarcode,
+                skuCode: printFor?.skuCode ?? '',
+                skuName: printFor?.nameZh,
+                copies: printCopies,
+              },
+            },
+          ]);
+        }}
+        okText="打印"
+        cancelText="取消"
+        destroyOnHidden
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <Select
+            placeholder="选择要打印的条码"
+            value={printBarcode === '' ? undefined : printBarcode}
+            onChange={setPrintBarcode}
+            options={(printBarcodes.data?.data ?? []).map((b) => ({
+              value: b.barcode,
+              label: `${b.barcode}（${b.isPrimary ? '主条码 · ' : ''}${b.barcodeType}）`,
+            }))}
+            loading={printBarcodes.isLoading}
+          />
+          <InputNumber
+            min={1}
+            max={200}
+            value={printCopies}
+            onChange={(value) => setPrintCopies(value ?? 1)}
+            addonAfter="份"
+            style={{ width: 140 }}
+          />
+          <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+            Code128 条码，新窗口打印；无条码可先在下方条码区生成内部条码 WCSKU…。
+          </span>
+        </div>
+      </Modal>
 
       <SkuCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
 
