@@ -1,0 +1,456 @@
+import { useMemo, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { App as AntdApp, Button, Drawer, Form, Input, Modal, Select } from 'antd';
+import { apiDelete, apiPatch, apiPost, useApiQuery } from '../../api/hooks';
+import { fmtDateTime } from '../../utils/format';
+import {
+  ActionMenu,
+  colors,
+  ContextMetric,
+  ContextRailContent,
+  ContextSection,
+  DataTable,
+  DeleteConfirmModal,
+  EntitySummary,
+  FilterBar,
+  PageHeader,
+  SectionCard,
+  StatusBadge,
+  useContextRail,
+} from '../../design-system';
+
+/**
+ * Supplier master data (Sprint 7 T2). Only REUSABLE vendors live here -
+ * one-off online purchases are recorded as source_note on the purchase
+ * documents instead (decision 0013 §3), which this page states explicitly
+ * so operators do not pollute the master data with throwaway sellers.
+ */
+
+interface SupplierRow {
+  id: string;
+  code: string;
+  name: string;
+  contactName: string | null;
+  contactPhone: string | null;
+  status: string;
+  remark: string | null;
+  referenceCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface SupplierFormValues {
+  name: string;
+  code?: string;
+  contactName?: string;
+  contactPhone?: string;
+  remark?: string;
+}
+
+type Envelope<T> = { data: T; meta: { total: number } };
+
+export function SuppliersPage() {
+  const { message } = AntdApp.useApp();
+  const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
+  const [keyword, setKeyword] = useState('');
+  const [status, setStatus] = useState<string | undefined>();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<SupplierRow | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [deleting, setDeleting] = useState<SupplierRow | null>(null);
+  const [form] = Form.useForm<SupplierFormValues>();
+
+  const list = useApiQuery<Envelope<SupplierRow[]>>(
+    '/api/v1/suppliers',
+    {
+      page,
+      pageSize: 20,
+      ...(keyword ? { keyword } : {}),
+      ...(status ? { status } : {}),
+    },
+    ['suppliers', page, keyword, status],
+  );
+
+  const detail = useApiQuery<{ data: SupplierRow }>(
+    '/api/v1/suppliers/{id}',
+    {},
+    ['supplier-detail', detailId],
+    { id: detailId ?? '' },
+    detailId !== null,
+  );
+
+  const rows = list.data?.data ?? [];
+  const selectedRow = useMemo(
+    () => rows.find((row) => row.id === selectedId) ?? null,
+    [rows, selectedId],
+  );
+  const detailRow = detail.data?.data ?? null;
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+    void queryClient.invalidateQueries({ queryKey: ['supplier-detail'] });
+  };
+
+  const createMutation = useMutation({
+    mutationFn: (values: SupplierFormValues) => apiPost('/api/v1/suppliers', values),
+    onSuccess: () => {
+      void message.success('供应商已创建');
+      setCreateOpen(false);
+      form.resetFields();
+      invalidate();
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, values }: { id: string; values: Partial<SupplierFormValues> }) =>
+      apiPatch('/api/v1/suppliers/{id}', values, { id }),
+    onSuccess: () => {
+      void message.success('供应商已更新');
+      setEditing(null);
+      invalidate();
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const statusMutation = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'activate' | 'deactivate' }) =>
+      apiPost('/api/v1/suppliers/{id}/{action}', {}, { id, action }),
+    onSuccess: () => {
+      void message.success('状态已更新');
+      invalidate();
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => apiDelete('/api/v1/suppliers/{id}', { id }),
+    onSuccess: (_data, id) => {
+      void message.success('供应商已删除');
+      setDeleting(null);
+      if (detailId === id) {
+        setDetailId(null);
+      }
+      if (selectedId === id) {
+        setSelectedId(null);
+      }
+      invalidate();
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  // ---- Context rail ----
+  const railContent = useMemo<ContextRailContent>(() => {
+    if (selectedRow === null) {
+      return {
+        defaultCollapsed: true,
+        children: (
+          <ContextSection title="供应商概览">
+            <ContextMetric label="当前筛选" value={`${list.data?.meta.total ?? 0} 家`} />
+            <span
+              style={{
+                fontSize: 12.5,
+                color: colors.textTertiary,
+                display: 'block',
+                paddingTop: 8,
+              }}
+            >
+              只把可复用的固定供应商建档；一次性网购在采购单上用「货源说明」记录，不进主数据。
+            </span>
+          </ContextSection>
+        ),
+      };
+    }
+    return {
+      defaultCollapsed: true,
+      header: (
+        <EntitySummary
+          title={selectedRow.name}
+          subtitle={selectedRow.code}
+          badge={
+            <StatusBadge
+              tone={selectedRow.status === 'ACTIVE' ? 'success' : 'neutral'}
+              label={selectedRow.status === 'ACTIVE' ? '启用' : '停用'}
+              hint={selectedRow.status}
+            />
+          }
+        />
+      ),
+      children: (
+        <ContextSection title="基本信息">
+          <ContextMetric label="联系人" value={selectedRow.contactName ?? '—'} />
+          <ContextMetric label="联系电话" value={selectedRow.contactPhone ?? '—'} />
+          <ContextMetric label="备注" value={selectedRow.remark ?? '—'} />
+          <ContextMetric label="创建时间" value={fmtDateTime(selectedRow.createdAt)} />
+        </ContextSection>
+      ),
+    };
+  }, [selectedRow, list.data]);
+  useContextRail(railContent);
+
+  const supplierForm = (
+    <Form form={form} layout="vertical" preserve={false}>
+      <Form.Item
+        name="name"
+        label="供应商名称"
+        rules={[{ required: true, message: '请输入供应商名称' }]}
+      >
+        <Input placeholder="如：深圳华强北电子供应商" maxLength={200} />
+      </Form.Item>
+      {editing === null && (
+        <Form.Item name="code" label="编码（留空自动生成 SUP%04d）">
+          <Input placeholder="自动生成" maxLength={50} />
+        </Form.Item>
+      )}
+      <Form.Item name="contactName" label="联系人">
+        <Input maxLength={100} />
+      </Form.Item>
+      <Form.Item name="contactPhone" label="联系电话">
+        <Input maxLength={100} />
+      </Form.Item>
+      <Form.Item name="remark" label="备注">
+        <Input.TextArea rows={3} maxLength={2000} />
+      </Form.Item>
+    </Form>
+  );
+
+  return (
+    <div>
+      <PageHeader
+        title="供应商管理"
+        description="维护可复用的固定供应商；一次性网购货源写在采购单的「货源说明」里"
+        primary={
+          <Button
+            type="primary"
+            onClick={() => {
+              form.resetFields();
+              setCreateOpen(true);
+            }}
+          >
+            新建供应商
+          </Button>
+        }
+      />
+
+      <FilterBar>
+        <Input.Search
+          placeholder="编码 / 名称"
+          allowClear
+          onSearch={(value) => {
+            setPage(1);
+            setKeyword(value);
+          }}
+          style={{ width: 240 }}
+          aria-label="搜索供应商"
+        />
+        <Select
+          allowClear
+          placeholder="状态"
+          style={{ width: 130 }}
+          options={[
+            { value: 'ACTIVE', label: '启用' },
+            { value: 'INACTIVE', label: '停用' },
+          ]}
+          value={status}
+          onChange={(value) => {
+            setPage(1);
+            setStatus(value);
+          }}
+        />
+      </FilterBar>
+
+      <SectionCard flush>
+        <DataTable<SupplierRow>
+          rowKey="id"
+          loading={list.isLoading}
+          dataSource={rows}
+          pagination={{
+            current: page,
+            pageSize: 20,
+            total: list.data?.meta.total ?? 0,
+            showTotal: (total) => `共 ${total} 家`,
+            onChange: setPage,
+          }}
+          onRow={(record) => ({
+            onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+            style: {
+              cursor: 'pointer',
+              background: record.id === selectedId ? colors.primarySoft : undefined,
+            },
+          })}
+          emptyTitle="暂无供应商"
+          emptyDescription="可复用的固定供应商在这里建档，供采购单与收货单引用。"
+          columns={[
+            { title: '编码', dataIndex: 'code', key: 'code', width: 110 },
+            { title: '名称', dataIndex: 'name', key: 'name' },
+            { title: '联系人', dataIndex: 'contactName', key: 'contactName', width: 120 },
+            { title: '联系电话', dataIndex: 'contactPhone', key: 'contactPhone', width: 140 },
+            {
+              title: '状态',
+              dataIndex: 'status',
+              key: 'status',
+              width: 90,
+              render: (value: string) => (
+                <StatusBadge
+                  tone={value === 'ACTIVE' ? 'success' : 'neutral'}
+                  label={value === 'ACTIVE' ? '启用' : '停用'}
+                  hint={value}
+                />
+              ),
+            },
+            {
+              title: '创建时间',
+              dataIndex: 'createdAt',
+              key: 'createdAt',
+              width: 160,
+              render: (value: string) => fmtDateTime(value),
+            },
+            {
+              title: '操作',
+              key: 'actions',
+              width: 120,
+              fixed: 'right',
+              render: (_: unknown, row: SupplierRow) => (
+                <ActionMenu
+                  primary={
+                    <Button
+                      type="link"
+                      size="small"
+                      style={{ paddingInline: 4 }}
+                      onClick={() => setDetailId(row.id)}
+                    >
+                      查看
+                    </Button>
+                  }
+                  items={[
+                    {
+                      key: 'edit',
+                      label: '编辑',
+                      onClick: () => {
+                        form.setFieldsValue({
+                          name: row.name,
+                          contactName: row.contactName ?? undefined,
+                          contactPhone: row.contactPhone ?? undefined,
+                          remark: row.remark ?? undefined,
+                        });
+                        setEditing(row);
+                      },
+                    },
+                    ...(row.status === 'ACTIVE'
+                      ? [
+                          {
+                            key: 'deactivate',
+                            label: '停用',
+                            onClick: () =>
+                              statusMutation.mutate({ id: row.id, action: 'deactivate' }),
+                          },
+                        ]
+                      : [
+                          {
+                            key: 'activate',
+                            label: '启用',
+                            onClick: () =>
+                              statusMutation.mutate({ id: row.id, action: 'activate' }),
+                          },
+                        ]),
+                    {
+                      key: 'delete',
+                      label: '删除',
+                      danger: true,
+                      onClick: () => setDeleting(row),
+                    },
+                  ]}
+                />
+              ),
+            },
+          ]}
+        />
+      </SectionCard>
+
+      <Drawer
+        open={detailId !== null}
+        onClose={() => setDetailId(null)}
+        size={560}
+        title={
+          detailRow !== null && (
+            <span style={{ fontSize: 16, fontWeight: 650 }}>
+              {detailRow.code} · {detailRow.name}
+            </span>
+          )
+        }
+        extra={
+          detailRow !== null && (
+            <StatusBadge
+              tone={detailRow.status === 'ACTIVE' ? 'success' : 'neutral'}
+              label={detailRow.status === 'ACTIVE' ? '启用' : '停用'}
+              hint={detailRow.status}
+            />
+          )
+        }
+        styles={{ body: { padding: 20 } }}
+        destroyOnHidden
+      >
+        {detailRow !== null && (
+          <ContextSection title="供应商信息">
+            <ContextMetric label="编码" value={detailRow.code} />
+            <ContextMetric label="名称" value={detailRow.name} />
+            <ContextMetric label="联系人" value={detailRow.contactName ?? '—'} />
+            <ContextMetric label="联系电话" value={detailRow.contactPhone ?? '—'} />
+            <ContextMetric label="备注" value={detailRow.remark ?? '—'} />
+            <ContextMetric label="创建时间" value={fmtDateTime(detailRow.createdAt)} />
+            <ContextMetric label="更新时间" value={fmtDateTime(detailRow.updatedAt)} />
+          </ContextSection>
+        )}
+      </Drawer>
+
+      <Modal
+        title="新建供应商"
+        open={createOpen}
+        onCancel={() => setCreateOpen(false)}
+        onOk={() => {
+          void form.validateFields().then((values) => createMutation.mutate(values));
+        }}
+        okText="创建"
+        cancelText="取消"
+        confirmLoading={createMutation.isPending}
+        destroyOnHidden
+      >
+        {supplierForm}
+      </Modal>
+
+      <Modal
+        title={`编辑供应商 ${editing?.code ?? ''}`}
+        open={editing !== null}
+        onCancel={() => setEditing(null)}
+        onOk={() => {
+          void form.validateFields().then((values) => {
+            if (editing !== null) {
+              updateMutation.mutate({ id: editing.id, values });
+            }
+          });
+        }}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={updateMutation.isPending}
+        destroyOnHidden
+      >
+        {supplierForm}
+      </Modal>
+
+      <DeleteConfirmModal
+        open={deleting !== null}
+        title={`删除供应商 ${deleting?.code ?? ''}？`}
+        description="仅零引用的供应商可物理删除；被采购单或收货单引用的供应商只能停用。"
+        confirmLoading={deleteMutation.isPending}
+        onConfirm={() => {
+          if (deleting !== null) {
+            deleteMutation.mutate(deleting.id);
+          }
+        }}
+        onCancel={() => setDeleting(null)}
+      />
+    </div>
+  );
+}

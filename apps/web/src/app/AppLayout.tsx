@@ -11,6 +11,7 @@ import {
   InboxOutlined,
   LayoutOutlined,
   QuestionCircleOutlined,
+  ShoppingCartOutlined,
   ShoppingOutlined,
   ToolOutlined,
 } from '@ant-design/icons';
@@ -61,6 +62,12 @@ const MENU_ITEMS = [
       { key: '/inventory/transactions', label: '库存流水' },
       { key: '/inventory/reservations', label: '库存占用' },
     ],
+  },
+  {
+    key: 'purchase-group',
+    label: '采购',
+    icon: <ShoppingCartOutlined />,
+    children: [{ key: '/suppliers', label: '供应商' }],
   },
   {
     key: 'order-group',
@@ -371,9 +378,7 @@ export function AppLayout() {
                 <Avatar size={26} style={{ background: colors.primary, fontSize: 12.5 }}>
                   {user.username.slice(0, 1).toUpperCase()}
                 </Avatar>
-                <span style={{ fontSize: 13, color: colors.textSecondary }}>
-                  {user.username}
-                </span>
+                <span style={{ fontSize: 13, color: colors.textSecondary }}>{user.username}</span>
                 <span
                   style={{
                     fontSize: 11,

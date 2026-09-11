@@ -1925,6 +1925,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/suppliers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List suppliers (paged + reference counts) */
+        get: operations["SupplierController_list"];
+        put?: never;
+        /** Create a supplier (code auto-generated when omitted) */
+        post: operations["SupplierController_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/suppliers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get supplier detail */
+        get: operations["SupplierController_getById"];
+        put?: never;
+        post?: never;
+        /** Delete a supplier with zero references (else SUPPLIER_IN_USE) */
+        delete: operations["SupplierController_remove"];
+        options?: never;
+        head?: never;
+        /** Update supplier fields (code immutable) */
+        patch: operations["SupplierController_update"];
+        trace?: never;
+    };
+    "/api/v1/suppliers/{id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Activate a supplier */
+        post: operations["SupplierController_activate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/suppliers/{id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Deactivate a supplier */
+        post: operations["SupplierController_deactivate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sync/orders": {
         parameters: {
             query?: never;
@@ -4289,6 +4360,56 @@ export interface components {
         SealPackageRequestDto: {
             /** @description 封箱时录入重量/尺寸 */
             dimensions?: components["schemas"]["PackageDimensionsDto"];
+        };
+        SupplierListItemDto: {
+            id: string;
+            /** @example SUP0001 */
+            code: string;
+            /** @example 深圳华强北电子供应商 */
+            name: string;
+            contactName?: Record<string, never> | null;
+            contactPhone?: Record<string, never> | null;
+            /** @enum {string} */
+            status: "ACTIVE" | "INACTIVE";
+            remark?: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            referenceCount: number;
+        };
+        SupplierResponseDto: {
+            id: string;
+            /** @example SUP0001 */
+            code: string;
+            /** @example 深圳华强北电子供应商 */
+            name: string;
+            contactName?: Record<string, never> | null;
+            contactPhone?: Record<string, never> | null;
+            /** @enum {string} */
+            status: "ACTIVE" | "INACTIVE";
+            remark?: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        CreateSupplierRequestDto: {
+            /** @example 深圳华强北电子供应商 */
+            name: string;
+            /** @description 留空自动生成 SUP%04d；创建后不可改 */
+            code?: string;
+            contactName?: string;
+            contactPhone?: string;
+            remark?: string;
+        };
+        UpdateSupplierRequestDto: {
+            name?: string;
+            contactName?: string;
+            contactPhone?: string;
+            /** @enum {string} */
+            status?: "ACTIVE" | "INACTIVE";
+            remark?: string;
         };
         SyncJobDto: {
             id: string;
@@ -8381,6 +8502,194 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["SealPackageResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    SupplierController_list: {
+        parameters: {
+            query?: {
+                /** @description 编码 / 名称模糊搜索 */
+                keyword?: string;
+                status?: "ACTIVE" | "INACTIVE";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SupplierListItemDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    SupplierController_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSupplierRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SupplierResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    SupplierController_getById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SupplierResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    SupplierController_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
+            };
+        };
+    };
+    SupplierController_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSupplierRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SupplierResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    SupplierController_activate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SupplierResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    SupplierController_deactivate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SupplierResponseDto"];
                     };
                 };
             };

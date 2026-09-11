@@ -28,6 +28,7 @@ import { OrderModule } from './modules/order/order.module';
 import { PickingModule } from './modules/picking/picking.module';
 import { ShipmentModule } from './modules/shipment/shipment.module';
 import { InterceptionModule } from './modules/interception/interception.module';
+import { PurchaseModule } from './modules/purchase/purchase.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { IntegrationModule } from './modules/integration/integration.module';
 import { SyncModule } from './modules/sync/sync.module';
@@ -64,6 +65,7 @@ import { SyncModule } from './modules/sync/sync.module';
     PickingModule,
     ShipmentModule,
     InterceptionModule,
+    PurchaseModule,
     NotificationModule,
     IntegrationModule,
     SyncModule,

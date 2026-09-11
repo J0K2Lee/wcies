@@ -27,6 +27,10 @@ export type StorePlatformCode = keyof typeof PLATFORM_CODE_PREFIX;
 const SCOPE_BRAND = 'brand';
 const SCOPE_CATEGORY = 'category';
 const SCOPE_PRODUCT = 'product';
+/** Sprint 7 purchase documents (master-data.md §1; decision 0013 §7). */
+const SCOPE_SUPPLIER = 'supplier';
+const SCOPE_PURCHASE_ORDER = 'purchase_order';
+const SCOPE_PURCHASE_RECEIPT = 'purchase_receipt';
 
 export function warehouseScope(warehouseType: WarehouseCodeType): string {
   return `warehouse:${warehouseType}`;
@@ -61,6 +65,21 @@ export function formatCategoryCode(seq: number): string {
 
 export function formatProductCode(seq: number): string {
   return `PN${String(seq).padStart(6, '0')}`;
+}
+
+/** Supplier SUP%04d (Sprint 7, master-data.md §1). */
+export function formatSupplierCode(seq: number): string {
+  return `SUP${String(seq).padStart(4, '0')}`;
+}
+
+/** Purchase order PO%06d (Sprint 7, master-data.md §1). */
+export function formatPurchaseOrderNo(seq: number): string {
+  return `PO${String(seq).padStart(6, '0')}`;
+}
+
+/** Purchase receipt PR%06d (Sprint 7, master-data.md §1). */
+export function formatPurchaseReceiptNo(seq: number): string {
+  return `PR${String(seq).padStart(6, '0')}`;
 }
 
 export function formatSkuCode(productSeq: number, inProductSeq: number): string {
@@ -110,6 +129,21 @@ export class BusinessCodeService {
 
   async nextBrandCode(): Promise<string> {
     return formatBrandCode(await this.next(SCOPE_BRAND));
+  }
+
+  /** Supplier code SUP%04d (Sprint 7). */
+  async nextSupplierCode(): Promise<string> {
+    return formatSupplierCode(await this.next(SCOPE_SUPPLIER));
+  }
+
+  /** Purchase order number PO%06d (Sprint 7). */
+  async nextPurchaseOrderNo(): Promise<string> {
+    return formatPurchaseOrderNo(await this.next(SCOPE_PURCHASE_ORDER));
+  }
+
+  /** Purchase receipt number PR%06d (Sprint 7). */
+  async nextPurchaseReceiptNo(): Promise<string> {
+    return formatPurchaseReceiptNo(await this.next(SCOPE_PURCHASE_RECEIPT));
   }
 
   async nextCategoryCode(): Promise<string> {

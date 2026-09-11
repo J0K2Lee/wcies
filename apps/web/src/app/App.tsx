@@ -26,6 +26,7 @@ import { InterceptionDetailPage } from '../pages/interceptions/InterceptionDetai
 import { NotificationsPage } from '../pages/notifications/NotificationsPage';
 import { SyncCenterPage } from '../pages/sync/SyncCenterPage';
 import { ExceptionsPage } from '../pages/exceptions/ExceptionsPage';
+import { SuppliersPage } from '../pages/purchase/SuppliersPage';
 import { SystemPage } from '../pages/system/SystemPage';
 import { PlatformMappingsPage } from '../pages/system/PlatformMappingsPage';
 
@@ -59,6 +60,7 @@ export function App() {
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/sync" element={<SyncCenterPage />} />
           <Route path="/exceptions" element={<ExceptionsPage />} />
+          <Route path="/suppliers" element={<SuppliersPage />} />
           <Route path="/system" element={<SystemPage />} />
           <Route path="/platform-mappings" element={<PlatformMappingsPage />} />
         </Route>
