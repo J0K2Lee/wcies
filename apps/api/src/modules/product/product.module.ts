@@ -19,6 +19,7 @@ import { SkuImageService } from './services/sku-image.service';
 import { SkuBundleService } from './services/sku-bundle.service';
 import { ProductController } from './controllers/product.controller';
 import { SkuController } from './controllers/sku.controller';
+import { BarcodeController } from './controllers/barcode.controller';
 
 /** Product + SKU + barcode + images (spec §94 module layout). */
 @Module({
@@ -34,7 +35,7 @@ import { SkuController } from './controllers/sku.controller';
     OperationLogModule,
     ObjectStorageModule,
   ],
-  controllers: [ProductController, SkuController],
+  controllers: [ProductController, SkuController, BarcodeController],
   providers: [
     ProductService,
     SkuService,

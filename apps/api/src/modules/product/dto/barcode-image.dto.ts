@@ -42,6 +42,16 @@ export class UpdateBarcodeRequestDto {
   status?: 'ACTIVE' | 'INACTIVE';
 }
 
+/** Result of GET /barcodes/:barcode/resolve (Sprint 7 T5.1). */
+export class BarcodeResolveDto {
+  @ApiProperty({ format: 'uuid' }) skuId!: string;
+  @ApiProperty({ example: 'SKU000001001' }) skuCode!: string;
+  @ApiProperty({ example: 'VK87 MAX V2 黑色' }) skuName!: string;
+  @ApiProperty({ example: '6971234567890' }) matchedBarcode!: string;
+  @ApiProperty({ example: 'EAN' }) barcodeType!: string;
+  @ApiProperty({ example: false }) serialTracking!: boolean;
+}
+
 export class BarcodeResponseDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;

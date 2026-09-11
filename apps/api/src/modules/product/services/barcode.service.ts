@@ -6,6 +6,7 @@ import { SkuNotFoundError } from '../errors/sku-errors';
 import { SkuRepository } from '../repositories/sku.repository';
 import { SkuBarcodeRepository } from '../repositories/sku-barcode.repository';
 import {
+  BarcodeResolveDto,
   BarcodeResponseDto,
   CreateBarcodeRequestDto,
   UpdateBarcodeRequestDto,
@@ -125,6 +126,31 @@ export class BarcodeService {
   /** Cross-module lookups. */
   async findByBarcode(barcode: string): Promise<SkuBarcodeEntity | null> {
     return this.repository.findByBarcode(barcode);
+  }
+
+  /**
+   * Barcode -> internal SKU with display fields (Sprint 7 T5.1). Returns
+   * null when the barcode is unknown or its record is not ACTIVE. Barcodes
+   * are globally unique, so there is no store dimension here (unlike the
+   * store-scoped Listing Resolver, AGENTS.md par26).
+   */
+  async resolveBarcode(barcode: string): Promise<BarcodeResolveDto | null> {
+    const record = await this.repository.findByBarcode(barcode);
+    if (record === null || record.status !== 'ACTIVE') {
+      return null;
+    }
+    const sku = await this.skuRepository.findById(record.skuId);
+    if (sku === null) {
+      return null;
+    }
+    return {
+      skuId: sku.id,
+      skuCode: sku.skuCode,
+      skuName: sku.nameZh,
+      matchedBarcode: record.barcode,
+      barcodeType: record.barcodeType,
+      serialTracking: sku.serialTracking,
+    };
   }
 
   private async assertSkuExists(skuId: string): Promise<void> {

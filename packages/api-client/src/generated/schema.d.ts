@@ -601,6 +601,23 @@ export interface paths {
         patch: operations["SkuController_updateImage"];
         trace?: never;
     };
+    "/api/v1/barcodes/{barcode}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 按条码解析内部 SKU（收货/拣货扫码共用） */
+        get: operations["BarcodeController_resolve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/warehouses": {
         parameters: {
             query?: never;
@@ -2945,6 +2962,20 @@ export interface components {
             sortOrder?: number;
             /** @description DB keeps at most one primary per SKU */
             isPrimary?: boolean;
+        };
+        BarcodeResolveDto: {
+            /** Format: uuid */
+            skuId: string;
+            /** @example SKU000001001 */
+            skuCode: string;
+            /** @example VK87 MAX V2 黑色 */
+            skuName: string;
+            /** @example 6971234567890 */
+            matchedBarcode: string;
+            /** @example EAN */
+            barcodeType: string;
+            /** @example false */
+            serialTracking: boolean;
         };
         WarehouseListItemDto: {
             /** Format: uuid */
@@ -6288,6 +6319,31 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["SkuImageResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    BarcodeController_resolve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                barcode: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BarcodeResolveDto"];
                     };
                 };
             };

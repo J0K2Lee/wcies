@@ -2379,6 +2379,45 @@
         "tags": ["skus"]
       }
     },
+    "/api/v1/barcodes/{barcode}/resolve": {
+      "get": {
+        "operationId": "BarcodeController_resolve",
+        "parameters": [
+          {
+            "name": "barcode",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/BarcodeResolveDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "按条码解析内部 SKU（收货/拣货扫码共用）",
+        "tags": ["barcodes"]
+      }
+    },
     "/api/v1/warehouses": {
       "get": {
         "operationId": "WarehouseController_list",
@@ -10033,6 +10072,43 @@
             "description": "DB keeps at most one primary per SKU"
           }
         }
+      },
+      "BarcodeResolveDto": {
+        "type": "object",
+        "properties": {
+          "skuId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skuCode": {
+            "type": "string",
+            "example": "SKU000001001"
+          },
+          "skuName": {
+            "type": "string",
+            "example": "VK87 MAX V2 黑色"
+          },
+          "matchedBarcode": {
+            "type": "string",
+            "example": "6971234567890"
+          },
+          "barcodeType": {
+            "type": "string",
+            "example": "EAN"
+          },
+          "serialTracking": {
+            "type": "boolean",
+            "example": false
+          }
+        },
+        "required": [
+          "skuId",
+          "skuCode",
+          "skuName",
+          "matchedBarcode",
+          "barcodeType",
+          "serialTracking"
+        ]
       },
       "WarehouseListItemDto": {
         "type": "object",

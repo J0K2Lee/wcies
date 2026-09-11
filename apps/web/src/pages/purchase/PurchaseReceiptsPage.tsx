@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { App as AntdApp, Button, Drawer, Form, Input, InputNumber, Modal, Select } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { apiPost, useApiQuery } from '../../api/hooks';
+import { apiClient } from '../../api/client';
 import { fmtDateTime } from '../../utils/format';
 import {
   ActionMenu,
@@ -20,10 +21,11 @@ import {
 } from '../../design-system';
 
 /**
- * Purchase receipts (Sprint 7 T4): the REAL receiving action. Confirming a
- * receipt books stock through the inventory core in one transaction - the
- * preview drawer shows exactly what will land in which bin before the
- * irreversible step.
+ * Purchase receipts (Sprint 7 T4/T5): the REAL receiving action. The editor
+ * supports scanning (barcode -> SKU via the global resolve endpoint),
+ * binding unknown barcodes on the spot (decision D13), per-line bin choice
+ * with a live occupancy hint (no automatic capacity check, D9), and a
+ * one-click STAGING bin (Q4 option A) for receive-now-shelve-later.
  */
 
 interface ReceiptRow {
@@ -46,6 +48,7 @@ interface ReceiptItem {
   skuId: string;
   skuCode: string;
   skuName: string;
+  purchaseOrderItemId: string | null;
   quantity: string;
   unitCost: string | null;
   binId: string | null;
@@ -58,18 +61,25 @@ interface ReceiptDetail extends ReceiptRow {
   items: ReceiptItem[];
 }
 
-interface ItemFormValues {
+interface ResolvedBarcode {
   skuId: string;
+  skuCode: string;
+  skuName: string;
+  matchedBarcode: string;
+  barcodeType: string;
+  serialTracking: boolean;
+}
+
+/** One editable receipt line (draft stage). */
+interface EditorItem {
+  skuId: string;
+  label: string;
+  serialTracking: boolean;
   quantity: number;
   unitCost?: number;
   binId?: string;
-}
-
-interface ReceiptFormValues {
-  warehouseId: string;
-  sourceNote?: string;
-  remark?: string;
-  items: ItemFormValues[];
+  serialNumbersText?: string;
+  purchaseOrderItemId?: string;
 }
 
 const STATUS_META: Record<string, { tone: 'info' | 'success' | 'neutral'; label: string }> = {
@@ -79,6 +89,17 @@ const STATUS_META: Record<string, { tone: 'info' | 'success' | 'neutral'; label:
 };
 
 type Envelope<T> = { data: T; meta: { total: number } };
+
+/** Barcode -> SKU through the generated client (never handwritten fetch, §72). */
+async function resolveBarcode(barcode: string): Promise<ResolvedBarcode | null> {
+  const { data, error } = await apiClient.GET('/api/v1/barcodes/{barcode}/resolve', {
+    params: { path: { barcode } },
+  });
+  if (error !== undefined) {
+    return null;
+  }
+  return data.data as ResolvedBarcode;
+}
 
 export function PurchaseReceiptsPage() {
   const { message, modal } = AntdApp.useApp();
@@ -90,8 +111,11 @@ export function PurchaseReceiptsPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [fromPoOpen, setFromPoOpen] = useState(false);
-  const [form] = Form.useForm<ReceiptFormValues>();
+  const [items, setItems] = useState<EditorItem[]>([]);
+  const [editing, setEditing] = useState<ReceiptDetail | null>(null);
+  const [form] = Form.useForm<{ warehouseId: string; sourceNote?: string; remark?: string }>();
   const [fromPoForm] = Form.useForm<{ poId: string; warehouseId: string }>();
+  const watchedWarehouseId = Form.useWatch('warehouseId', form);
 
   const list = useApiQuery<Envelope<ReceiptRow[]>>(
     '/api/v1/purchase-receipts',
@@ -136,25 +160,75 @@ export function PurchaseReceiptsPage() {
     void queryClient.invalidateQueries({ queryKey: ['pos-for-receipt'] });
   };
 
+  const itemsToPayload = (editorItems: EditorItem[]) =>
+    editorItems
+      .filter((item) => item.skuId !== '')
+      .map((item) => ({
+        skuId: item.skuId,
+        ...(item.purchaseOrderItemId ? { purchaseOrderItemId: item.purchaseOrderItemId } : {}),
+        quantity: String(item.quantity),
+        ...(item.unitCost !== undefined && item.unitCost !== null
+          ? { unitCost: String(item.unitCost) }
+          : {}),
+        ...(item.binId ? { binId: item.binId } : {}),
+        ...(item.serialNumbersText && item.serialNumbersText.trim() !== ''
+          ? {
+              serialNumbers: item.serialNumbersText
+                .split(/[\n,，;；\s]+/)
+                .map((sn) => sn.trim())
+                .filter((sn) => sn !== ''),
+            }
+          : {}),
+      }));
+
   const createMutation = useMutation({
-    mutationFn: (values: ReceiptFormValues) =>
+    mutationFn: (values: { warehouseId: string; sourceNote?: string; remark?: string }) =>
       apiPost<{ id: string; receiptNo: string }>('/api/v1/purchase-receipts', {
         warehouseId: values.warehouseId,
         sourceNote: values.sourceNote,
         remark: values.remark,
-        items: values.items.map((item) => ({
-          skuId: item.skuId,
-          quantity: String(item.quantity),
-          ...(item.unitCost !== undefined && item.unitCost !== null
-            ? { unitCost: String(item.unitCost) }
-            : {}),
-          ...(item.binId ? { binId: item.binId } : {}),
-        })),
+        items: itemsToPayload(items),
       }),
     onSuccess: (result) => {
       void message.success(`收货单 ${result.receiptNo} 已创建（草稿，确认后才入账）`);
       setCreateOpen(false);
-      form.resetFields();
+      setItems([]);
+      invalidate();
+      setDetailId(result.id);
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({
+      id,
+      sourceNote,
+      remark,
+    }: {
+      id: string;
+      sourceNote?: string;
+      remark?: string;
+    }) => {
+      const body: Record<string, unknown> = { items: itemsToPayload(items) };
+      if (sourceNote !== undefined) {
+        body.sourceNote = sourceNote;
+      }
+      if (remark !== undefined) {
+        body.remark = remark;
+      }
+      return apiClient.PATCH('/api/v1/purchase-receipts/{id}', {
+        params: { path: { id } },
+        body: body as never,
+      });
+    },
+    onSuccess: (result) => {
+      if (result.error !== undefined) {
+        void message.error(result.error.error.message);
+        return;
+      }
+      void message.success('草稿已保存');
+      setEditing(null);
+      setItems([]);
       invalidate();
     },
     onError: (error: Error) => void message.error(error.message),
@@ -259,11 +333,13 @@ export function PurchaseReceiptsPage() {
     label: `${warehouse.warehouseCode} · ${warehouse.name}`,
   }));
 
+  const editorWarehouseId = editing !== null ? editing.warehouseId : watchedWarehouseId;
+
   return (
     <div>
       <PageHeader
         title="收货单"
-        description="真实收货动作：确认后经库存核心入账并留 PURCHASE_RECEIPT 流水"
+        description="真实收货动作：扫码加明细、选库位（可建暂存位），确认后经库存核心入账"
         primary={
           <span style={{ display: 'inline-flex', gap: 8 }}>
             <Button
@@ -271,7 +347,7 @@ export function PurchaseReceiptsPage() {
               icon={<PlusOutlined />}
               onClick={() => {
                 form.resetFields();
-                form.setFieldsValue({ items: [{ quantity: 1 }] });
+                setItems([]);
                 setCreateOpen(true);
               }}
             >
@@ -385,25 +461,14 @@ export function PurchaseReceiptsPage() {
               render: (_: unknown, row: ReceiptRow) => (
                 <ActionMenu
                   primary={
-                    row.status === 'DRAFT' ? (
-                      <Button
-                        type="link"
-                        size="small"
-                        style={{ paddingInline: 4 }}
-                        onClick={() => setDetailId(row.id)}
-                      >
-                        预览确认
-                      </Button>
-                    ) : (
-                      <Button
-                        type="link"
-                        size="small"
-                        style={{ paddingInline: 4 }}
-                        onClick={() => setDetailId(row.id)}
-                      >
-                        查看
-                      </Button>
-                    )
+                    <Button
+                      type="link"
+                      size="small"
+                      style={{ paddingInline: 4 }}
+                      onClick={() => setDetailId(row.id)}
+                    >
+                      {row.status === 'DRAFT' ? '预览确认' : '查看'}
+                    </Button>
                   }
                   items={[
                     ...(row.status === 'DRAFT'
@@ -432,7 +497,7 @@ export function PurchaseReceiptsPage() {
       <Drawer
         open={detailId !== null}
         onClose={() => setDetailId(null)}
-        size={820}
+        size={860}
         title={
           detailRow !== null && (
             <span style={{ fontSize: 16, fontWeight: 650 }}>
@@ -543,6 +608,25 @@ export function PurchaseReceiptsPage() {
                 >
                   确认收货
                 </Button>
+                <Button
+                  onClick={() => {
+                    setItems(
+                      detailRow.items.map((item) => ({
+                        skuId: item.skuId,
+                        label: `${item.skuCode} · ${item.skuName}`,
+                        serialTracking: item.serialNumbers !== null,
+                        quantity: Number(item.quantity),
+                        unitCost: item.unitCost === null ? undefined : Number(item.unitCost),
+                        binId: item.binId ?? undefined,
+                        serialNumbersText: item.serialNumbers?.join('\n') ?? '',
+                        purchaseOrderItemId: item.purchaseOrderItemId ?? undefined,
+                      })),
+                    );
+                    setEditing(detailRow);
+                  }}
+                >
+                  编辑明细
+                </Button>
                 <Button danger onClick={() => cancelMutation.mutate(detailRow.id)}>
                   取消草稿
                 </Button>
@@ -553,92 +637,54 @@ export function PurchaseReceiptsPage() {
       </Drawer>
 
       <Modal
-        title="新建收货单"
-        open={createOpen}
-        onCancel={() => setCreateOpen(false)}
-        onOk={() => {
-          void form.validateFields().then((values) => createMutation.mutate(values));
+        title={editing === null ? '新建收货单' : `编辑收货单草稿 ${editing.receiptNo}`}
+        open={createOpen || editing !== null}
+        onCancel={() => {
+          setCreateOpen(false);
+          setEditing(null);
+          setItems([]);
         }}
-        okText="创建草稿"
+        onOk={() => {
+          if (itemsToPayload(items).length === 0) {
+            void message.warning('请至少添加一行明细');
+            return;
+          }
+          if (editing !== null) {
+            updateMutation.mutate({
+              id: editing.id,
+              sourceNote: form.getFieldValue('sourceNote') as string | undefined,
+              remark: form.getFieldValue('remark') as string | undefined,
+            });
+          } else {
+            void form.validateFields().then((values) => createMutation.mutate(values));
+          }
+        }}
+        okText={editing === null ? '创建草稿' : '保存草稿'}
         cancelText="取消"
-        confirmLoading={createMutation.isPending}
-        width={720}
+        confirmLoading={createMutation.isPending || updateMutation.isPending}
+        width={960}
         destroyOnHidden
       >
         <Form form={form} layout="vertical" preserve={false}>
-          <Form.Item
-            name="warehouseId"
-            label="收货仓库"
-            rules={[{ required: true, message: '请选择仓库' }]}
-          >
-            <Select options={warehouseOptions} placeholder="选择仓库" />
-          </Form.Item>
-          <Form.Item name="sourceNote" label="货源说明（一次性网购）">
-            <Input maxLength={500} placeholder="如：淘宝 订单号 12345678" />
-          </Form.Item>
-          <Form.Item name="remark" label="备注">
-            <Input maxLength={2000} />
-          </Form.Item>
-          <Form.List name="items">
-            {(fields, { add, remove }) => (
-              <>
-                {fields.map((field) => (
-                  <div
-                    key={field.key}
-                    style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}
-                  >
-                    <Form.Item
-                      name={[field.name, 'skuId']}
-                      rules={[{ required: true, message: '请选择 SKU' }]}
-                      style={{ flex: 1, marginBottom: 0 }}
-                    >
-                      <SkuSelect />
-                    </Form.Item>
-                    <Form.Item
-                      name={[field.name, 'quantity']}
-                      rules={[{ required: true, message: '数量' }]}
-                      style={{ width: 90, marginBottom: 0 }}
-                    >
-                      <InputNumber min={1} placeholder="数量" style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item
-                      name={[field.name, 'unitCost']}
-                      style={{ width: 110, marginBottom: 0 }}
-                    >
-                      <InputNumber min={0} placeholder="单位成本" style={{ width: '100%' }} />
-                    </Form.Item>
-                    <span
-                      style={{
-                        width: 130,
-                        fontSize: 12,
-                        color: colors.textTertiary,
-                        lineHeight: '22px',
-                      }}
-                    >
-                      库位在确认前可补选
-                    </span>
-                    <Button
-                      type="text"
-                      danger
-                      disabled={fields.length <= 1}
-                      onClick={() => remove(field.name)}
-                    >
-                      删除
-                    </Button>
-                  </div>
-                ))}
-                <Button
-                  type="dashed"
-                  block
-                  icon={<PlusOutlined />}
-                  onClick={() => add({ quantity: 1 })}
-                >
-                  添加明细
-                </Button>
-              </>
-            )}
-          </Form.List>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <Form.Item
+              name="warehouseId"
+              label="收货仓库"
+              rules={[{ required: true, message: '请选择仓库' }]}
+              style={{ flex: 1 }}
+            >
+              <Select
+                options={warehouseOptions}
+                placeholder="选择仓库"
+                disabled={editing !== null}
+              />
+            </Form.Item>
+            <Form.Item name="sourceNote" label="货源说明（一次性网购）" style={{ flex: 1 }}>
+              <Input maxLength={500} placeholder="如：淘宝 订单号 12345678" />
+            </Form.Item>
+          </div>
         </Form>
+        <ReceiptItemsEditor warehouseId={editorWarehouseId} items={items} setItems={setItems} />
       </Modal>
 
       <Modal
@@ -678,7 +724,7 @@ export function PurchaseReceiptsPage() {
             <Select options={warehouseOptions} placeholder="选择仓库" />
           </Form.Item>
           <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
-            生成后可在草稿明细中为每行指定库位（含暂存位）；留空时无库位仓库自动落 DEFAULT。
+            将按采购明细的未收数量预填草稿；生成后可在草稿中扫码调整、选库位再确认。
           </span>
         </Form>
       </Modal>
@@ -686,26 +732,397 @@ export function PurchaseReceiptsPage() {
   );
 }
 
+/**
+ * Receiving editor (Sprint 7 T5.2-T5.5): scan-to-add lines, bind unknown
+ * barcodes on the spot (D13), per-line bin choice with live occupancy hints
+ * (D9: the human decides capacity), and a one-click STAGING bin (Q4 A).
+ */
+function ReceiptItemsEditor({
+  warehouseId,
+  items,
+  setItems,
+}: {
+  warehouseId: string | undefined;
+  items: EditorItem[];
+  setItems: (next: EditorItem[]) => void;
+}) {
+  const { message } = AntdApp.useApp();
+  const queryClient = useQueryClient();
+  const [scanning, setScanning] = useState(false);
+  const [bindBarcode, setBindBarcode] = useState<string | null>(null);
+  const [bindSku, setBindSku] = useState<string | undefined>();
+
+  const bins = useApiQuery<Envelope<Array<{ id: string; binCode: string }>>>(
+    '/api/v1/warehouses/{warehouseId}/bins',
+    { page: 1, pageSize: 200 },
+    ['receipt-bins', warehouseId],
+    { warehouseId: warehouseId ?? '' },
+    warehouseId !== undefined,
+  );
+
+  // Occupancy hint for the first line that chose a bin (D9: no auto check).
+  const occupancyBinId = items.find((item) => item.binId !== undefined)?.binId;
+  const occupancy = useApiQuery<
+    Envelope<Array<{ skuCode: string; onHandQty: string; binCode: string }>>
+  >(
+    '/api/v1/inventory',
+    { binId: occupancyBinId, pageSize: 50 },
+    ['bin-occupancy', occupancyBinId],
+    undefined,
+    occupancyBinId !== undefined,
+  );
+
+  const bindMutation = useMutation({
+    mutationFn: async ({ skuId, mode }: { skuId: string; mode: 'bind' | 'generate' }) => {
+      // Returns the barcode that should be re-resolved to land the line.
+      if (mode === 'bind') {
+        await apiPost(
+          '/api/v1/skus/{skuId}/barcodes',
+          {
+            barcode: bindBarcode,
+            barcodeType: 'OTHER',
+          },
+          { skuId },
+        );
+        return bindBarcode as string;
+      }
+      const generated = await apiPost<{ barcode: string }>(
+        '/api/v1/skus/{skuId}/barcodes/generate-internal',
+        {},
+        { skuId },
+      );
+      return generated.barcode;
+    },
+    onSuccess: async (barcodeToResolve, variables) => {
+      const resolved = await resolveBarcode(barcodeToResolve);
+      setBindBarcode(null);
+      setBindSku(undefined);
+      if (resolved === null) {
+        void message.error('条码已保存但解析失败，请手工添加明细');
+        return;
+      }
+      setItems([
+        ...items,
+        {
+          skuId: resolved.skuId,
+          label: `${resolved.skuCode} · ${resolved.skuName}`,
+          serialTracking: resolved.serialTracking,
+          quantity: 1,
+          serialNumbersText: '',
+        },
+      ]);
+      void message.success(
+        variables.mode === 'bind'
+          ? `条码已绑定并加入：${resolved.skuCode}`
+          : `内部条码 ${barcodeToResolve} 已生成并加入（打印标签见 SKU 管理）`,
+      );
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const stageBinMutation = useMutation({
+    mutationFn: () =>
+      apiPost<{ id: string; binCode: string }>(
+        '/api/v1/warehouses/{warehouseId}/bins',
+        { zone: 'ST', rackNumber: 1, level: '1' },
+        { warehouseId: warehouseId as string },
+      ),
+    onSuccess: (bin) => {
+      void message.success(`暂存库位已创建：${bin.binCode}（收货后可用 MOVE_BIN 上架）`);
+      void queryClient.invalidateQueries({ queryKey: ['receipt-bins', warehouseId] });
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  async function handleScan(barcode: string): Promise<void> {
+    const trimmed = barcode.trim();
+    if (trimmed === '') {
+      return;
+    }
+    setScanning(true);
+    try {
+      const resolved = await resolveBarcode(trimmed);
+      if (resolved === null) {
+        setBindBarcode(trimmed); // Unknown: offer on-the-spot binding (D13).
+        return;
+      }
+      // Same SKU scanned again: bump the quantity like a counting scanner.
+      const existing = items.find((item) => item.skuId === resolved.skuId);
+      if (existing !== undefined) {
+        setItems(
+          items.map((item) =>
+            item.skuId === resolved.skuId ? { ...item, quantity: item.quantity + 1 } : item,
+          ),
+        );
+      } else {
+        setItems([
+          ...items,
+          {
+            skuId: resolved.skuId,
+            label: `${resolved.skuCode} · ${resolved.skuName}`,
+            serialTracking: resolved.serialTracking,
+            quantity: 1,
+            serialNumbersText: '',
+          },
+        ]);
+      }
+      void message.success(`已加入/累加：${resolved.skuCode}`);
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <Input.Search
+        placeholder="扫码 / 输入条码后回车，自动加入明细（未知条码可当场绑定）"
+        enterButton="扫码"
+        onSearch={(value) => {
+          void handleScan(value);
+        }}
+        loading={scanning}
+        disabled={warehouseId === undefined}
+        aria-label="扫码加入明细"
+      />
+      {items.length === 0 ? (
+        <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+          尚无明细：扫码添加，或点击下方按钮手工添加。
+          {warehouseId === undefined ? '（请先选择仓库）' : ''}
+        </span>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {items.map((item, index) => (
+            <div
+              key={`${item.skuId}-${index}`}
+              style={{
+                border: `1px solid ${colors.border}`,
+                borderRadius: 8,
+                padding: '8px 10px',
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 8,
+                alignItems: 'center',
+              }}
+            >
+              {item.skuId === '' ? (
+                <SkuPicker
+                  onPicked={(sku) =>
+                    setItems(
+                      items.map((row, i) =>
+                        i === index
+                          ? {
+                              ...row,
+                              skuId: sku.id,
+                              label: `${sku.skuCode} · ${sku.nameZh}`,
+                              serialTracking: sku.serialTracking ?? false,
+                            }
+                          : row,
+                      ),
+                    )
+                  }
+                />
+              ) : (
+                <span style={{ minWidth: 220, fontSize: 13 }}>{item.label}</span>
+              )}
+              <InputNumber
+                min={1}
+                value={item.quantity}
+                onChange={(value) =>
+                  setItems(
+                    items.map((row, i) => (i === index ? { ...row, quantity: value ?? 1 } : row)),
+                  )
+                }
+                addonAfter="件"
+                style={{ width: 120 }}
+              />
+              <InputNumber
+                min={0}
+                value={item.unitCost}
+                placeholder="单位成本"
+                onChange={(value) =>
+                  setItems(
+                    items.map((row, i) =>
+                      i === index ? { ...row, unitCost: value ?? undefined } : row,
+                    ),
+                  )
+                }
+                style={{ width: 120 }}
+              />
+              <Select
+                allowClear
+                placeholder="库位（可空）"
+                value={item.binId}
+                style={{ width: 190 }}
+                showSearch
+                optionFilterProp="label"
+                options={(bins.data?.data ?? []).map((bin) => ({
+                  value: bin.id,
+                  label: bin.binCode,
+                }))}
+                onChange={(value) =>
+                  setItems(items.map((row, i) => (i === index ? { ...row, binId: value } : row)))
+                }
+              />
+              <Button
+                type="text"
+                danger
+                onClick={() => setItems(items.filter((_, i) => i !== index))}
+              >
+                移除
+              </Button>
+              {item.serialTracking && (
+                <Input.TextArea
+                  rows={2}
+                  placeholder="SN 列表（每行一个或逗号分隔，数量必须与件数一致）"
+                  value={item.serialNumbersText}
+                  onChange={(event) =>
+                    setItems(
+                      items.map((row, i) =>
+                        i === index ? { ...row, serialNumbersText: event.target.value } : row,
+                      ),
+                    )
+                  }
+                  style={{ width: '100%' }}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Button
+          type="dashed"
+          icon={<PlusOutlined />}
+          onClick={() =>
+            setItems([
+              ...items,
+              {
+                skuId: '',
+                label: '',
+                serialTracking: false,
+                quantity: 1,
+                serialNumbersText: '',
+              },
+            ])
+          }
+        >
+          手工添加明细
+        </Button>
+        <Button
+          disabled={warehouseId === undefined}
+          loading={stageBinMutation.isPending}
+          onClick={() => stageBinMutation.mutate()}
+        >
+          创建暂存库位（ST 区）
+        </Button>
+      </div>
+      {occupancyBinId !== undefined && (
+        <span style={{ fontSize: 12.5, color: colors.textSecondary }}>
+          库位现状（人工判断容量，不做自动校验）：
+          {occupancy.isLoading
+            ? ' 加载中…'
+            : (occupancy.data?.data ?? []).length === 0
+              ? ' 该库位当前为空'
+              : ' ' +
+                (occupancy.data?.data ?? [])
+                  .map((row) => `${row.skuCode} ×${Number(row.onHandQty)}`)
+                  .join('，')}
+        </span>
+      )}
+
+      <Modal
+        title={`条码 ${bindBarcode} 未绑定任何 SKU`}
+        open={bindBarcode !== null}
+        onCancel={() => {
+          setBindBarcode(null);
+          setBindSku(undefined);
+        }}
+        footer={[
+          <Button
+            key="generate"
+            disabled={bindSku === undefined}
+            loading={bindMutation.isPending}
+            onClick={() => {
+              if (bindSku !== undefined) {
+                bindMutation.mutate({ skuId: bindSku, mode: 'generate' });
+              }
+            }}
+          >
+            生成内部条码并加入
+          </Button>,
+          <Button
+            key="bind"
+            type="primary"
+            disabled={bindSku === undefined}
+            loading={bindMutation.isPending}
+            onClick={() => {
+              if (bindSku !== undefined) {
+                bindMutation.mutate({ skuId: bindSku, mode: 'bind' });
+              }
+            }}
+          >
+            绑定该条码并加入
+          </Button>,
+        ]}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+            新到货没有系统条码是正常情况：选择它是哪个
+            SKU，把实物上的条码绑定给它；实物没有条码则生成内部条码（WCSKU…）打印后贴上。一个 SKU
+            可有多个条码，不会覆盖已有条码。
+          </span>
+          <SkuPicker value={bindSku} onChange={setBindSku} />
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+interface SkuOption {
+  id: string;
+  skuCode: string;
+  nameZh: string;
+  serialTracking?: boolean;
+}
+
 /** SKU picker with server-side keyword search over the master data. */
-function SkuSelect(props: { value?: string; onChange?: (value: string) => void }) {
+function SkuPicker({
+  value,
+  onChange,
+  onPicked,
+}: {
+  value?: string;
+  onChange?: (value: string | undefined) => void;
+  onPicked?: (sku: SkuOption) => void;
+}) {
   const [keyword, setKeyword] = useState('');
-  const skus = useApiQuery<Envelope<Array<{ id: string; skuCode: string; nameZh: string }>>>(
+  const skus = useApiQuery<Envelope<SkuOption[]>>(
     '/api/v1/skus',
     { page: 1, pageSize: 20, ...(keyword ? { keyword } : {}) },
-    ['skus-for-receipt', keyword],
+    ['skus-for-receipt-editor', keyword],
   );
   return (
     <Select
-      {...props}
       showSearch
       filterOption={false}
       placeholder="搜索 SKU 编码 / 名称"
       onSearch={setKeyword}
+      value={value}
+      style={{ width: '100%', minWidth: 260 }}
+      allowClear
+      loading={skus.isLoading}
       options={(skus.data?.data ?? []).map((sku) => ({
         value: sku.id,
         label: `${sku.skuCode} · ${sku.nameZh}`,
+        sku,
       }))}
-      loading={skus.isLoading}
+      onChange={(_value, option) => {
+        const picked = (option as { sku?: SkuOption } | undefined)?.sku;
+        onChange?.(picked?.id);
+        if (picked !== undefined) {
+          onPicked?.(picked);
+        }
+      }}
     />
   );
 }
