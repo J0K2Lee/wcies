@@ -24,6 +24,7 @@ afterAll(async () => {
 describe('warehouses + bins (task §81)', () => {
   let szId = '';
   let secondWhId = '';
+  let singleWhId = '';
 
   it('creates the Shenzhen SELF warehouse and an OZON PLATFORM warehouse', async () => {
     const sz = await client.post<{ id: string }>('/api/v1/warehouses', {
@@ -114,6 +115,60 @@ describe('warehouses + bins (task §81)', () => {
     expect(zoneA.body.data.length).toBe(20);
     const zones = await client.get<string[]>(`/api/v1/warehouses/${szId}/bins/zones`);
     expect(zones.body.data).toEqual(['A']);
+  });
+
+  // The ambiguity this guards: the single-create dialog used to take a free
+  // rack string while the batch dialog derived the rack from the zone, so the
+  // same "zone A" produced A01 in one path and C01 in the other.
+  // Own warehouse: these cases must not disturb the shared szId bin counts.
+  it('derives the rack from the zone in the SINGLE create path too', async () => {
+    const wh = await client.post<{ id: string }>('/api/v1/warehouses', {
+      warehouseCode: `${PREFIX}-SINGLE`,
+      name: `${PREFIX} 单建仓`,
+      warehouseType: 'SELF',
+    });
+    singleWhId = wh.body.data.id;
+
+    const single = await client.post<{
+      binCode: string;
+      rack: string;
+      zone: string;
+      level: string;
+    }>(`/api/v1/warehouses/${singleWhId}/bins`, {
+      zone: 'C',
+      rackNumber: 1,
+      level: '2',
+    });
+    expect(single.status).toBe(201);
+    // Same shape the batch path produces for zone C: rack C01, level plain.
+    expect(single.body.data.rack).toBe('C01');
+    expect(single.body.data.zone).toBe('C');
+    expect(single.body.data.binCode).toBe(`${PREFIX}-SINGLE-C01-2`);
+  });
+
+  it('collapses zero-padded levels so 01 and 1 cannot become two codes', async () => {
+    const padded = await client.post<{ binCode: string }>(`/api/v1/warehouses/${singleWhId}/bins`, {
+      zone: 'C',
+      rackNumber: 2,
+      level: '02',
+    });
+    expect(padded.status).toBe(201);
+    expect(padded.body.data.binCode).toBe(`${PREFIX}-SINGLE-C02-2`);
+
+    // The same physical level must collide, not create a second bin.
+    const duplicate = await client.post(`/api/v1/warehouses/${singleWhId}/bins`, {
+      zone: 'C',
+      rackNumber: 2,
+      level: '2',
+    });
+    expect(duplicate.status).toBe(409);
+    expect(duplicate.body.error?.code).toBe('WAREHOUSE_BIN_ALREADY_EXISTS');
+  });
+
+  it('requires enough input to generate a code', async () => {
+    const missing = await client.post(`/api/v1/warehouses/${singleWhId}/bins`, { zone: 'D' });
+    expect(missing.status).toBe(422);
+    expect(missing.body.error?.code).toBe('WAREHOUSE_BIN_BATCH_INVALID');
   });
 
   it('allows the same bin_code in a DIFFERENT warehouse (task §81)', async () => {

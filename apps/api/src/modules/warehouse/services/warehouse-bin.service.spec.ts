@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { WarehouseBinBatchInvalidError } from '../errors/warehouse-errors';
-import { expandRange, formatBinCode } from './warehouse-bin.service';
+import { expandRange, formatBinCode, formatRack, normalizeSegment } from './warehouse-bin.service';
 
 describe('expandRange (batch bin generation, task §41)', () => {
   it('expands inclusive numeric ranges keeping zero padding', () => {
@@ -41,5 +41,43 @@ describe('formatBinCode (decision 0010: one string, warehouse-prefixed)', () => 
   it('treats an empty or null position as absent', () => {
     expect(formatBinCode('ZG-01', 'A05', '1', '')).toBe('ZG-01-A05-1');
     expect(formatBinCode('ZG-01', 'A05', '1', null)).toBe('ZG-01-A05-1');
+  });
+});
+
+describe('formatRack (zone prefixes the rack, shared by both create paths)', () => {
+  it('combines zone and zero-padded rack number', () => {
+    expect(formatRack('A', 1)).toBe('A01');
+    expect(formatRack('A', 12)).toBe('A12');
+  });
+
+  it('grows the padding past 99 instead of wrapping', () => {
+    expect(formatRack('B', 100)).toBe('B100');
+  });
+
+  it('omits the prefix when there is no zone', () => {
+    expect(formatRack(null, 3)).toBe('03');
+  });
+});
+
+describe('normalizeSegment (01 and 1 must not become two codes)', () => {
+  it('drops leading zeros from numeric segments', () => {
+    expect(normalizeSegment('01')).toBe('1');
+    expect(normalizeSegment('02')).toBe('2');
+    expect(normalizeSegment('10')).toBe('10');
+  });
+
+  it('trims surrounding whitespace', () => {
+    expect(normalizeSegment('  3  ')).toBe('3');
+  });
+
+  it('keeps free-form imported segments untouched', () => {
+    expect(normalizeSegment('A01')).toBe('A01');
+  });
+
+  it('returns null for empty or missing input', () => {
+    expect(normalizeSegment('')).toBeNull();
+    expect(normalizeSegment('   ')).toBeNull();
+    expect(normalizeSegment(undefined)).toBeNull();
+    expect(normalizeSegment(null)).toBeNull();
   });
 });

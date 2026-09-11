@@ -26,7 +26,7 @@ const MAX_BATCH_BINS = 2000;
 const BIN_CODE_MAX_LENGTH = 100;
 
 /**
- * The one canonical bin code format, shared by both creation paths:
+ * The one canonical bin code format, shared by every creation path:
  *
  *   {warehouseCode}-{rack}-{level}[-{position}]   e.g. ZG-01-A05-1
  *
@@ -46,6 +46,31 @@ export function formatBinCode(
   return position === undefined || position === null || position === ''
     ? base
     : `${base}-${position}`;
+}
+
+/**
+ * Rack label for a zone + rack number: zone 'A', number 3 -> 'A03'.
+ *
+ * `width` is the zero-pad width, defaulting to the 2-digit minimum. A batch
+ * passes the width of its LARGEST rack so every code in that batch has the
+ * same width - mixing widths would break the lexical order that allocation
+ * and picking rely on (B99 sorts after B100 when padded inconsistently).
+ */
+export function formatRack(zone: string | null, rackNumber: number, width = 2): string {
+  return `${zone ?? ''}${String(rackNumber).padStart(Math.max(2, width), '0')}`;
+}
+
+/**
+ * Drops leading zeros from a purely numeric segment, so `01` and `1` cannot
+ * become two different codes for the same physical level. Non-numeric input
+ * (imported free-form segments) is kept as-is.
+ */
+export function normalizeSegment(value: string | undefined | null): string | null {
+  const trimmed = value?.trim() ?? '';
+  if (trimmed === '') {
+    return null;
+  }
+  return /^\d+$/.test(trimmed) ? String(Number(trimmed)) : trimmed;
 }
 
 /**
@@ -122,9 +147,36 @@ export class WarehouseBinService {
     operator: OperatorContext,
   ): Promise<BinResponseDto> {
     const warehouse = await this.assertWarehouseExists(warehouseId);
-    const binCode =
-      dto.binCode ??
-      formatBinCode(warehouse.warehouseCode, dto.rack ?? '', dto.level ?? '', dto.position);
+    const zone = dto.zone?.trim() || null;
+
+    // Two shapes reach here, and they differ in who owns the code:
+    //  - explicit `binCode` (Excel import): the caller owns the string, so the
+    //    descriptive columns are stored exactly as given.
+    //  - layout intent (create dialog): the server generates the code through
+    //    the same helpers the batch path uses, so a code can never be
+    //    hand-authored into a shape the batch path would not produce.
+    let binCode: string;
+    let rack: string | null;
+    let level: string | null;
+    let position: string | null;
+
+    if (dto.binCode !== undefined) {
+      binCode = dto.binCode.trim();
+      rack = dto.rack?.trim() || null;
+      level = dto.level?.trim() || null;
+      position = dto.position?.trim() || null;
+    } else {
+      rack = dto.rackNumber !== undefined ? formatRack(zone, dto.rackNumber) : null;
+      level = normalizeSegment(dto.level);
+      position = normalizeSegment(dto.position);
+      if (rack === null || level === null) {
+        throw new WarehouseBinBatchInvalidError(
+          'Provide binCode, or enough to generate one (rackNumber and level)',
+        );
+      }
+      binCode = formatBinCode(warehouse.warehouseCode, rack, level, position);
+    }
+
     if (binCode.length > BIN_CODE_MAX_LENGTH) {
       throw new WarehouseBinBatchInvalidError(
         `Bin code exceeds ${BIN_CODE_MAX_LENGTH} characters: ${binCode}`,
@@ -137,10 +189,10 @@ export class WarehouseBinService {
     const bin = await this.repository.insertBin({
       warehouseId,
       binCode,
-      zone: dto.zone ?? null,
-      rack: dto.rack ?? null,
-      level: dto.level ?? null,
-      position: dto.position ?? null,
+      zone,
+      rack,
+      level,
+      position,
       // One value: the barcode IS the code, so a scan always resolves.
       barcode: dto.barcode ?? binCode,
       status: 'ACTIVE',
@@ -197,7 +249,9 @@ export class WarehouseBinService {
 
     const bins: Array<Partial<WarehouseBinEntity>> = [];
     for (const rackNumber of rackNumbers) {
-      const rack = `${zone}${rackNumber}`;
+      // Same helper as single create, so both paths cannot drift apart; the
+      // batch supplies its uniform width to keep codes comparable.
+      const rack = formatRack(zoneOrNull, Number(rackNumber), rackWidth);
       for (const level of levels) {
         const binCode = formatBinCode(warehouse.warehouseCode, rack, level);
         if (binCode.length > BIN_CODE_MAX_LENGTH) {

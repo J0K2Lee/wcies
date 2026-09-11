@@ -9440,28 +9440,37 @@
         "properties": {
           "binCode": {
             "type": "string",
-            "example": "ZG-01-A01-1",
-            "description": "库位编码；留空则由区/架/层/位自动生成（推荐）"
+            "example": "ZG-01-A03-1",
+            "description": "完整库位编码，仅导入与特例使用；一般留空，由 zone + rackNumber + level 生成"
           },
           "zone": {
             "type": "string",
-            "example": "A"
+            "example": "A",
+            "description": "库区；同时作为货架编码前缀（A → 货架 A03）"
+          },
+          "rackNumber": {
+            "type": "number",
+            "example": 3,
+            "description": "货架号；与 zone 组合成完整货架（区 A + 3 → A03）。与 rack 二选一。"
           },
           "rack": {
             "type": "string",
-            "example": "A01"
+            "example": "A03",
+            "description": "完整货架值，仅导入使用；一般用 rackNumber"
           },
           "level": {
             "type": "string",
-            "example": "1"
+            "example": "1",
+            "description": "层号"
           },
           "position": {
             "type": "string",
-            "example": "01"
+            "example": "02",
+            "description": "位号（选填）"
           },
           "barcode": {
             "type": "string",
-            "example": "ZG-01-A01-1",
+            "example": "ZG-01-A03-1",
             "description": "留空则与库位编码相同"
           },
           "remark": {
@@ -10341,7 +10350,7 @@
           },
           "binCode": {
             "type": "string",
-            "example": "SZ01-A01-01"
+            "example": "ZG-01-A01-1"
           },
           "condition": {
             "type": "string",
@@ -12170,7 +12179,7 @@
           },
           "binCode": {
             "type": "string",
-            "example": "SZ01-A01-01"
+            "example": "ZG-01-A01-1"
           },
           "quantity": {
             "type": "string",
@@ -12608,8 +12617,8 @@
           },
           "binBarcode": {
             "type": "string",
-            "example": "SZ01-A01-01",
-            "description": "目标回库库位条码（后端验证）"
+            "example": "ZG-01-A01-1",
+            "description": "目标回库库位编码（后端验证）"
           }
         },
         "required": ["barcode", "binBarcode"]

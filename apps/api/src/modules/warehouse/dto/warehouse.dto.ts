@@ -209,39 +209,50 @@ export class WarehouseListItemDto extends WarehouseResponseDto {
 
 export class CreateBinRequestDto {
   @ApiPropertyOptional({
-    example: 'ZG-01-A01-1',
-    description: '库位编码；留空则由区/架/层/位自动生成（推荐）',
+    example: 'ZG-01-A03-1',
+    description: '完整库位编码，仅导入与特例使用；一般留空，由 zone + rackNumber + level 生成',
   })
   @IsOptional()
   @IsString()
   @Length(1, 100)
   binCode?: string;
 
-  @ApiPropertyOptional({ example: 'A' })
+  @ApiPropertyOptional({ example: 'A', description: '库区；同时作为货架编码前缀（A → 货架 A03）' })
   @IsOptional()
   @IsString()
-  @MaxLength(100)
+  @MaxLength(20)
   zone?: string;
 
-  @ApiPropertyOptional({ example: 'A01' })
+  @ApiPropertyOptional({
+    example: 3,
+    description: '货架号；与 zone 组合成完整货架（区 A + 3 → A03）。与 rack 二选一。',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(9999)
+  rackNumber?: number;
+
+  @ApiPropertyOptional({ example: 'A03', description: '完整货架值，仅导入使用；一般用 rackNumber' })
   @IsOptional()
   @IsString()
   @MaxLength(100)
   rack?: string;
 
-  @ApiPropertyOptional({ example: '1' })
+  @ApiPropertyOptional({ example: '1', description: '层号' })
   @IsOptional()
   @IsString()
   @MaxLength(100)
   level?: string;
 
-  @ApiPropertyOptional({ example: '01' })
+  @ApiPropertyOptional({ example: '02', description: '位号（选填）' })
   @IsOptional()
   @IsString()
   @MaxLength(100)
   position?: string;
 
-  @ApiPropertyOptional({ example: 'ZG-01-A01-1', description: '留空则与库位编码相同' })
+  @ApiPropertyOptional({ example: 'ZG-01-A03-1', description: '留空则与库位编码相同' })
   @IsOptional()
   @IsString()
   @MaxLength(255)

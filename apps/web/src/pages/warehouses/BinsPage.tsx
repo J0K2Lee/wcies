@@ -36,6 +36,33 @@ interface BatchFormValues {
 }
 
 /**
+ * Mirrors the server's code rule so a dialog can preview exactly what will be
+ * created: the rack is `{zone}{number padded to 2}`, the level stays plain.
+ */
+function formatRackLabel(zone: string | undefined, rackNumber: number): string {
+  return `${zone?.trim() ?? ''}${String(rackNumber).padStart(2, '0')}`;
+}
+
+interface SingleFormValues {
+  zone?: string;
+  rackNumber: number;
+  level: string;
+  position?: string;
+}
+
+/** Preview for the single-bin dialog. */
+function previewSingleBin(warehouseCode: string, values: Partial<SingleFormValues>): string | null {
+  const { rackNumber, level } = values;
+  const normalizedLevel = level?.trim().replace(/^0+(?=\d)/, '');
+  if (rackNumber === undefined || rackNumber < 1 || !normalizedLevel) {
+    return null;
+  }
+  const position = values.position?.trim().replace(/^0+(?=\d)/, '');
+  const base = `${warehouseCode}-${formatRackLabel(values.zone, rackNumber)}-${normalizedLevel}`;
+  return position ? `${base}-${position}` : base;
+}
+
+/**
  * Mirrors the server's code rule so the dialog can preview exactly what will
  * be created: rack numbers pad to at least two digits, levels stay plain.
  */
@@ -77,6 +104,7 @@ export function BinsPage() {
   const [form] = Form.useForm();
   const [batchForm] = Form.useForm();
   const batchValues = Form.useWatch([], batchForm) as Partial<BatchFormValues> | undefined;
+  const singleValues = Form.useWatch([], form) as Partial<SingleFormValues> | undefined;
 
   const warehouses = useApiQuery<{
     data: Array<{ id: string; warehouseCode: string; name: string }>;
@@ -105,6 +133,10 @@ export function BinsPage() {
     selectedWarehouse === undefined || batchValues === undefined
       ? null
       : previewBinCodes(selectedWarehouse.warehouseCode, batchValues);
+  const singlePreview =
+    selectedWarehouse === undefined || singleValues === undefined
+      ? null
+      : previewSingleBin(selectedWarehouse.warehouseCode, singleValues);
 
   const invalidateBins = (): void => {
     void queryClient.invalidateQueries({ queryKey: ['bins', warehouseId] });
@@ -114,7 +146,7 @@ export function BinsPage() {
   const createMutation = useMutation({
     // warehouseId is a path parameter; sending it in the body fails validation
     // because the DTO does not declare it (forbidNonWhitelisted).
-    mutationFn: ({ warehouseId: wid, ...body }: Record<string, string> & { warehouseId: string }) =>
+    mutationFn: ({ warehouseId: wid, ...body }: SingleFormValues & { warehouseId: string }) =>
       apiPost('/api/v1/warehouses/{warehouseId}/bins', body, { warehouseId: wid }),
     onSuccess: () => {
       void message.success('库位已创建');
@@ -342,21 +374,41 @@ export function BinsPage() {
         <Form form={form} layout="vertical">
           <Space wrap>
             <Form.Item name="zone" label="库区">
-              <Input style={{ width: 100 }} />
+              <Input style={{ width: 100 }} placeholder="如 A" />
             </Form.Item>
-            <Form.Item name="rack" label="货架">
-              <Input style={{ width: 100 }} placeholder="A01" />
+            <Form.Item
+              name="rackNumber"
+              label="货架号"
+              rules={[{ required: true, message: '请输入货架号' }]}
+            >
+              <InputNumber min={1} max={9999} precision={0} style={{ width: 110 }} />
             </Form.Item>
-            <Form.Item name="level" label="层">
+            <Form.Item name="level" label="层" rules={[{ required: true, message: '请输入层号' }]}>
               <Input style={{ width: 80 }} placeholder="1" />
             </Form.Item>
             <Form.Item name="position" label="位（选填）">
-              <Input style={{ width: 100 }} placeholder="01" />
+              <Input style={{ width: 100 }} placeholder="02" />
             </Form.Item>
           </Space>
-          <p style={{ color: colors.textTertiary, fontSize: 12.5, marginBottom: 0 }}>
-            库位编码由系统生成：仓库-货架-层（如 ZG-01-A01-1）。条码与编码相同，扫码可直接识别。
-          </p>
+          {singlePreview === null ? (
+            <p style={{ color: colors.textTertiary, fontSize: 12.5, marginBottom: 0 }}>
+              货架号为数字，与库区组合成完整货架：区 A + 货架号 3 → 货架 A03 → 编码
+              ZG-01-A03-1。批量创建库位使用同一规则。
+            </p>
+          ) : (
+            <div
+              style={{
+                background: colors.canvas,
+                border: `1px solid ${colors.borderSoft}`,
+                borderRadius: 6,
+                padding: '10px 12px',
+                fontSize: 13,
+                color: colors.textPrimary,
+              }}
+            >
+              将创建：<span style={{ fontFamily: 'monospace' }}>{singlePreview}</span>
+            </div>
+          )}
         </Form>
       </Modal>
 
