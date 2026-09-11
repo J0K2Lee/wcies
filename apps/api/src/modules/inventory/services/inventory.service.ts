@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, QueryRunner } from 'typeorm';
 import { SkuService } from '../../product/services/sku.service';
 import { WarehouseService } from '../../warehouse/services/warehouse.service';
 import { WarehouseBinService } from '../../warehouse/services/warehouse-bin.service';
@@ -27,6 +27,7 @@ import {
   nextVersionOf,
   resolveDimension,
   DimensionDeps,
+  ResolvedDimension,
 } from './inventory-dimension';
 import { SkuNotFoundError } from '../../product/errors/sku-errors';
 
@@ -83,6 +84,13 @@ export interface BalanceQuantities {
   version: string;
 }
 
+/** Pre-transaction validation outcome shared by both receive paths. */
+interface ValidatedAddStock {
+  qty: bigint;
+  dim: ResolvedDimension;
+  serialNumbers: string[];
+}
+
 @Injectable()
 export class InventoryService {
   private readonly deps: DimensionDeps;
@@ -108,10 +116,169 @@ export class InventoryService {
     return this.addStock(input, 'RECEIVE');
   }
 
+  /**
+   * Transaction-aware receive (Sprint 7 task T4.2, decision 0013 par5):
+   * runs the SAME locked-balance path on the CALLER's QueryRunner so the
+   * purchase-receipt business command (N receive lines + PO accumulators +
+   * status patches) commits or rolls back as ONE database transaction -
+   * exactly the pickStockPartialInTx pattern from Sprint 4. Inventory still
+   * owns every stock rule; the caller only owns the transaction boundary,
+   * and records the operation log after ITS commit.
+   */
+  async receiveStockInTx(
+    runner: QueryRunner,
+    input: AddStockInput,
+  ): Promise<StockChangeResult & { wrote: boolean }> {
+    const prevalidated = await this.validateAddStock(input);
+    return this.addStockInTx(runner, input, 'RECEIVE', prevalidated);
+  }
+
   private async addStock(
     input: AddStockInput,
     eventType: InventoryEventType,
   ): Promise<StockChangeResult> {
+    const prevalidated = await this.validateAddStock(input);
+
+    // Fast replay check before opening a transaction (task par22).
+    const existingEvent = await this.ledgerRepo.findEventByIdempotencyKey(input.idempotencyKey);
+    if (existingEvent !== null) {
+      return this.replayStockChange(existingEvent.idempotencyKey, prevalidated.dim);
+    }
+
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    // Everything below runs on the runner's own connection; the operation
+    // log and result building happen AFTER release (pool discipline).
+    let outcome: StockChangeResult & { wrote: boolean; from: string };
+    try {
+      outcome = await this.addStockInTx(runner, input, eventType, prevalidated);
+      await runner.commitTransaction();
+    } catch (error: unknown) {
+      await runner.rollbackTransaction();
+      if (isUniqueViolationOn(error, 'uq_inventory_events_idem')) {
+        // A concurrent duplicate of this idempotency key committed first.
+        return this.replayStockChange(input.idempotencyKey, prevalidated.dim);
+      }
+      throw error;
+    } finally {
+      await runner.release();
+    }
+
+    if (!outcome.wrote) {
+      return outcome;
+    }
+    await this.operationLog.record({
+      entityType: 'INVENTORY_BALANCE',
+      entityId: outcome.balance.balanceId,
+      entityCode:
+        prevalidated.dim.skuId + '/' + prevalidated.dim.warehouseId + '/' + prevalidated.dim.binId,
+      action: eventType,
+      changes: { onHandQty: { from: outcome.from, to: outcome.balance.onHandQty } },
+      operator: input.operator,
+    });
+    return outcome;
+  }
+
+  /**
+   * Shared core of every stock addition on the GIVEN runner: assumes
+   * validateAddStock passed, performs the in-transaction idempotency check
+   * and the locked balance write. A duplicate key resolves to the first
+   * execution's replay shape WITHOUT rolling the caller's transaction back
+   * (a replay is a no-op, not an error).
+   */
+  private async addStockInTx(
+    runner: QueryRunner,
+    input: AddStockInput,
+    eventType: InventoryEventType,
+    prevalidated: ValidatedAddStock,
+  ): Promise<StockChangeResult & { wrote: boolean; from: string }> {
+    const { qty, dim, serialNumbers } = prevalidated;
+
+    // Idempotency check INSIDE the caller's transaction: a duplicate of this
+    // key that committed earlier is detected without waiting for the unique
+    // constraint to fire (task par22/par61).
+    const raced = await this.ledgerRepo.findEventByIdempotencyKeyTx(runner, input.idempotencyKey);
+    if (raced !== null) {
+      return { ...(await this.replayStockChangeInTx(runner, input.idempotencyKey, dim)), from: '' };
+    }
+
+    const balance = await this.balanceRepo.lockOrCreate(runner, {
+      skuId: dim.skuId,
+      warehouseId: dim.warehouseId,
+      binId: dim.binId,
+      condition: input.condition,
+    });
+    const before = qtyFromDb(balance.onHandQty);
+    const after = before + qty;
+    const patch = {
+      onHandQty: formatQty(after),
+      reservedQty: balance.reservedQty,
+      pickedQty: balance.pickedQty,
+      version: nextVersionOf(balance),
+    };
+    assertBalanceInvariants(patch);
+    await this.balanceRepo.saveQuantities(runner, balance.id, patch);
+
+    const event = await this.ledgerRepo.insertEventWithLines(
+      runner,
+      {
+        eventType,
+        referenceType: input.referenceType,
+        referenceId: input.referenceId,
+        idempotencyKey: input.idempotencyKey,
+        operatorId: input.operator.userId,
+        remark: input.remark ?? null,
+      },
+      [
+        {
+          skuId: dim.skuId,
+          warehouseId: dim.warehouseId,
+          binId: dim.binId,
+          transactionType: eventType,
+          quantityBefore: balance.onHandQty,
+          quantityChange: formatQty(qty),
+          quantityAfter: patch.onHandQty,
+        },
+      ],
+    );
+
+    // Serial rows are written in the SAME transaction as the balance so
+    // SN detail can never drift from the quantity fact (task par43).
+    if (serialNumbers.length > 0) {
+      try {
+        await this.serialRepo.insertMany(
+          runner,
+          serialNumbers.map((serialNumber) => ({
+            serialNumber,
+            skuId: dim.skuId,
+            warehouseId: dim.warehouseId,
+            binId: dim.binId,
+            status: 'IN_STOCK' as const,
+          })),
+        );
+      } catch (error: unknown) {
+        if (isUniqueViolation(error)) {
+          throw new InventorySerialInvalidError('SN 已存在（与现有库存或本次列表重复）', {
+            skuId: input.skuId,
+          });
+        }
+        throw error;
+      }
+    }
+
+    return {
+      eventNo: event.eventNo,
+      transactionNos: [event.eventNo + '-1'],
+      balance: this.snapshot(balance.id, dim, input.condition, patch),
+      idempotentReplay: false,
+      wrote: true,
+      from: balance.onHandQty,
+    };
+  }
+
+  /** Validations that need no transaction: quantity, dimension, serials. */
+  private async validateAddStock(input: AddStockInput): Promise<ValidatedAddStock> {
     const qty = parseQty(input.quantity);
     if (qty < 0n) {
       throw new InventoryQuantityInvalidError('入库/初始化数量不能为负', {
@@ -121,7 +288,7 @@ export class InventoryService {
     }
     const dim = await resolveDimension(this.deps, input, input.operator);
 
-    // Serial validation BEFORE any write (Sprint 3 task §44): serial-tracked
+    // Serial validation BEFORE any write (Sprint 3 task par44): serial-tracked
     // SKUs must receive one serial per unit; others must not carry serials.
     const sku = await this.deps.skuService.getEntityById(input.skuId);
     if (sku === null) {
@@ -155,132 +322,44 @@ export class InventoryService {
         skuId: input.skuId,
       });
     }
+    return { qty, dim, serialNumbers };
+  }
 
-    const existingEvent = await this.ledgerRepo.findEventByIdempotencyKey(input.idempotencyKey);
-    if (existingEvent !== null) {
-      return this.replayStockChange(existingEvent.idempotencyKey, dim);
+  /** Replay result assembled on the caller's connection (sees own writes). */
+  private async replayStockChangeInTx(
+    runner: QueryRunner,
+    idempotencyKey: string,
+    dim: { skuId: string; warehouseId: string; binId?: string | null },
+  ): Promise<StockChangeResult & { wrote: false }> {
+    const event = await this.ledgerRepo.findEventByIdempotencyKeyTx(runner, idempotencyKey);
+    if (event === null) {
+      throw new IdempotencyConflictError(idempotencyKey);
     }
-
-    const runner = this.dataSource.createQueryRunner();
-    await runner.connect();
-    await runner.startTransaction();
-    // Everything below runs on the runner's own connection; the operation
-    // log and result building happen AFTER release (pool discipline).
-    let done:
-      { eventNo: string; balanceId: string; from: string; patch: BalanceQuantities } | undefined;
-    let replayKey: string | undefined;
-    try {
-      const balance = await this.balanceRepo.lockOrCreate(runner, {
-        skuId: dim.skuId,
-        warehouseId: dim.warehouseId,
-        binId: dim.binId,
-        condition: input.condition,
-      });
-      // Idempotency re-check AFTER the row lock: a concurrent duplicate of
-      // this key that committed first is detected without waiting for the
-      // unique constraint to fire (task §22/§61).
-      const raced = await this.ledgerRepo.findEventByIdempotencyKeyTx(runner, input.idempotencyKey);
-      if (raced !== null) {
-        await runner.rollbackTransaction();
-        replayKey = input.idempotencyKey;
-      } else {
-        const before = qtyFromDb(balance.onHandQty);
-        const after = before + qty;
-        const patch = {
-          onHandQty: formatQty(after),
-          reservedQty: balance.reservedQty,
-          pickedQty: balance.pickedQty,
-          version: nextVersionOf(balance),
-        };
-        assertBalanceInvariants(patch);
-        await this.balanceRepo.saveQuantities(runner, balance.id, patch);
-
-        const event = await this.ledgerRepo.insertEventWithLines(
-          runner,
-          {
-            eventType,
-            referenceType: input.referenceType,
-            referenceId: input.referenceId,
-            idempotencyKey: input.idempotencyKey,
-            operatorId: input.operator.userId,
-            remark: input.remark ?? null,
-          },
-          [
-            {
-              skuId: dim.skuId,
-              warehouseId: dim.warehouseId,
-              binId: dim.binId,
-              transactionType: eventType,
-              quantityBefore: balance.onHandQty,
-              quantityChange: formatQty(qty),
-              quantityAfter: patch.onHandQty,
-            },
-          ],
-        );
-
-        // Serial rows are written in the SAME transaction as the balance so
-        // SN detail can never drift from the quantity fact (task §43).
-        if (serialNumbers.length > 0) {
-          try {
-            await this.serialRepo.insertMany(
-              runner,
-              serialNumbers.map((serialNumber) => ({
-                serialNumber,
-                skuId: dim.skuId,
-                warehouseId: dim.warehouseId,
-                binId: dim.binId,
-                status: 'IN_STOCK' as const,
-              })),
-            );
-          } catch (error: unknown) {
-            if (isUniqueViolation(error)) {
-              throw new InventorySerialInvalidError('SN 已存在（与现有库存或本次列表重复）', {
-                skuId: input.skuId,
-              });
-            }
-            throw error;
-          }
-        }
-
-        await runner.commitTransaction();
-        done = {
-          eventNo: event.eventNo,
-          balanceId: balance.id,
-          from: balance.onHandQty,
-          patch,
-        };
-      }
-    } catch (error: unknown) {
-      await runner.rollbackTransaction();
-      if (isUniqueViolationOn(error, 'uq_inventory_events_idem')) {
-        // A concurrent duplicate of this idempotency key committed first.
-        return this.replayStockChange(input.idempotencyKey, dim);
-      }
-      throw error;
-    } finally {
-      await runner.release();
+    const lines = await this.ledgerRepo.findTransactionsByEventIdTx(runner, event.id);
+    if (lines.length === 0 || lines[0]!.skuId !== dim.skuId) {
+      throw new IdempotencyConflictError(idempotencyKey);
     }
-
-    if (replayKey !== undefined) {
-      return this.replayStockChange(replayKey, dim);
-    }
-    if (done === undefined) {
-      throw new Error('addStock: no result produced');
-    }
-
-    await this.operationLog.record({
-      entityType: 'INVENTORY_BALANCE',
-      entityId: done.balanceId,
-      entityCode: `${dim.skuId}/${dim.warehouseId}/${dim.binId}`,
-      action: eventType,
-      changes: { onHandQty: { from: done.from, to: done.patch.onHandQty } },
-      operator: input.operator,
+    const current = await this.balanceRepo.lockByDim(runner, {
+      skuId: dim.skuId,
+      warehouseId: dim.warehouseId,
+      binId: lines[0]!.binId,
+      condition: 'SELLABLE',
     });
     return {
-      eventNo: done.eventNo,
-      transactionNos: [`${done.eventNo}-1`],
-      balance: this.snapshot(done.balanceId, dim, input.condition, done.patch),
-      idempotentReplay: false,
+      eventNo: event.eventNo,
+      transactionNos: lines.map((line) => line.transactionNo),
+      balance: {
+        balanceId: current?.id ?? '',
+        skuId: dim.skuId,
+        warehouseId: dim.warehouseId,
+        binId: lines[0]!.binId,
+        condition: current?.inventoryCondition ?? 'SELLABLE',
+        onHandQty: current?.onHandQty ?? '0.000',
+        reservedQty: current?.reservedQty ?? '0.000',
+        pickedQty: current?.pickedQty ?? '0.000',
+      },
+      idempotentReplay: true,
+      wrote: false,
     };
   }
 

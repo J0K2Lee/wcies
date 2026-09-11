@@ -72,8 +72,17 @@ export type InventoryTransactionType = InventoryEventType;
  * Business source of an inventory action (task §14): reservations/events are
  * decoupled from the future Order module via generic references. IMPORT is
  * used by the INITIAL_INVENTORY import template (task §46-§47).
+ * PURCHASE_RECEIPT marks receive-stock lines written by purchase-receipt
+ * confirmation (Sprint 7, user-confirmed Q1, decision 0013 §5) so the ledger
+ * reconciles by document origin instead of reading as manual adjustments.
  */
-export const INVENTORY_REFERENCE_TYPES = ['MANUAL', 'TEST', 'ORDER', 'IMPORT'] as const;
+export const INVENTORY_REFERENCE_TYPES = [
+  'MANUAL',
+  'TEST',
+  'ORDER',
+  'IMPORT',
+  'PURCHASE_RECEIPT',
+] as const;
 export type InventoryReferenceType = (typeof INVENTORY_REFERENCE_TYPES)[number];
 
 /** Reservation references in the first phase (task §14). */

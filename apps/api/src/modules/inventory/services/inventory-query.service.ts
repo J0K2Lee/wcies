@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, QueryRunner } from 'typeorm';
 import { PageMeta } from '@wcies/shared';
 import { formatQty, parseQty, qtyFromDb } from '../../../common/utils/quantity';
 import { SkuService } from '../../product/services/sku.service';
@@ -145,6 +145,19 @@ export class InventoryQueryService {
     private readonly reservationService: ReservationService,
     private readonly skuService: SkuService,
   ) {}
+
+  /**
+   * Total on-hand of a SKU across warehouses and conditions, read on the
+   * CALLER's transaction (Sprint 7 moving-average input, decision 0013
+   * par6). Sees the receive lines the same transaction just wrote.
+   */
+  async getTotalOnHandInTx(runner: QueryRunner, skuId: string): Promise<string> {
+    const rows = (await runner.query(
+      `SELECT COALESCE(SUM(on_hand_qty), 0)::text AS total FROM inventory_balances WHERE sku_id = $1`,
+      [skuId],
+    )) as Array<{ total: string }>;
+    return rows[0]?.total ?? '0';
+  }
 
   async listBalances(
     filters: BalanceListFilters,

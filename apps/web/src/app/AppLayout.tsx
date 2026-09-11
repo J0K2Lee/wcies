@@ -69,6 +69,7 @@ const MENU_ITEMS = [
     icon: <ShoppingCartOutlined />,
     children: [
       { key: '/purchase-orders', label: '采购单' },
+      { key: '/purchase-receipts', label: '收货单' },
       { key: '/suppliers', label: '供应商' },
     ],
   },

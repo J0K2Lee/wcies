@@ -1894,6 +1894,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/purchase-receipts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 收货单列表（筛选：状态/仓库/来源采购单） */
+        get: operations["PurchaseReceiptController_list"];
+        put?: never;
+        /** 新建收货单草稿（确认时才写库存） */
+        post: operations["PurchaseReceiptController_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-receipts/from-po/{poId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 从采购单生成收货单（预填剩余数量/成本/供应商） */
+        post: operations["PurchaseReceiptController_generateFromPo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-receipts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 收货单详情（确认前预览即此数据） */
+        get: operations["PurchaseReceiptController_getById"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** 修改收货单草稿（仅 DRAFT） */
+        patch: operations["PurchaseReceiptController_update"];
+        trace?: never;
+    };
+    "/api/v1/purchase-receipts/{id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 确认收货（整单一个事务写入库存与流水；重复确认幂等） */
+        post: operations["PurchaseReceiptController_confirm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-receipts/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 取消收货单（仅 DRAFT，从未碰库存） */
+        post: operations["PurchaseReceiptController_cancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/shipments": {
         parameters: {
             query?: never;
@@ -3446,7 +3533,7 @@ export interface components {
             pickedChange?: Record<string, never> | null;
             pickedAfter?: Record<string, never> | null;
             /** @enum {string} */
-            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT";
+            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT";
             referenceId: string;
             operatorId?: Record<string, never> | null;
             operatorName?: Record<string, never> | null;
@@ -3499,7 +3586,7 @@ export interface components {
             /** @description SN 管理商品必填：与数量一致的 SN 列表；非 SN 商品禁止提供 */
             serialNumbers?: string[];
             /** @enum {string} */
-            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT";
+            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT";
             referenceId: string;
             remark?: string;
             /** @example INIT:PRD-VK87:2026-09-08 */
@@ -3523,7 +3610,7 @@ export interface components {
             /** @description SN 管理商品必填：与数量一致的 SN 列表；非 SN 商品禁止提供 */
             serialNumbers?: string[];
             /** @enum {string} */
-            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT";
+            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT";
             referenceId: string;
             remark?: string;
             /** @example INIT:PRD-VK87:2026-09-08 */
@@ -3576,7 +3663,7 @@ export interface components {
             /** @example 4 */
             quantity: string;
             /** @enum {string} */
-            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT";
+            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT";
             referenceId: string;
             remark?: string;
             idempotencyKey: string;
@@ -4289,6 +4376,134 @@ export interface components {
             remark?: string;
             /** @description 整体替换明细（仅 ORDERED 状态） */
             items?: components["schemas"]["PurchaseOrderItemInputDto"][];
+        };
+        PurchaseReceiptListItemDto: {
+            id: string;
+            /** @example PR000001 */
+            receiptNo: string;
+            purchaseOrderId?: Record<string, never> | null;
+            /** @example PO000001 */
+            purchaseOrderNo?: Record<string, never> | null;
+            supplierId?: Record<string, never> | null;
+            supplierName?: Record<string, never> | null;
+            sourceNote?: Record<string, never> | null;
+            warehouseId: string;
+            /** @example ZG-01 */
+            warehouseCode?: Record<string, never> | null;
+            /** @enum {string} */
+            status: "DRAFT" | "RECEIVED" | "CANCELLED";
+            /** Format: date-time */
+            receivedAt?: string | null;
+            itemCount: number;
+            /** @example 2.000 */
+            totalQuantity: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        PurchaseReceiptItemDto: {
+            id: string;
+            skuId: string;
+            /** @example SKU000001001 */
+            skuCode: string;
+            /** @example VK87 MAX V2 黑色 */
+            skuName: string;
+            purchaseOrderItemId?: Record<string, never> | null;
+            /** @example 2.000 */
+            quantity: string;
+            /** @example 59.9000 */
+            unitCost?: Record<string, never> | null;
+            binId?: Record<string, never> | null;
+            /** @example ZG-01-A01-1 */
+            binCode?: Record<string, never> | null;
+            serialNumbers?: string[] | null;
+            remark?: Record<string, never> | null;
+        };
+        PurchaseReceiptDetailDto: {
+            id: string;
+            /** @example PR000001 */
+            receiptNo: string;
+            purchaseOrderId?: Record<string, never> | null;
+            /** @example PO000001 */
+            purchaseOrderNo?: Record<string, never> | null;
+            supplierId?: Record<string, never> | null;
+            supplierName?: Record<string, never> | null;
+            sourceNote?: Record<string, never> | null;
+            warehouseId: string;
+            /** @example ZG-01 */
+            warehouseCode?: Record<string, never> | null;
+            /** @enum {string} */
+            status: "DRAFT" | "RECEIVED" | "CANCELLED";
+            /** Format: date-time */
+            receivedAt?: string | null;
+            remark?: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            items: components["schemas"]["PurchaseReceiptItemDto"][];
+        };
+        PurchaseReceiptItemInputDto: {
+            skuId: string;
+            /** @description 来源采购明细（可空 = 直接收货） */
+            purchaseOrderItemId?: string;
+            /** @example 2 */
+            quantity: string;
+            /** @example 59.9000 */
+            unitCost?: string;
+            /** @description 目标库位（可空 → 库存层既有解析规则） */
+            binId?: string;
+            /** @description SN 管理商品必填：与数量一致的 SN 列表；非 SN 商品禁止提供 */
+            serialNumbers?: string[];
+            remark?: string;
+        };
+        CreatePurchaseReceiptRequestDto: {
+            /** @description 来源采购单（可空 = 直接收货） */
+            purchaseOrderId?: string;
+            supplierId?: string;
+            sourceNote?: string;
+            warehouseId: string;
+            remark?: string;
+            items: components["schemas"]["PurchaseReceiptItemInputDto"][];
+        };
+        GenerateReceiptFromPoRequestDto: {
+            warehouseId: string;
+            /** @description 默认目标库位（明细可单独覆盖） */
+            defaultBinId?: string;
+        };
+        UpdatePurchaseReceiptRequestDto: {
+            supplierId?: string;
+            sourceNote?: string;
+            remark?: string;
+            /** @description 整体替换明细（仅 DRAFT） */
+            items?: components["schemas"]["PurchaseReceiptItemInputDto"][];
+        };
+        PurchaseReceiptConfirmResultDto: {
+            id: string;
+            /** @example PR000001 */
+            receiptNo: string;
+            purchaseOrderId?: Record<string, never> | null;
+            /** @example PO000001 */
+            purchaseOrderNo?: Record<string, never> | null;
+            supplierId?: Record<string, never> | null;
+            supplierName?: Record<string, never> | null;
+            sourceNote?: Record<string, never> | null;
+            warehouseId: string;
+            /** @example ZG-01 */
+            warehouseCode?: Record<string, never> | null;
+            /** @enum {string} */
+            status: "DRAFT" | "RECEIVED" | "CANCELLED";
+            /** Format: date-time */
+            receivedAt?: string | null;
+            remark?: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            items: components["schemas"]["PurchaseReceiptItemDto"][];
+            /** @example false */
+            idempotentReplay: boolean;
         };
         ShipmentListItemDto: {
             id: string;
@@ -7235,7 +7450,7 @@ export interface operations {
                 warehouseId?: string;
                 binId?: string;
                 transactionType?: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "RETURN_PICKED" | "MOVE_BIN" | "MANUAL_ADJUSTMENT";
-                referenceType?: "MANUAL" | "TEST" | "ORDER" | "IMPORT";
+                referenceType?: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT";
                 referenceId?: string;
                 createdFrom?: string;
                 createdTo?: string;
@@ -8688,6 +8903,200 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["PurchaseOrderDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    PurchaseReceiptController_list: {
+        parameters: {
+            query?: {
+                /** @description 收货单号 / 货源说明 模糊搜索 */
+                keyword?: string;
+                status?: "DRAFT" | "RECEIVED" | "CANCELLED";
+                warehouseId?: string;
+                purchaseOrderId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PurchaseReceiptListItemDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    PurchaseReceiptController_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePurchaseReceiptRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PurchaseReceiptDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    PurchaseReceiptController_generateFromPo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                poId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerateReceiptFromPoRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PurchaseReceiptDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    PurchaseReceiptController_getById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PurchaseReceiptDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    PurchaseReceiptController_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePurchaseReceiptRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PurchaseReceiptDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    PurchaseReceiptController_confirm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PurchaseReceiptConfirmResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    PurchaseReceiptController_cancel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PurchaseReceiptDetailDto"];
                     };
                 };
             };

@@ -78,6 +78,16 @@ export class InventoryTransactionRepository {
       .find({ where: { eventId }, order: { transactionNo: 'ASC' } });
   }
 
+  /** Same read on the caller's transaction (receiveStockInTx replay, Sprint 7). */
+  async findTransactionsByEventIdTx(
+    runner: QueryRunner,
+    eventId: string,
+  ): Promise<InventoryTransactionEntity[]> {
+    return runner.manager
+      .getRepository(InventoryTransactionEntity)
+      .find({ where: { eventId }, order: { transactionNo: 'ASC' } });
+  }
+
   /**
    * Inserts one event and its transaction lines (task §18: one business
    * action = one event = one idempotency key). Line idempotency keys are

@@ -28,6 +28,7 @@ import { SyncCenterPage } from '../pages/sync/SyncCenterPage';
 import { ExceptionsPage } from '../pages/exceptions/ExceptionsPage';
 import { SuppliersPage } from '../pages/purchase/SuppliersPage';
 import { PurchaseOrdersPage } from '../pages/purchase/PurchaseOrdersPage';
+import { PurchaseReceiptsPage } from '../pages/purchase/PurchaseReceiptsPage';
 import { SystemPage } from '../pages/system/SystemPage';
 import { PlatformMappingsPage } from '../pages/system/PlatformMappingsPage';
 
@@ -63,6 +64,7 @@ export function App() {
           <Route path="/exceptions" element={<ExceptionsPage />} />
           <Route path="/suppliers" element={<SuppliersPage />} />
           <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
+          <Route path="/purchase-receipts" element={<PurchaseReceiptsPage />} />
           <Route path="/system" element={<SystemPage />} />
           <Route path="/platform-mappings" element={<PlatformMappingsPage />} />
         </Route>

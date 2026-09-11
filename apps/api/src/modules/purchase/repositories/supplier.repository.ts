@@ -79,13 +79,15 @@ export class SupplierRepository {
   }
 
   /**
-   * Reference census for the zero-reference delete guard (decision 0003).
-   * Sprint 7 adds the referencing tables incrementally: purchase_orders here
-   * (T3), purchase_receipts in T4.
+   * Reference census for the zero-reference delete guard (decision 0003):
+   * purchase orders (T3) and purchase receipts (T4) - including cancelled
+   * rows, which remain audit history referencing the supplier.
    */
   async countReferences(id: string): Promise<Array<{ table: string; count: number }>> {
     const result = await this.dataSource.query<Array<{ table: string; count: string }>>(
-      `SELECT 'purchase_orders' AS table, COUNT(*)::text AS count FROM purchase_orders WHERE supplier_id = $1`,
+      `SELECT 'purchase_orders' AS table, COUNT(*)::text AS count FROM purchase_orders WHERE supplier_id = $1
+       UNION ALL
+       SELECT 'purchase_receipts', COUNT(*)::text FROM purchase_receipts WHERE supplier_id = $1`,
       [id],
     );
     return result.map((row) => ({ table: row.table, count: Number(row.count) }));

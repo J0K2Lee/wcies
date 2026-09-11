@@ -13,6 +13,10 @@ export const PURCHASE_ORDER_STATUSES = [
 ] as const;
 export type PurchaseOrderStatus = (typeof PURCHASE_ORDER_STATUSES)[number];
 
+/** Purchase receipt lifecycle (purchase.md §4.2): RECEIVED is irreversible. */
+export const PURCHASE_RECEIPT_STATUSES = ['DRAFT', 'RECEIVED', 'CANCELLED'] as const;
+export type PurchaseReceiptStatus = (typeof PURCHASE_RECEIPT_STATUSES)[number];
+
 /**
  * Derived per-order-line procurement state (purchase.md §3.5). NEVER stored
  * on order_items - always recomputed from purchase_order_items (AGENTS.md

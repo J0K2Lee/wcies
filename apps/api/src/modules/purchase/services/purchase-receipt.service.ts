@@ -1,0 +1,542 @@
+import { Injectable } from '@nestjs/common';
+import { DataSource } from 'typeorm';
+import { PageMeta } from '@wcies/shared';
+import { OperatorContext, OperationLogService } from '../../operation-log/operation-log.service';
+import { BusinessCodeService } from '../../../infrastructure/business-code/business-code.service';
+import { SkuService } from '../../product/services/sku.service';
+import { SkuNotFoundError } from '../../product/errors/sku-errors';
+import { WarehouseService } from '../../warehouse/services/warehouse.service';
+import { WarehouseNotFoundError } from '../../warehouse/errors/warehouse-errors';
+import { InventoryService } from '../../inventory/services/inventory.service';
+import { InventoryQueryService } from '../../inventory/services/inventory-query.service';
+import { formatQty, parseQty } from '../../../common/utils/quantity';
+import { PurchaseOrderEntity } from '../entities/purchase-order.entity';
+import { PurchaseReceiptEntity } from '../entities/purchase-receipt.entity';
+import {
+  PurchaseReceiptConfirmResultDto,
+  PurchaseReceiptDetailDto,
+  PurchaseReceiptItemInputDto,
+  PurchaseReceiptListItemDto,
+  PurchaseReceiptListQueryDto,
+  CreatePurchaseReceiptRequestDto,
+  UpdatePurchaseReceiptRequestDto,
+} from '../dto/purchase-receipt.dto';
+import {
+  PurchaseReceiptRepository,
+  PurchaseReceiptListFilters,
+} from '../repositories/purchase-receipt.repository';
+import { PurchaseOrderRepository } from '../repositories/purchase-order.repository';
+import {
+  PurchaseOrderInvalidStateError,
+  PurchaseOrderNotFoundError,
+  PurchaseReceiptEmptyError,
+  PurchaseReceiptInvalidStateError,
+  PurchaseReceiptNotFoundError,
+  SupplierNotFoundError,
+} from '../errors/purchase-errors';
+import { SupplierService } from './supplier.service';
+import { offsetOf } from '../../../common/dto/pagination.dto';
+
+const ENTITY_TYPE = 'PURCHASE_RECEIPT';
+
+/**
+ * Purchase receipts (Sprint 7 task §11): the REAL receiving action that
+ * turns purchased goods into stock facts. Confirmation books every line
+ * through InventoryService.receiveStockInTx inside ONE transaction - this
+ * module never writes inventory_balances itself (AGENTS.md §10).
+ */
+@Injectable()
+export class PurchaseReceiptService {
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly repository: PurchaseReceiptRepository,
+    private readonly poRepository: PurchaseOrderRepository,
+    private readonly supplierService: SupplierService,
+    private readonly skuService: SkuService,
+    private readonly warehouseService: WarehouseService,
+    private readonly inventoryService: InventoryService,
+    private readonly inventoryQuery: InventoryQueryService,
+    private readonly businessCode: BusinessCodeService,
+    private readonly operationLog: OperationLogService,
+  ) {}
+
+  // --------------------------------------------------------------------------
+  // Create / update / cancel (DRAFT stage)
+  // --------------------------------------------------------------------------
+
+  async create(
+    dto: CreatePurchaseReceiptRequestDto,
+    operator: OperatorContext,
+  ): Promise<PurchaseReceiptDetailDto> {
+    const header = await this.resolveHeaderRefs(dto);
+    await this.assertItemsValid(dto.items);
+
+    const created = await this.dataSource.transaction(async (manager) => {
+      const receiptNo = await this.businessCode.nextPurchaseReceiptNo();
+      return this.repository.insertWithItems(
+        manager,
+        {
+          receiptNo,
+          purchaseOrderId: header.purchaseOrderId,
+          supplierId: header.supplierId,
+          sourceNote: dto.sourceNote?.trim() || null,
+          warehouseId: dto.warehouseId,
+          status: 'DRAFT',
+          remark: dto.remark ?? null,
+          createdBy: operator.userId,
+        },
+        dto.items.map((item) => this.toItemRow(item)),
+      );
+    });
+
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: created.id,
+      entityCode: created.receiptNo,
+      action: 'CREATE',
+      changes: {
+        receiptNo: { from: null, to: created.receiptNo },
+        warehouseId: { from: null, to: created.warehouseId },
+        itemCount: { from: null, to: dto.items.length },
+      },
+      operator,
+    });
+    return this.getDetail(created.id);
+  }
+
+  /** One-click prefill from a purchase order (task §T4.4). */
+  async generateFromPo(
+    poId: string,
+    dto: { warehouseId: string; defaultBinId?: string },
+    operator: OperatorContext,
+  ): Promise<PurchaseReceiptDetailDto> {
+    const po = await this.poRepository.findById(poId);
+    if (po === null) {
+      throw new PurchaseOrderNotFoundError(poId);
+    }
+    if (po.status === 'CANCELLED') {
+      throw new PurchaseOrderInvalidStateError('采购单已取消，不能生成收货单', {
+        poNo: po.poNo,
+        status: po.status,
+      });
+    }
+    await this.assertWarehouseExists(dto.warehouseId);
+
+    const items = (await this.poRepository.findItemsWithRefs(poId))
+      .map((row) => ({
+        item: row.item,
+        remaining: parseQty(row.item.quantity) - parseQty(row.item.receivedQuantity),
+      }))
+      .filter(({ remaining }) => remaining > 0n);
+    if (items.length === 0) {
+      throw new PurchaseOrderInvalidStateError('采购单全部明细已收货，没有可收数量', {
+        poNo: po.poNo,
+        status: po.status,
+      });
+    }
+
+    const created = await this.dataSource.transaction(async (manager) => {
+      const receiptNo = await this.businessCode.nextPurchaseReceiptNo();
+      return this.repository.insertWithItems(
+        manager,
+        {
+          receiptNo,
+          purchaseOrderId: po.id,
+          supplierId: po.supplierId,
+          sourceNote: po.sourceNote,
+          warehouseId: dto.warehouseId,
+          status: 'DRAFT',
+          remark: `从采购单 ${po.poNo} 生成`,
+          createdBy: operator.userId,
+        },
+        items.map(({ item, remaining }) => ({
+          purchaseOrderItemId: item.id,
+          skuId: item.skuId,
+          quantity: formatQty(remaining),
+          unitCost: item.unitCost,
+          binId: dto.defaultBinId ?? null,
+          serialNumbers: null,
+          remark: null,
+        })),
+      );
+    });
+
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: created.id,
+      entityCode: created.receiptNo,
+      action: 'CREATE',
+      changes: {
+        receiptNo: { from: null, to: created.receiptNo },
+        generatedFrom: { from: null, to: po.poNo },
+      },
+      operator,
+    });
+    return this.getDetail(created.id);
+  }
+
+  /** DRAFT-only edits; RECEIVED quantities are frozen (§4.2). */
+  async update(
+    id: string,
+    dto: UpdatePurchaseReceiptRequestDto,
+    operator: OperatorContext,
+  ): Promise<PurchaseReceiptDetailDto> {
+    const existing = await this.findOrThrow(id);
+    if (existing.status !== 'DRAFT') {
+      throw new PurchaseReceiptInvalidStateError(
+        `收货单状态 ${existing.status} 不允许修改（库存已入账，修正走库存调整）`,
+        { receiptNo: existing.receiptNo, status: existing.status },
+      );
+    }
+    if (dto.supplierId !== undefined && dto.supplierId !== null) {
+      if ((await this.supplierService.getEntityById(dto.supplierId)) === null) {
+        throw new SupplierNotFoundError(dto.supplierId);
+      }
+    }
+    if (dto.items !== undefined) {
+      await this.assertItemsValid(dto.items);
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      const patch: Partial<PurchaseReceiptEntity> = {};
+      if (dto.supplierId !== undefined) patch.supplierId = dto.supplierId;
+      if (dto.sourceNote !== undefined) patch.sourceNote = dto.sourceNote?.trim() || null;
+      if (dto.remark !== undefined) patch.remark = dto.remark ?? null;
+      if (Object.keys(patch).length > 0) {
+        await this.repository.updateHeader(manager, id, patch);
+      }
+      if (dto.items !== undefined) {
+        await this.repository.replaceItems(
+          manager,
+          id,
+          dto.items.map((item) => this.toItemRow(item)),
+        );
+      }
+    });
+
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: id,
+      entityCode: existing.receiptNo,
+      action: 'UPDATE',
+      changes: { items: { from: null, to: dto.items?.length ?? null } },
+      operator,
+    });
+    return this.getDetail(id);
+  }
+
+  async cancel(id: string, operator: OperatorContext): Promise<PurchaseReceiptDetailDto> {
+    const existing = await this.findOrThrow(id);
+    if (existing.status === 'CANCELLED') {
+      return this.getDetail(id);
+    }
+    if (existing.status !== 'DRAFT') {
+      throw new PurchaseReceiptInvalidStateError(
+        `收货单已确认（${existing.status}），库存事实不可撤销`,
+        { receiptNo: existing.receiptNo, status: existing.status },
+      );
+    }
+    await this.dataSource.transaction(async (manager) => {
+      await this.repository.updateHeader(manager, id, { status: 'CANCELLED' });
+    });
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: id,
+      entityCode: existing.receiptNo,
+      action: 'CANCEL',
+      changes: { status: { from: existing.status, to: 'CANCELLED' } },
+      operator,
+    });
+    return this.getDetail(id);
+  }
+
+  // --------------------------------------------------------------------------
+  // Confirm - the core receiving action (task §T4.2)
+  // --------------------------------------------------------------------------
+
+  /**
+   * ONE database transaction: every line books through
+   * InventoryService.receiveStockInTx (reference PURCHASE_RECEIPT,
+   * idempotency key PURCHASE_RECEIPT:<receiptId>:<itemId>), PO items
+   * accrue received_quantity, source PO status recomputes, and the
+   * moving-average cost updates for lines carrying unit_cost. Any failure
+   * rolls the whole receipt back - no half-booked documents exist.
+   */
+  async confirm(
+    receiptId: string,
+    operator: OperatorContext,
+  ): Promise<PurchaseReceiptConfirmResultDto> {
+    const receipt = await this.findOrThrow(receiptId);
+    if (receipt.status === 'RECEIVED') {
+      // Idempotent repeat: already booked, never re-enter stock (§4.3).
+      return { ...(await this.getDetail(receiptId)), idempotentReplay: true };
+    }
+    if (receipt.status !== 'DRAFT') {
+      throw new PurchaseReceiptInvalidStateError(`收货单状态 ${receipt.status} 不能确认`, {
+        receiptNo: receipt.receiptNo,
+        status: receipt.status,
+      });
+    }
+    await this.assertWarehouseExists(receipt.warehouseId);
+    const items = await this.repository.findItemsWithRefs(receiptId);
+    if (items.length === 0) {
+      throw new PurchaseReceiptEmptyError(receiptId);
+    }
+
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    const touchedPoIds = new Set<string>();
+    try {
+      // Status re-check under the row lock: a concurrent confirm of the same
+      // receipt serializes here instead of double-booking.
+      const locked = await this.repository.lockById(runner, receiptId);
+      if (locked === null) {
+        throw new PurchaseReceiptNotFoundError(receiptId);
+      }
+      if (locked.status !== 'DRAFT') {
+        throw new PurchaseReceiptInvalidStateError(
+          `收货单状态 ${locked.status} 不能确认（并发确认已被另一请求完成）`,
+          { receiptNo: locked.receiptNo, status: locked.status },
+        );
+      }
+
+      for (const { item } of items) {
+        const outcome = await this.inventoryService.receiveStockInTx(runner, {
+          skuId: item.skuId,
+          warehouseId: receipt.warehouseId,
+          binId: item.binId,
+          condition: 'SELLABLE',
+          quantity: item.quantity,
+          serialNumbers: item.serialNumbers ?? undefined,
+          referenceType: 'PURCHASE_RECEIPT',
+          referenceId: receipt.id,
+          idempotencyKey: `PURCHASE_RECEIPT:${receipt.id}:${item.id}`,
+          remark: `receipt=${receipt.receiptNo}`,
+          operator,
+        });
+
+        if (outcome.wrote) {
+          if (item.purchaseOrderItemId !== null) {
+            await this.repository.accruePoItemReceived(
+              runner,
+              item.purchaseOrderItemId,
+              item.quantity,
+            );
+            const poItem = (await runner.query(
+              `SELECT po_id FROM purchase_order_items WHERE id = $1`,
+              [item.purchaseOrderItemId],
+            )) as unknown as { po_id: string }[];
+            if (poItem[0] !== undefined) {
+              touchedPoIds.add(poItem[0].po_id);
+            }
+          }
+          if (item.unitCost !== null) {
+            // Moving average (decision 0013 §6): weighted against the SKU's
+            // total on-hand INCLUDING this line (same transaction view).
+            const totalOnHand = await this.inventoryQuery.getTotalOnHandInTx(runner, item.skuId);
+            await this.skuService.applyMovingAverageCostInTx(runner.manager, {
+              skuId: item.skuId,
+              receivedQty: item.quantity,
+              unitCost: item.unitCost,
+              totalOnHand,
+            });
+          }
+        }
+      }
+
+      await this.repository.updateHeader(runner.manager, receiptId, {
+        status: 'RECEIVED',
+        receivedAt: new Date(),
+      });
+
+      // Source POs roll forward: ORDERED -> PARTIALLY_RECEIVED -> RECEIVED.
+      for (const poId of touchedPoIds) {
+        const nextStatus = await this.poRepository.recomputeStatus(runner.manager, poId);
+        await this.poRepository.updateHeader(runner.manager, poId, {
+          status: nextStatus as PurchaseOrderEntity['status'],
+        });
+      }
+
+      await runner.commitTransaction();
+    } catch (error: unknown) {
+      await runner.rollbackTransaction();
+      throw error;
+    } finally {
+      await runner.release();
+    }
+
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: receipt.id,
+      entityCode: receipt.receiptNo,
+      action: 'CONFIRM',
+      changes: {
+        status: { from: 'DRAFT', to: 'RECEIVED' },
+        itemCount: { from: null, to: items.length },
+      },
+      operator,
+    });
+    return { ...(await this.getDetail(receiptId)), idempotentReplay: false };
+  }
+
+  // --------------------------------------------------------------------------
+  // Reads
+  // --------------------------------------------------------------------------
+
+  async list(
+    query: PurchaseReceiptListQueryDto & { page: number; pageSize: number },
+  ): Promise<{ items: PurchaseReceiptListItemDto[]; meta: PageMeta }> {
+    const { page, pageSize } = query;
+    const filters: PurchaseReceiptListFilters = {
+      keyword: query.keyword?.trim() || undefined,
+      status: query.status,
+      warehouseId: query.warehouseId,
+      purchaseOrderId: query.purchaseOrderId,
+    };
+    const { rows, total } = await this.repository.list(filters, pageSize, offsetOf(page, pageSize));
+    return {
+      items: rows.map((row) => ({
+        id: row.receipt.id,
+        receiptNo: row.receipt.receiptNo,
+        purchaseOrderId: row.receipt.purchaseOrderId,
+        purchaseOrderNo: row.purchaseOrderNo,
+        supplierId: row.receipt.supplierId,
+        supplierName: row.supplierName,
+        sourceNote: row.receipt.sourceNote,
+        warehouseId: row.receipt.warehouseId,
+        warehouseCode: row.warehouseCode,
+        status: row.receipt.status,
+        receivedAt: row.receipt.receivedAt,
+        itemCount: row.itemCount,
+        totalQuantity: row.totalQuantity,
+        createdAt: row.receipt.createdAt,
+        updatedAt: row.receipt.updatedAt,
+      })),
+      meta: { page, pageSize, total },
+    };
+  }
+
+  async getDetail(id: string): Promise<PurchaseReceiptDetailDto> {
+    const receipt = await this.findOrThrow(id);
+    const items = await this.repository.findItemsWithRefs(receipt.id);
+    const poNo =
+      receipt.purchaseOrderId === null
+        ? null
+        : ((await this.poRepository.findById(receipt.purchaseOrderId))?.poNo ?? null);
+    return {
+      id: receipt.id,
+      receiptNo: receipt.receiptNo,
+      purchaseOrderId: receipt.purchaseOrderId,
+      purchaseOrderNo: poNo,
+      supplierId: receipt.supplierId,
+      supplierName: null,
+      sourceNote: receipt.sourceNote,
+      warehouseId: receipt.warehouseId,
+      warehouseCode: null,
+      status: receipt.status,
+      receivedAt: receipt.receivedAt,
+      remark: receipt.remark,
+      createdAt: receipt.createdAt,
+      updatedAt: receipt.updatedAt,
+      items: items.map((row) => ({
+        id: row.item.id,
+        skuId: row.item.skuId,
+        skuCode: row.skuCode,
+        skuName: row.skuName,
+        purchaseOrderItemId: row.item.purchaseOrderItemId,
+        quantity: row.item.quantity,
+        unitCost: row.item.unitCost,
+        binId: row.item.binId,
+        binCode: row.binCode,
+        serialNumbers: row.item.serialNumbers,
+        remark: row.item.remark,
+      })),
+    };
+  }
+
+  // --------------------------------------------------------------------------
+  // Internals
+  // --------------------------------------------------------------------------
+
+  private toItemRow(item: PurchaseReceiptItemInputDto) {
+    return {
+      purchaseOrderItemId: item.purchaseOrderItemId ?? null,
+      skuId: item.skuId,
+      quantity: formatQty(parseQty(item.quantity)),
+      unitCost: item.unitCost ?? null,
+      binId: item.binId ?? null,
+      serialNumbers: item.serialNumbers ?? null,
+      remark: item.remark ?? null,
+    };
+  }
+
+  private async resolveHeaderRefs(
+    dto: CreatePurchaseReceiptRequestDto,
+  ): Promise<{ purchaseOrderId: string | null; supplierId: string | null }> {
+    await this.assertWarehouseExists(dto.warehouseId);
+    let purchaseOrderId = dto.purchaseOrderId ?? null;
+    if (purchaseOrderId !== null) {
+      const po = await this.poRepository.findById(purchaseOrderId);
+      if (po === null) {
+        throw new PurchaseOrderNotFoundError(purchaseOrderId);
+      }
+      if (po.status === 'CANCELLED') {
+        throw new PurchaseOrderInvalidStateError('采购单已取消，不能收货', {
+          poNo: po.poNo,
+          status: po.status,
+        });
+      }
+    }
+    // PO items imply their PO: keep the header link consistent automatically.
+    if (purchaseOrderId === null) {
+      for (const item of dto.items) {
+        if (item.purchaseOrderItemId === undefined) {
+          continue;
+        }
+        const row = (await this.dataSource.query(
+          `SELECT po_id FROM purchase_order_items WHERE id = $1`,
+          [item.purchaseOrderItemId],
+        )) as unknown as { po_id: string }[];
+        const first = row[0];
+        if (first === undefined) {
+          throw new PurchaseOrderNotFoundError(item.purchaseOrderItemId);
+        }
+        purchaseOrderId = first.po_id;
+        break;
+      }
+    }
+    let supplierId = dto.supplierId ?? null;
+    if (dto.supplierId !== undefined) {
+      if ((await this.supplierService.getEntityById(dto.supplierId)) === null) {
+        throw new SupplierNotFoundError(dto.supplierId);
+      }
+    }
+    if (supplierId === null && purchaseOrderId !== null) {
+      supplierId = (await this.poRepository.findById(purchaseOrderId))?.supplierId ?? null;
+    }
+    return { purchaseOrderId, supplierId };
+  }
+
+  private async assertWarehouseExists(warehouseId: string): Promise<void> {
+    if ((await this.warehouseService.getEntityById(warehouseId)) === null) {
+      throw new WarehouseNotFoundError(warehouseId);
+    }
+  }
+
+  private async assertItemsValid(items: PurchaseReceiptItemInputDto[]): Promise<void> {
+    for (const item of items) {
+      if ((await this.skuService.getEntityById(item.skuId)) === null) {
+        throw new SkuNotFoundError(item.skuId);
+      }
+    }
+  }
+
+  private async findOrThrow(id: string): Promise<PurchaseReceiptEntity> {
+    const receipt = await this.repository.findById(id);
+    if (receipt === null) {
+      throw new PurchaseReceiptNotFoundError(id);
+    }
+    return receipt;
+  }
+}

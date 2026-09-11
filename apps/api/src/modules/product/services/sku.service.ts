@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { EntityManager } from 'typeorm';
 import { PageMeta } from '@wcies/shared';
 import {
   OperatorContext,
@@ -259,6 +260,34 @@ export class SkuService {
   /** Cross-module lookups (listing / import services). */
   async getEntityById(id: string): Promise<SkuEntity | null> {
     return this.repository.findById(id);
+  }
+
+  /**
+   * Moving-average cost update on receipt confirmation (Sprint 7, decision
+   * 0013 par6, master-data.md par4). Runs on the CALLER's transaction; the
+   * weighted arithmetic happens in SQL NUMERIC so precision is exact
+   * (AGENTS.md par58 forbids float money). totalOnHand is the SKU's
+   * warehouse-wide on-hand INCLUDING this receipt (read on the same tx).
+   * Returns the new average for auditing.
+   */
+  async applyMovingAverageCostInTx(
+    manager: EntityManager,
+    input: { skuId: string; receivedQty: string; unitCost: string; totalOnHand: string },
+  ): Promise<string> {
+    const result = await manager.query<Array<{ avg: string }>>(
+      `UPDATE skus
+       SET moving_average_cost = CASE
+             WHEN moving_average_cost IS NULL THEN $2::numeric
+             ELSE ROUND(
+               (moving_average_cost * ($4::numeric - $3::numeric)
+                + $2::numeric * $3::numeric) / $4::numeric, 4)
+           END,
+           updated_at = now()
+       WHERE id = $1
+       RETURNING moving_average_cost::text AS avg`,
+      [input.skuId, input.unitCost, input.receivedQty, input.totalOnHand],
+    );
+    return result[0]?.avg ?? '';
   }
 
   /** Zero-reference hard delete (decision 0003); referenced -> SKU_IN_USE. */

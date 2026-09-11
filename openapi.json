@@ -4548,7 +4548,7 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": ["MANUAL", "TEST", "ORDER", "IMPORT"]
+              "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT"]
             }
           },
           {
@@ -7203,6 +7203,343 @@
         },
         "summary": "取消采购单（仅未收货）",
         "tags": ["purchase-orders"]
+      }
+    },
+    "/api/v1/purchase-receipts": {
+      "get": {
+        "operationId": "PurchaseReceiptController_list",
+        "parameters": [
+          {
+            "name": "keyword",
+            "required": false,
+            "in": "query",
+            "description": "收货单号 / 货源说明 模糊搜索",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["DRAFT", "RECEIVED", "CANCELLED"]
+            }
+          },
+          {
+            "name": "warehouseId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "purchaseOrderId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data", "meta"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PurchaseReceiptListItemDto"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": ["page", "pageSize", "total"],
+                      "properties": {
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "pageSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "收货单列表（筛选：状态/仓库/来源采购单）",
+        "tags": ["purchase-receipts"]
+      },
+      "post": {
+        "operationId": "PurchaseReceiptController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePurchaseReceiptRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PurchaseReceiptDetailDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "新建收货单草稿（确认时才写库存）",
+        "tags": ["purchase-receipts"]
+      }
+    },
+    "/api/v1/purchase-receipts/from-po/{poId}": {
+      "post": {
+        "operationId": "PurchaseReceiptController_generateFromPo",
+        "parameters": [
+          {
+            "name": "poId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateReceiptFromPoRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PurchaseReceiptDetailDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "从采购单生成收货单（预填剩余数量/成本/供应商）",
+        "tags": ["purchase-receipts"]
+      }
+    },
+    "/api/v1/purchase-receipts/{id}": {
+      "get": {
+        "operationId": "PurchaseReceiptController_getById",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PurchaseReceiptDetailDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "收货单详情（确认前预览即此数据）",
+        "tags": ["purchase-receipts"]
+      },
+      "patch": {
+        "operationId": "PurchaseReceiptController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePurchaseReceiptRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PurchaseReceiptDetailDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "修改收货单草稿（仅 DRAFT）",
+        "tags": ["purchase-receipts"]
+      }
+    },
+    "/api/v1/purchase-receipts/{id}/confirm": {
+      "post": {
+        "operationId": "PurchaseReceiptController_confirm",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PurchaseReceiptConfirmResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "确认收货（整单一个事务写入库存与流水；重复确认幂等）",
+        "tags": ["purchase-receipts"]
+      }
+    },
+    "/api/v1/purchase-receipts/{id}/cancel": {
+      "post": {
+        "operationId": "PurchaseReceiptController_cancel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PurchaseReceiptDetailDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "取消收货单（仅 DRAFT，从未碰库存）",
+        "tags": ["purchase-receipts"]
       }
     },
     "/api/v1/shipments": {
@@ -11211,7 +11548,7 @@
           },
           "referenceType": {
             "type": "string",
-            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT"]
+            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT"]
           },
           "referenceId": {
             "type": "string"
@@ -11352,7 +11689,7 @@
           },
           "referenceType": {
             "type": "string",
-            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT"]
+            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT"]
           },
           "referenceId": {
             "type": "string"
@@ -11406,7 +11743,7 @@
           },
           "referenceType": {
             "type": "string",
-            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT"]
+            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT"]
           },
           "referenceId": {
             "type": "string"
@@ -11526,7 +11863,7 @@
           },
           "referenceType": {
             "type": "string",
-            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT"]
+            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT"]
           },
           "referenceId": {
             "type": "string"
@@ -13646,6 +13983,383 @@
             }
           }
         }
+      },
+      "PurchaseReceiptListItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "receiptNo": {
+            "type": "string",
+            "example": "PR000001"
+          },
+          "purchaseOrderId": {
+            "type": "object",
+            "nullable": true
+          },
+          "purchaseOrderNo": {
+            "type": "object",
+            "nullable": true,
+            "example": "PO000001"
+          },
+          "supplierId": {
+            "type": "object",
+            "nullable": true
+          },
+          "supplierName": {
+            "type": "object",
+            "nullable": true
+          },
+          "sourceNote": {
+            "type": "object",
+            "nullable": true
+          },
+          "warehouseId": {
+            "type": "string"
+          },
+          "warehouseCode": {
+            "type": "object",
+            "nullable": true,
+            "example": "ZG-01"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["DRAFT", "RECEIVED", "CANCELLED"]
+          },
+          "receivedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "itemCount": {
+            "type": "number"
+          },
+          "totalQuantity": {
+            "type": "string",
+            "example": "2.000"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "receiptNo",
+          "warehouseId",
+          "status",
+          "itemCount",
+          "totalQuantity",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "PurchaseReceiptItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "skuId": {
+            "type": "string"
+          },
+          "skuCode": {
+            "type": "string",
+            "example": "SKU000001001"
+          },
+          "skuName": {
+            "type": "string",
+            "example": "VK87 MAX V2 黑色"
+          },
+          "purchaseOrderItemId": {
+            "type": "object",
+            "nullable": true
+          },
+          "quantity": {
+            "type": "string",
+            "example": "2.000"
+          },
+          "unitCost": {
+            "type": "object",
+            "nullable": true,
+            "example": "59.9000"
+          },
+          "binId": {
+            "type": "object",
+            "nullable": true
+          },
+          "binCode": {
+            "type": "object",
+            "nullable": true,
+            "example": "ZG-01-A01-1"
+          },
+          "serialNumbers": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "remark": {
+            "type": "object",
+            "nullable": true
+          }
+        },
+        "required": ["id", "skuId", "skuCode", "skuName", "quantity"]
+      },
+      "PurchaseReceiptDetailDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "receiptNo": {
+            "type": "string",
+            "example": "PR000001"
+          },
+          "purchaseOrderId": {
+            "type": "object",
+            "nullable": true
+          },
+          "purchaseOrderNo": {
+            "type": "object",
+            "nullable": true,
+            "example": "PO000001"
+          },
+          "supplierId": {
+            "type": "object",
+            "nullable": true
+          },
+          "supplierName": {
+            "type": "object",
+            "nullable": true
+          },
+          "sourceNote": {
+            "type": "object",
+            "nullable": true
+          },
+          "warehouseId": {
+            "type": "string"
+          },
+          "warehouseCode": {
+            "type": "object",
+            "nullable": true,
+            "example": "ZG-01"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["DRAFT", "RECEIVED", "CANCELLED"]
+          },
+          "receivedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "remark": {
+            "type": "object",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PurchaseReceiptItemDto"
+            }
+          }
+        },
+        "required": ["id", "receiptNo", "warehouseId", "status", "createdAt", "updatedAt", "items"]
+      },
+      "PurchaseReceiptItemInputDto": {
+        "type": "object",
+        "properties": {
+          "skuId": {
+            "type": "string"
+          },
+          "purchaseOrderItemId": {
+            "type": "string",
+            "description": "来源采购明细（可空 = 直接收货）"
+          },
+          "quantity": {
+            "type": "string",
+            "example": "2"
+          },
+          "unitCost": {
+            "type": "string",
+            "example": "59.9000"
+          },
+          "binId": {
+            "type": "string",
+            "description": "目标库位（可空 → 库存层既有解析规则）"
+          },
+          "serialNumbers": {
+            "description": "SN 管理商品必填：与数量一致的 SN 列表；非 SN 商品禁止提供",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "remark": {
+            "type": "string"
+          }
+        },
+        "required": ["skuId", "quantity"]
+      },
+      "CreatePurchaseReceiptRequestDto": {
+        "type": "object",
+        "properties": {
+          "purchaseOrderId": {
+            "type": "string",
+            "description": "来源采购单（可空 = 直接收货）"
+          },
+          "supplierId": {
+            "type": "string"
+          },
+          "sourceNote": {
+            "type": "string"
+          },
+          "warehouseId": {
+            "type": "string"
+          },
+          "remark": {
+            "type": "string"
+          },
+          "items": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PurchaseReceiptItemInputDto"
+            }
+          }
+        },
+        "required": ["warehouseId", "items"]
+      },
+      "GenerateReceiptFromPoRequestDto": {
+        "type": "object",
+        "properties": {
+          "warehouseId": {
+            "type": "string"
+          },
+          "defaultBinId": {
+            "type": "string",
+            "description": "默认目标库位（明细可单独覆盖）"
+          }
+        },
+        "required": ["warehouseId"]
+      },
+      "UpdatePurchaseReceiptRequestDto": {
+        "type": "object",
+        "properties": {
+          "supplierId": {
+            "type": "string"
+          },
+          "sourceNote": {
+            "type": "string"
+          },
+          "remark": {
+            "type": "string"
+          },
+          "items": {
+            "description": "整体替换明细（仅 DRAFT）",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PurchaseReceiptItemInputDto"
+            }
+          }
+        }
+      },
+      "PurchaseReceiptConfirmResultDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "receiptNo": {
+            "type": "string",
+            "example": "PR000001"
+          },
+          "purchaseOrderId": {
+            "type": "object",
+            "nullable": true
+          },
+          "purchaseOrderNo": {
+            "type": "object",
+            "nullable": true,
+            "example": "PO000001"
+          },
+          "supplierId": {
+            "type": "object",
+            "nullable": true
+          },
+          "supplierName": {
+            "type": "object",
+            "nullable": true
+          },
+          "sourceNote": {
+            "type": "object",
+            "nullable": true
+          },
+          "warehouseId": {
+            "type": "string"
+          },
+          "warehouseCode": {
+            "type": "object",
+            "nullable": true,
+            "example": "ZG-01"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["DRAFT", "RECEIVED", "CANCELLED"]
+          },
+          "receivedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "remark": {
+            "type": "object",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PurchaseReceiptItemDto"
+            }
+          },
+          "idempotentReplay": {
+            "type": "boolean",
+            "example": false
+          }
+        },
+        "required": [
+          "id",
+          "receiptNo",
+          "warehouseId",
+          "status",
+          "createdAt",
+          "updatedAt",
+          "items",
+          "idempotentReplay"
+        ]
       },
       "ShipmentListItemDto": {
         "type": "object",

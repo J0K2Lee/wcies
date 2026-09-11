@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { App as AntdApp, Button, Drawer, Form, Input, InputNumber, Modal, Select } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
@@ -92,6 +93,9 @@ export function PurchaseOrdersPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [cancelling, setCancelling] = useState<PurchaseOrderRow | null>(null);
+  const [generateFor, setGenerateFor] = useState<PurchaseOrderRow | null>(null);
+  const [generateForm] = Form.useForm<{ warehouseId: string }>();
+  const navigate = useNavigate();
   const [form] = Form.useForm<PoFormValues>();
 
   const list = useApiQuery<Envelope<PurchaseOrderRow[]>>(
@@ -110,6 +114,10 @@ export function PurchaseOrdersPage() {
     { page: 1, pageSize: 100, status: 'ACTIVE' },
     ['suppliers-for-po'],
   );
+
+  const warehouses = useApiQuery<
+    Envelope<Array<{ id: string; warehouseCode: string; name: string }>>
+  >('/api/v1/warehouses', { page: 1, pageSize: 100 }, ['warehouses-for-po-generate']);
 
   const detail = useApiQuery<{ data: PurchaseOrderDetail }>(
     '/api/v1/purchase-orders/{id}',
@@ -162,6 +170,22 @@ export function PurchaseOrdersPage() {
       setCancelling(null);
       void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       void queryClient.invalidateQueries({ queryKey: ['purchase-order-detail'] });
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const generateMutation = useMutation({
+    mutationFn: ({ poId, warehouseId }: { poId: string; warehouseId: string }) =>
+      apiPost<{ id: string; receiptNo: string }>(
+        '/api/v1/purchase-receipts/from-po/{poId}',
+        { warehouseId },
+        { poId },
+      ),
+    onSuccess: (result) => {
+      void message.success(`已生成收货单 ${result.receiptNo}（草稿），前往确认`);
+      setGenerateFor(null);
+      void queryClient.invalidateQueries({ queryKey: ['purchase-receipts'] });
+      void navigate(`/purchase-receipts?focus=${result.id}`);
     },
     onError: (error: Error) => void message.error(error.message),
   });
@@ -379,6 +403,19 @@ export function PurchaseOrdersPage() {
       >
         {detailRow !== null && (
           <>
+            {(detailRow.status === 'ORDERED' || detailRow.status === 'PARTIALLY_RECEIVED') && (
+              <div style={{ marginBottom: 16 }}>
+                <Button
+                  type="primary"
+                  onClick={() => {
+                    generateForm.resetFields();
+                    setGenerateFor(detailRow);
+                  }}
+                >
+                  生成收货单
+                </Button>
+              </div>
+            )}
             <ContextSection title="采购单信息">
               <ContextMetric label="供应商" value={detailRow.supplierName ?? '—'} />
               <ContextMetric label="货源说明" value={detailRow.sourceNote ?? '—'} />
@@ -535,6 +572,42 @@ export function PurchaseOrdersPage() {
               </>
             )}
           </Form.List>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={`从 ${generateFor?.poNo ?? ''} 生成收货单`}
+        open={generateFor !== null}
+        onCancel={() => setGenerateFor(null)}
+        onOk={() => {
+          void generateForm.validateFields().then((values) => {
+            if (generateFor !== null) {
+              generateMutation.mutate({ poId: generateFor.id, warehouseId: values.warehouseId });
+            }
+          });
+        }}
+        okText="生成草稿"
+        cancelText="取消"
+        confirmLoading={generateMutation.isPending}
+        destroyOnHidden
+      >
+        <Form form={generateForm} layout="vertical" preserve={false}>
+          <Form.Item
+            name="warehouseId"
+            label="收货仓库"
+            rules={[{ required: true, message: '请选择仓库' }]}
+          >
+            <Select
+              placeholder="选择仓库"
+              options={(warehouses.data?.data ?? []).map((warehouse) => ({
+                value: warehouse.id,
+                label: `${warehouse.warehouseCode} · ${warehouse.name}`,
+              }))}
+            />
+          </Form.Item>
+          <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+            将按采购明细的未收数量预填草稿；生成后可调整库位与数量再确认。
+          </span>
         </Form>
       </Modal>
 
