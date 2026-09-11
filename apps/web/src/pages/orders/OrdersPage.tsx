@@ -654,7 +654,6 @@ export function OrdersPage() {
                 ghost
                 onClick={(event) => {
                   event.stopPropagation();
-                  registerForm.setFieldsValue({ quantity: Number(row.quantity) });
                   setRegisterItem(row);
                 }}
               >
@@ -1261,7 +1260,14 @@ export function OrdersPage() {
         confirmLoading={registerPurchaseMutation.isPending}
         destroyOnHidden
       >
-        <Form form={registerForm} layout="vertical" preserve={false}>
+        {/* destroyOnHidden remounts this form per open, so initialValues is
+            re-read each time; setFieldsValue before mount gets lost. */}
+        <Form
+          form={registerForm}
+          layout="vertical"
+          preserve={false}
+          initialValues={{ quantity: registerItem === null ? 1 : Number(registerItem.quantity) }}
+        >
           <span
             style={{
               fontSize: 12.5,

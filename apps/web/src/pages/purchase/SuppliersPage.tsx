@@ -61,6 +61,7 @@ export function SuppliersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [deleting, setDeleting] = useState<SupplierRow | null>(null);
   const [form] = Form.useForm<SupplierFormValues>();
+  const [editForm] = Form.useForm<SupplierFormValues>();
 
   const list = useApiQuery<Envelope<SupplierRow[]>>(
     '/api/v1/suppliers',
@@ -190,8 +191,11 @@ export function SuppliersPage() {
   }, [selectedRow, list.data]);
   useContextRail(railContent);
 
-  const supplierForm = (
-    <Form form={form} layout="vertical" preserve={false}>
+  // Shared fields; each dialog wraps them in its OWN form instance so the
+  // edit dialog can carry initialValues (destroyOnHidden remounts per open,
+  // which re-evaluates them - setFieldsValue before mount gets lost).
+  const supplierFields = (
+    <>
       <Form.Item
         name="name"
         label="供应商名称"
@@ -199,11 +203,6 @@ export function SuppliersPage() {
       >
         <Input placeholder="如：深圳华强北电子供应商" maxLength={200} />
       </Form.Item>
-      {editing === null && (
-        <Form.Item name="code" label="编码（留空自动生成 SUP%04d）">
-          <Input placeholder="自动生成" maxLength={50} />
-        </Form.Item>
-      )}
       <Form.Item name="contactName" label="联系人">
         <Input maxLength={100} />
       </Form.Item>
@@ -213,6 +212,14 @@ export function SuppliersPage() {
       <Form.Item name="remark" label="备注">
         <Input.TextArea rows={3} maxLength={2000} />
       </Form.Item>
+    </>
+  );
+  const supplierForm = (
+    <Form form={form} layout="vertical" preserve={false}>
+      <Form.Item name="code" label="编码（留空自动生成 SUP%04d）">
+        <Input placeholder="自动生成" maxLength={50} />
+      </Form.Item>
+      {supplierFields}
     </Form>
   );
 
@@ -328,15 +335,7 @@ export function SuppliersPage() {
                     {
                       key: 'edit',
                       label: '编辑',
-                      onClick: () => {
-                        form.setFieldsValue({
-                          name: row.name,
-                          contactName: row.contactName ?? undefined,
-                          contactPhone: row.contactPhone ?? undefined,
-                          remark: row.remark ?? undefined,
-                        });
-                        setEditing(row);
-                      },
+                      onClick: () => setEditing(row),
                     },
                     ...(row.status === 'ACTIVE'
                       ? [
@@ -425,7 +424,7 @@ export function SuppliersPage() {
         open={editing !== null}
         onCancel={() => setEditing(null)}
         onOk={() => {
-          void form.validateFields().then((values) => {
+          void editForm.validateFields().then((values) => {
             if (editing !== null) {
               updateMutation.mutate({ id: editing.id, values });
             }
@@ -436,7 +435,19 @@ export function SuppliersPage() {
         confirmLoading={updateMutation.isPending}
         destroyOnHidden
       >
-        {supplierForm}
+        <Form
+          form={editForm}
+          layout="vertical"
+          preserve={false}
+          initialValues={{
+            name: editing?.name,
+            contactName: editing?.contactName ?? undefined,
+            contactPhone: editing?.contactPhone ?? undefined,
+            remark: editing?.remark ?? undefined,
+          }}
+        >
+          {supplierFields}
+        </Form>
       </Modal>
 
       <DeleteConfirmModal

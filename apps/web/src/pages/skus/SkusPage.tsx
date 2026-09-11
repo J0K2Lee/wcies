@@ -975,7 +975,7 @@ export function SkusPage() {
             max={200}
             value={printCopies}
             onChange={(value) => setPrintCopies(value ?? 1)}
-            addonAfter="份"
+            suffix="份"
             style={{ width: 140 }}
           />
           <span style={{ fontSize: 12.5, color: colors.textTertiary }}>

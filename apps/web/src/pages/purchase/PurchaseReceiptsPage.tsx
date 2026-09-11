@@ -334,6 +334,16 @@ export function PurchaseReceiptsPage() {
   }));
 
   const editorWarehouseId = editing !== null ? editing.warehouseId : watchedWarehouseId;
+  // Same key/params as the editor's bins query - shared react-query cache,
+  // no extra request; used by the submit guard (warehouse WITH bins needs
+  // an explicit binId per line, frozen inventory rule).
+  const binsForWarehouse = useApiQuery<Envelope<Array<{ id: string; binCode: string }>>>(
+    '/api/v1/warehouses/{warehouseId}/bins',
+    { page: 1, pageSize: 100 },
+    ['receipt-bins', editorWarehouseId],
+    { warehouseId: editorWarehouseId ?? '' },
+    editorWarehouseId !== undefined,
+  );
 
   return (
     <div>
@@ -649,6 +659,16 @@ export function PurchaseReceiptsPage() {
             void message.warning('请至少添加一行明细');
             return;
           }
+          // Inventory rule (frozen): a warehouse WITH bins requires an
+          // explicit binId - surface it here instead of failing at confirm.
+          if (
+            editorWarehouseId !== undefined &&
+            (binsForWarehouse.data?.data?.length ?? 0) > 0 &&
+            items.some((item) => item.skuId !== '' && item.binId === undefined)
+          ) {
+            void message.warning('该仓库已有库位，请为每行明细选择库位（可建暂存位）');
+            return;
+          }
           if (editing !== null) {
             updateMutation.mutate({
               id: editing.id,
@@ -754,7 +774,7 @@ function ReceiptItemsEditor({
 
   const bins = useApiQuery<Envelope<Array<{ id: string; binCode: string }>>>(
     '/api/v1/warehouses/{warehouseId}/bins',
-    { page: 1, pageSize: 200 },
+    { page: 1, pageSize: 100 }, // backend caps pageSize at 100
     ['receipt-bins', warehouseId],
     { warehouseId: warehouseId ?? '' },
     warehouseId !== undefined,
@@ -932,7 +952,7 @@ function ReceiptItemsEditor({
                     items.map((row, i) => (i === index ? { ...row, quantity: value ?? 1 } : row)),
                   )
                 }
-                addonAfter="件"
+                suffix="件"
                 style={{ width: 120 }}
               />
               <InputNumber

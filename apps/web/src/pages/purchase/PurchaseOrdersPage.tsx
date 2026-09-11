@@ -405,13 +405,7 @@ export function PurchaseOrdersPage() {
           <>
             {(detailRow.status === 'ORDERED' || detailRow.status === 'PARTIALLY_RECEIVED') && (
               <div style={{ marginBottom: 16 }}>
-                <Button
-                  type="primary"
-                  onClick={() => {
-                    generateForm.resetFields();
-                    setGenerateFor(detailRow);
-                  }}
-                >
+                <Button type="primary" onClick={() => setGenerateFor(detailRow)}>
                   生成收货单
                 </Button>
               </div>
