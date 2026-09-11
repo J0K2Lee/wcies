@@ -82,6 +82,12 @@ export interface OzonFbsPosting {
   readonly substatus?: string;
   /** Дата и время начала обработки отправления (UTC ISO). */
   readonly in_process_at?: string;
+  /**
+   * Дата и время, до которой необходимо собрать отправление (deadline;
+   * after it a new tariff applies). Not marked required by the official
+   * schema - treat as optional.
+   */
+  readonly shipment_date?: string | null;
   readonly tracking_number?: string | null;
   readonly products: readonly OzonPostingProduct[];
   readonly [key: string]: unknown;

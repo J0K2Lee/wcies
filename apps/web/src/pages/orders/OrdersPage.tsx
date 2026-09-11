@@ -42,6 +42,8 @@ interface OrderListItem {
   fulfillmentMode: string | null;
   currency: string | null;
   orderedAt: string;
+  /** Platform-required ship-by time (OZON shipment_date); platform fact, not ERP state. */
+  shipmentDeadline: string | null;
   createdAt: string;
   itemsCount: number;
   reservedCount: number;
@@ -89,6 +91,7 @@ interface OrderDetail {
   fulfillmentMode: string | null;
   currency: string | null;
   orderedAt: string;
+  shipmentDeadline: string | null;
   syncSource: string | null;
   rawData: Record<string, unknown> | null;
   items: OrderItem[];
@@ -164,6 +167,39 @@ const FIXTURES: Array<{ label: string; json: Record<string, unknown> }> = [
 
 function fmtDateTime(value: string): string {
   return new Date(value).toLocaleString('zh-CN', { hour12: false });
+}
+
+/**
+ * Shipment-deadline tiering (Sprint 7 task §8, orders.md §16): overdue /
+ * <24h urgent (red), <3 days approaching (orange), otherwise neutral.
+ * Pure display of a platform FACT - never an ERP status.
+ */
+function deadlineBadge(deadline: string | null): {
+  tone: 'danger' | 'warning' | 'neutral';
+  label: string;
+  exact: string;
+} | null {
+  if (deadline === null) {
+    return null;
+  }
+  const remainingMs = new Date(deadline).getTime() - Date.now();
+  const absMinutes = Math.round(Math.abs(remainingMs) / 60000);
+  const days = Math.floor(absMinutes / 1440);
+  const hours = Math.floor((absMinutes % 1440) / 60);
+  const minutes = absMinutes % 60;
+  const span =
+    days > 0 ? `${days}天${hours}小时` : hours > 0 ? `${hours}小时${minutes}分` : `${minutes}分`;
+  const exact = fmtDateTime(deadline);
+  if (remainingMs < 0) {
+    return { tone: 'danger', label: `已超时 ${span}`, exact };
+  }
+  if (remainingMs < 24 * 60 * 60 * 1000) {
+    return { tone: 'danger', label: `剩 ${span}`, exact };
+  }
+  if (remainingMs < 3 * 24 * 60 * 60 * 1000) {
+    return { tone: 'warning', label: `剩 ${span}`, exact };
+  }
+  return { tone: 'neutral', label: `剩 ${span}`, exact };
 }
 
 export function OrdersPage() {
@@ -304,6 +340,7 @@ export function OrdersPage() {
 
   const list = query.data?.data ?? [];
   const detail = detailId !== null ? detailQuery.data?.data : undefined;
+  const detailDeadline = detail === undefined ? null : deadlineBadge(detail.shipmentDeadline);
   const selectedRow = useMemo(
     () => list.find((row) => row.id === selectedId) ?? null,
     [list, selectedId],
@@ -341,6 +378,7 @@ export function OrdersPage() {
       tone: 'neutral' as const,
       label: selectedRow.erpStatus,
     };
+    const deadline = deadlineBadge(selectedRow.shipmentDeadline);
     // Risk section: mapping failed (red) takes priority over backordered (orange).
     const riskItems =
       railDetail?.items.filter(
@@ -450,6 +488,39 @@ export function OrdersPage() {
               }
             />
             <ContextMetric label="下单时间" value={fmtDateTime(selectedRow.orderedAt)} />
+            {deadline !== null && (
+              <ContextMetric
+                label={
+                  <span
+                    style={{
+                      color:
+                        deadline.tone === 'danger'
+                          ? colors.danger
+                          : deadline.tone === 'warning'
+                            ? colors.warning
+                            : colors.textSecondary,
+                    }}
+                  >
+                    发货时限
+                  </span>
+                }
+                value={
+                  <span
+                    style={{
+                      color:
+                        deadline.tone === 'danger'
+                          ? colors.danger
+                          : deadline.tone === 'warning'
+                            ? colors.warning
+                            : undefined,
+                      fontWeight: deadline.tone === 'neutral' ? undefined : 650,
+                    }}
+                  >
+                    {deadline.label}（{deadline.exact}）
+                  </span>
+                }
+              />
+            )}
           </ContextSection>
           {railDetail !== undefined && railDetail.history.length > 0 && (
             <ContextSection title="最近状态">
@@ -745,6 +816,20 @@ export function OrdersPage() {
               ),
             },
             {
+              title: '时限',
+              dataIndex: 'shipmentDeadline',
+              key: 'shipmentDeadline',
+              width: 130,
+              render: (value: string | null) => {
+                const badge = deadlineBadge(value);
+                return badge === null ? (
+                  '—'
+                ) : (
+                  <StatusBadge tone={badge.tone} label={badge.label} hint={badge.exact} />
+                );
+              },
+            },
+            {
               title: '下单时间',
               dataIndex: 'orderedAt',
               key: 'orderedAt',
@@ -843,6 +928,27 @@ export function OrdersPage() {
                   { label: '履约模式', children: detail.fulfillmentMode ?? '—' },
                   { label: '币种', children: detail.currency ?? '—' },
                   { label: '下单时间', children: fmtDateTime(detail.orderedAt) },
+                  {
+                    label: '发货时限',
+                    children:
+                      detailDeadline === null ? (
+                        '—'
+                      ) : (
+                        <span
+                          style={{
+                            color:
+                              detailDeadline.tone === 'danger'
+                                ? colors.danger
+                                : detailDeadline.tone === 'warning'
+                                  ? colors.warning
+                                  : colors.textPrimary,
+                            fontWeight: 600,
+                          }}
+                        >
+                          {detailDeadline.exact}（{detailDeadline.label}）
+                        </span>
+                      ),
+                  },
                   {
                     label: '同步来源',
                     children:

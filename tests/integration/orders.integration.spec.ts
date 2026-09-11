@@ -679,3 +679,96 @@ describe('serial tracking in ingestion (S3-SN)', () => {
     expect(bad.body.error?.code).toBe('INVENTORY_SERIAL_INVALID');
   });
 });
+
+describe('shipment deadline (Sprint 7 task §8)', () => {
+  it('ingests a deadline that is returned by list and detail; far deadline raises no exception', async () => {
+    const skuId = await newSku('DL1');
+    await initialize({ skuId, binId: binA01, quantity: '5' });
+    await mapSku(skuId, `${PREFIX}-DL-1`);
+
+    const deadline = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+    const result = await client.post<IngestResult>('/api/v1/orders/ingest', {
+      storeId: storeA,
+      platformOrderId: `PO-${randomUUID()}`,
+      platformStatus: 'awaiting_packaging',
+      fulfillmentMode: 'FBS',
+      orderedAt: new Date().toISOString(),
+      shipmentDeadline: deadline.toISOString(),
+      currency: 'RUB',
+      items: [{ platformSkuId: `${PREFIX}-DL-1`, quantity: '1' }],
+    });
+    expect(result.status, JSON.stringify(result.body.error ?? {})).toBe(200);
+    const orderId = result.body.data.orderId;
+
+    const detail = await client.get<OrderDetail & { shipmentDeadline: string | null }>(
+      `/api/v1/orders/${orderId}`,
+    );
+    expect(detail.body.data.shipmentDeadline).not.toBeNull();
+    expect(new Date(detail.body.data.shipmentDeadline as string).getTime()).toBe(
+      deadline.getTime(),
+    );
+
+    const list = await client.get<Array<{ id: string; shipmentDeadline: string | null }>>(
+      `/api/v1/orders?keyword=&pageSize=100`,
+    );
+    const row = list.body.data.find((o) => o.id === orderId);
+    expect(row?.shipmentDeadline).not.toBeNull();
+
+    // Far deadline: no exception (orders.md §16 - only <24h or overdue).
+    const exceptions = await client.get<ExceptionDto[]>(
+      `/api/v1/exceptions?referenceType=ORDER&referenceId=${orderId}&status=OPEN&pageSize=100`,
+    );
+    expect(
+      exceptions.body.data.some((e) => e.exceptionType === 'ORDER_SHIPMENT_DEADLINE_NEAR'),
+    ).toBe(false);
+  });
+
+  it('a near deadline (<24h) raises ORDER_SHIPMENT_DEADLINE_NEAR; overdue is HIGH severity', async () => {
+    const skuId = await newSku('DL2');
+    await initialize({ skuId, binId: binA01, quantity: '5' });
+    await mapSku(skuId, `${PREFIX}-DL-2`);
+
+    const ingestNear = await client.post<IngestResult>('/api/v1/orders/ingest', {
+      storeId: storeA,
+      platformOrderId: `PO-${randomUUID()}`,
+      orderedAt: new Date().toISOString(),
+      shipmentDeadline: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+      items: [{ platformSkuId: `${PREFIX}-DL-2`, quantity: '1' }],
+    });
+    const nearId = ingestNear.body.data.orderId;
+    const nearExceptions = await client.get<Array<ExceptionDto & { severity: string }>>(
+      `/api/v1/exceptions?referenceType=ORDER&referenceId=${nearId}&status=OPEN&pageSize=100`,
+    );
+    const near = nearExceptions.body.data.find(
+      (e) => e.exceptionType === 'ORDER_SHIPMENT_DEADLINE_NEAR',
+    );
+    expect(near).toBeDefined();
+    expect(near?.severity).toBe('MEDIUM');
+
+    const ingestOverdue = await client.post<IngestResult>('/api/v1/orders/ingest', {
+      storeId: storeA,
+      platformOrderId: `PO-${randomUUID()}`,
+      orderedAt: new Date().toISOString(),
+      shipmentDeadline: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      items: [{ platformSkuId: `${PREFIX}-DL-2`, quantity: '1' }],
+    });
+    const overdueExceptions = await client.get<Array<ExceptionDto & { severity: string }>>(
+      `/api/v1/exceptions?referenceType=ORDER&referenceId=${ingestOverdue.body.data.orderId}&status=OPEN&pageSize=100`,
+    );
+    const overdue = overdueExceptions.body.data.find(
+      (e) => e.exceptionType === 'ORDER_SHIPMENT_DEADLINE_NEAR',
+    );
+    expect(overdue?.severity).toBe('HIGH');
+
+    // Cancelling the overdue order auto-resolves its deadline exception.
+    await client.post(`/api/v1/orders/${ingestOverdue.body.data.orderId}/cancel`, {
+      reason: 'test cancel',
+    });
+    const afterCancel = await client.get<ExceptionDto[]>(
+      `/api/v1/exceptions?referenceType=ORDER&referenceId=${ingestOverdue.body.data.orderId}&status=OPEN&pageSize=100`,
+    );
+    expect(
+      afterCancel.body.data.some((e) => e.exceptionType === 'ORDER_SHIPMENT_DEADLINE_NEAR'),
+    ).toBe(false);
+  });
+});

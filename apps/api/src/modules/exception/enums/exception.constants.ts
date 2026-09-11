@@ -10,6 +10,12 @@ export const EXCEPTION_TYPES = [
   'ORDER_OUT_OF_STOCK',
   'ORDER_INVALID_STATE',
   'ORDER_INTERCEPTION_FAILED',
+  /**
+   * Sprint 7 (user-confirmed Q3, orders.md §16): platform shipment deadline
+   * is near (<24h) or already past on an order that has not fully shipped.
+   * Reference: ORDER/orderId. Auto-resolved on SHIPPED / CANCELLED.
+   */
+  'ORDER_SHIPMENT_DEADLINE_NEAR',
 ] as const;
 export type ExceptionType = (typeof EXCEPTION_TYPES)[number];
 

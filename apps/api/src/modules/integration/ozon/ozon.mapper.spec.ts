@@ -140,6 +140,31 @@ describe('mapPostingToOrder', () => {
     };
     expect(() => mapPostingToOrder(badSku)).toThrow(/sku/);
   });
+
+  // Sprint 7 (task §8): shipment_date is a platform FACT that becomes the
+  // structured orders.shipment_deadline. The official schema does not mark
+  // it required - missing/invalid must degrade to null, never fail the sync.
+  it('parses a valid shipment_date into shipmentDeadline', () => {
+    const order = mapPostingToOrder({
+      ...POSTING,
+      shipment_date: '2026-09-15T18:00:00.000Z',
+    });
+    expect(order.shipmentDeadline?.toISOString()).toBe('2026-09-15T18:00:00.000Z');
+  });
+
+  it('maps a missing shipment_date to shipmentDeadline = null without throwing', () => {
+    const order = mapPostingToOrder(POSTING);
+    expect(order.shipmentDeadline).toBeNull();
+    expect(() => mapPostingToOrder({ ...POSTING, shipment_date: null })).not.toThrow();
+    expect(mapPostingToOrder({ ...POSTING, shipment_date: null }).shipmentDeadline).toBeNull();
+  });
+
+  it('maps an unparseable shipment_date to shipmentDeadline = null without throwing', () => {
+    expect(() => mapPostingToOrder({ ...POSTING, shipment_date: 'not-a-date' })).not.toThrow();
+    expect(
+      mapPostingToOrder({ ...POSTING, shipment_date: 'not-a-date' }).shipmentDeadline,
+    ).toBeNull();
+  });
 });
 
 describe('mapWebhookPayload', () => {

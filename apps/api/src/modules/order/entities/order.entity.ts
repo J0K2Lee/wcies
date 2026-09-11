@@ -53,6 +53,14 @@ export class OrderEntity {
   @Column({ type: 'timestamptz', name: 'ordered_at' })
   orderedAt!: Date;
 
+  /**
+   * Platform-required ship-by time (OZON shipment_date). A platform FACT,
+   * never an ERP state (AGENTS.md §38): display/exception only. Nullable -
+   * platforms may omit it and the mapper tolerates missing/invalid values.
+   */
+  @Column({ type: 'timestamptz', name: 'shipment_deadline', nullable: true })
+  shipmentDeadline!: Date | null;
+
   @Column({ type: 'jsonb', name: 'raw_data', nullable: true })
   rawData!: Record<string, unknown> | null;
 

@@ -63,6 +63,7 @@ export class OrderRepository {
       fulfillmentMode: string | null;
       currency: string | null;
       orderedAt: Date;
+      shipmentDeadline: Date | null;
       rawData: Record<string, unknown> | null;
       remark: string | null;
       syncSource: string | null;

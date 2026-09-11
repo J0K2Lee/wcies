@@ -73,6 +73,14 @@ export class NormalizedOrderInputDto {
   @ApiProperty({ type: String, format: 'date-time' })
   @IsDateString()
   orderedAt!: Date;
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
+    description: '平台要求的发货截止时间（平台事实，非 ERP 状态；可空）',
+  })
+  @IsOptional()
+  @IsDateString()
+  shipmentDeadline?: Date;
   @ApiPropertyOptional({ example: 'RUB' })
   @IsOptional()
   @IsString()
@@ -147,6 +155,13 @@ export class OrderListItemDto {
   @ApiProperty({ nullable: true, type: String }) fulfillmentMode!: string | null;
   @ApiProperty({ nullable: true, type: String }) currency!: string | null;
   @ApiProperty({ type: Date }) orderedAt!: Date;
+  @ApiPropertyOptional({
+    nullable: true,
+    type: String,
+    format: 'date-time',
+    description: '平台要求的发货截止时间（平台事实，非 ERP 状态）',
+  })
+  shipmentDeadline!: Date | null;
   @ApiProperty({ type: Date }) createdAt!: Date;
   @ApiProperty({ nullable: true, enum: ['MANUAL', 'API', 'POLLING', 'WEBHOOK'] })
   syncSource!: string | null;
@@ -249,6 +264,13 @@ export class OrderDetailDto {
   @ApiProperty({ nullable: true, type: String }) fulfillmentMode!: string | null;
   @ApiProperty({ nullable: true, type: String }) currency!: string | null;
   @ApiProperty({ type: Date }) orderedAt!: Date;
+  @ApiPropertyOptional({
+    nullable: true,
+    type: String,
+    format: 'date-time',
+    description: '平台要求的发货截止时间（平台事实，非 ERP 状态）',
+  })
+  shipmentDeadline!: Date | null;
   @ApiProperty({ nullable: true, type: Object }) rawData!: Record<string, unknown> | null;
   @ApiProperty({ nullable: true, type: String }) remark!: string | null;
   @ApiProperty({ nullable: true, enum: ['MANUAL', 'API', 'POLLING', 'WEBHOOK'] })

@@ -5293,7 +5293,8 @@
                 "ORDER_SKU_MAPPING_FAILED",
                 "ORDER_OUT_OF_STOCK",
                 "ORDER_INVALID_STATE",
-                "ORDER_INTERCEPTION_FAILED"
+                "ORDER_INTERCEPTION_FAILED",
+                "ORDER_SHIPMENT_DEADLINE_NEAR"
               ]
             }
           },
@@ -11253,7 +11254,8 @@
               "ORDER_SKU_MAPPING_FAILED",
               "ORDER_OUT_OF_STOCK",
               "ORDER_INVALID_STATE",
-              "ORDER_INTERCEPTION_FAILED"
+              "ORDER_INTERCEPTION_FAILED",
+              "ORDER_SHIPMENT_DEADLINE_NEAR"
             ]
           },
           "severity": {
@@ -11373,6 +11375,12 @@
           "orderedAt": {
             "format": "date-time",
             "type": "string"
+          },
+          "shipmentDeadline": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "平台要求的发货截止时间（平台事实，非 ERP 状态）"
           },
           "createdAt": {
             "format": "date-time",
@@ -11728,6 +11736,12 @@
             "format": "date-time",
             "type": "string"
           },
+          "shipmentDeadline": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "平台要求的发货截止时间（平台事实，非 ERP 状态）"
+          },
           "rawData": {
             "type": "object",
             "nullable": true
@@ -11917,6 +11931,11 @@
           "orderedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "shipmentDeadline": {
+            "type": "string",
+            "format": "date-time",
+            "description": "平台要求的发货截止时间（平台事实，非 ERP 状态；可空）"
           },
           "currency": {
             "type": "string",

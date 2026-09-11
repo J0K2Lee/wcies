@@ -83,6 +83,11 @@ export function mapPostingToOrder(posting: OzonFbsPosting): PlatformOrderRaw {
 
   const orderedAt = parseIsoDate(posting.in_process_at, 'posting.in_process_at');
   const currency = firstCurrency(posting.products);
+  // Platform fact, not an ERP state (AGENTS.md §38). The official schema does
+  // not mark shipment_date required, and one missing field must not fail the
+  // whole posting sync (AGENTS.md §49) - so unlike orderedAt this parse is
+  // TOLERANT: missing or unparseable becomes null.
+  const shipmentDeadline = parseIsoDateTolerant(posting.shipment_date);
 
   const items: PlatformOrderItemRaw[] = posting.products.map(
     (product: OzonPostingProduct, index: number) => {
@@ -116,6 +121,7 @@ export function mapPostingToOrder(posting: OzonFbsPosting): PlatformOrderRaw {
     platformStatus: posting.status,
     fulfillmentMode: 'FBS',
     orderedAt,
+    shipmentDeadline,
     currency,
     items,
     rawData: { ...posting },
@@ -213,6 +219,19 @@ function parseIsoDate(value: unknown, field: string): Date {
     throw malformed(field, `unparseable date-time: ${value}`);
   }
   return date;
+}
+
+/**
+ * Same as parseIsoDate but returns null instead of throwing: for optional
+ * platform facts a missing/invalid value must degrade gracefully, never fail
+ * the order sync (Sprint 7 task §8, AGENTS.md §49).
+ */
+function parseIsoDateTolerant(value: unknown): Date | null {
+  if (typeof value !== 'string' || value === '') {
+    return null;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function readString(value: unknown): string | null {

@@ -121,6 +121,12 @@ export interface PlatformOrderRaw {
   readonly platformStatus: string | null;
   readonly fulfillmentMode: string | null;
   readonly orderedAt: Date;
+  /**
+   * Platform-required ship-by time (OZON shipment_date). A platform FACT,
+   * never an ERP state. Null when the platform omits it or the value is
+   * unparseable - mappers must tolerate both (Sprint 7).
+   */
+  readonly shipmentDeadline: Date | null;
   readonly currency: string | null;
   readonly items: readonly PlatformOrderItemRaw[];
   readonly rawData: Record<string, unknown>;

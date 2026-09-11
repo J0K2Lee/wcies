@@ -141,6 +141,7 @@ export class OrderSyncService {
       platformStatus: order.platformStatus ?? undefined,
       fulfillmentMode: order.fulfillmentMode ?? undefined,
       orderedAt: order.orderedAt,
+      shipmentDeadline: order.shipmentDeadline ?? undefined,
       currency: order.currency ?? undefined,
       items: order.items.map((item) => ({
         platformProductId: item.platformProductId ?? undefined,

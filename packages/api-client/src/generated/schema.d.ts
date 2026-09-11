@@ -3550,7 +3550,7 @@ export interface components {
             /** @example EXC00000001 */
             exceptionNo: string;
             /** @enum {string} */
-            exceptionType: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED";
+            exceptionType: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR";
             /** @enum {string} */
             severity: "LOW" | "MEDIUM" | "HIGH";
             /** @enum {string} */
@@ -3589,6 +3589,11 @@ export interface components {
             currency: string | null;
             /** Format: date-time */
             orderedAt: string;
+            /**
+             * Format: date-time
+             * @description 平台要求的发货截止时间（平台事实，非 ERP 状态）
+             */
+            shipmentDeadline?: string | null;
             /** Format: date-time */
             createdAt: string;
             /** @enum {string|null} */
@@ -3689,6 +3694,11 @@ export interface components {
             currency: string | null;
             /** Format: date-time */
             orderedAt: string;
+            /**
+             * Format: date-time
+             * @description 平台要求的发货截止时间（平台事实，非 ERP 状态）
+             */
+            shipmentDeadline?: string | null;
             rawData: Record<string, never> | null;
             remark: string | null;
             /** @enum {string|null} */
@@ -3741,6 +3751,11 @@ export interface components {
             fulfillmentMode?: string;
             /** Format: date-time */
             orderedAt: string;
+            /**
+             * Format: date-time
+             * @description 平台要求的发货截止时间（平台事实，非 ERP 状态；可空）
+             */
+            shipmentDeadline?: string;
             /** @example RUB */
             currency?: string;
             items: components["schemas"]["NormalizedOrderItemInputDto"][];
@@ -7347,7 +7362,7 @@ export interface operations {
     ExceptionController_list: {
         parameters: {
             query?: {
-                exceptionType?: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED";
+                exceptionType?: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR";
                 status?: "OPEN" | "RESOLVED" | "IGNORED";
                 referenceType?: string;
                 referenceId?: string;

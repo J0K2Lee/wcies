@@ -76,6 +76,7 @@ export class OrderService {
         fulfillmentMode: row.order.fulfillmentMode,
         currency: row.order.currency,
         orderedAt: row.order.orderedAt,
+        shipmentDeadline: row.order.shipmentDeadline,
         syncSource: row.order.syncSource,
         createdAt: row.order.createdAt,
         itemsCount: row.itemsCount,
@@ -167,6 +168,7 @@ export class OrderService {
       fulfillmentMode: order.fulfillmentMode,
       currency: order.currency,
       orderedAt: order.orderedAt,
+      shipmentDeadline: order.shipmentDeadline,
       rawData: order.rawData,
       remark: order.remark,
       syncSource: order.syncSource,
@@ -349,6 +351,8 @@ export class OrderService {
     }
 
     await this.statusService.transition(orderId, 'CANCELLED', operator, reason ?? '订单取消');
+    // A cancelled order will never ship: its deadline alert (if any) is done.
+    await this.resolveDeadlineException(order.id);
     await this.operationLog.record({
       entityType: 'ORDER',
       entityId: order.id,
@@ -484,7 +488,23 @@ export class OrderService {
 
   /** Post-commit rollup recompute after a shipment shipped the line. */
   async recomputeAfterShip(orderId: string, operator: OperatorContext): Promise<ErpOrderStatus> {
-    return this.statusService.recomputeOrderStatus(orderId, operator, '正式出库完成');
+    const status = await this.statusService.recomputeOrderStatus(orderId, operator, '正式出库完成');
+    if (status === 'SHIPPED') {
+      // Fully shipped before the platform deadline alert becomes moot.
+      await this.resolveDeadlineException(orderId);
+    }
+    return status;
+  }
+
+  /** Closes the OPEN ORDER_SHIPMENT_DEADLINE_NEAR of an order, if present. */
+  private async resolveDeadlineException(orderId: string): Promise<void> {
+    await this.dataSource.transaction(async (runner) => {
+      await this.exceptionService.resolveByReferenceInTx(runner, {
+        exceptionType: 'ORDER_SHIPMENT_DEADLINE_NEAR',
+        referenceType: 'ORDER',
+        referenceId: orderId,
+      });
+    });
   }
 
   /**

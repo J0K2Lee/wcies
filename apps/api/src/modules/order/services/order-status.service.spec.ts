@@ -44,6 +44,7 @@ function makeOrder(erpStatus: OrderEntity['erpStatus']): OrderEntity {
     fulfillmentMode: null,
     currency: null,
     orderedAt: new Date(),
+    shipmentDeadline: null,
     rawData: null,
     remark: null,
     syncSource: null,
