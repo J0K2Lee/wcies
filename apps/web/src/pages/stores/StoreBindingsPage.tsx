@@ -12,11 +12,17 @@ import {
   Switch,
   Table,
   Tag,
+  Tooltip,
 } from 'antd';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { apiDelete, apiPost, useApiQuery } from '../../api/hooks';
-import { FULFILLMENT_MODE_LABEL, PlatformTag } from '../../design-system';
+import {
+  FULFILLMENT_CATEGORY_LABEL,
+  FULFILLMENT_MODE_META,
+  PlatformTag,
+} from '../../design-system';
+import { colors } from '../../design-system/tokens';
 
 interface BindingRow {
   id: string;
@@ -35,16 +41,26 @@ interface BindingRow {
   status: string;
 }
 
-const FULFILLMENT_MODES = [
-  'OZON_RFBS',
-  'OZON_FBS',
-  'OZON_FBO',
-  'OZON_FBP',
-  'WB_FBS',
-  'WB_FBW',
-  'YANDEX_FBS',
-  'YANDEX_FBY',
-];
+/** Category display order: seller-side stock first, platform-managed last. */
+const FULFILLMENT_CATEGORY_ORDER = ['SELF_MANAGED', 'SEMI_MANAGED', 'MANAGED'];
+
+/**
+ * Modes offered for a store: only the ones belonging to its platform (the
+ * backend rejects cross-platform combinations), grouped by business category
+ * so the seller picks "自管仓 / 半托管 / 托管仓" first and the platform's own
+ * mode code second.
+ */
+function modeOptionsForPlatform(platformCode: string | undefined) {
+  return FULFILLMENT_CATEGORY_ORDER.map((category) => ({
+    label: FULFILLMENT_CATEGORY_LABEL[category] ?? category,
+    options: Object.entries(FULFILLMENT_MODE_META)
+      .filter(([, meta]) => meta.platform === platformCode && meta.category === category)
+      .map(([mode, meta]) => ({
+        value: mode,
+        label: `${meta.label} — ${meta.hint}`,
+      })),
+  })).filter((group) => group.options.length > 0);
+}
 
 /** 店仓绑定页 (task §63/§82): store + fulfillment mode + warehouse. */
 export function StoreBindingsPage() {
@@ -52,14 +68,14 @@ export function StoreBindingsPage() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
-  const [storeId, setStoreId] = useState<string | undefined>(() =>
-    searchParams.get('storeId') ?? undefined,
+  const [storeId, setStoreId] = useState<string | undefined>(
+    () => searchParams.get('storeId') ?? undefined,
   );
   const [createOpen, setCreateOpen] = useState(false);
   const [form] = Form.useForm();
 
-  const [warehouseId, setWarehouseId] = useState<string | undefined>(() =>
-    searchParams.get('warehouseId') ?? undefined,
+  const [warehouseId, setWarehouseId] = useState<string | undefined>(
+    () => searchParams.get('warehouseId') ?? undefined,
   );
   const list = useApiQuery<{ data: BindingRow[]; meta: { total: number } }>(
     '/api/v1/warehouse-bindings',
@@ -73,6 +89,13 @@ export function StoreBindingsPage() {
     data: Array<{ id: string; warehouseCode: string; name: string }>;
   }>('/api/v1/warehouses', { page: 1, pageSize: 100 }, ['warehouses-lite']);
 
+  // Fulfillment modes are platform-specific, so the create form narrows the
+  // options to the chosen store's platform (and clears a stale selection).
+  const createStoreId = Form.useWatch<string | undefined>('storeId', form);
+  const createPlatformCode = (stores.data?.data ?? []).find(
+    (store) => store.id === createStoreId,
+  )?.platformCode;
+
   const statusMutation = useMutation({
     mutationFn: ({
       storeId: sid,
@@ -82,7 +105,12 @@ export function StoreBindingsPage() {
       storeId: string;
       id: string;
       action: 'enable' | 'disable';
-    }) => apiPost(`/api/v1/stores/{storeId}/warehouse-bindings/{id}/${action}`, {}, { storeId: sid, id }),
+    }) =>
+      apiPost(
+        `/api/v1/stores/{storeId}/warehouse-bindings/{id}/${action}`,
+        {},
+        { storeId: sid, id },
+      ),
     onSuccess: () => {
       void message.success('状态已更新');
       void queryClient.invalidateQueries({ queryKey: ['bindings'] });
@@ -193,7 +221,22 @@ export function StoreBindingsPage() {
           {
             title: '履约模式',
             dataIndex: 'fulfillmentMode',
-            render: (value: string) => FULFILLMENT_MODE_LABEL[value] ?? value,
+            render: (value: string) => {
+              const meta = FULFILLMENT_MODE_META[value];
+              if (meta === undefined) {
+                return value;
+              }
+              return (
+                <Tooltip title={`${meta.label} — ${meta.hint}`}>
+                  <span>
+                    {FULFILLMENT_CATEGORY_LABEL[meta.category] ?? meta.category}
+                    <span style={{ color: colors.textTertiary, marginLeft: 6, fontSize: 12 }}>
+                      {meta.label}
+                    </span>
+                  </span>
+                </Tooltip>
+              );
+            },
           },
           { title: '平台仓ID', dataIndex: 'platformWarehouseId' },
           {
@@ -270,6 +313,7 @@ export function StoreBindingsPage() {
             <Select
               showSearch
               optionFilterProp="label"
+              onChange={() => form.setFieldValue('fulfillmentMode', undefined)}
               options={(stores.data?.data ?? []).map((store) => ({
                 value: store.id,
                 label: `${store.storeCode} · ${store.name}`,
@@ -286,12 +330,16 @@ export function StoreBindingsPage() {
               }))}
             />
           </Form.Item>
-          <Form.Item name="fulfillmentMode" label="履约模式" rules={[{ required: true }]}>
+          <Form.Item
+            name="fulfillmentMode"
+            label="履约模式"
+            rules={[{ required: true, message: '请选择履约模式' }]}
+            extra="先选店铺：可选模式按该店铺平台的业务类别分组。自管仓＝卖家持货发货，半托管＝备货平台合作仓，托管仓＝平台仓持货发货。"
+          >
             <Select
-              options={FULFILLMENT_MODES.map((mode) => ({
-                value: mode,
-                label: FULFILLMENT_MODE_LABEL[mode] ?? mode,
-              }))}
+              disabled={createPlatformCode === undefined}
+              placeholder={createPlatformCode === undefined ? '请先选择店铺' : '选择履约模式'}
+              options={modeOptionsForPlatform(createPlatformCode)}
             />
           </Form.Item>
           <Form.Item name="platformWarehouseId" label="平台仓ID（平台履约时填写）">
@@ -310,8 +358,8 @@ export function StoreBindingsPage() {
               <InputNumber min={0} style={{ width: 110 }} />
             </Form.Item>
           </Space>
-          <p style={{ color: '#888' }}>
-            履约模式必须与店铺平台一致；FBO/FBY/FBW 绑定平台仓，FBS/RFBS 绑定自管/第三方仓。
+          <p style={{ color: colors.textTertiary, fontSize: 12.5 }}>
+            托管仓（FBO/FBW/FBY）必须绑定平台仓；自管仓与半托管（RFBS/FBS/FBP）绑定自管仓或第三方仓。
           </p>
         </Form>
       </Modal>

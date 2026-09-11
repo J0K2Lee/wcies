@@ -25,6 +25,7 @@ import {
   ContextRailContent,
   ContextSection,
   DataTable,
+  DeleteConfirmModal,
   EntitySummary,
   ErrorState,
   FilterBar,
@@ -268,6 +269,13 @@ export function ProductsPage() {
   // ---- SKU quick-create (from product drawer) ----
   const [skuModalOpen, setSkuModalOpen] = useState(false);
 
+  // ---- Delete confirmation (one dialog for normal + forced delete) ----
+  const [deleteTarget, setDeleteTarget] = useState<{
+    id: string;
+    name: string;
+    dependentCount: number;
+  } | null>(null);
+
   // ===================== Queries =====================
 
   const list = useApiQuery<{ data: ProductRow[]; meta: { total: number } }>(
@@ -401,9 +409,11 @@ export function ProductsPage() {
   });
 
   const deleteProductMutation = useMutation({
-    mutationFn: (id: string) => apiDelete('/api/v1/products/{id}', { id }),
-    onSuccess: (_data, id) => {
+    mutationFn: ({ id, force }: { id: string; force: boolean }) =>
+      apiDelete(`/api/v1/products/{id}${force ? '?force=true' : ''}`, { id }),
+    onSuccess: (_data, variables) => {
       void message.success('商品已删除');
+      const id = variables.id;
       if (drawerId === id) {
         setDrawerId(null);
       }
@@ -542,14 +552,8 @@ export function ProductsPage() {
     setEditOpen(true);
   };
 
-  const confirmDeleteProduct = (id: string, name: string) => {
-    modal.confirm({
-      title: '确认删除该商品？',
-      content: `将删除「${name}」。存在 SKU 时后端将拒绝删除。`,
-      okText: '删除',
-      okButtonProps: { danger: true },
-      onOk: () => deleteProductMutation.mutateAsync(id).catch(() => undefined),
-    });
+  const confirmDeleteProduct = (id: string, name: string, skuCount: number) => {
+    setDeleteTarget({ id, name, dependentCount: skuCount });
   };
 
   const openBrandModal = (target: 'create' | 'edit') => {
@@ -951,7 +955,8 @@ export function ProductsPage() {
                         key: 'delete',
                         label: '删除',
                         danger: true,
-                        onClick: () => confirmDeleteProduct(record.id, record.nameZh),
+                        onClick: () =>
+                          confirmDeleteProduct(record.id, record.nameZh, record.skuCount),
                       },
                     ]}
                   />
@@ -980,8 +985,7 @@ export function ProductsPage() {
               nameZh: (values.nameZh as string).trim(),
               nameRu: (values.nameRu as string | undefined)?.trim() || undefined,
               brandId: (values.brandId as string | undefined) || undefined,
-              categoryId:
-                path !== undefined && path.length > 0 ? path[path.length - 1] : undefined,
+              categoryId: path !== undefined && path.length > 0 ? path[path.length - 1] : undefined,
               remark: (values.remark as string | undefined)?.trim() || undefined,
             });
           })
@@ -1227,7 +1231,7 @@ export function ProductsPage() {
               <Button
                 size="small"
                 danger
-                onClick={() => confirmDeleteProduct(product.id, product.nameZh)}
+                onClick={() => confirmDeleteProduct(product.id, product.nameZh, product.skuCount)}
               >
                 删除
               </Button>
@@ -1281,9 +1285,24 @@ export function ProductsPage() {
               columns={[
                 { title: 'SKU Code', dataIndex: 'skuCode', width: 120 },
                 { title: '名称', dataIndex: 'nameZh', ellipsis: true },
-                { title: '型号', dataIndex: 'model', width: 100, render: (v: string | null) => v ?? '—' },
-                { title: '颜色', dataIndex: 'color', width: 90, render: (v: string | null) => v ?? '—' },
-                { title: '尺寸', dataIndex: 'size', width: 90, render: (v: string | null) => v ?? '—' },
+                {
+                  title: '型号',
+                  dataIndex: 'model',
+                  width: 100,
+                  render: (v: string | null) => v ?? '—',
+                },
+                {
+                  title: '颜色',
+                  dataIndex: 'color',
+                  width: 90,
+                  render: (v: string | null) => v ?? '—',
+                },
+                {
+                  title: '尺寸',
+                  dataIndex: 'size',
+                  width: 90,
+                  render: (v: string | null) => v ?? '—',
+                },
                 {
                   title: 'SN管理',
                   dataIndex: 'serialTracking',
@@ -1315,6 +1334,31 @@ export function ProductsPage() {
               }
         }
         onCreated={() => refreshProducts()}
+      />
+
+      {/* ---- Delete confirmation (normal vs forced cascade) ---- */}
+      <DeleteConfirmModal
+        open={deleteTarget !== null}
+        title="确认删除该商品？"
+        description={
+          deleteTarget === null
+            ? ''
+            : `将删除「${deleteTarget.name}」及其 ${deleteTarget.dependentCount} 个 SKU。` +
+              `若该商品或其 SKU 已有库存流水/订单/拣货记录，删除会被拒绝。`
+        }
+        forceLabel="强制删除（同时删除关联的 SKU、条码、图片与平台映射）"
+        forceWarning="强制删除仅级联主数据。若已有库存流水、订单行、拣货或发货记录，后端仍会拒绝删除——这些记录是货物实际流转的凭证，无法移除。此时请改用「停用」。"
+        confirmLoading={deleteProductMutation.isPending}
+        onConfirm={(force) => {
+          if (deleteTarget === null) {
+            return;
+          }
+          deleteProductMutation.mutate(
+            { id: deleteTarget.id, force },
+            { onSettled: () => setDeleteTarget(null) },
+          );
+        }}
+        onCancel={() => setDeleteTarget(null)}
       />
 
       {/* ---- Brand quick-create: general name required, no code field ---- */}
@@ -1633,7 +1677,13 @@ export function ProductsPage() {
                     </span>
                   </div>
                   <div
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      marginTop: 8,
+                      flexWrap: 'wrap',
+                    }}
                   >
                     <StatusBadge
                       tone={manageSelected.status === 'ACTIVE' ? 'success' : 'neutral'}
@@ -1641,8 +1691,8 @@ export function ProductsPage() {
                       hint={manageSelected.status}
                     />
                     <span style={{ fontSize: 12.5, color: colors.textSecondary }}>
-                      {CATEGORY_LEVEL_LABEL[manageSelected.level] ?? `${manageSelected.level}级`}分类
-                      · 排序 #{manageSelected.sortOrder}
+                      {CATEGORY_LEVEL_LABEL[manageSelected.level] ?? `${manageSelected.level}级`}
+                      分类 · 排序 #{manageSelected.sortOrder}
                     </span>
                   </div>
                   <div style={{ fontSize: 12.5, color: colors.textTertiary, marginTop: 6 }}>
@@ -1662,11 +1712,7 @@ export function ProductsPage() {
                       >
                         <Input maxLength={200} style={{ width: 200 }} />
                       </Form.Item>
-                      <Form.Item
-                        name="nameRu"
-                        label="俄文名称（选填）"
-                        style={{ marginBottom: 0 }}
-                      >
+                      <Form.Item name="nameRu" label="俄文名称（选填）" style={{ marginBottom: 0 }}>
                         <Input maxLength={200} style={{ width: 200 }} />
                       </Form.Item>
                     </Space>
@@ -1683,9 +1729,7 @@ export function ProductsPage() {
                 </section>
 
                 <section>
-                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
-                    排序与层级
-                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>排序与层级</div>
                   <Form form={categoryStructureForm} layout="vertical">
                     <Space orientation="horizontal" wrap size={12} align="start">
                       <Form.Item

@@ -21,7 +21,7 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import { useSearchParams, useNavigate } from 'react-router';
-import { apiDelete, apiPost, useApiQuery } from '../../api/hooks';
+import { apiDelete, apiPatch, apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime, fmtNumber } from '../../utils/format';
 import {
   ActionMenu,
@@ -141,7 +141,7 @@ function latestJobAt(latest: Map<string, SyncJobLite>, storeId: string): SyncJob
 }
 
 export function StoresPage() {
-  const { message } = AntdApp.useApp();
+  const { message, modal } = AntdApp.useApp();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -157,6 +157,8 @@ export function StoresPage() {
   // may null out detailId while the modal is open - the submission must use
   // the store it was opened for (modal chain fix).
   const [credentialStoreId, setCredentialStoreId] = useState<string | null>(null);
+  // null = create a new credential; an id = replace that credential's payload.
+  const [editingCredentialId, setEditingCredentialId] = useState<string | null>(null);
   const [form] = Form.useForm();
   const [credentialForm] = Form.useForm();
 
@@ -254,23 +256,88 @@ export function StoresPage() {
   });
 
   const credentialMutation = useMutation({
-    mutationFn: (values: { clientId: string; apiKey: string; storeId: string }) =>
-      apiPost(
-        '/api/v1/stores/{storeId}/credentials',
-        { credentialType: 'MAIN_API', payload: { clientId: values.clientId, apiKey: values.apiKey } },
-        { storeId: values.storeId },
-      ),
-    onSuccess: () => {
-      void message.success('凭证已加密保存');
+    mutationFn: (values: {
+      clientId: string;
+      apiKey: string;
+      storeId: string;
+      credentialId?: string;
+    }) =>
+      values.credentialId === undefined
+        ? apiPost(
+            '/api/v1/stores/{storeId}/credentials',
+            {
+              credentialType: 'MAIN_API',
+              payload: { clientId: values.clientId, apiKey: values.apiKey },
+            },
+            { storeId: values.storeId },
+          )
+        : apiPatch(
+            '/api/v1/stores/{storeId}/credentials/{id}',
+            {
+              credentialType: 'MAIN_API',
+              payload: { clientId: values.clientId, apiKey: values.apiKey },
+            },
+            { storeId: values.storeId, id: values.credentialId },
+          ),
+    onSuccess: (_data, variables) => {
+      void message.success(
+        variables.credentialId === undefined ? '凭证已加密保存' : '凭证已更新（重新加密）',
+      );
       setCredentialOpen(false);
+      setEditingCredentialId(null);
       credentialForm.resetFields();
       refreshStore(credentialStoreId);
     },
     onError: (error: Error) => void message.error(error.message),
   });
 
+  // Enable / disable keep the stored secret; only the credential's status
+  // changes, so a disabled key can be brought back without re-entering it.
+  const credentialStatusMutation = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'enable' | 'disable' }) =>
+      apiPost(
+        `/api/v1/stores/{storeId}/credentials/{id}/${action}`,
+        {},
+        { storeId: detailId ?? '', id },
+      ),
+    onSuccess: (_data, variables) => {
+      void message.success(variables.action === 'enable' ? '凭证已启用' : '凭证已停用');
+      refreshStore(detailId);
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const credentialDeleteMutation = useMutation({
+    mutationFn: (id: string) =>
+      apiDelete('/api/v1/stores/{storeId}/credentials/{id}', { storeId: detailId ?? '', id }),
+    onSuccess: () => {
+      void message.success('凭证已删除');
+      refreshStore(detailId);
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const confirmDeleteCredential = (credential: CredentialRow) => {
+    modal.confirm({
+      title: '确认删除该凭证？',
+      content: '删除后需重新录入 Client ID 与 API Key 才能连接平台。密钥本身不会被导出或显示。',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      onOk: () => credentialDeleteMutation.mutateAsync(credential.id).catch(() => undefined),
+    });
+  };
+
   const openCredentialModal = (storeId: string) => {
     setCredentialStoreId(storeId);
+    setEditingCredentialId(null);
+    credentialForm.resetFields();
+    setCredentialOpen(true);
+  };
+
+  /** Editing re-encrypts a replacement payload (the stored secret never leaves the server). */
+  const openEditCredentialModal = (storeId: string, credentialId: string) => {
+    setCredentialStoreId(storeId);
+    setEditingCredentialId(credentialId);
     credentialForm.resetFields();
     setCredentialOpen(true);
   };
@@ -280,9 +347,13 @@ export function StoresPage() {
       void message.error('店铺上下文丢失，请重新打开后重试');
       return;
     }
-    void credentialForm
-      .validateFields()
-      .then((values) => credentialMutation.mutate({ ...values, storeId: credentialStoreId }));
+    void credentialForm.validateFields().then((values) =>
+      credentialMutation.mutate({
+        ...values,
+        storeId: credentialStoreId,
+        credentialId: editingCredentialId ?? undefined,
+      }),
+    );
   };
 
   const validateMutation = useMutation({
@@ -806,6 +877,11 @@ export function StoresPage() {
             bindingsLoading={bindings.isLoading}
             onValidate={(id) => validateMutation.mutate(id)}
             validating={validateMutation.isPending}
+            onEditCredential={(id) =>
+              detailRow !== null && openEditCredentialModal(detailRow.id, id)
+            }
+            onToggleCredential={(id, action) => credentialStatusMutation.mutate({ id, action })}
+            onDeleteCredential={(credential) => confirmDeleteCredential(credential)}
             onConfigure={() => detailRow !== null && openCredentialModal(detailRow.id)}
             onSync={(type) => triggerFor(detailRow.id, type)}
             syncing={syncMutation.isPending}
@@ -867,14 +943,17 @@ export function StoresPage() {
         </Form>
       </Modal>
 
-      {/* ---- Credential modal (existing business flow) ---- */}
+      {/* ---- Credential modal (create or replace payload) ---- */}
       <Modal
-        title="配置 MAIN_API 凭证"
+        title={
+          editingCredentialId === null ? '配置 MAIN_API 凭证' : '编辑 MAIN_API 凭证（替换密钥）'
+        }
         open={credentialOpen}
         zIndex={1100}
         afterOpenChange={(open) => {
           if (!open) {
             credentialForm.resetFields();
+            setEditingCredentialId(null);
           }
         }}
         onCancel={() => setCredentialOpen(false)}
@@ -885,8 +964,8 @@ export function StoresPage() {
           const configured = (credentials.data?.data ?? [])[0];
           return configured !== undefined ? (
             <p style={{ color: colors.textTertiary, fontSize: 12.5, marginBottom: 12 }}>
-              当前已配置：MAIN_API · 更新时间 {fmtDateTime(configured.updatedAt)}。留空提交将覆盖为
-              新值（密钥加密存储，不回显）。
+              当前已配置：MAIN_API · 更新时间 {fmtDateTime(configured.updatedAt)}。
+              提交后将以新值覆盖（密钥加密存储，不回显）。
             </p>
           ) : (
             <p style={{ color: colors.textTertiary, fontSize: 12.5, marginBottom: 12 }}>
@@ -925,6 +1004,9 @@ function StoreDetailBody({
   bindingsLoading,
   onValidate,
   validating,
+  onEditCredential,
+  onToggleCredential,
+  onDeleteCredential,
   onConfigure,
   onSync,
   syncing,
@@ -939,6 +1021,9 @@ function StoreDetailBody({
   bindingsLoading: boolean;
   onValidate: (credentialId: string) => void;
   validating: boolean;
+  onEditCredential: (credentialId: string) => void;
+  onToggleCredential: (credentialId: string, action: 'enable' | 'disable') => void;
+  onDeleteCredential: (credential: CredentialRow) => void;
   onConfigure: () => void;
   onSync: (type: 'orders' | 'listings') => void;
   syncing: boolean;
@@ -999,8 +1084,7 @@ function StoreDetailBody({
               title: '类型',
               dataIndex: 'credentialType',
               width: 110,
-              render: (value: string) =>
-                value === 'MAIN_API' ? '主 API' : value,
+              render: (value: string) => (value === 'MAIN_API' ? '主 API' : value),
             },
             {
               title: '状态',
@@ -1037,11 +1121,44 @@ function StoreDetailBody({
             {
               title: '操作',
               key: 'actions',
-              width: 110,
+              width: 190,
               render: (_: unknown, row: CredentialRow) => (
-                <Button size="small" loading={validating} onClick={() => onValidate(row.id)}>
-                  验证连接
-                </Button>
+                <Space size={4}>
+                  <Button
+                    size="small"
+                    loading={validating}
+                    disabled={row.status !== 'ACTIVE'}
+                    onClick={() => onValidate(row.id)}
+                  >
+                    验证
+                  </Button>
+                  <ActionMenu
+                    items={[
+                      {
+                        key: 'edit',
+                        label: '编辑（替换密钥）',
+                        onClick: () => onEditCredential(row.id),
+                      },
+                      row.status === 'ACTIVE'
+                        ? {
+                            key: 'disable',
+                            label: '停用',
+                            onClick: () => onToggleCredential(row.id, 'disable'),
+                          }
+                        : {
+                            key: 'enable',
+                            label: '启用',
+                            onClick: () => onToggleCredential(row.id, 'enable'),
+                          },
+                      {
+                        key: 'delete',
+                        label: '删除',
+                        danger: true,
+                        onClick: () => onDeleteCredential(row),
+                      },
+                    ]}
+                  />
+                </Space>
               ),
             },
           ]}

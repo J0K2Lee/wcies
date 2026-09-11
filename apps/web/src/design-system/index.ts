@@ -14,6 +14,9 @@ export {
   RESERVATION_STATUS_LABEL,
   TRANSACTION_TYPE_LABEL,
   FULFILLMENT_MODE_LABEL,
+  FULFILLMENT_MODE_META,
+  FULFILLMENT_CATEGORY_LABEL,
+  fulfillmentModeLabel,
   BARCODE_TYPE_LABEL,
   CREDENTIAL_TYPE_LABEL,
   ACTIVE_STATUS_LABEL,
@@ -28,6 +31,8 @@ export { InfoGrid } from './components/InfoGrid';
 export { DataTable } from './components/DataTable';
 export type { DataTableProps } from './components/DataTable';
 export { ActionMenu } from './components/ActionMenu';
+export { DeleteConfirmModal } from './components/DeleteConfirmModal';
+export type { DeleteConfirmModalProps } from './components/DeleteConfirmModal';
 export { EmptyState } from './components/EmptyState';
 export { ScanFeedback } from './components/ScanFeedback';
 export type { ScanFeedbackData } from './components/ScanFeedback';

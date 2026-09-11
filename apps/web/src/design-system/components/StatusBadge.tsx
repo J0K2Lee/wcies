@@ -105,10 +105,7 @@ export function StatusBadge({ tone, label, hint, showDot = true }: StatusBadgePr
  * map and fall back to the raw value HERE (one place), keeping the raw value
  * visible for troubleshooting (Sprint 6 task §11.3).
  */
-export function labelOf(
-  map: Record<string, string>,
-  value: string | null | undefined,
-): string {
+export function labelOf(map: Record<string, string>, value: string | null | undefined): string {
   if (value === null || value === undefined || value === '') {
     return '—';
   }
@@ -232,17 +229,94 @@ export const TRANSACTION_TYPE_LABEL: Record<string, string> = {
   MANUAL_ADJUSTMENT: '人工调整',
 };
 
-/** Fulfillment mode → label (bindings / listings). */
-export const FULFILLMENT_MODE_LABEL: Record<string, string> = {
-  OZON_RFBS: 'OZON 真仓配送',
-  OZON_FBS: 'OZON 真仓入库',
-  OZON_FBO: 'OZON 平台仓',
-  OZON_FBP: 'OZON 半托管',
-  WB_FBS: 'WB 真仓配送',
-  WB_FBW: 'WB 平台仓',
-  YANDEX_FBS: 'Yandex 真仓配送',
-  YANDEX_FBY: 'Yandex 平台仓',
+/**
+ * Fulfillment mode metadata (bindings / listings).
+ *
+ * Mirrors `FULFILLMENT_MODE_PLATFORM` / `FULFILLMENT_MODE_CATEGORY` in
+ * apps/api/src/modules/platform/constants/platform.constants.ts, which is the
+ * source of truth. Kept as one table so the dropdown (platform filter +
+ * category grouping) and the list column read the same facts.
+ *
+ * `category` is the seller-facing business model (who holds and ships);
+ * `label` is the platform's own vocabulary, which is what the platform
+ * back office shows and what order ingestion matches on.
+ */
+export const FULFILLMENT_CATEGORY_LABEL: Record<string, string> = {
+  SELF_MANAGED: '自管仓',
+  SEMI_MANAGED: '半托管',
+  MANAGED: '托管仓',
 };
+
+export const FULFILLMENT_MODE_META: Record<
+  string,
+  { platform: string; category: string; label: string; hint: string }
+> = {
+  OZON_RFBS: {
+    platform: 'OZON',
+    category: 'SELF_MANAGED',
+    label: 'realFBS',
+    hint: '卖家持货，自行发货给买家',
+  },
+  OZON_FBS: {
+    platform: 'OZON',
+    category: 'SELF_MANAGED',
+    label: 'FBS',
+    hint: '卖家持货，发货至 OZON 分拣中心',
+  },
+  OZON_FBP: {
+    platform: 'OZON',
+    category: 'SEMI_MANAGED',
+    label: 'FBP',
+    hint: '卖家备货至平台国内合作仓，平台负责跨境与尾程',
+  },
+  OZON_FBO: {
+    platform: 'OZON',
+    category: 'MANAGED',
+    label: 'FBO',
+    hint: 'OZON 仓库持货并发货',
+  },
+  WB_FBS: {
+    platform: 'WB',
+    category: 'SELF_MANAGED',
+    label: 'FBS',
+    hint: '卖家持货，按单发货至 WB 仓',
+  },
+  WB_FBW: {
+    platform: 'WB',
+    category: 'MANAGED',
+    label: 'FBW',
+    hint: 'WB 仓库持货并发货',
+  },
+  YANDEX_FBS: {
+    platform: 'YANDEX',
+    category: 'SELF_MANAGED',
+    label: 'FBS',
+    hint: '卖家持货并自行发货',
+  },
+  YANDEX_FBY: {
+    platform: 'YANDEX',
+    category: 'MANAGED',
+    label: 'FBY',
+    hint: 'Yandex 仓库持货并发货',
+  },
+};
+
+/** "自管仓 · FBS" — category first (business view), then the platform code. */
+export function fulfillmentModeLabel(mode: string): string {
+  const meta = FULFILLMENT_MODE_META[mode];
+  if (meta === undefined) {
+    return mode;
+  }
+  return `${FULFILLMENT_CATEGORY_LABEL[meta.category] ?? meta.category} · ${meta.label}`;
+}
+
+/**
+ * Kept for existing call sites that render a bare mode string; delegates to
+ * the table above so labels cannot drift between pages.
+ */
+export const FULFILLMENT_MODE_LABEL: Record<string, string> = Object.fromEntries(
+  Object.keys(FULFILLMENT_MODE_META).map((mode) => [mode, fulfillmentModeLabel(mode)]),
+);
 
 /** Barcode type → label (SKU barcodes). */
 export const BARCODE_TYPE_LABEL: Record<string, string> = {

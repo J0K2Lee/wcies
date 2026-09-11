@@ -5,12 +5,14 @@ import { useSearchParams } from 'react-router';
 import { apiDelete, apiPatch, apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
 import {
   ACTIVE_STATUS_LABEL,
+  ActionMenu,
   colors,
   ContextAction,
   ContextMetric,
   ContextRailContent,
   ContextSection,
   DataTable,
+  DeleteConfirmModal,
   EntitySummary,
   ErrorState,
   FilterBar,
@@ -93,6 +95,11 @@ export function ListingsPage() {
   const [mapTarget, setMapTarget] = useState<ListingSkuRow | null>(null);
   const [form] = Form.useForm();
   const [mapForm] = Form.useForm();
+  // Row actions act on a snapshotted row, so a closing drawer cannot blank the
+  // id out from under an open modal (the same modal-chain fix as above).
+  const [mappingEditTarget, setMappingEditTarget] = useState<ListingSkuRow | null>(null);
+  const [mappingDeleteTarget, setMappingDeleteTarget] = useState<ListingSkuRow | null>(null);
+  const [mappingEditForm] = Form.useForm();
   const [skuKeyword, setSkuKeyword] = useState('');
   const debouncedSkuKeyword = useDebouncedValue(skuKeyword);
 
@@ -148,10 +155,14 @@ export function ListingsPage() {
 
   const mapMutation = useMutation({
     mutationFn: (input: { listingId: string; mappingId: string; skuId: string }) =>
-      apiPost('/api/v1/listings/{listingId}/skus/{id}/map', { skuId: input.skuId }, {
-        listingId: input.listingId,
-        id: input.mappingId,
-      }),
+      apiPost(
+        '/api/v1/listings/{listingId}/skus/{id}/map',
+        { skuId: input.skuId },
+        {
+          listingId: input.listingId,
+          id: input.mappingId,
+        },
+      ),
     onSuccess: () => {
       void message.success('映射完成（后续同步不会覆盖）');
       setMapTarget(null);
@@ -186,7 +197,9 @@ export function ListingsPage() {
   const listingStatusMutation = useMutation({
     mutationFn: ({ id, action }: { id: string; action: 'activate' | 'deactivate' }) =>
       apiPost(
-        action === 'activate' ? '/api/v1/listings/{id}/activate' : '/api/v1/listings/{id}/deactivate',
+        action === 'activate'
+          ? '/api/v1/listings/{id}/activate'
+          : '/api/v1/listings/{id}/deactivate',
         {},
         { id },
       ),
@@ -239,6 +252,33 @@ export function ListingsPage() {
     onError: (error: Error) => void message.error(error.message),
   });
 
+  /** Edits a mapping's platform identifiers (the SKU binding is changed via 人工映射). */
+  const mappingEditMutation = useMutation({
+    mutationFn: (input: {
+      listingId: string;
+      mappingId: string;
+      platformSkuId?: string;
+      sellerSku?: string;
+      offerId?: string;
+    }) =>
+      apiPatch(
+        '/api/v1/listings/{listingId}/skus/{id}',
+        {
+          platformSkuId: input.platformSkuId?.trim() || null,
+          sellerSku: input.sellerSku?.trim() || null,
+          offerId: input.offerId?.trim() || null,
+        },
+        { listingId: input.listingId, id: input.mappingId },
+      ),
+    onSuccess: () => {
+      void message.success('映射已更新');
+      setMappingEditTarget(null);
+      mappingEditForm.resetFields();
+      refreshListings();
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
   const storeOptions = (stores.data?.data ?? [])
     .filter((store) => platformId === undefined || store.platformId === platformId)
     .map((store) => ({ value: store.id, label: `${store.storeCode} ${store.name}` }));
@@ -256,7 +296,10 @@ export function ListingsPage() {
         defaultCollapsed: true,
         children: (
           <ContextSection title="映射概览">
-            <ContextMetric label="当前筛选结果" value={`${list.data?.meta.total ?? 0} 个 Listing`} />
+            <ContextMetric
+              label="当前筛选结果"
+              value={`${list.data?.meta.total ?? 0} 个 Listing`}
+            />
             <ContextMetric label="本页" value={`${list.data?.data.length ?? 0} 条`} />
             <span
               style={{
@@ -287,7 +330,10 @@ export function ListingsPage() {
           <ContextSection title="基本信息">
             <ContextMetric label="标题" value={selectedRow.title ?? '—'} />
             <ContextMetric label="变体映射" value={`${selectedRow.mappingCount} 个`} />
-            <ContextMetric label="更新时间" value={<RelativeTime value={selectedRow.updatedAt} />} />
+            <ContextMetric
+              label="更新时间"
+              value={<RelativeTime value={selectedRow.updatedAt} />}
+            />
           </ContextSection>
           <ContextAction>
             <Button block onClick={() => setDetailId(selectedRow.id)}>
@@ -655,9 +701,7 @@ export function ListingsPage() {
                   },
                   {
                     label: '最近同步发现',
-                    children: (
-                      <RelativeTime value={listingDetail.lastSeenAt} fallback="未发现" />
-                    ),
+                    children: <RelativeTime value={listingDetail.lastSeenAt} fallback="未发现" />,
                   },
                   {
                     label: '标题',
@@ -762,53 +806,59 @@ export function ListingsPage() {
                           人工映射
                         </Button>
                       ) : (
-                        <Space size={4}>
-                          {row.status === 'ACTIVE' ? (
+                        <ActionMenu
+                          primary={
                             <Button
+                              type="link"
                               size="small"
-                              loading={mappingStatusMutation.isPending}
-                              onClick={() =>
-                                mappingStatusMutation.mutate({
-                                  listingId: row.listingId,
-                                  mappingId: row.id,
-                                  status: 'INACTIVE',
-                                })
-                              }
+                              style={{ paddingInline: 4 }}
+                              onClick={() => {
+                                setMapTarget(row);
+                                mapForm.resetFields();
+                              }}
                             >
-                              停用
+                              人工映射
                             </Button>
-                          ) : (
-                            <Button
-                              size="small"
-                              type="primary"
-                              ghost
-                              loading={mappingStatusMutation.isPending}
-                              onClick={() =>
-                                mappingStatusMutation.mutate({
-                                  listingId: row.listingId,
-                                  mappingId: row.id,
-                                  status: 'ACTIVE',
-                                })
-                              }
-                            >
-                              启用
-                            </Button>
-                          )}
-                          <Popconfirm
-                            title="确认删除该映射？"
-                            description="已关联订单行的映射无法删除；被拒时会返回具体原因。"
-                            onConfirm={() =>
-                              mappingDeleteMutation.mutate({
-                                listingId: row.listingId,
-                                mappingId: row.id,
-                              })
-                            }
-                          >
-                            <Button size="small" danger loading={mappingDeleteMutation.isPending}>
-                              删除
-                            </Button>
-                          </Popconfirm>
-                        </Space>
+                          }
+                          items={[
+                            {
+                              key: 'edit',
+                              label: '编辑映射',
+                              onClick: () => {
+                                setMappingEditTarget(row);
+                                mappingEditForm.resetFields();
+                              },
+                            },
+                            row.status === 'ACTIVE'
+                              ? {
+                                  key: 'deactivate',
+                                  label: '停用',
+                                  danger: true,
+                                  onClick: () =>
+                                    mappingStatusMutation.mutate({
+                                      listingId: row.listingId,
+                                      mappingId: row.id,
+                                      status: 'INACTIVE',
+                                    }),
+                                }
+                              : {
+                                  key: 'activate',
+                                  label: '启用',
+                                  onClick: () =>
+                                    mappingStatusMutation.mutate({
+                                      listingId: row.listingId,
+                                      mappingId: row.id,
+                                      status: 'ACTIVE',
+                                    }),
+                                },
+                            {
+                              key: 'delete',
+                              label: '删除',
+                              danger: true,
+                              onClick: () => setMappingDeleteTarget(row),
+                            },
+                          ]}
+                        />
                       ),
                   },
                 ]}
@@ -860,6 +910,65 @@ export function ListingsPage() {
             </Form.Item>
           </Form>
         </Modal>
+
+        {/* ---- Edit mapping: platform identifiers only (SKU binding uses 人工映射) ---- */}
+        <Modal
+          title={`编辑映射：${mappingEditTarget?.skuCode ?? '变体'}`}
+          open={mappingEditTarget !== null}
+          zIndex={1100}
+          onCancel={() => setMappingEditTarget(null)}
+          confirmLoading={mappingEditMutation.isPending}
+          onOk={() =>
+            void mappingEditForm.validateFields().then((values) => {
+              if (mappingEditTarget === null) {
+                void message.error('映射上下文丢失，请重新打开后重试');
+                return;
+              }
+              mappingEditMutation.mutate({
+                listingId: mappingEditTarget.listingId,
+                mappingId: mappingEditTarget.id,
+                platformSkuId: values.platformSkuId,
+                sellerSku: values.sellerSku,
+                offerId: values.offerId,
+              });
+            })
+          }
+        >
+          <p style={{ color: colors.textTertiary, fontSize: 12.5 }}>
+            修改平台标识。要更换绑定的内部 SKU，请使用「人工映射」。
+          </p>
+          <Form form={mappingEditForm} layout="vertical">
+            <Form.Item name="platformSkuId" label="Platform SKU ID">
+              <Input placeholder="平台 SKU ID" maxLength={255} />
+            </Form.Item>
+            <Form.Item name="sellerSku" label="Seller SKU">
+              <Input placeholder="卖家 SKU" maxLength={255} />
+            </Form.Item>
+            <Form.Item name="offerId" label="Offer ID">
+              <Input placeholder="Offer ID" maxLength={255} />
+            </Form.Item>
+          </Form>
+        </Modal>
+
+        <DeleteConfirmModal
+          open={mappingDeleteTarget !== null}
+          title="确认删除该映射？"
+          description={`将删除「${mappingDeleteTarget?.skuCode ?? ''}」与平台变体「${
+            mappingDeleteTarget?.offerId ?? mappingDeleteTarget?.platformSkuId ?? ''
+          }」的映射关系。Listing 本身保留。`}
+          forceWarning="若该映射已被订单行引用，删除会被拒绝——订单行是履约凭证，无法移除。"
+          confirmLoading={mappingDeleteMutation.isPending}
+          onConfirm={() => {
+            if (mappingDeleteTarget === null) {
+              return;
+            }
+            mappingDeleteMutation.mutate(
+              { listingId: mappingDeleteTarget.listingId, mappingId: mappingDeleteTarget.id },
+              { onSettled: () => setMappingDeleteTarget(null) },
+            );
+          }}
+          onCancel={() => setMappingDeleteTarget(null)}
+        />
       </Drawer>
     </div>
   );
