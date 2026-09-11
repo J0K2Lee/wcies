@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DeepPartial, Repository } from 'typeorm';
+import { SKU_CASCADE_TABLES, skuMatchCondition } from '../constants/sku-delete.constants';
 import { ProductEntity } from '../entities/product.entity';
 
 export interface ProductListFilters {
@@ -127,6 +128,34 @@ export class ProductRepository {
 
   async delete(id: string): Promise<void> {
     await this.repository.delete({ id });
+  }
+
+  /** SKU ids belonging to the product (used by forced delete, decision 0008). */
+  async listSkuIds(productId: string): Promise<string[]> {
+    const rows = await this.repository.query<Array<{ id: string }>>(
+      'SELECT id::text AS id FROM skus WHERE product_id = $1',
+      [productId],
+    );
+    return rows.map((row) => row.id);
+  }
+
+  /**
+   * Deletes the product and every SKU under it atomically. The caller must
+   * have confirmed that neither the product nor its SKUs have business
+   * history; the SKU cascade tables are removed here so no FK blocks the
+   * delete.
+   */
+  async deleteWithSkus(productId: string, skuIds: string[]): Promise<void> {
+    await this.repository.manager.transaction(async (manager) => {
+      for (const skuId of skuIds) {
+        for (const table of SKU_CASCADE_TABLES) {
+          const { where, params } = skuMatchCondition(table, skuId);
+          await manager.query(`DELETE FROM ${table} WHERE ${where}`, params);
+        }
+      }
+      await manager.query('DELETE FROM skus WHERE product_id = $1', [productId]);
+      await manager.delete(ProductEntity, { id: productId });
+    });
   }
 
   /** Category id plus every descendant id (recursive CTE). */

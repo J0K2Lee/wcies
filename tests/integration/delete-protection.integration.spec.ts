@@ -89,10 +89,10 @@ describe('store / binding delete', () => {
       name: `${PREFIX} 绑定仓`,
       warehouseType: 'SELF',
     });
-    const binding = await client.post<IdDto>(
-      `/api/v1/stores/${storeId}/warehouse-bindings`,
-      { warehouseId: warehouse.body.data.id, fulfillmentMode: 'OZON_RFBS' },
-    );
+    const binding = await client.post<IdDto>(`/api/v1/stores/${storeId}/warehouse-bindings`, {
+      warehouseId: warehouse.body.data.id,
+      fulfillmentMode: 'OZON_RFBS',
+    });
 
     // A store with a binding is IN_USE.
     const storeRejected = await client.del(`/api/v1/stores/${storeId}`);
@@ -180,11 +180,16 @@ describe('product / sku delete', () => {
     expect(productRejected.status).toBe(409);
     expect(productRejected.body.error?.code).toBe('PRODUCT_IN_USE');
 
+    // Must be unique per run: barcodes are globally unique, and deriving the
+    // value from the digits of PREFIX collided across runs (the same digits
+    // recurred), leaving the SKU reference-free and making this assertion fail
+    // for the wrong reason.
+    const uniqueBarcode = `69${String(Date.now()).slice(-11)}`;
     const barcode = await client.post<IdDto>(`/api/v1/skus/${sku.body.data.id}/barcodes`, {
-      barcode: `69${PREFIX.replace(/[^0-9]/g, '')}0001`.slice(0, 13) || '6900000000001',
+      barcode: uniqueBarcode,
       barcodeType: 'EAN',
     });
-    void barcode;
+    expect(barcode.status).toBe(201);
 
     const skuRejected = await client.del(`/api/v1/skus/${sku.body.data.id}`);
     expect(skuRejected.status).toBe(409);

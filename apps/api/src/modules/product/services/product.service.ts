@@ -2,7 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { PageMeta } from '@wcies/shared';
 import { CatalogService } from '../../catalog/catalog.service';
 import { BrandNotFoundError } from '../../catalog/errors/catalog-errors';
-import { CategoryLevelInvalidError, CategoryNotFoundError } from '../../catalog/errors/catalog-errors';
+import {
+  CategoryLevelInvalidError,
+  CategoryNotFoundError,
+} from '../../catalog/errors/catalog-errors';
 import {
   OperatorContext,
   OperationLogService,
@@ -12,6 +15,7 @@ import { BusinessCodeService } from '../../../infrastructure/business-code/busin
 import { ProductEntity } from '../entities/product.entity';
 import {
   ProductCodeAlreadyExistsError,
+  ProductHasHistoryError,
   ProductInUseError,
   ProductNotFoundError,
 } from '../errors/product-errors';
@@ -236,6 +240,41 @@ export class ProductService {
       entityCode: existing.product.productCode,
       action: 'DELETE',
       changes: { deleted: { from: existing.product.productCode, to: null } },
+      operator,
+    });
+  }
+
+  /**
+   * Forced delete (decision 0008): removes the product, all of its SKUs and
+   * those SKUs' master-data children (barcodes, images, bundle links, platform
+   * mappings) in one transaction.
+   *
+   * Business history still blocks: if any SKU has inventory ledger rows, order
+   * lines, picking/package/shipment records, the delete is refused and the
+   * caller is told which table. Those rows are evidence the goods physically
+   * moved, so cascading them would break traceability (AGENTS.md §25).
+   */
+  async forceRemove(id: string, operator: OperatorContext): Promise<void> {
+    const existing = await this.findRowOrThrow(id);
+    const skuIds = await this.repository.listSkuIds(id);
+    const blockers = await this.skuService.findHistoryBlockersForProduct(skuIds);
+    if (blockers.length > 0) {
+      throw new ProductHasHistoryError(
+        blockers.map((blocker) => `${blocker.table}(${blocker.count})`),
+      );
+    }
+    // The repository owns the cascade table list (single source of truth in
+    // constants/sku-delete.constants.ts) - nothing to pass through here.
+    await this.repository.deleteWithSkus(id, skuIds);
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: id,
+      entityCode: existing.product.productCode,
+      action: 'FORCE_DELETE',
+      changes: {
+        deleted: { from: existing.product.productCode, to: null },
+        cascadedSkus: { from: skuIds.length, to: null },
+      },
       operator,
     });
   }

@@ -97,9 +97,16 @@ export class SkuController {
   @ApiOkNoDataEnvelope()
   async remove(
     @Param('id') id: string,
+    @Query('force') force: string | undefined,
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true }> {
-    await this.skuService.remove(id, operator);
+    // force=true also removes the SKU's barcodes, images, bundle links and
+    // platform mappings (decision 0008); inventory/order history still refuses.
+    if (force === 'true' || force === '1') {
+      await this.skuService.forceRemove(id, operator);
+    } else {
+      await this.skuService.remove(id, operator);
+    }
     return ok({});
   }
 

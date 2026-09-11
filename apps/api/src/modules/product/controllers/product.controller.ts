@@ -13,7 +13,11 @@ import {
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PageMeta } from '@wcies/shared';
 import { ok, okPage } from '../../../common/dto/api-response';
-import { ApiOkEnvelope, ApiOkNoDataEnvelope, ApiOkPagedEnvelope } from '../../../common/swagger/api-envelope';
+import {
+  ApiOkEnvelope,
+  ApiOkNoDataEnvelope,
+  ApiOkPagedEnvelope,
+} from '../../../common/swagger/api-envelope';
 import { CurrentOperator } from '../../../common/decorators/current-operator.decorator';
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import {
@@ -75,9 +79,16 @@ export class ProductController {
   @ApiOkNoDataEnvelope()
   async remove(
     @Param('id') id: string,
+    @Query('force') force: string | undefined,
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true }> {
-    await this.productService.remove(id, operator);
+    // force=true cascades the product's SKUs and their master-data children
+    // (decision 0008); SKUs with business history still refuse.
+    if (force === 'true' || force === '1') {
+      await this.productService.forceRemove(id, operator);
+    } else {
+      await this.productService.remove(id, operator);
+    }
     return ok({});
   }
 

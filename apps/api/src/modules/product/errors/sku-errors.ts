@@ -37,3 +37,20 @@ export class SkuInUseError extends DomainError {
     super(`该记录已被引用（${sources.join('、')}），只能停用不能删除`, { sources });
   }
 }
+
+/**
+ * Forced delete (decision 0008) hit business history. Inventory, order,
+ * picking, package and shipment records are evidence the SKU physically
+ * moved, so they are never cascaded away (AGENTS.md §25).
+ */
+export class SkuHasHistoryError extends DomainError {
+  readonly code = 'SKU_HAS_BUSINESS_HISTORY';
+  readonly httpStatus = 409;
+
+  constructor(sources: string[]) {
+    super(
+      `该 SKU 已有业务流水（${sources.join('、')}），强制删除也不能移除。` + `如需下架请改用停用。`,
+      { sources },
+    );
+  }
+}

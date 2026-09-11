@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DeepPartial, Repository } from 'typeorm';
+import { SKU_CASCADE_TABLES, skuMatchCondition } from '../constants/sku-delete.constants';
 import { SkuEntity } from '../entities/sku.entity';
 
 export interface SkuListFilters {
@@ -231,6 +232,54 @@ export class SkuRepository {
 
   async delete(id: string): Promise<void> {
     await this.repository.delete({ id });
+  }
+
+  /**
+   * Counts references restricted to the given tables (decision 0008). Lets the
+   * service separate cascadable master data from business history without
+   * running the full reference sweep.
+   */
+  async countReferencesIn(
+    id: string,
+    tables: readonly string[],
+  ): Promise<Array<{ table: string; count: number }>> {
+    if (tables.length === 0) {
+      return [];
+    }
+    // Table/column names come from typed constants in the module, never input.
+    // Placeholders are numbered sequentially across all sub-selects because a
+    // table may match the SKU through more than one column.
+    const params: string[] = [];
+    const selects = tables
+      .map((table) => {
+        const { where, params: tableParams } = skuMatchCondition(table, id, params.length + 1);
+        params.push(...tableParams);
+        return `(SELECT COUNT(*) FROM ${table} WHERE ${where}) AS ${table}`;
+      })
+      .join(', ');
+    const rows = await this.repository.query<Array<Record<string, string | number>>>(
+      `SELECT ${selects}`,
+      params,
+    );
+    return Object.entries(rows[0] ?? {}).map(([table, count]) => ({
+      table,
+      count: Number(count),
+    }));
+  }
+
+  /**
+   * Deletes a SKU together with its master-data children in ONE transaction
+   * (decision 0008). Removing `platform_listing_skus` rows detaches the SKU
+   * from any listing; the listing record itself is kept intact.
+   */
+  async deleteWithCascade(skuId: string): Promise<void> {
+    await this.repository.manager.transaction(async (manager) => {
+      for (const table of SKU_CASCADE_TABLES) {
+        const { where, params } = skuMatchCondition(table, skuId);
+        await manager.query(`DELETE FROM ${table} WHERE ${where}`, params);
+      }
+      await manager.delete(SkuEntity, { id: skuId });
+    });
   }
 
   async listByProductIds(productIds: string[]): Promise<SkuEntity[]> {
