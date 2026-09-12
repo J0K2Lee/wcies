@@ -308,3 +308,69 @@ describe('listing filters (task §68)', () => {
     }
   });
 });
+
+describe('keyword search spans variant identifiers and internal SKU code', () => {
+  let storeK = '';
+  let offerId = '';
+  let platformSkuId = '';
+  let sellerSku = '';
+  let skuCode = '';
+
+  beforeAll(async () => {
+    // Dedicated store + SKU: keeps the shared fixtures' counts untouched.
+    const store = await client.post<{ id: string }>('/api/v1/stores', {
+      platformId: ozonPlatformId,
+      storeCode: `${PREFIX}-K`,
+      name: 'K',
+    });
+    storeK = store.body.data.id;
+    const product = await client.post<{ id: string }>('/api/v1/products', {
+      nameZh: `${PREFIX} 关键字搜索`,
+    });
+    const sku = await client.post<{ id: string; skuCode: string }>('/api/v1/skus', {
+      productId: product.body.data.id,
+      nameZh: `${PREFIX} 搜索黑`,
+    });
+    skuCode = sku.body.data.skuCode;
+    offerId = `${PREFIX}-KWOFF`;
+    platformSkuId = `${PREFIX}-KWSKU`;
+    sellerSku = `${PREFIX}-KWSELLER`;
+    const listing = await client.post<{ id: string }>('/api/v1/listings', {
+      platformId: ozonPlatformId,
+      storeId: storeK,
+      platformProductId: `${PREFIX}-KWPROD`,
+      skuVariants: [{ skuId: sku.body.data.id, platformSkuId, sellerSku, offerId }],
+    });
+    expect(listing.body.success).toBe(true);
+  });
+
+  async function hitBy(keyword: string): Promise<boolean> {
+    // The exception center deep-links with keyword only (no storeId).
+    const rows = await client.get<Array<{ platformProductId: string }>>(
+      `/api/v1/listings?keyword=${encodeURIComponent(keyword)}&pageSize=100`,
+    );
+    expect(rows.body.success).toBe(true);
+    return rows.body.data.some((row) => row.platformProductId === `${PREFIX}-KWPROD`);
+  }
+
+  it('matches the variant offer_id (exception center deep link)', async () => {
+    expect(await hitBy(offerId)).toBe(true);
+  });
+
+  it('matches the variant platform_sku_id', async () => {
+    expect(await hitBy(platformSkuId)).toBe(true);
+  });
+
+  it('matches the variant seller_sku', async () => {
+    expect(await hitBy(sellerSku)).toBe(true);
+  });
+
+  it('matches the mapped internal SKU code', async () => {
+    expect(skuCode).not.toBe('');
+    expect(await hitBy(skuCode)).toBe(true);
+  });
+
+  it('does not match unrelated keywords', async () => {
+    expect(await hitBy(`${PREFIX}-NO-SUCH-IDENTIFIER`)).toBe(false);
+  });
+});

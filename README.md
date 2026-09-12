@@ -73,6 +73,7 @@ pnpm docker:dev    # 等价于 docker compose --profile dev up -d
 - **镜像构建报 `ECONNREFUSED` / `ENETUNREACH`**：宿主机代理 DNS 偶发把 registry 域名解析成不可路由的假地址（构建期无法像运行时那样固定公共 DNS，取决于代理行为，重试通常即可）。重跑 `pnpm docker:dev:rebuild`；彻底解决需在代理软件中将 Docker 网段纳入 TUN/直连规则。
 - **容器内 API 访问外部平台**（OZON 等真实 API 联调）：容器流量不经过宿主机代理，直连可能不通。需要真实平台联调时改用混合模式（API 留宿主机）。
 - dev 目标的镜像构建**不需要网络**（依赖安装在容器首次启动时进行）；若首次启动停留在安装阶段属正常，`docker compose logs -f api-dev` 可看进度。
+- 容器内 API 的 nest watch 编译产物在 `apps/api/dist-docker`（与宿主机的 `dist` 和集成测试互不踩踏）；`pnpm test:integration` 会先自行构建宿主机 `dist`。
 
 ## 局域网访问（手机 / 其他电脑）
 

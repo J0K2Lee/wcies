@@ -28,7 +28,11 @@ EXPOSE 3000
 # empty, so this installs the workspace there (volumes only - the container
 # never writes node_modules into the host working tree) and builds the
 # @wcies/* dists that workspace imports need. Later starts are a no-op.
-CMD ["sh", "-c", "pnpm install --frozen-lockfile && pnpm build:packages && pnpm --filter @wcies/api dev"]
+# The watch compiles into dist-docker so it can NEVER clobber apps/api/dist,
+# which the host-side integration tests spawn their API processes from.
+# pnpm run passes a literal "--" through to the script, which nest chokes
+# on, so use `pnpm exec` to hand nest its docker tsconfig cleanly.
+CMD ["sh", "-c", "pnpm install --frozen-lockfile && pnpm build:packages && pnpm --filter @wcies/api exec nest start --watch -p tsconfig.build.docker.json"]
 
 # ---- Stage 1: build (prod target only) ----
 FROM node:24-alpine AS build

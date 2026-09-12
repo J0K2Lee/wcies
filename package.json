@@ -19,7 +19,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,json,md,yml,yaml}\"",
     "typecheck": "pnpm build:packages && pnpm -r --if-present run typecheck",
     "test": "pnpm -r --if-present run test",
-    "test:integration": "tsx scripts/ensure-test-db.ts && vitest run --config vitest.config.integration.ts",
+    "test:integration": "pnpm --filter @wcies/api build && tsx scripts/ensure-test-db.ts && vitest run --config vitest.config.integration.ts",
     "check:arch": "tsx scripts/check-architecture.ts",
     "db:migrate": "tsx scripts/db.ts run",
     "db:rollback": "tsx scripts/db.ts revert",

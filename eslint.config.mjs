@@ -9,6 +9,7 @@ export default tseslint.config(
     ignores: [
       '**/node_modules/**',
       '**/dist/**',
+      '**/dist-docker/**',
       '**/build/**',
       '**/coverage/**',
       'packages/api-client/src/generated/**',

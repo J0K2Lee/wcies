@@ -18,7 +18,7 @@ export class ApiClient {
   constructor(private readonly base: string) {}
 
   async login(username?: string, password?: string): Promise<void> {
-    const response = await fetch(`${this.base}/api/v1/auth/login`, {
+    const response = await this.fetchResponse(`${this.base}/api/v1/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -64,7 +64,7 @@ export class ApiClient {
     if (file !== null) {
       form.append('file', new Blob([new Uint8Array(file.buffer)], { type: file.type }), file.name);
     }
-    const response = await fetch(`${this.base}${path}`, {
+    const response = await this.fetchResponse(`${this.base}${path}`, {
       method: 'POST',
       headers: { Cookie: this.cookies },
       body: form,
@@ -73,6 +73,31 @@ export class ApiClient {
       status: response.status,
       body: (await response.json()) as Envelope<T>,
     };
+  }
+
+  /**
+   * One retry for connection-level failures (ECONNRESET / ECONNREFUSED on the
+   * spawned local API) - a flake family documented since Sprint 6: on Windows
+   * the spawned API's sockets are occasionally reset mid-suite even when the
+   * process is healthy. HTTP error statuses are never retried, and every
+   * mutating endpoint used by the suites is idempotent by design
+   * (AGENTS.md §49), so replaying a request that never got a response cannot
+   * double-apply.
+   */
+  private async fetchResponse(url: string, init: RequestInit): Promise<Response> {
+    try {
+      return await fetch(url, init);
+    } catch (error) {
+      const cause = (error as TypeError).cause as { code?: string } | undefined;
+      const retryable = ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE'].includes(
+        cause?.code ?? '',
+      );
+      if (!retryable) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      return await fetch(url, init);
+    }
   }
 
   private async request<T>(
@@ -85,7 +110,7 @@ export class ApiClient {
     if (body !== undefined) {
       headers['Content-Type'] = 'application/json';
     }
-    const response = await fetch(`${this.base}${path}`, {
+    const response = await this.fetchResponse(`${this.base}${path}`, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),

@@ -124,9 +124,27 @@ export class ListingRepository {
       qb.andWhere('listing.status = :status', { status: filters.status });
     }
     if (filters.keyword !== undefined && filters.keyword !== '') {
-      qb.andWhere('(listing.platform_product_id ILIKE :kw OR listing.title ILIKE :kw)', {
-        kw: `%${filters.keyword}%`,
-      });
+      // Keyword spans the listing's own identity (platform product_id, title)
+      // AND every variant identifier (platform sku, offer_id, seller_sku) plus
+      // the mapped internal SKU code. The exception center deep-links here
+      // with whichever identifier the ORDER_SKU_MAPPING_FAILED payload
+      // carries - usually the offer_id - so the search must accept all of
+      // them or the deep link lands on an empty result.
+      qb.andWhere(
+        `(listing.platform_product_id ILIKE :kw
+          OR listing.title ILIKE :kw
+          OR EXISTS (
+            SELECT 1 FROM platform_listing_skus kw_pls
+            WHERE kw_pls.listing_id = listing.id
+              AND (kw_pls.platform_sku_id ILIKE :kw
+                   OR kw_pls.offer_id ILIKE :kw
+                   OR kw_pls.seller_sku ILIKE :kw
+                   OR (kw_pls.sku_id IS NOT NULL AND EXISTS (
+                        SELECT 1 FROM skus kw_sku
+                        WHERE kw_sku.id = kw_pls.sku_id
+                          AND kw_sku.sku_code ILIKE :kw)))))`,
+        { kw: `%${filters.keyword}%` },
+      );
     }
     if (filters.skuId !== undefined || filters.mappingState !== undefined) {
       qb.andWhere((sub) => {

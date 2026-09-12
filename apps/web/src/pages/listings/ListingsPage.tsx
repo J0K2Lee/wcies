@@ -400,7 +400,7 @@ export function ListingsPage() {
           ]}
         />
         <Input.Search
-          placeholder="Platform Product ID / 标题"
+          placeholder="product_id / offer_id / 平台SKU / 内部SKU / 标题"
           allowClear
           defaultValue={keyword}
           onSearch={(value) => {
