@@ -626,6 +626,16 @@ export function SkusPage() {
             />
           </ContextSection>
           <ContextAction>
+            <Button
+              block
+              onClick={() => {
+                setPrintBarcode(selectedRow.primaryBarcode ?? '');
+                setPrintCopies(1);
+                setPrintFor(selectedRow);
+              }}
+            >
+              打印条码标签
+            </Button>
             <Button block onClick={() => setDrawerId(selectedRow.id)}>
               打开完整详情
             </Button>

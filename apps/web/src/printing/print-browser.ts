@@ -96,10 +96,15 @@ export function printTasksBrowser(tasks: readonly PrintTask[]): void {
 </head>
 <body><div class="sheet">${bodyParts.join('\n')}</div></body>
 </html>`;
-  const printWindow = window.open('', '_blank', 'noopener');
+  // NOTE: do NOT pass 'noopener' here - with it window.open() returns null,
+  // so the handle is lost, document.write never runs and the user is left
+  // with a blank tab (exactly the bug this fixed). The opener link is
+  // severed manually right after opening instead.
+  const printWindow = window.open('', '_blank');
   if (printWindow === null) {
     return;
   }
+  printWindow.opener = null;
   printWindow.document.write(html);
   printWindow.document.close();
   printWindow.focus();
