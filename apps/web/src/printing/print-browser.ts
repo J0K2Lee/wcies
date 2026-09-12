@@ -79,8 +79,14 @@ export function printTasksBrowser(tasks: readonly PrintTask[]): void {
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"/>
-<title>WCIES 标签打印</title>
+<!-- Empty title: browsers print the document title in the page header;
+     an empty title prints nothing even where headers survive. -->
+<title></title>
 <style>
+  /* Zero page margin: Chromium draws its date/title/URL/page-number
+     header & footer inside the page margin area, so margin 0 removes
+     them and the sheet carries its own padding instead. */
+  @page { margin: 0; }
   body { margin: 0; font-family: "Microsoft YaHei", Arial, sans-serif; background: #fff; }
   .sheet { padding: 8mm; }
   .label { page-break-inside: avoid; text-align: center; margin-bottom: 6mm; }
@@ -89,7 +95,7 @@ export function printTasksBrowser(tasks: readonly PrintTask[]): void {
   .label .code { font-family: "Courier New", monospace; font-size: 13px; letter-spacing: 1px; }
   svg { display: block; margin: 2px auto; }
   @media print {
-    .sheet { padding: 0; }
+    .sheet { padding: 4mm; }
     .label { margin-bottom: 4mm; }
   }
 </style>

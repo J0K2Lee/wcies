@@ -39,6 +39,10 @@ describe('printTasksBrowser', () => {
     expect(html).toContain('GUI-DEMO-69CODE');
     expect(html).toContain('SKU000010001');
     expect(html).toContain('<svg');
+    // The printed page must carry ONLY the label: zero page margin so
+    // Chromium does not draw its date/title/URL/page-number header/footer.
+    expect(html).toContain('@page { margin: 0; }');
+    expect(html).not.toContain('WCIES');
     expect(fake.document.close).toHaveBeenCalledOnce();
     // Security hygiene: the popup must not keep an opener link.
     expect(fake.opener).toBeNull();
