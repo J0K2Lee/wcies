@@ -80,15 +80,79 @@ services:
       dockerfile: apps/web/Dockerfile
       target: dev
     container_name: wcies-web-dev
-    profiles: ['web']
+    profiles: ['dev']
     environment:
-      # /api and /health* calls are proxied by Vite to the host API.
-      VITE_PROXY_TARGET: http://host.docker.internal:3000
+      # /api and /health* calls are proxied by Vite to the API container.
+      # Set VITE_PROXY_TARGET=http://host.docker.internal:3000 in .env to
+      # proxy an API that runs on the host instead.
+      VITE_PROXY_TARGET: ${VITE_PROXY_TARGET:-http://api-dev:3000}
+      # Windows bind mounts propagate no fs events: make Vite's watcher poll.
+      CHOKIDAR_USEPOLLING: 'true'
     ports:
       - '5173:5173'
     volumes:
       - .:/app
       - web_node_modules:/app/node_modules
+      - web_nm_web:/app/apps/web/node_modules
+      - web_nm_api:/app/apps/api/node_modules
+      - web_nm_shared:/app/packages/shared/node_modules
+      - web_nm_client:/app/packages/api-client/node_modules
+      - web_nm_contracts:/app/packages/platform-contracts/node_modules
+    # Public DNS: the host's proxy DNS intermittently returns unroutable
+    # fake IPs. host-gateway pins host.docker.internal without DNS.
+    dns: ['223.5.5.5', '119.29.29.29']
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    networks:
+      - wcies-network
+
+  # API dev container: nest start --watch with source bind-mounted.
+  # Hot reload relies on TSC polling - Windows bind mounts propagate no fs
+  # events, so watch mode must poll for file changes.
+  api-dev:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: dev
+    container_name: wcies-api-dev
+    profiles: ['dev']
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # In-container the API reaches the compose services by service name.
+      DATABASE_URL: postgresql://wcies:wcies_dev_password@wcies-postgres:5432/wcies_dev
+      REDIS_URL: redis://wcies-redis:6379
+      # Presigned URLs are opened by browsers on the host (and on LAN devices).
+      # Default keeps single-machine use working; for LAN access set
+      # S3_ENDPOINT=http://<lan-ip>:9000 in .env - compose interpolation
+      # forwards it here and it resolves from containers and browsers alike.
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://host.docker.internal:9000}
+      # Windows bind mounts propagate no fs events: make tsc watch poll.
+      TSC_WATCHFILE: DynamicPriorityPolling
+      TSC_WATCHDIRECTORY: RecursiveDirectoryUsingDynamicPolling
+    ports:
+      - '3000:3000'
+    volumes:
+      - .:/app
+      - api_node_modules:/app/node_modules
+      - api_nm_api:/app/apps/api/node_modules
+      - api_nm_web:/app/apps/web/node_modules
+      - api_nm_shared:/app/packages/shared/node_modules
+      - api_nm_client:/app/packages/api-client/node_modules
+      - api_nm_contracts:/app/packages/platform-contracts/node_modules
+    # Public DNS: the host's proxy DNS intermittently returns unroutable
+    # fake IPs. host-gateway pins host.docker.internal without DNS.
+    dns: ['223.5.5.5', '119.29.29.29']
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     networks:
       - wcies-network
 
@@ -96,6 +160,17 @@ volumes:
   postgres_data:
   minio_data:
   web_node_modules:
+  web_nm_web:
+  web_nm_api:
+  web_nm_shared:
+  web_nm_client:
+  web_nm_contracts:
+  api_node_modules:
+  api_nm_api:
+  api_nm_web:
+  api_nm_shared:
+  api_nm_client:
+  api_nm_contracts:
 
 networks:
   wcies-network:

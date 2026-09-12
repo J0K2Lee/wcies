@@ -1,0 +1,4 @@
+# Docker-related files must stay LF: CRLF breaks RUN/CMD inside Linux containers.
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+docker-compose.yml text eol=lf

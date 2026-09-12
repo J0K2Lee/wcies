@@ -41,6 +41,54 @@ pnpm dev                    # 同时启动 API(:3000) 与 Web(:5173)
 pnpm dev:worker
 ```
 
+### 备选：全 Docker 开发（前后端都进容器，保留热重载）
+
+`pnpm docker:up` 只启动基础设施（postgres / redis / minio）。如果希望 API 与 Web 也全部跑在容器里：
+
+```bash
+pnpm docker:dev    # 等价于 docker compose --profile dev up -d
+```
+
+将启动 5 个服务：postgres / redis / minio / **api-dev(:3000)** / **web-dev(:5173)**。
+
+- **热重载**：编辑 `apps/web/src` 或 `apps/api/src` 下的代码，容器内自动重编译。Windows 挂载目录收不到文件事件，容器内已内置轮询监听，无需额外配置。
+- **packages/\* 下的共享包变更**（shared / platform-contracts / api-client）：容器不监听这些目录，改动后重启容器生效：`docker compose restart api-dev web-dev`。
+- **迁移与种子数据**在容器内执行（自动指向 compose 网络内的服务）：
+
+  ```bash
+  docker compose exec api-dev pnpm db:migrate
+  docker compose exec api-dev pnpm seed:dev
+  ```
+
+- 首次启动需要数分钟：dev 镜像的构建**不联网**，依赖在容器首次运行时安装进专属数据卷（一次性，之后随卷保留），日常启动只需数秒。依赖目录全部由数据卷承载，容器永远不会改写宿主机的 `node_modules`。
+- **改了依赖**（package.json / pnpm-lock.yaml）或 Dockerfile 后：`pnpm docker:dev:rebuild`（重建镜像、重灌依赖卷并重启）。
+- **镜像源说明**：Docker 构建与容器内安装固定走 `registry.npmmirror.com`（本机代理 DNS 会把 registry.npmjs.org 解析成仅宿主机可路由的假地址，容器内不可达）。宿主机侧的 pnpm 安装不受影响。
+- Worker（BullMQ）暂不进容器：两个 watch 进程会争用同一编译产物。需要时在宿主机运行 `pnpm dev:worker`。
+- `api-dev` 与宿主机 `pnpm dev` 的 API 都占用 3000 端口，**不要同时运行**。集成测试固定使用 3101–3112 端口，与容器互不冲突。
+- **混合模式**（Web 在容器、API 在宿主机，例如需要真实平台联调时）：`.env` 加 `VITE_PROXY_TARGET=http://host.docker.internal:3000`，然后 `docker compose --profile dev up -d web-dev`。
+- 回到宿主机开发模式：`pnpm docker:down` 后照常 `pnpm dev`。
+
+### 故障排查
+
+- **镜像构建报 `ECONNREFUSED` / `ENETUNREACH`**：宿主机代理 DNS 偶发把 registry 域名解析成不可路由的假地址（构建期无法像运行时那样固定公共 DNS，取决于代理行为，重试通常即可）。重跑 `pnpm docker:dev:rebuild`；彻底解决需在代理软件中将 Docker 网段纳入 TUN/直连规则。
+- **容器内 API 访问外部平台**（OZON 等真实 API 联调）：容器流量不经过宿主机代理，直连可能不通。需要真实平台联调时改用混合模式（API 留宿主机）。
+- dev 目标的镜像构建**不需要网络**（依赖安装在容器首次启动时进行）；若首次启动停留在安装阶段属正常，`docker compose logs -f api-dev` 可看进度。
+
+## 局域网访问（手机 / 其他电脑）
+
+Web 与 API 的端口发布在宿主机所有网卡上，局域网设备可直接访问：
+
+| 服务 | 地址 |
+|---|---|
+| Web | `http://<宿主机内网IP>:5173`（例：http://192.168.1.12:5173） |
+| API / Swagger | `http://<宿主机内网IP>:3000/api/docs` |
+
+注意事项：
+
+1. **防火墙**：首次从其他设备连接时，Windows 防火墙弹窗请选择「允许」（对应 Docker Desktop 后端进程，专用网络）。
+2. **图片与面单**：登录和页面操作开箱即用（前端 API 调用走同源代理）。要让其他设备也能显示 **SKU 图片和面单**，需把根 `.env` 的 `S3_ENDPOINT` 改为 `http://<宿主机内网IP>:9000` 并重启 API（容器模式 `docker compose restart api-dev`；宿主机模式重启 `pnpm dev`）——图片签名 URL 基于该地址生成。
+3. **安全**：开发环境使用弱口令，仅供局域网内部使用，勿暴露公网。
+
 ## 服务地址
 
 | 服务 | 地址 | 说明 |

@@ -1,0 +1,30 @@
+# Build context is the repo root for both apps/*/Dockerfile builds.
+# Keep the uploaded context lean and keep secrets / local artifacts out.
+
+# VCS / tooling state
+.git
+.zcode
+.playwright-mcp
+.husky
+.github
+
+# Dependencies and build artifacts (installed/built inside the images)
+node_modules
+**/node_modules
+**/dist
+**/coverage
+**/tsconfig.tsbuildinfo
+
+# Secrets - must never enter the build context (AGENTS.md §29)
+.env
+.env.*
+!.env.example
+
+# Local docs, tests and screenshots - never COPYed by any Dockerfile
+docs
+tests
+handoff
+*-screenshots
+/*.png
+*.dump
+*.log
