@@ -1,8 +1,22 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { App, Alert, Button, Drawer, Form, Input, Modal, Popconfirm, Select, Space } from 'antd';
-import { useMemo, useState } from 'react';
+import {
+  App,
+  Alert,
+  Button,
+  Checkbox,
+  Drawer,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+} from 'antd';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { apiDelete, apiPatch, apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
+import { printTasksBrowser } from '../../printing/print-browser';
 import {
   ACTIVE_STATUS_LABEL,
   ActionMenu,
@@ -39,6 +53,8 @@ interface ListingRow {
   status: string;
   updatedAt: string;
   mappingCount: number;
+  mappingStatus: string;
+  hasOrderException: boolean;
 }
 
 interface ListingSkuRow {
@@ -66,6 +82,15 @@ interface ListingDetail {
   updatedAt: string;
   lastSeenAt: string | null;
   skus: ListingSkuRow[];
+}
+
+/** Sprint 8 T1 onboarding result - enough to print the label on the spot. */
+interface OnboardResult {
+  listingId: string;
+  mappingId: string;
+  product: { id: string; productCode: string; nameZh: string };
+  sku: { id: string; skuCode: string; nameZh: string };
+  barcode: string | null;
 }
 
 const listingStatusBadge = (value: string) => (
@@ -102,6 +127,13 @@ export function ListingsPage() {
   const [mappingEditForm] = Form.useForm();
   const [skuKeyword, setSkuKeyword] = useState('');
   const debouncedSkuKeyword = useDebouncedValue(skuKeyword);
+  // Sprint 8 T1: quick onboarding (Product + SKU + optional barcode + mapping
+  // in one transaction) from an unmapped listing / variant row.
+  const [onboardListingId, setOnboardListingId] = useState<string | null>(null);
+  const [onboardVariantId, setOnboardVariantId] = useState<string | null>(null);
+  const [onboardResult, setOnboardResult] = useState<OnboardResult | null>(null);
+  const [onboardForm] = Form.useForm();
+  const [printCopies, setPrintCopies] = useState(1);
 
   const list = useApiQuery<{ data: ListingRow[]; meta: { total: number } }>(
     '/api/v1/listings',
@@ -147,11 +179,107 @@ export function ListingsPage() {
     detailId !== null,
   );
   const listingDetail = detail.data?.data;
+  // Sprint 8 T3: unmapped-workbench counters (reuse the drawer's cache key).
+  const mappingStats = useApiQuery<{ data: { mapped: number; unmapped: number } }>(
+    '/api/v1/listings/mapping-stats',
+    {},
+    ['listing-mapping-stats'],
+  );
+  // Detail feed for the onboarding dialog (shares cache with the drawer).
+  const onboardDetail = useApiQuery<{ data: ListingDetail }>(
+    '/api/v1/listings/{id}',
+    {},
+    ['listing-detail', onboardListingId],
+    { id: onboardListingId ?? '' },
+    onboardListingId !== null,
+  );
+  const onboardUnmapped = useMemo(
+    () =>
+      (onboardDetail.data?.data?.skus ?? []).filter(
+        (variant) => variant.mappingStatus === 'UNMAPPED',
+      ),
+    [onboardDetail.data],
+  );
+  const onboardSelectedVariantId = onboardVariantId ?? onboardUnmapped[0]?.id ?? null;
 
   const refreshListings = () => {
     void queryClient.invalidateQueries({ queryKey: ['listings'] });
     void queryClient.invalidateQueries({ queryKey: ['listing-detail'] });
+    void queryClient.invalidateQueries({ queryKey: ['listing-mapping-stats'] });
   };
+
+  // Sprint 8 T1: one transaction on the backend - Product + SKU + optional
+  // internal barcode + mapping. Any failure rolls back whole.
+  const onboardMutation = useMutation({
+    mutationFn: (input: {
+      listingId: string;
+      mappingId: string;
+      productNameZh: string;
+      skuNameZh: string;
+      generateBarcode: boolean;
+    }) =>
+      apiPost<OnboardResult>(
+        '/api/v1/listings/{listingId}/skus/{id}/onboard',
+        {
+          productNameZh: input.productNameZh,
+          skuNameZh: input.skuNameZh,
+          generateBarcode: input.generateBarcode,
+        },
+        { listingId: input.listingId, id: input.mappingId },
+      ),
+    onSuccess: (result) => {
+      setOnboardResult(result);
+      void message.success(
+        `建档并映射完成：${result.sku.skuCode}${result.barcode !== null ? `（条码 ${result.barcode}）` : ''}`,
+      );
+      refreshListings();
+    },
+    onError: (error: Error) => void message.error(`建档失败（已整体回滚）: ${error.message}`),
+  });
+
+  // Sprint 8 T2: export the unmapped set (respects the current platform/store
+  // filters) as an import-compatible Excel and download via signed URL.
+  const exportMutation = useMutation({
+    mutationFn: () =>
+      apiPost<{ objectKey: string; downloadUrl: string; rowCount: number }>(
+        '/api/v1/listings/exports/unmapped',
+        { platformId, storeId },
+      ),
+    onSuccess: (data) => {
+      void message.success(`已导出 ${data.rowCount} 行未映射清单（internal_sku_code 留空待补填）`);
+      window.open(data.downloadUrl, '_blank');
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  /** Opens quick-onboarding for an unmapped listing row (variant chosen inside). */
+  const openOnboard = (listingId: string, title: string | null) => {
+    setOnboardResult(null);
+    setOnboardVariantId(null);
+    onboardForm.setFieldsValue({
+      productNameZh: title ?? '',
+      skuNameZh: title ?? '',
+      generateBarcode: true,
+    });
+    setOnboardListingId(listingId);
+  };
+
+  const closeOnboard = () => {
+    setOnboardListingId(null);
+    setOnboardVariantId(null);
+    setOnboardResult(null);
+    onboardForm.resetFields();
+  };
+
+  // Keep the name fields in sync while the dialog opens with no result yet.
+  useEffect(() => {
+    if (onboardListingId !== null && onboardResult === null) {
+      const title = onboardDetail.data?.data?.title ?? '';
+      if (title !== '' && (onboardForm.getFieldValue('productNameZh') ?? '') === '') {
+        onboardForm.setFieldsValue({ productNameZh: title, skuNameZh: title });
+      }
+    }
+  }, [onboardListingId, onboardResult, onboardDetail.data, onboardForm]);
 
   const mapMutation = useMutation({
     mutationFn: (input: { listingId: string; mappingId: string; skuId: string }) =>
@@ -297,10 +425,21 @@ export function ListingsPage() {
         children: (
           <ContextSection title="映射概览">
             <ContextMetric
+              label="未映射总数"
+              value={
+                mappingStats.data === undefined
+                  ? '…'
+                  : `${mappingStats.data.data.unmapped} 个 Listing`
+              }
+            />
+            <ContextMetric
+              label="已映射"
+              value={mappingStats.data === undefined ? '…' : `${mappingStats.data.data.mapped} 个`}
+            />
+            <ContextMetric
               label="当前筛选结果"
               value={`${list.data?.meta.total ?? 0} 个 Listing`}
             />
-            <ContextMetric label="本页" value={`${list.data?.data.length ?? 0} 条`} />
             <span
               style={{
                 fontSize: 12.5,
@@ -309,7 +448,7 @@ export function ListingsPage() {
                 paddingTop: 8,
               }}
             >
-              点击表格任意行，在此预览 Listing 与变体映射概况。
+              未映射行可用「建档并映射」一步完成建档；被订单撞上的未映射会排在最前。
             </span>
           </ContextSection>
         ),
@@ -343,7 +482,7 @@ export function ListingsPage() {
         </>
       ),
     };
-  }, [selectedRow, list.data]);
+  }, [selectedRow, list.data, mappingStats.data]);
   useContextRail(railContent);
 
   return (
@@ -351,6 +490,11 @@ export function ListingsPage() {
       <PageHeader
         title="SKU映射"
         description="管理平台商品（Listing）与内部SKU的变体映射；人工确认的映射不会被后续同步覆盖"
+        secondary={
+          <Button loading={exportMutation.isPending} onClick={() => exportMutation.mutate()}>
+            导出未映射清单
+          </Button>
+        }
         primary={
           <Button type="primary" onClick={() => setCreateOpen(true)}>
             新建映射
@@ -475,6 +619,22 @@ export function ListingsPage() {
                 render: (value: number) => `${value} 个`,
               },
               {
+                title: '映射',
+                dataIndex: 'mappingStatus',
+                width: 150,
+                render: (value: string, record: ListingRow) =>
+                  value === 'MAPPED' ? (
+                    <StatusBadge tone="success" label="已映射" />
+                  ) : (
+                    <Space size={4}>
+                      <StatusBadge tone="warning" label="未映射" />
+                      {record.hasOrderException && (
+                        <StatusBadge tone="danger" label="订单异常" showDot />
+                      )}
+                    </Space>
+                  ),
+              },
+              {
                 title: '状态',
                 dataIndex: 'status',
                 width: 90,
@@ -489,16 +649,28 @@ export function ListingsPage() {
               {
                 title: '操作',
                 key: 'actions',
-                width: 76,
+                width: 150,
                 render: (_: unknown, record: ListingRow) => (
-                  <Button
-                    type="link"
-                    size="small"
-                    style={{ padding: 0 }}
-                    onClick={() => setDetailId(record.id)}
-                  >
-                    详情
-                  </Button>
+                  <Space size={0}>
+                    {record.mappingStatus === 'UNMAPPED' && (
+                      <Button
+                        type="link"
+                        size="small"
+                        style={{ paddingInline: 4 }}
+                        onClick={() => openOnboard(record.id, record.title)}
+                      >
+                        建档并映射
+                      </Button>
+                    )}
+                    <Button
+                      type="link"
+                      size="small"
+                      style={{ padding: 0 }}
+                      onClick={() => setDetailId(record.id)}
+                    >
+                      详情
+                    </Button>
+                  </Space>
                 ),
               },
             ]}
@@ -830,20 +1002,39 @@ export function ListingsPage() {
                   {
                     title: '操作',
                     key: 'actions',
-                    width: 180,
+                    width: 220,
                     render: (_: unknown, row: ListingSkuRow) =>
                       row.mappingStatus === 'UNMAPPED' ? (
-                        <Button
-                          size="small"
-                          type="primary"
-                          ghost
-                          onClick={() => {
-                            setMapTarget(row);
-                            mapForm.resetFields();
-                          }}
-                        >
-                          人工映射
-                        </Button>
+                        <Space size={0}>
+                          <Button
+                            size="small"
+                            type="primary"
+                            ghost
+                            onClick={() => {
+                              setMapTarget(row);
+                              mapForm.resetFields();
+                            }}
+                          >
+                            人工映射
+                          </Button>
+                          <Button
+                            type="link"
+                            size="small"
+                            style={{ paddingInline: 4 }}
+                            onClick={() => {
+                              setOnboardResult(null);
+                              setOnboardVariantId(row.id);
+                              onboardForm.setFieldsValue({
+                                productNameZh: listingDetail.title ?? '',
+                                skuNameZh: listingDetail.title ?? '',
+                                generateBarcode: true,
+                              });
+                              setOnboardListingId(listingDetail.id);
+                            }}
+                          >
+                            建档并映射
+                          </Button>
+                        </Space>
                       ) : (
                         <ActionMenu
                           primary={
@@ -1009,6 +1200,165 @@ export function ListingsPage() {
           onCancel={() => setMappingDeleteTarget(null)}
         />
       </Drawer>
+
+      {/* ---- Sprint 8 T1: quick onboarding (one dialog, one transaction) ---- */}
+      <Modal
+        title="建档并映射（新建商品 + SKU + 映射）"
+        open={onboardListingId !== null}
+        zIndex={1100}
+        onCancel={closeOnboard}
+        footer={
+          onboardResult === null
+            ? [
+                <Button key="cancel" onClick={closeOnboard}>
+                  取消
+                </Button>,
+                <Button
+                  key="submit"
+                  type="primary"
+                  loading={onboardMutation.isPending}
+                  onClick={() => {
+                    if (onboardSelectedVariantId === null) {
+                      void message.warning('没有可建档的未映射变体');
+                      return;
+                    }
+                    void onboardForm.validateFields().then((values) => {
+                      if (onboardListingId === null) {
+                        return;
+                      }
+                      onboardMutation.mutate({
+                        listingId: onboardListingId,
+                        mappingId: onboardSelectedVariantId,
+                        productNameZh: values.productNameZh as string,
+                        skuNameZh: values.skuNameZh as string,
+                        generateBarcode: values.generateBarcode !== false,
+                      });
+                    });
+                  }}
+                >
+                  建档并映射
+                </Button>,
+              ]
+            : [
+                ...(onboardResult?.barcode !== null && onboardResult !== null
+                  ? [
+                      <Button
+                        key="print"
+                        onClick={() =>
+                          printTasksBrowser([
+                            {
+                              type: 'SKU_LABEL',
+                              payload: {
+                                barcode: onboardResult.barcode ?? '',
+                                skuCode: onboardResult.sku.skuCode,
+                                skuName: onboardResult.sku.nameZh,
+                                copies: printCopies,
+                              },
+                            },
+                          ])
+                        }
+                      >
+                        打印标签
+                      </Button>,
+                    ]
+                  : []),
+                <Button key="done" type="primary" onClick={closeOnboard}>
+                  完成
+                </Button>,
+              ]
+        }
+      >
+        {onboardResult !== null ? (
+          <Space orientation="vertical" style={{ width: '100%' }} size="middle">
+            <Alert
+              type="success"
+              showIcon
+              title="建档、条码、映射已在一个事务中完成"
+              description="失败会整体回滚，不会留下「建了 SKU 但没映射」的半成品。收货/拣货扫描可直接使用该条码。"
+            />
+            <InfoGrid
+              columns={2}
+              items={[
+                {
+                  label: '商品',
+                  children: `${onboardResult.product.productCode} ${onboardResult.product.nameZh}`,
+                },
+                { label: '内部SKU', children: onboardResult.sku.skuCode },
+                {
+                  label: '内部条码',
+                  children:
+                    onboardResult.barcode === null ? (
+                      <StatusBadge tone="neutral" label="未生成" showDot={false} />
+                    ) : (
+                      <span style={{ fontFamily: 'monospace' }}>{onboardResult.barcode}</span>
+                    ),
+                },
+                { label: '映射状态', children: <StatusBadge tone="success" label="已映射" /> },
+              ]}
+            />
+            {onboardResult.barcode !== null && (
+              <Space>
+                <span style={{ fontSize: 12.5, color: colors.textTertiary }}>打印份数</span>
+                <InputNumber
+                  min={1}
+                  max={99}
+                  value={printCopies}
+                  onChange={(value) => setPrintCopies(value ?? 1)}
+                  style={{ width: 80 }}
+                />
+              </Space>
+            )}
+          </Space>
+        ) : (
+          <Form form={onboardForm} layout="vertical" preserve={false}>
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 12 }}
+              title="一步完成：新建商品 + 新建SKU +（可选）生成内部条码 + 映射该变体"
+              description="编码由系统按序号自动生成；商品名/SKU 名已按 Listing 标题预填，可修改。已映射的变体不提供此操作。"
+            />
+            {onboardUnmapped.length > 1 && (
+              <Form.Item label="要建档映射的变体（该 Listing 有多个未映射变体）" required>
+                <Select
+                  value={onboardSelectedVariantId}
+                  onChange={setOnboardVariantId}
+                  options={onboardUnmapped.map((variant) => ({
+                    value: variant.id,
+                    label: `${variant.platformSkuId ?? '—'} / ${variant.offerId ?? variant.sellerSku ?? '—'}`,
+                  }))}
+                />
+              </Form.Item>
+            )}
+            {onboardUnmapped.length === 0 && !onboardDetail.isLoading && (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 12 }}
+                title="该 Listing 没有未映射的变体"
+                description="可能刚刚已完成映射，请刷新列表后重试。"
+              />
+            )}
+            <Form.Item
+              name="productNameZh"
+              label="商品名（Product）"
+              rules={[{ required: true, message: '请填写商品名' }]}
+            >
+              <Input maxLength={255} placeholder="默认取 Listing 标题" />
+            </Form.Item>
+            <Form.Item
+              name="skuNameZh"
+              label="SKU 名"
+              rules={[{ required: true, message: '请填写 SKU 名' }]}
+            >
+              <Input maxLength={255} placeholder="默认取 Listing 标题" />
+            </Form.Item>
+            <Form.Item name="generateBarcode" valuePropName="checked" initialValue={true}>
+              <Checkbox>生成内部条码（WCSKU…，建档后可直接打印标签贴到实物上）</Checkbox>
+            </Form.Item>
+          </Form>
+        )}
+      </Modal>
     </div>
   );
 }

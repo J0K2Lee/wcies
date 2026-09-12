@@ -3753,6 +3753,76 @@
         "tags": ["listings"]
       }
     },
+    "/api/v1/listings/mapping-stats": {
+      "get": {
+        "operationId": "ListingController_mappingStats",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ListingMappingStatsDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Mapped / unmapped listing counters (Sprint 8 unmapped workbench)",
+        "tags": ["listings"]
+      }
+    },
+    "/api/v1/listings/exports/unmapped": {
+      "post": {
+        "operationId": "ListingController_exportUnmapped",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnmappedListingExportRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/UnmappedListingExportResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Export unmapped variants as a LISTING_MAPPING-compatible Excel (signed URL download)",
+        "tags": ["listings"]
+      }
+    },
     "/api/v1/listings/skus/{skuId}/mappings": {
       "get": {
         "operationId": "ListingController_listMappingsOfSku",
@@ -4102,6 +4172,63 @@
         "tags": ["listings"]
       }
     },
+    "/api/v1/listings/{listingId}/skus/{id}/onboard": {
+      "post": {
+        "operationId": "ListingController_onboard",
+        "parameters": [
+          {
+            "name": "listingId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListingOnboardRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ListingOnboardResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "建档并映射（Sprint 8 T1）：一个事务内建 Product + SKU +（可选）内部条码并映射该未映射变体，失败整体回滚",
+        "tags": ["listings"]
+      }
+    },
     "/api/v1/listings/{listingId}/skus/{id}": {
       "patch": {
         "operationId": "ListingController_updateMapping",
@@ -4202,6 +4329,36 @@
         },
         "summary": "Delete a mapping without order history",
         "tags": ["listings"]
+      }
+    },
+    "/api/v1/imports/templates/{type}": {
+      "get": {
+        "operationId": "ImportController_downloadTemplate",
+        "parameters": [
+          {
+            "name": "type",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fixed-template xlsx workbook (binary download)",
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Download a fixed-template Excel (SKU / LISTING_MAPPING), header + one example row",
+        "tags": ["imports"]
       }
     },
     "/api/v1/imports/upload": {
@@ -10784,6 +10941,11 @@
             "enum": ["MAPPED", "UNMAPPED"],
             "example": "MAPPED",
             "description": "是否至少有一个 ACTIVE 且已绑定内部 SKU 的变体；与 mappingState 筛选同一判定"
+          },
+          "hasOrderException": {
+            "type": "boolean",
+            "example": false,
+            "description": "是否有未解决的 ORDER_SKU_MAPPING_FAILED 异常撞上该 Listing（派生展示，Sprint 8 T3）"
           }
         },
         "required": [
@@ -10801,7 +10963,8 @@
           "createdAt",
           "updatedAt",
           "mappingCount",
-          "mappingStatus"
+          "mappingStatus",
+          "hasOrderException"
         ]
       },
       "ListingSkuResponseDto": {
@@ -10946,6 +11109,11 @@
             "example": "MAPPED",
             "description": "是否至少有一个 ACTIVE 且已绑定内部 SKU 的变体；与 mappingState 筛选同一判定"
           },
+          "hasOrderException": {
+            "type": "boolean",
+            "example": false,
+            "description": "是否有未解决的 ORDER_SKU_MAPPING_FAILED 异常撞上该 Listing（派生展示，Sprint 8 T3）"
+          },
           "skus": {
             "type": "array",
             "items": {
@@ -10969,6 +11137,7 @@
           "updatedAt",
           "mappingCount",
           "mappingStatus",
+          "hasOrderException",
           "skus"
         ]
       },
@@ -11080,6 +11249,52 @@
           "matchedSellerSku",
           "matchedPlatformSkuId"
         ]
+      },
+      "ListingMappingStatsDto": {
+        "type": "object",
+        "properties": {
+          "mapped": {
+            "type": "number",
+            "example": 1
+          },
+          "unmapped": {
+            "type": "number",
+            "example": 1323
+          }
+        },
+        "required": ["mapped", "unmapped"]
+      },
+      "UnmappedListingExportResponseDto": {
+        "type": "object",
+        "properties": {
+          "objectKey": {
+            "type": "string",
+            "example": "exports/unmapped-listings/1760000000000-unmapped-listings.xlsx"
+          },
+          "downloadUrl": {
+            "type": "string",
+            "description": "短时效签名下载链接（直接打开即下载）"
+          },
+          "rowCount": {
+            "type": "number",
+            "example": 1323,
+            "description": "导出的未映射变体行数"
+          }
+        },
+        "required": ["objectKey", "downloadUrl", "rowCount"]
+      },
+      "UnmappedListingExportRequestDto": {
+        "type": "object",
+        "properties": {
+          "platformId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "storeId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
       },
       "SkuMappingRowDto": {
         "type": "object",
@@ -11229,6 +11444,93 @@
           }
         },
         "required": ["skuId"]
+      },
+      "ListingOnboardProductDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "productCode": {
+            "type": "string",
+            "example": "PN000012"
+          },
+          "nameZh": {
+            "type": "string",
+            "example": "VK87 MAX V2 机械键盘"
+          }
+        },
+        "required": ["id", "productCode", "nameZh"]
+      },
+      "ListingOnboardSkuDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skuCode": {
+            "type": "string",
+            "example": "SKU000012001"
+          },
+          "nameZh": {
+            "type": "string",
+            "example": "VK87 MAX V2 机械键盘"
+          }
+        },
+        "required": ["id", "skuCode", "nameZh"]
+      },
+      "ListingOnboardResponseDto": {
+        "type": "object",
+        "properties": {
+          "listingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mappingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mappingStatus": {
+            "type": "string",
+            "enum": ["MAPPED"],
+            "description": "成功后恒为 MAPPED"
+          },
+          "product": {
+            "$ref": "#/components/schemas/ListingOnboardProductDto"
+          },
+          "sku": {
+            "$ref": "#/components/schemas/ListingOnboardSkuDto"
+          },
+          "barcode": {
+            "type": "object",
+            "nullable": true,
+            "example": "WCSKU00000042",
+            "description": "未勾选生成时为 null"
+          }
+        },
+        "required": ["listingId", "mappingId", "mappingStatus", "product", "sku", "barcode"]
+      },
+      "ListingOnboardRequestDto": {
+        "type": "object",
+        "properties": {
+          "productNameZh": {
+            "type": "string",
+            "description": "商品名；缺省取 Listing 标题",
+            "maxLength": 255
+          },
+          "skuNameZh": {
+            "type": "string",
+            "description": "SKU 名；缺省取 Listing 标题",
+            "maxLength": 255
+          },
+          "generateBarcode": {
+            "type": "boolean",
+            "default": true,
+            "description": "同时生成内部条码（WCSKU…），生成后可直接打印标签"
+          }
+        }
       },
       "UpdateListingSkuRequestDto": {
         "type": "object",

@@ -25,17 +25,24 @@ import {
   AddListingSkuRequestDto,
   CreateListingRequestDto,
   ListingDetailDto,
+  ListingMappingStatsDto,
+  ListingOnboardRequestDto,
+  ListingOnboardResponseDto,
   MapListingSkuRequestDto,
   ListingListQueryDto,
   ListingResponseDto,
   ListingSkuResponseDto,
   ResolveSkuRequestDto,
   ResolveSkuResponseDto,
+  UnmappedListingExportRequestDto,
+  UnmappedListingExportResponseDto,
   UpdateListingRequestDto,
   UpdateListingSkuRequestDto,
 } from '../dto/listing.dto';
 import { ListingService } from '../services/listing.service';
 import { ListingResolverService } from '../services/listing-resolver.service';
+import { ListingOnboardingService } from '../services/listing-onboarding.service';
+import { ListingExportService } from '../services/listing-export.service';
 
 /** Mapping row enriched with store/listing context (SKU drawer, task §91). */
 export class SkuMappingRowDto extends ListingSkuResponseDto {
@@ -57,6 +64,8 @@ export class ListingController {
   constructor(
     private readonly listingService: ListingService,
     private readonly resolverService: ListingResolverService,
+    private readonly onboardingService: ListingOnboardingService,
+    private readonly exportService: ListingExportService,
   ) {}
 
   @Get()
@@ -94,6 +103,31 @@ export class ListingController {
         sellerSku: query.sellerSku,
         offerId: query.offerId,
       }),
+    );
+  }
+
+  @Get('mapping-stats')
+  @ApiOperation({ summary: 'Mapped / unmapped listing counters (Sprint 8 unmapped workbench)' })
+  @ApiOkEnvelope(ListingMappingStatsDto)
+  async mappingStats(): Promise<{ success: true; data: ListingMappingStatsDto }> {
+    return ok(await this.listingService.getMappingStats());
+  }
+
+  @Post('exports/unmapped')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Export unmapped variants as a LISTING_MAPPING-compatible Excel (signed URL download)',
+  })
+  @ApiOkEnvelope(UnmappedListingExportResponseDto)
+  async exportUnmapped(
+    @Body() dto: UnmappedListingExportRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: UnmappedListingExportResponseDto }> {
+    return ok(
+      await this.exportService.exportUnmapped(
+        { platformId: dto.platformId, storeId: dto.storeId },
+        operator,
+      ),
     );
   }
 
@@ -182,6 +216,22 @@ export class ListingController {
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true; data: ListingSkuResponseDto }> {
     return ok(await this.listingService.mapUnmappedSku(listingId, mappingId, dto, operator));
+  }
+
+  @Post(':listingId/skus/:id/onboard')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary:
+      '建档并映射（Sprint 8 T1）：一个事务内建 Product + SKU +（可选）内部条码并映射该未映射变体，失败整体回滚',
+  })
+  @ApiOkEnvelope(ListingOnboardResponseDto)
+  async onboard(
+    @Param('listingId') listingId: string,
+    @Param('id') mappingId: string,
+    @Body() dto: ListingOnboardRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: ListingOnboardResponseDto }> {
+    return ok(await this.onboardingService.onboard(listingId, mappingId, dto, operator));
   }
 
   @Patch(':listingId/skus/:id')

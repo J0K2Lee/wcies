@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { EntityManager } from 'typeorm';
 import { PageMeta } from '@wcies/shared';
 import { CatalogService } from '../../catalog/catalog.service';
 import { BrandNotFoundError } from '../../catalog/errors/catalog-errors';
@@ -314,6 +315,36 @@ export class ProductService {
       operator,
     });
     return product;
+  }
+
+  /**
+   * Cross-module tx participant (Sprint 8 T1): creates the product row on the
+   * CALLER's transaction so listing quick-onboarding commits or rolls back as
+   * one unit. Sequence is taken on the same manager - a rollback returns the
+   * number instead of burning it. Operation logging stays with the CALLER
+   * (after commit) so a rolled-back attempt leaves no audit orphans.
+   */
+  async createForOnboardingInTx(
+    manager: EntityManager,
+    input: { nameZh: string; nameRu?: string | null },
+    operator: OperatorContext,
+  ): Promise<ProductEntity> {
+    const { productCode, codeSeq } = await this.businessCode.nextProductCode(manager);
+    const repository = manager.getRepository(ProductEntity);
+    const created = repository.create({
+      productCode,
+      codeSeq,
+      nameZh: input.nameZh,
+      nameRu: input.nameRu ?? null,
+      brandId: null,
+      categoryId: null,
+      mainImageId: null,
+      status: 'DRAFT',
+      remark: null,
+      createdBy: operator.userId,
+      updatedBy: operator.userId,
+    });
+    return repository.save(created);
   }
 
   private async findRowOrThrow(id: string): Promise<ProductRowWithCounts> {

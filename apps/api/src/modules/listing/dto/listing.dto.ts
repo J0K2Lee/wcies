@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsObject,
   IsOptional,
@@ -127,6 +128,110 @@ export class MapListingSkuRequestDto {
   @ApiProperty({ format: 'uuid', description: '目标 Internal SKU' })
   @IsUUID()
   skuId!: string;
+}
+
+/** Sprint 8 T1: quick-create Product+SKU(+barcode) and map the variant in one action. */
+export class ListingOnboardRequestDto {
+  @ApiPropertyOptional({
+    description: '商品名；缺省取 Listing 标题',
+    maxLength: 255,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  productNameZh?: string;
+
+  @ApiPropertyOptional({
+    description: 'SKU 名；缺省取 Listing 标题',
+    maxLength: 255,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  skuNameZh?: string;
+
+  @ApiPropertyOptional({
+    default: true,
+    description: '同时生成内部条码（WCSKU…），生成后可直接打印标签',
+  })
+  @IsOptional()
+  @IsBoolean()
+  generateBarcode?: boolean;
+}
+
+export class ListingOnboardProductDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'PN000012' })
+  productCode!: string;
+
+  @ApiProperty({ example: 'VK87 MAX V2 机械键盘' })
+  nameZh!: string;
+}
+
+export class ListingOnboardSkuDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'SKU000012001' })
+  skuCode!: string;
+
+  @ApiProperty({ example: 'VK87 MAX V2 机械键盘' })
+  nameZh!: string;
+}
+
+export class ListingOnboardResponseDto {
+  @ApiProperty({ format: 'uuid' })
+  listingId!: string;
+
+  @ApiProperty({ format: 'uuid' })
+  mappingId!: string;
+
+  @ApiProperty({ enum: ['MAPPED'], description: '成功后恒为 MAPPED' })
+  mappingStatus!: string;
+
+  @ApiProperty({ type: ListingOnboardProductDto })
+  product!: ListingOnboardProductDto;
+
+  @ApiProperty({ type: ListingOnboardSkuDto })
+  sku!: ListingOnboardSkuDto;
+
+  @ApiProperty({ nullable: true, example: 'WCSKU00000042', description: '未勾选生成时为 null' })
+  barcode!: string | null;
+}
+
+/** Sprint 8 T3: global mapped/unmapped counters for the workbench header. */
+export class ListingMappingStatsDto {
+  @ApiProperty({ example: 1 })
+  mapped!: number;
+
+  @ApiProperty({ example: 1323 })
+  unmapped!: number;
+}
+
+/** Sprint 8 T2: signed-URL download descriptor for the unmapped export. */
+export class UnmappedListingExportResponseDto {
+  @ApiProperty({ example: 'exports/unmapped-listings/1760000000000-unmapped-listings.xlsx' })
+  objectKey!: string;
+
+  @ApiProperty({ description: '短时效签名下载链接（直接打开即下载）' })
+  downloadUrl!: string;
+
+  @ApiProperty({ example: 1323, description: '导出的未映射变体行数' })
+  rowCount!: number;
+}
+
+export class UnmappedListingExportRequestDto {
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  platformId?: string;
+
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  storeId?: string;
 }
 
 export class UpdateListingSkuRequestDto {
@@ -272,6 +377,13 @@ export class ListingResponseDto {
     description: '是否至少有一个 ACTIVE 且已绑定内部 SKU 的变体；与 mappingState 筛选同一判定',
   })
   mappingStatus!: 'MAPPED' | 'UNMAPPED';
+
+  @ApiProperty({
+    example: false,
+    description:
+      '是否有未解决的 ORDER_SKU_MAPPING_FAILED 异常撞上该 Listing（派生展示，Sprint 8 T3）',
+  })
+  hasOrderException!: boolean;
 }
 
 export class ListingDetailDto extends ListingResponseDto {

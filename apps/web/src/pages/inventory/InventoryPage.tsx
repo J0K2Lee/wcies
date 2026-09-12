@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { App, Button, Drawer, Form, Input, InputNumber, Modal, Select, Tabs } from 'antd';
+import { App, Button, Drawer, Form, Input, InputNumber, Modal, Select, Space, Tabs } from 'antd';
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { apiPost, apiPut, useApiQuery } from '../../api/hooks';
@@ -35,6 +35,16 @@ import {
  * selection. All stock mutations (initialize/adjust/safety/move) are the
  * unchanged Sprint 2 business flows.
  */
+
+/**
+ * Staging-bin display hint (Sprint 8 T4b): goods on an ST-zone bin
+ * ({warehouse}-{STnn}-{level}) await MOVE_BIN to a sellable rack. Derived
+ * display only - it never gates picking or counting.
+ */
+function isStagingBin(binCode: string): boolean {
+  const rack = binCode.split('-')[2] ?? '';
+  return /^ST\d+$/.test(rack);
+}
 
 interface InventoryRow {
   id: string;
@@ -530,7 +540,22 @@ export function InventoryPage() {
                 <span title={record.warehouseName}>{value}</span>
               ),
             },
-            { title: '库位', dataIndex: 'binCode', width: 130 },
+            {
+              title: '库位',
+              dataIndex: 'binCode',
+              width: 150,
+              render: (value: string | null) =>
+                value === null ? (
+                  <span style={{ color: colors.textTertiary }}>自动（DEFAULT）</span>
+                ) : isStagingBin(value) ? (
+                  <Space size={4}>
+                    <span>{value}</span>
+                    <StatusBadge tone="warning" label="待上架" showDot={false} />
+                  </Space>
+                ) : (
+                  value
+                ),
+            },
             {
               title: 'On Hand',
               dataIndex: 'onHandQty',

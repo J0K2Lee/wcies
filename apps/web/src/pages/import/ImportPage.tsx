@@ -98,6 +98,32 @@ export function ImportPage() {
     onError: (error: Error) => void message.error(error.message),
   });
 
+  /** Template download (Sprint 8 T2.4): fixed-template xlsx from the backend. */
+  const downloadTemplate = async (type: string): Promise<void> => {
+    try {
+      const response = await fetch(`/api/v1/imports/templates/${type}`, {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as {
+          error?: { message?: string };
+        } | null;
+        throw new Error(body?.error?.message ?? `模板下载失败（${response.status}）`);
+      }
+      const disposition = response.headers.get('Content-Disposition') ?? '';
+      const match = /filename="([^"]+)"/.exec(disposition);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = match?.[1] ?? `${type}-template.xlsx`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      void message.error(error instanceof Error ? error.message : '模板下载失败');
+    }
+  };
+
   return (
     <Space orientation="vertical" style={{ width: '100%' }} size="middle">
       <Space wrap>
@@ -118,12 +144,36 @@ export function ImportPage() {
             上传 Excel（固定模板）
           </Button>
         </Upload>
+        <Button onClick={() => void downloadTemplate('SKU')}>下载 SKU 模板</Button>
+        <Button onClick={() => void downloadTemplate('LISTING_MAPPING')}>下载映射模板</Button>
       </Space>
 
       <Alert
         type="info"
         showIcon
         title="导入流程：上传 → 校验（精确到行/字段/错误码）→ 确认导入（后台队列执行）。重复的业务键（sku_code/条码/仓库编码等）会被拒绝，不会静默覆盖。"
+      />
+
+      <Alert
+        type="success"
+        showIcon
+        title="批量补映射两步指引（Excel 闭环）"
+        description={
+          <ol style={{ margin: '4px 0 0 18px', padding: 0 }}>
+            <li>
+              到「SKU映射」页点右上角<b>导出未映射清单</b>（列与导入模板逐列对齐，
+              <code>internal_sku_code</code> 留空）。
+            </li>
+            <li>
+              本地补填 <code>internal_sku_code</code>：SKU 未建档的，先下载
+              <b>SKU 模板</b>建档（可同时建商品/条码）并导入；已有 SKU 的直接填编码。
+            </li>
+            <li>
+              选类型 <b>LISTING_MAPPING</b> 上传补好的清单并确认导入——标识与已同步变体匹配的行会
+              直接绑定该变体，不会产生重复行。
+            </li>
+          </ol>
+        }
       />
 
       <Typography.Title level={5}>导入任务</Typography.Title>
@@ -150,7 +200,9 @@ export function ImportPage() {
             dataIndex: 'status',
             width: 110,
             render: (value: string) => (
-              <Tag color={STATUS_TAG[value] ?? 'default'}>{IMPORT_STATUS_LABEL[value] ?? value}</Tag>
+              <Tag color={STATUS_TAG[value] ?? 'default'}>
+                {IMPORT_STATUS_LABEL[value] ?? value}
+              </Tag>
             ),
           },
           { title: '总行数', dataIndex: 'totalRows', width: 80 },

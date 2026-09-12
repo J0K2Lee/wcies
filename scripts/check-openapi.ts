@@ -82,6 +82,9 @@ function main(): void {
   }
 
   // 3. Success responses must be documented and resolve.
+  //    A response is documented when it declares JSON content with a schema,
+  //    OR explicitly non-JSON content (e.g. a binary file download declared
+  //    with its media type). A bare `{ description }` response still fails.
   let documentedResponses = 0;
   for (const [path, item] of Object.entries(doc.paths ?? {})) {
     for (const [method, op] of Object.entries(item)) {
@@ -93,10 +96,18 @@ function main(): void {
       if (okResponse === undefined) {
         continue;
       }
-      const json = (okResponse.content as Record<string, { schema?: unknown }> | undefined)?.[
-        'application/json'
-      ];
-      const schema = json?.schema;
+      const content = okResponse.content as Record<string, { schema?: unknown }> | undefined;
+      if (content === undefined || Object.keys(content).length === 0) {
+        errors.push(`${method.toUpperCase()} ${path}: 2xx response declares no content at all`);
+        continue;
+      }
+      const json = content['application/json'];
+      if (json === undefined) {
+        // Non-JSON content (binary download) is documented by its media type.
+        documentedResponses += 1;
+        continue;
+      }
+      const schema = json.schema;
       if (schema === undefined) {
         errors.push(`${method.toUpperCase()} ${path}: 2xx response has no JSON schema`);
         continue;

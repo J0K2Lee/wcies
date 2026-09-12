@@ -915,6 +915,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/listings/mapping-stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Mapped / unmapped listing counters (Sprint 8 unmapped workbench) */
+        get: operations["ListingController_mappingStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/listings/exports/unmapped": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Export unmapped variants as a LISTING_MAPPING-compatible Excel (signed URL download) */
+        post: operations["ListingController_exportUnmapped"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/listings/skus/{skuId}/mappings": {
         parameters: {
             query?: never;
@@ -1019,6 +1053,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/listings/{listingId}/skus/{id}/onboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 建档并映射（Sprint 8 T1）：一个事务内建 Product + SKU +（可选）内部条码并映射该未映射变体，失败整体回滚 */
+        post: operations["ListingController_onboard"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/listings/{listingId}/skus/{id}": {
         parameters: {
             query?: never;
@@ -1035,6 +1086,23 @@ export interface paths {
         head?: never;
         /** Update a variant mapping */
         patch: operations["ListingController_updateMapping"];
+        trace?: never;
+    };
+    "/api/v1/imports/templates/{type}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download a fixed-template Excel (SKU / LISTING_MAPPING), header + one example row */
+        get: operations["ImportController_downloadTemplate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/imports/upload": {
@@ -3262,6 +3330,11 @@ export interface components {
              * @enum {string}
              */
             mappingStatus: "MAPPED" | "UNMAPPED";
+            /**
+             * @description 是否有未解决的 ORDER_SKU_MAPPING_FAILED 异常撞上该 Listing（派生展示，Sprint 8 T3）
+             * @example false
+             */
+            hasOrderException: boolean;
         };
         ListingSkuResponseDto: {
             /** Format: uuid */
@@ -3337,6 +3410,11 @@ export interface components {
              * @enum {string}
              */
             mappingStatus: "MAPPED" | "UNMAPPED";
+            /**
+             * @description 是否有未解决的 ORDER_SKU_MAPPING_FAILED 异常撞上该 Listing（派生展示，Sprint 8 T3）
+             * @example false
+             */
+            hasOrderException: boolean;
             skus: components["schemas"]["ListingSkuResponseDto"][];
         };
         ListingSkuVariantDto: {
@@ -3379,6 +3457,29 @@ export interface components {
             matchedSellerSku: Record<string, never> | null;
             /** @example 152987456 */
             matchedPlatformSkuId: Record<string, never> | null;
+        };
+        ListingMappingStatsDto: {
+            /** @example 1 */
+            mapped: number;
+            /** @example 1323 */
+            unmapped: number;
+        };
+        UnmappedListingExportResponseDto: {
+            /** @example exports/unmapped-listings/1760000000000-unmapped-listings.xlsx */
+            objectKey: string;
+            /** @description 短时效签名下载链接（直接打开即下载） */
+            downloadUrl: string;
+            /**
+             * @description 导出的未映射变体行数
+             * @example 1323
+             */
+            rowCount: number;
+        };
+        UnmappedListingExportRequestDto: {
+            /** Format: uuid */
+            platformId?: string;
+            /** Format: uuid */
+            storeId?: string;
         };
         SkuMappingRowDto: {
             /** Format: uuid */
@@ -3442,6 +3543,51 @@ export interface components {
              * @description 目标 Internal SKU
              */
             skuId: string;
+        };
+        ListingOnboardProductDto: {
+            /** Format: uuid */
+            id: string;
+            /** @example PN000012 */
+            productCode: string;
+            /** @example VK87 MAX V2 机械键盘 */
+            nameZh: string;
+        };
+        ListingOnboardSkuDto: {
+            /** Format: uuid */
+            id: string;
+            /** @example SKU000012001 */
+            skuCode: string;
+            /** @example VK87 MAX V2 机械键盘 */
+            nameZh: string;
+        };
+        ListingOnboardResponseDto: {
+            /** Format: uuid */
+            listingId: string;
+            /** Format: uuid */
+            mappingId: string;
+            /**
+             * @description 成功后恒为 MAPPED
+             * @enum {string}
+             */
+            mappingStatus: "MAPPED";
+            product: components["schemas"]["ListingOnboardProductDto"];
+            sku: components["schemas"]["ListingOnboardSkuDto"];
+            /**
+             * @description 未勾选生成时为 null
+             * @example WCSKU00000042
+             */
+            barcode: Record<string, never> | null;
+        };
+        ListingOnboardRequestDto: {
+            /** @description 商品名；缺省取 Listing 标题 */
+            productNameZh?: string;
+            /** @description SKU 名；缺省取 Listing 标题 */
+            skuNameZh?: string;
+            /**
+             * @description 同时生成内部条码（WCSKU…），生成后可直接打印标签
+             * @default true
+             */
+            generateBarcode: boolean;
         };
         UpdateListingSkuRequestDto: {
             platformSkuId?: Record<string, never> | null;
@@ -7063,6 +7209,56 @@ export interface operations {
             };
         };
     };
+    ListingController_mappingStats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ListingMappingStatsDto"];
+                    };
+                };
+            };
+        };
+    };
+    ListingController_exportUnmapped: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnmappedListingExportRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["UnmappedListingExportResponseDto"];
+                    };
+                };
+            };
+        };
+    };
     ListingController_listMappingsOfSku: {
         parameters: {
             query?: never;
@@ -7276,6 +7472,36 @@ export interface operations {
             };
         };
     };
+    ListingController_onboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listingId: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListingOnboardRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ListingOnboardResponseDto"];
+                    };
+                };
+            };
+        };
+    };
     ListingController_deleteMapping: {
         parameters: {
             query?: never;
@@ -7328,6 +7554,28 @@ export interface operations {
                         success: true;
                         data: components["schemas"]["ListingSkuResponseDto"];
                     };
+                };
+            };
+        };
+    };
+    ImportController_downloadTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                type: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Fixed-template xlsx workbook (binary download) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": string;
                 };
             };
         };

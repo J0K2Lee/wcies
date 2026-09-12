@@ -753,6 +753,17 @@ export function PurchaseReceiptsPage() {
 }
 
 /**
+ * Staging-bin display hint (Sprint 8 T4b / decision 3A): ST-zone bins
+ * ({warehouse}-{STnn}-{level}) are the convention for 暂存位. Derived display
+ * only - no schema, no status, the goods still need MOVE_BIN to reach a
+ * sellable rack.
+ */
+function isStagingBin(binCode: string): boolean {
+  const rack = binCode.split('-')[2] ?? '';
+  return /^ST\d+$/.test(rack);
+}
+
+/**
  * Receiving editor (Sprint 7 T5.2-T5.5): scan-to-add lines, bind unknown
  * barcodes on the spot (D13), per-line bin choice with live occupancy hints
  * (D9: the human decides capacity), and a one-click STAGING bin (Q4 A).
@@ -959,6 +970,9 @@ function ReceiptItemsEditor({
                 min={0}
                 value={item.unitCost}
                 placeholder="单位成本"
+                status={
+                  item.unitCost === undefined || item.unitCost === null ? 'warning' : undefined
+                }
                 onChange={(value) =>
                   setItems(
                     items.map((row, i) =>
@@ -977,7 +991,7 @@ function ReceiptItemsEditor({
                 optionFilterProp="label"
                 options={(bins.data?.data ?? []).map((bin) => ({
                   value: bin.id,
-                  label: bin.binCode,
+                  label: isStagingBin(bin.binCode) ? `${bin.binCode}（暂存）` : bin.binCode,
                 }))}
                 onChange={(value) =>
                   setItems(items.map((row, i) => (i === index ? { ...row, binId: value } : row)))
@@ -1009,6 +1023,14 @@ function ReceiptItemsEditor({
           ))}
         </div>
       )}
+      {items.length > 0 &&
+        items.some((item) => item.unitCost === undefined || item.unitCost === null) && (
+          <span style={{ fontSize: 12.5, color: '#d48806' }}>
+            ⚠ 有{' '}
+            {items.filter((item) => item.unitCost === undefined || item.unitCost === null).length}{' '}
+            行未填单位成本：留空合法（赠品/样品），但该行不会计入移动加权成本，且确认后无法补填。
+          </span>
+        )}
       <div style={{ display: 'flex', gap: 8 }}>
         <Button
           type="dashed"

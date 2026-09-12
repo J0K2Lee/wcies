@@ -10,6 +10,7 @@ import { BusinessCodeService } from '../../../infrastructure/business-code/busin
 import { ObjectStorageService } from '../../../infrastructure/storage/object-storage.service';
 import { SKU_HISTORY_TABLES } from '../constants/sku-delete.constants';
 import { SkuEntity } from '../entities/sku.entity';
+import { ProductEntity } from '../entities/product.entity';
 import { ImageNotFoundError } from '../errors/image-errors';
 import { ProductNotFoundError } from '../errors/product-errors';
 import {
@@ -263,6 +264,16 @@ export class SkuService {
   }
 
   /**
+   * Same lookup on the CALLER's transaction (Sprint 8 T1): rows created inside
+   * that transaction (e.g. the SKU quick-onboarding just built) are invisible
+   * to the default connection until commit, so cross-module InTx participants
+   * must read through the shared manager.
+   */
+  async getEntityByIdInTx(manager: EntityManager, id: string): Promise<SkuEntity | null> {
+    return manager.getRepository(SkuEntity).findOneBy({ id });
+  }
+
+  /**
    * Moving-average cost update on receipt confirmation (Sprint 7, decision
    * 0013 par6, master-data.md par4). Runs on the CALLER's transaction; the
    * weighted arithmetic happens in SQL NUMERIC so precision is exact
@@ -288,6 +299,47 @@ export class SkuService {
       [input.skuId, input.unitCost, input.receivedQty, input.totalOnHand],
     );
     return result[0]?.avg ?? '';
+  }
+
+  /**
+   * Cross-module tx participant (Sprint 8 T1): creates the SKU row on the
+   * CALLER's transaction with the standard derived code (decision 0002).
+   * Logging stays with the caller (after commit).
+   */
+  async createForOnboardingInTx(
+    manager: EntityManager,
+    input: { productId: string; nameZh: string },
+  ): Promise<SkuEntity> {
+    const product = await manager.getRepository(ProductEntity).findOneBy({
+      id: input.productId,
+    });
+    if (product === null) {
+      throw new ProductNotFoundError(input.productId);
+    }
+    const skuCode = await this.businessCode.nextSkuCode(product.id, product.codeSeq, manager);
+    const repository = manager.getRepository(SkuEntity);
+    const created = repository.create({
+      productId: product.id,
+      skuCode,
+      nameZh: input.nameZh,
+      nameRu: null,
+      model: null,
+      color: null,
+      size: null,
+      weightG: null,
+      lengthMm: null,
+      widthMm: null,
+      heightMm: null,
+      volumeMm3: null,
+      purchaseUrl: null,
+      latestPurchasePrice: null,
+      movingAverageCost: null,
+      costCurrency: 'CNY',
+      serialTracking: false,
+      status: 'ACTIVE',
+      remark: null,
+    });
+    return repository.save(created);
   }
 
   /** Zero-reference hard delete (decision 0003); referenced -> SKU_IN_USE. */

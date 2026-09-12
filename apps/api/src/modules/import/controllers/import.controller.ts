@@ -1,16 +1,20 @@
 import {
   Controller,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   Param,
   Post,
   Query,
+  Res,
+  StreamableFile,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiConsumes, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Response } from 'express';
 import { PageMeta } from '@wcies/shared';
 import { ok, okPage } from '../../../common/dto/api-response';
 import { ApiOkEnvelope, ApiOkPagedEnvelope } from '../../../common/swagger/api-envelope';
@@ -18,11 +22,37 @@ import { CurrentOperator } from '../../../common/decorators/current-operator.dec
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import { ImportJobResponseDto, ImportListQueryDto } from '../dto/import.dto';
 import { ImportService } from '../import.service';
+import { ImportTemplateService } from '../services/import-template.service';
 
 @ApiTags('imports')
 @Controller('imports')
 export class ImportController {
-  constructor(private readonly importService: ImportService) {}
+  constructor(
+    private readonly importService: ImportService,
+    private readonly templateService: ImportTemplateService,
+  ) {}
+
+  @Get('templates/:type')
+  @Header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  @ApiOperation({
+    summary: 'Download a fixed-template Excel (SKU / LISTING_MAPPING), header + one example row',
+  })
+  @ApiOkResponse({
+    description: 'Fixed-template xlsx workbook (binary download)',
+    content: {
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': {
+        schema: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  async downloadTemplate(
+    @Param('type') type: string,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<StreamableFile> {
+    const { buffer, filename } = await this.templateService.buildTemplate(type);
+    response.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return new StreamableFile(buffer);
+  }
 
   @Post('upload')
   @UseInterceptors(FileInterceptor('file'))

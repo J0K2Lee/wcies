@@ -113,6 +113,15 @@ Sprint 5 起，平台同步会产生**未映射**的平台 SKU 事实：
     - `mappingCount` 语义：该 Listing 的**变体映射总数（含未映射行）**，与「已映射数量」不是同一个数，界面文案需区分。
     - 确定性说明：因为没有 `mappingId` 直接绑定 SKU 时会先落 UNMAPPED 行再人工映射，`sku_id IS NOT NULL` 与 `mapping_status = 'MAPPED'` 在现有写路径下同真同假；两者都写进条件是防御性的，使未来新增写路径不会静默改变判定。
 
+Sprint 8 起（2026-09-12，规划 §T1/T2/T3）：
+
+12. **快捷建档**：`POST /listings/:listingId/skus/:mappingId/onboard`。一个数据库事务内创建 Product + SKU +（可选）内部条码，并把该变体绑定为 MAPPED；任一步失败**整体回滚**，不存在「建了 SKU 但没映射」的半成品。编码沿用集中序号（`PN%06d` / `SKU{9}` / `WCSKU%08d`，不新增规则）；商品名/SKU 名默认取 `listing.title`，两者最终都为空 → 422 `LISTING_ONBOARD_NAME_REQUIRED`。只允许从 **UNMAPPED** 变体发起（已映射变体返回 409 `LISTING_SKU_MAPPING_INVALID_STATE`）。条码为该 SKU 首条码时自动为主条码。审计在各实体写入成功（提交后）记录，Action 含 `CREATE`（product/sku/barcode）与 `MAP`。
+13. **LISTING_MAPPING 导入绑定同步行**：导入行落到**已存在**的 Listing 且平台标识（优先 `platform_sku_id`，其次 `offer_id`、`seller_sku`）命中该 Listing 一条 ACTIVE 的 UNMAPPED 同步变体时，**绑定该行**（等价人工映射，sku_id 写入、置 MAPPED），**不插入重复变体行**。「相同映射（同 Listing 同 SKU）拒绝」与决策 0012（至少一个平台标识）规则不变；未命中任何同步变体时维持原有新建行为。
+14. **未映射工作台**（派生展示，不新增业务状态）：
+    - `GET /listings/mapping-stats` 返回全局 MAPPED/UNMAPPED 计数，判定与第 11 条同一条件；
+    - 列表行携带 `hasOrderException`（是否存在 OPEN 的 `ORDER_SKU_MAPPING_FAILED` 异常经订单行 `store + platform_product_id` 撞上该 Listing）；
+    - `mappingState=UNMAPPED` 筛选下，`hasOrderException` 的行**排序置顶**，其余按 `created_at DESC`。该标志不参与任何写路径判定。
+
 ## 9. Listing Resolver（订单安全边界）
 
 `ListingResolverService.resolveInternalSku({ storeId, platformSkuId?, sellerSku?, offerId? })`：
@@ -130,6 +139,11 @@ Sprint 5 起，平台同步会产生**未映射**的平台 SKU 事实：
 3. 唯一业务键（sku_code/barcode/warehouse_code 等）重复时 **Reject 并报告**，绝不静默覆盖（task §61）。
 4. SKU 模板中 `product_code` 引用已有商品；不存在时若提供 `product_name_zh` 则一并创建。
 
+Sprint 8 起（2026-09-12，Excel 闭环补齐）：
+
+5. **未映射清单导出**：`POST /listings/exports/unmapped`（可选 platformId/storeId 过滤）。导出**未映射的 ACTIVE 变体行**（非 Listing 行），列与 LISTING_MAPPING 模板**逐列一致**，`internal_sku_code` 留空待补填；已映射行默认不导出。文件走对象存储 + 短时效签名 URL 下载；现实规模约 1.3k 行，同步生成即可（BullMQ 只用于长任务）。
+6. **模板下载**：`GET /imports/templates/:type`（SKU / LISTING_MAPPING），表头 + 一行示例；示例行上传校验会按行报错，防止被误导入。
+
 ## 11. 审计
 
 以下写操作记录 `operation_logs`：Product、SKU、Barcode、Store、Credential（不含 Secret）、Warehouse、Bin、StoreWarehouseBinding、Listing、ListingSkuMapping、ImportJob、Supplier、PurchaseOrder、PurchaseReceipt（Sprint 7 起）。
@@ -142,6 +156,11 @@ Sprint 6 新增（T2/T3/T4，2026-09-11）：
 
 - 删除保护（决策 0003）：`WAREHOUSE_IN_USE`、`BIN_IN_USE`、`STORE_IN_USE`、`BINDING_IN_USE`、`BRAND_IN_USE`、`CATEGORY_IN_USE`、`PRODUCT_IN_USE`、`SKU_IN_USE`、`LISTING_IN_USE`、`LISTING_SKU_MAPPING_IN_USE`。
 - 分类层级（决策 0005）：`CATEGORY_DEPTH_EXCEEDED`、`CATEGORY_LEVEL_INVALID`、`CATEGORY_NAME_DUPLICATED`、`CATEGORY_HAS_CHILDREN`。
+
+Sprint 8 新增（2026-09-12）：
+
+- 快捷建档：`LISTING_ONBOARD_NAME_REQUIRED`（422，无标题且未填名称）。
+- 模板下载：`IMPORT_TEMPLATE_INVALID`（422，未知模板类型）。
 
 ## 13. 修改本文档的条件
 

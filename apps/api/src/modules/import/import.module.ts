@@ -14,6 +14,7 @@ import { ImportJobEntity } from './entities/import-job.entity';
 import { ImportJobRepository } from './repositories/import-job.repository';
 import { ImportService } from './import.service';
 import { ImportExecutorService } from './services/import-executor.service';
+import { ImportTemplateService } from './services/import-template.service';
 import { ImportController } from './controllers/import.controller';
 import { SkuImportHandler } from './handlers/sku-import.handler';
 import {
@@ -45,6 +46,7 @@ import { InitialInventoryImportHandler } from './handlers/initial-inventory-impo
   providers: [
     ImportService,
     ImportExecutorService,
+    ImportTemplateService,
     ImportJobRepository,
     SkuImportHandler,
     BarcodeImportHandler,

@@ -36,6 +36,11 @@ export class ApiClient {
     return this.request<T>('GET', path);
   }
 
+  /** Session cookies for raw fetch() calls (binary downloads etc.). */
+  cookieHeader(): string {
+    return this.cookies;
+  }
+
   async post<T>(
     path: string,
     body?: unknown,

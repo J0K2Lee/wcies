@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { EntityManager } from 'typeorm';
 import { PageMeta } from '@wcies/shared';
 import { PlatformService } from '../../platform/platform.service';
 import { PlatformNotFoundError } from '../../platform/errors/platform-errors';
@@ -12,6 +13,7 @@ import {
   diffOf,
 } from '../../operation-log/operation-log.service';
 import { PlatformListingEntity } from '../entities/platform-listing.entity';
+import { PlatformListingSkuEntity } from '../entities/platform-listing-sku.entity';
 import {
   ListingAlreadyExistsError,
   ListingInUseError,
@@ -93,9 +95,24 @@ export class ListingService {
         ...refs,
         mappingCount: mappings.length,
         mappingStatus: deriveMappingStatus(mappings.map((row) => row.mapping)),
+        hasOrderException: false,
       }),
       skus: mappings.map((row) => this.mappingToResponse(row)),
     };
+  }
+
+  /**
+   * Sprint 8 T3: global mapped/unmapped counters for the unmapped workbench
+   * header ("how many are still unmanaged"). Same derived-state fragment as
+   * the list filter, so the number can never contradict the 待映射 view.
+   */
+  async getMappingStats(): Promise<{ mapped: number; unmapped: number }> {
+    return this.repository.countMappingStates();
+  }
+
+  /** Sprint 8 T2: unmapped variant rows for the Excel export (raw facts). */
+  async listUnmappedVariantsForExport(filters: { platformId?: string; storeId?: string }) {
+    return this.repository.listUnmappedVariantsForExport(filters);
   }
 
   /** All mappings of an internal SKU across stores/listings (task §91). */
@@ -200,6 +217,7 @@ export class ListingService {
         storeName: store.name,
         mappingCount: mappings.length,
         mappingStatus: deriveMappingStatus(mappings.map((row) => row.mapping)),
+        hasOrderException: false,
       }),
       skus: mappings.map((row) => this.mappingToResponse(row)),
     };
@@ -322,6 +340,38 @@ export class ListingService {
       skuCode: sku.skuCode,
       skuName: sku.nameZh,
     });
+  }
+
+  /**
+   * Cross-module tx participant (Sprint 8 T1): binds a synced UNMAPPED
+   * variant to an internal SKU on the CALLER's transaction. Same guards as
+   * mapUnmappedSku(); operation logging stays with the caller (after commit).
+   * Returns the updated mapping entity.
+   */
+  async mapUnmappedSkuInTx(
+    manager: EntityManager,
+    listingId: string,
+    mappingId: string,
+    skuId: string,
+  ): Promise<PlatformListingSkuEntity> {
+    const mapping = await this.findOwnedMappingOrThrow(listingId, mappingId);
+    if (mapping.skuId !== null) {
+      throw new ListingSkuMappingInvalidStateError(mappingId, 'already mapped');
+    }
+    // Read on the CALLER's manager: the SKU may have been created inside the
+    // same transaction (quick onboarding) and is invisible to other
+    // connections until commit.
+    const sku = await this.skuService.getEntityByIdInTx(manager, skuId);
+    if (sku === null) {
+      throw new SkuNotFoundError(skuId);
+    }
+    await manager
+      .getRepository(PlatformListingSkuEntity)
+      .update({ id: mappingId }, { skuId, mappingStatus: 'MAPPED' });
+    const updated = await manager
+      .getRepository(PlatformListingSkuEntity)
+      .findOneByOrFail({ id: mappingId });
+    return updated;
   }
 
   async updateMapping(
@@ -536,6 +586,29 @@ export class ListingService {
     if (duplicate !== null) {
       return { created: false };
     }
+    // Sprint 8 T2 closed loop: when the identifiers match a synced UNMAPPED
+    // variant on this listing, BIND that row (exactly what 人工映射 does).
+    // Inserting a twin would leave the synced row orphaned next to the new
+    // MAPPED row and pollute the variant list on every export-import cycle.
+    const synced = await this.repository.findUnmappedVariantByIdentifiers(input.listingId, input);
+    if (synced !== null) {
+      await this.repository.updateMapping(synced.id, {
+        skuId: input.skuId,
+        mappingStatus: 'MAPPED',
+      });
+      await this.operationLog.record({
+        entityType: MAPPING_ENTITY_TYPE,
+        entityId: synced.id,
+        entityCode: synced.offerId ?? synced.platformSkuId ?? synced.id,
+        action: 'MAP',
+        changes: {
+          mappingStatus: { from: 'UNMAPPED', to: 'MAPPED' },
+          source: { from: null, to: 'IMPORT' },
+        },
+        operator,
+      });
+      return { created: false };
+    }
     await this.addMappingInternal(input.listingId, input, operator);
     return { created: true };
   }
@@ -647,6 +720,7 @@ export class ListingService {
       updatedAt: row.listing.updatedAt,
       mappingCount: row.mappingCount,
       mappingStatus: row.mappingStatus,
+      hasOrderException: row.hasOrderException,
     };
   }
 

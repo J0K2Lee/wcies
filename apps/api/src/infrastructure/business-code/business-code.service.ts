@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { InternalDomainError } from '../../common/errors/common-errors';
 
 /**
@@ -101,9 +101,14 @@ export class BusinessCodeService {
    * Takes the next number for a scope. The stored next_value is the last
    * handed-out number; the conflict branch increments before returning.
    * (pg drivers may return bigint as string - always coerce.)
+   *
+   * An optional EntityManager lets multi-document flows (e.g. listing quick
+   * onboarding) consume the sequence INSIDE their transaction, so a rollback
+   * does not burn numbers and code_seq stays dense.
    */
-  async next(scopeKey: string): Promise<number> {
-    const result = await this.dataSource.query<Array<{ next_value: string | number }>>(
+  async next(scopeKey: string, manager?: EntityManager): Promise<number> {
+    const executor = manager ?? this.dataSource;
+    const result = await executor.query<Array<{ next_value: string | number }>>(
       `INSERT INTO business_code_sequences (scope_key, next_value, updated_at)
        VALUES ($1, 1, now())
        ON CONFLICT (scope_key)
@@ -151,8 +156,10 @@ export class BusinessCodeService {
   }
 
   /** Returns both the formatted PN code and the raw seq (products.code_seq). */
-  async nextProductCode(): Promise<{ productCode: string; codeSeq: number }> {
-    const codeSeq = await this.next(SCOPE_PRODUCT);
+  async nextProductCode(
+    manager?: EntityManager,
+  ): Promise<{ productCode: string; codeSeq: number }> {
+    const codeSeq = await this.next(SCOPE_PRODUCT, manager);
     return { productCode: formatProductCode(codeSeq), codeSeq };
   }
 
@@ -160,8 +167,12 @@ export class BusinessCodeService {
    * Derived SKU code (decision 0002): SKU{product seq 6}{in-product seq 3}.
    * The per-product scope starts at 1 for every product.
    */
-  async nextSkuCode(productId: string, productCodeSeq: number): Promise<string> {
-    const inProductSeq = await this.next(skuScope(productId));
+  async nextSkuCode(
+    productId: string,
+    productCodeSeq: number,
+    manager?: EntityManager,
+  ): Promise<string> {
+    const inProductSeq = await this.next(skuScope(productId), manager);
     return formatSkuCode(productCodeSeq, inProductSeq);
   }
 }

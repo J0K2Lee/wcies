@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { EntityManager } from 'typeorm';
 import { OperatorContext, OperationLogService } from '../../operation-log/operation-log.service';
 import { SkuBarcodeEntity } from '../entities/sku-barcode.entity';
 import { BarcodeAlreadyExistsError, BarcodeNotFoundError } from '../errors/barcode-errors';
@@ -76,6 +77,36 @@ export class BarcodeService {
     await this.assertSkuExists(skuId);
     const barcodeValue = await this.repository.nextInternalBarcode();
     return this.create(skuId, { barcode: barcodeValue, barcodeType: 'INTERNAL' }, operator);
+  }
+
+  /**
+   * Cross-module tx participant (Sprint 8 T1): same generation as
+   * generateInternal() but on the CALLER's transaction. The sequence itself
+   * (nextval) is non-transactional by design - a rollback may skip a WCSKU
+   * number, which is acceptable (internal barcodes have no density contract).
+   * Logging stays with the caller (after commit). Returns the raw entity.
+   */
+  async generateInternalInTx(manager: EntityManager, skuId: string): Promise<SkuBarcodeEntity> {
+    const result = await manager.query<Array<{ nextval: string }>>(
+      "SELECT nextval('seq_internal_barcode') AS nextval",
+    );
+    const value = Number(result[0]?.nextval ?? 1);
+    const barcodeValue = `WCSKU${String(value).padStart(8, '0')}`;
+    const barcodeRepository = manager.getRepository(SkuBarcodeEntity);
+    const existing = await barcodeRepository.findOneBy({ barcode: barcodeValue });
+    if (existing !== null) {
+      throw new BarcodeAlreadyExistsError(barcodeValue);
+    }
+    // First barcode of the SKU becomes primary - same rule as create().
+    const hasAnyBarcode = await barcodeRepository.findOneBy({ skuId });
+    const created = barcodeRepository.create({
+      skuId,
+      barcode: barcodeValue,
+      barcodeType: 'INTERNAL',
+      isPrimary: hasAnyBarcode === null,
+      status: 'ACTIVE',
+    });
+    return barcodeRepository.save(created);
   }
 
   async update(
