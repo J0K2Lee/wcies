@@ -10,6 +10,9 @@ export const QUEUE_NAMES = {
   listingSync: 'wcies.listing-sync',
   webhook: 'wcies.webhook',
   scheduler: 'wcies.scheduler',
+  media: 'wcies.media',
+  categoryTree: 'wcies.category-tree',
+  enrichment: 'wcies.enrichment',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];

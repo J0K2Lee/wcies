@@ -121,3 +121,41 @@ export class ListingSkuMappingInUseError extends DomainError {
     super('该记录已被引用（存在订单行），只能停用不能删除', { mappingId });
   }
 }
+
+/** Sprint 8.5 T3b: no cached platform tree for this platform yet. */
+export class CategoryTreeNotSyncedError extends DomainError {
+  readonly code = 'CATEGORY_TREE_NOT_SYNCED';
+  readonly httpStatus = 409;
+
+  constructor(platformId: string) {
+    super('该平台尚未同步类目树，请先在同步中心触发「类目树同步」', { platformId });
+  }
+}
+
+/**
+ * Sprint 8.5 T3b (AGENTS.md §89): the import refuses to run while any
+ * candidate collides with an existing category by exact name_ru match, or
+ * would duplicate a sibling name_zh - ambiguity is reported, never silently
+ * dropped or guessed.
+ */
+export class CategoryImportConflictsError extends DomainError {
+  readonly code = 'CATEGORY_IMPORT_CONFLICTS';
+  readonly httpStatus = 409;
+
+  constructor(conflicts: Array<{ name: string; reason: string }>) {
+    super(
+      `类目导入存在 ${conflicts.length} 处冲突，请先人工处理后再导入（详见 details，不做静默跳过）`,
+      { conflicts: conflicts.slice(0, 50) },
+    );
+  }
+}
+
+/** Sprint 8 T1: neither the request nor the listing title provides a name. */
+export class ListingOnboardNameRequiredError extends DomainError {
+  readonly code = 'LISTING_ONBOARD_NAME_REQUIRED';
+  readonly httpStatus = 422;
+
+  constructor() {
+    super('商品名/SKU 名不能为空（该 Listing 无标题，请手工填写名称）', {});
+  }
+}

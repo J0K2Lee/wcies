@@ -70,6 +70,50 @@ export class SyncController {
     );
   }
 
+  @Post('category-tree')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: '手动触发类目树同步（Sprint 8.5 T3a：ZH_HANS+RU 双语合并落缓存表）' })
+  @ApiOkEnvelope(SyncJobDto)
+  async triggerCategoryTreeSync(
+    @Body() request: TriggerSyncRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: SyncJobDto }> {
+    return ok(
+      this.jobService.toDto(
+        await this.dispatchService.dispatch({
+          storeId: request.storeId,
+          syncType: 'CATEGORY_TREE_SYNC',
+          trigger: 'MANUAL',
+        }),
+        { storeCode: '', storeName: '', platformCode: '' },
+        operator,
+      ),
+    );
+  }
+
+  @Post('product-enrichment')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: '手动触发商品属性补齐（Sprint 8.5 T5：v4 attributes 并入 raw_data）',
+  })
+  @ApiOkEnvelope(SyncJobDto)
+  async triggerProductEnrichmentSync(
+    @Body() request: TriggerSyncRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: SyncJobDto }> {
+    return ok(
+      this.jobService.toDto(
+        await this.dispatchService.dispatch({
+          storeId: request.storeId,
+          syncType: 'PRODUCT_ENRICHMENT_SYNC',
+          trigger: 'MANUAL',
+        }),
+        { storeCode: '', storeName: '', platformCode: '' },
+        operator,
+      ),
+    );
+  }
+
   @Get('jobs')
   @ApiOperation({ summary: '同步任务列表（Sync Dashboard）' })
   @ApiOkPagedEnvelope(SyncJobDto)

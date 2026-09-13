@@ -932,6 +932,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/listings/{listingId}/onboard-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 建档弹窗上下文（Sprint 8.5）：变体图片/类目键/类目建议/预填尺寸重量 + 缺省挂靠商品 */
+        get: operations["ListingController_onboardContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/listings/exports/unmapped": {
         parameters: {
             query?: never;
@@ -1086,6 +1103,40 @@ export interface paths {
         head?: never;
         /** Update a variant mapping */
         patch: operations["ListingController_updateMapping"];
+        trace?: never;
+    };
+    "/api/v1/listings/category-import/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 类目导入预演（dry-run，不落库；冲突清单 + 建树预览） */
+        post: operations["CategoryImportController_preview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/listings/category-import/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 确认导入（单事务：三级类目 + 复合键映射；有冲突时 409 拒绝） */
+        post: operations["CategoryImportController_execute"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/imports/templates/{type}": {
@@ -2249,6 +2300,40 @@ export interface paths {
         put?: never;
         /** 手动触发 Listing 同步（创建 SyncJob，立即返回） */
         post: operations["SyncController_triggerListingSync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sync/category-tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 手动触发类目树同步（Sprint 8.5 T3a：ZH_HANS+RU 双语合并落缓存表） */
+        post: operations["SyncController_triggerCategoryTreeSync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sync/product-enrichment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 手动触发商品属性补齐（Sprint 8.5 T5：v4 attributes 并入 raw_data） */
+        post: operations["SyncController_triggerProductEnrichmentSync"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3464,6 +3549,57 @@ export interface components {
             /** @example 1323 */
             unmapped: number;
         };
+        OnboardContextVariantDto: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            mappingStatus: "UNMAPPED" | "MAPPED";
+            platformSkuId: Record<string, never> | null;
+            offerId: Record<string, never> | null;
+            sellerSku: Record<string, never> | null;
+            /** @description 已映射时该变体绑定的内部 SKU 编码 */
+            skuCode: Record<string, never> | null;
+            /** @description 已映射时该变体绑定的内部商品 id（挂靠目标） */
+            productId: Record<string, never> | null;
+            /** @description 已映射时该变体绑定的内部商品编码 */
+            productCode: Record<string, never> | null;
+            /** @description raw_data.primary_image CDN 直链 */
+            primaryImage: Record<string, never> | null;
+            /** @description raw_data.color_image CDN 直链（转存优先用它） */
+            colorImage: Record<string, never> | null;
+            /** @description 平台类目 id（raw_data.description_category_id） */
+            descriptionCategoryId: Record<string, never> | null;
+            /** @description 平台类型 id（raw_data.type_id） */
+            descriptionTypeId: Record<string, never> | null;
+            /**
+             * Format: uuid
+             * @description 复合键命中的内部三级分类（未命中为 null，人工选择）
+             */
+            suggestedCategoryId: Record<string, never> | null;
+            /** @description v4 enrichment 预填重量（g） */
+            weightG: Record<string, never> | null;
+            /** @description v4 enrichment 预填长（mm） */
+            lengthMm: Record<string, never> | null;
+            /** @description v4 enrichment 预填宽（mm） */
+            widthMm: Record<string, never> | null;
+            /** @description v4 enrichment 预填高（mm） */
+            heightMm: Record<string, never> | null;
+        };
+        ListingOnboardContextDto: {
+            /** Format: uuid */
+            listingId: string;
+            title: Record<string, never> | null;
+            /**
+             * Format: uuid
+             * @description 缺省挂靠目标：该 Listing 首个已建档变体的商品；无则为 null（新建）
+             */
+            defaultAttachProductId: Record<string, never> | null;
+            /** @example PN000012 */
+            defaultAttachProductCode: Record<string, never> | null;
+            /** @example VK87 MAX V2 机械键盘 */
+            defaultAttachProductName: Record<string, never> | null;
+            variants: components["schemas"]["OnboardContextVariantDto"][];
+        };
         UnmappedListingExportResponseDto: {
             /** @example exports/unmapped-listings/1760000000000-unmapped-listings.xlsx */
             objectKey: string;
@@ -3577,6 +3713,11 @@ export interface components {
              * @example WCSKU00000042
              */
             barcode: Record<string, never> | null;
+            /**
+             * @description Sprint 8.5 T2：本次是否新建了商品（false = 挂靠已有商品）
+             * @example false
+             */
+            productCreated: boolean;
         };
         ListingOnboardRequestDto: {
             /** @description 商品名；缺省取 Listing 标题 */
@@ -3588,6 +3729,36 @@ export interface components {
              * @default true
              */
             generateBarcode: boolean;
+            /**
+             * Format: uuid
+             * @description Sprint 8.5 T2：挂靠到该已有商品（多变体同挂一个 Product）
+             */
+            existingProductId?: string;
+            /** @description Sprint 8.5 T2：显式另建新商品（覆盖「缺省自动挂靠已有商品」） */
+            createNewProduct?: boolean;
+            /**
+             * Format: uuid
+             * @description Sprint 8.5 T4：商品品牌（仅新建商品时生效）
+             */
+            brandId?: string;
+            /**
+             * Format: uuid
+             * @description Sprint 8.5 T3c：商品分类（三级，仅新建商品时生效）
+             */
+            categoryId?: string;
+            /**
+             * @description Sprint 8.5 T3c：记住「平台类目→内部类目」映射（onboard 同一事务写入，同类目后续自动命中）
+             * @default true
+             */
+            rememberCategoryMapping: boolean;
+            /** @description Sprint 8.5 T5：重量（g），可编辑预填 */
+            weightG?: number;
+            /** @description Sprint 8.5 T5：长（mm） */
+            lengthMm?: number;
+            /** @description Sprint 8.5 T5：宽（mm） */
+            widthMm?: number;
+            /** @description Sprint 8.5 T5：高（mm） */
+            heightMm?: number;
         };
         UpdateListingSkuRequestDto: {
             platformSkuId?: Record<string, never> | null;
@@ -3595,6 +3766,53 @@ export interface components {
             offerId?: Record<string, never> | null;
             /** @enum {string} */
             status?: "ACTIVE" | "INACTIVE";
+        };
+        CategoryImportStatsDto: {
+            /** @example 7933 */
+            totalNodes: number;
+            /** @example 0 */
+            skippedDisabled: number;
+            /** @example 0 */
+            skippedOrphaned: number;
+            /** @example 22 */
+            duplicateCompositeKeys: number;
+            toCreate: Record<string, never>;
+        };
+        CategoryImportConflictDto: {
+            /** @example 积木 */
+            name: string;
+            /** @example 3 */
+            level: number;
+            /** @example name_ru「Конструктор」与现有分类「积木」精确重名 */
+            reason: string;
+        };
+        CategoryImportTopLevelPreviewDto: {
+            /** @example 儿童用品 */
+            nameZh: string;
+            /** @example Детские товары */
+            nameRu: Record<string, never> | null;
+            /** @example 21 */
+            level2Count: number;
+            /** @example 289 */
+            level3Count: number;
+        };
+        CategoryImportPreviewDto: {
+            /** Format: uuid */
+            platformId: string;
+            stats: components["schemas"]["CategoryImportStatsDto"];
+            conflicts: components["schemas"]["CategoryImportConflictDto"][];
+            previewTopLevels: components["schemas"]["CategoryImportTopLevelPreviewDto"][];
+        };
+        CategoryImportRequestDto: {
+            /** Format: uuid */
+            platformId: string;
+        };
+        CategoryImportResultDto: {
+            /** Format: uuid */
+            platformId: string;
+            created: Record<string, never>;
+            /** @example 7365 */
+            mappingCount: number;
         };
         ImportJobResponseDto: {
             /** Format: uuid */
@@ -4969,7 +5187,7 @@ export interface components {
             /** @example OZON */
             platformCode: string;
             /** @enum {string} */
-            syncType: "LISTING_SYNC" | "ORDER_SYNC";
+            syncType: "LISTING_SYNC" | "ORDER_SYNC" | "CATEGORY_TREE_SYNC" | "PRODUCT_ENRICHMENT_SYNC";
             /** @enum {string} */
             status: "PENDING" | "RUNNING" | "SUCCESS" | "PARTIAL" | "FAILED";
             /** @enum {string} */
@@ -7232,6 +7450,31 @@ export interface operations {
             };
         };
     };
+    ListingController_onboardContext: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                listingId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ListingOnboardContextDto"];
+                    };
+                };
+            };
+        };
+    };
     ListingController_exportUnmapped: {
         parameters: {
             query?: never;
@@ -7553,6 +7796,60 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["ListingSkuResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    CategoryImportController_preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CategoryImportRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["CategoryImportPreviewDto"];
+                    };
+                };
+            };
+        };
+    };
+    CategoryImportController_execute: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CategoryImportRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["CategoryImportResultDto"];
                     };
                 };
             };
@@ -9762,11 +10059,65 @@ export interface operations {
             };
         };
     };
+    SyncController_triggerCategoryTreeSync: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TriggerSyncRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SyncJobDto"];
+                    };
+                };
+            };
+        };
+    };
+    SyncController_triggerProductEnrichmentSync: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TriggerSyncRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SyncJobDto"];
+                    };
+                };
+            };
+        };
+    };
     SyncController_list: {
         parameters: {
             query?: {
                 storeId?: string;
-                syncType?: "LISTING_SYNC" | "ORDER_SYNC";
+                syncType?: "LISTING_SYNC" | "ORDER_SYNC" | "CATEGORY_TREE_SYNC" | "PRODUCT_ENRICHMENT_SYNC";
                 status?: "PENDING" | "RUNNING" | "SUCCESS" | "PARTIAL" | "FAILED";
             };
             header?: never;

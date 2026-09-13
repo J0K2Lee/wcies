@@ -4,12 +4,14 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  IsNumber,
   IsObject,
   IsOptional,
   IsString,
   IsUUID,
   Length,
   MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -157,6 +159,70 @@ export class ListingOnboardRequestDto {
   @IsOptional()
   @IsBoolean()
   generateBarcode?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Sprint 8.5 T2：挂靠到该已有商品（多变体同挂一个 Product）',
+    format: 'uuid',
+  })
+  @IsOptional()
+  @IsUUID()
+  existingProductId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Sprint 8.5 T2：显式另建新商品（覆盖「缺省自动挂靠已有商品」）',
+  })
+  @IsOptional()
+  @IsBoolean()
+  createNewProduct?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Sprint 8.5 T4：商品品牌（仅新建商品时生效）',
+    format: 'uuid',
+  })
+  @IsOptional()
+  @IsUUID()
+  brandId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Sprint 8.5 T3c：商品分类（三级，仅新建商品时生效）',
+    format: 'uuid',
+  })
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string;
+
+  @ApiPropertyOptional({
+    default: true,
+    description:
+      'Sprint 8.5 T3c：记住「平台类目→内部类目」映射（onboard 同一事务写入，同类目后续自动命中）',
+  })
+  @IsOptional()
+  @IsBoolean()
+  rememberCategoryMapping?: boolean;
+
+  @ApiPropertyOptional({ description: 'Sprint 8.5 T5：重量（g），可编辑预填' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  weightG?: number;
+
+  @ApiPropertyOptional({ description: 'Sprint 8.5 T5：长（mm）' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  lengthMm?: number;
+
+  @ApiPropertyOptional({ description: 'Sprint 8.5 T5：宽（mm）' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  widthMm?: number;
+
+  @ApiPropertyOptional({ description: 'Sprint 8.5 T5：高（mm）' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  heightMm?: number;
 }
 
 export class ListingOnboardProductDto {
@@ -194,11 +260,101 @@ export class ListingOnboardResponseDto {
   @ApiProperty({ type: ListingOnboardProductDto })
   product!: ListingOnboardProductDto;
 
-  @ApiProperty({ type: ListingOnboardSkuDto })
+  @ApiProperty({
+    type: ListingOnboardSkuDto,
+  })
   sku!: ListingOnboardSkuDto;
 
   @ApiProperty({ nullable: true, example: 'WCSKU00000042', description: '未勾选生成时为 null' })
   barcode!: string | null;
+
+  @ApiProperty({
+    example: false,
+    description: 'Sprint 8.5 T2：本次是否新建了商品（false = 挂靠已有商品）',
+  })
+  productCreated!: boolean;
+}
+
+/** Sprint 8.5: one feed powering the enhanced onboarding dialog. */
+export class OnboardContextVariantDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ enum: ['UNMAPPED', 'MAPPED'] })
+  mappingStatus!: string;
+
+  @ApiProperty({ nullable: true })
+  platformSkuId!: string | null;
+
+  @ApiProperty({ nullable: true })
+  offerId!: string | null;
+
+  @ApiProperty({ nullable: true })
+  sellerSku!: string | null;
+
+  @ApiProperty({ nullable: true, description: '已映射时该变体绑定的内部 SKU 编码' })
+  skuCode!: string | null;
+
+  @ApiProperty({ nullable: true, description: '已映射时该变体绑定的内部商品 id（挂靠目标）' })
+  productId!: string | null;
+
+  @ApiProperty({ nullable: true, description: '已映射时该变体绑定的内部商品编码' })
+  productCode!: string | null;
+
+  @ApiProperty({ nullable: true, description: 'raw_data.primary_image CDN 直链' })
+  primaryImage!: string | null;
+
+  @ApiProperty({ nullable: true, description: 'raw_data.color_image CDN 直链（转存优先用它）' })
+  colorImage!: string | null;
+
+  @ApiProperty({ nullable: true, description: '平台类目 id（raw_data.description_category_id）' })
+  descriptionCategoryId!: string | null;
+
+  @ApiProperty({ nullable: true, description: '平台类型 id（raw_data.type_id）' })
+  descriptionTypeId!: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    format: 'uuid',
+    description: '复合键命中的内部三级分类（未命中为 null，人工选择）',
+  })
+  suggestedCategoryId!: string | null;
+
+  @ApiProperty({ nullable: true, description: 'v4 enrichment 预填重量（g）' })
+  weightG!: number | null;
+
+  @ApiProperty({ nullable: true, description: 'v4 enrichment 预填长（mm）' })
+  lengthMm!: number | null;
+
+  @ApiProperty({ nullable: true, description: 'v4 enrichment 预填宽（mm）' })
+  widthMm!: number | null;
+
+  @ApiProperty({ nullable: true, description: 'v4 enrichment 预填高（mm）' })
+  heightMm!: number | null;
+}
+
+export class ListingOnboardContextDto {
+  @ApiProperty({ format: 'uuid' })
+  listingId!: string;
+
+  @ApiProperty({ nullable: true })
+  title!: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    format: 'uuid',
+    description: '缺省挂靠目标：该 Listing 首个已建档变体的商品；无则为 null（新建）',
+  })
+  defaultAttachProductId!: string | null;
+
+  @ApiProperty({ nullable: true, example: 'PN000012' })
+  defaultAttachProductCode!: string | null;
+
+  @ApiProperty({ nullable: true, example: 'VK87 MAX V2 机械键盘' })
+  defaultAttachProductName!: string | null;
+
+  @ApiProperty({ type: [OnboardContextVariantDto] })
+  variants!: OnboardContextVariantDto[];
 }
 
 /** Sprint 8 T3: global mapped/unmapped counters for the workbench header. */
@@ -438,4 +594,95 @@ export class ResolveSkuResponseDto {
 
   @ApiProperty({ example: '152987456', nullable: true })
   matchedPlatformSkuId!: string | null;
+}
+
+/** Sprint 8.5 T3b: dry-run import report (no writes). */
+export class CategoryImportStatsDto {
+  @ApiProperty({ example: 7933 })
+  totalNodes!: number;
+
+  @ApiProperty({ example: 0 })
+  skippedDisabled!: number;
+
+  @ApiProperty({ example: 0 })
+  skippedOrphaned!: number;
+
+  @ApiProperty({ example: 22 })
+  duplicateCompositeKeys!: number;
+
+  @ApiProperty({ type: Object })
+  toCreate!: { level1: number; level2: number; level3: number };
+}
+
+export class CategoryImportConflictDto {
+  @ApiProperty({ example: '积木' })
+  name!: string;
+
+  @ApiProperty({ example: 3 })
+  level!: number;
+
+  @ApiProperty({ example: 'name_ru「Конструктор」与现有分类「积木」精确重名' })
+  reason!: string;
+}
+
+export class CategoryImportTopLevelPreviewDto {
+  @ApiProperty({ example: '儿童用品' })
+  nameZh!: string;
+
+  @ApiProperty({ nullable: true, example: 'Детские товары' })
+  nameRu!: string | null;
+
+  @ApiProperty({ example: 21 })
+  level2Count!: number;
+
+  @ApiProperty({ example: 289 })
+  level3Count!: number;
+}
+
+export class CategoryImportRenameDto {
+  @ApiProperty({ example: '其他' })
+  name!: string;
+
+  @ApiProperty({ example: '其他 (91543)' })
+  renamedTo!: string;
+}
+
+export class CategoryImportPreviewDto {
+  @ApiProperty({ format: 'uuid' })
+  platformId!: string;
+
+  @ApiProperty({ type: CategoryImportStatsDto })
+  stats!: CategoryImportStatsDto;
+
+  @ApiProperty({ type: [CategoryImportConflictDto] })
+  conflicts!: CategoryImportConflictDto[];
+
+  @ApiProperty({
+    type: [CategoryImportRenameDto],
+    description: '同父同名候选的确定性去重命名（§89 不丢弃）',
+  })
+  disambiguatedNames!: CategoryImportRenameDto[];
+
+  @ApiProperty({ example: 57 })
+  disambiguatedCount!: number;
+
+  @ApiProperty({ type: [CategoryImportTopLevelPreviewDto] })
+  previewTopLevels!: CategoryImportTopLevelPreviewDto[];
+}
+
+export class CategoryImportResultDto {
+  @ApiProperty({ format: 'uuid' })
+  platformId!: string;
+
+  @ApiProperty({ type: Object })
+  created!: { level1: number; level2: number; level3: number };
+
+  @ApiProperty({ example: 7365 })
+  mappingCount!: number;
+}
+
+export class CategoryImportRequestDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  platformId!: string;
 }

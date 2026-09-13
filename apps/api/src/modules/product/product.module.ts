@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ObjectStorageModule } from '../../infrastructure/storage/object-storage.module';
 import { CatalogModule } from '../catalog/catalog.module';
@@ -16,7 +17,10 @@ import { ProductService } from './services/product.service';
 import { SkuService } from './services/sku.service';
 import { BarcodeService } from './services/barcode.service';
 import { SkuImageService } from './services/sku-image.service';
+import { SkuImageImportService } from './services/sku-image-import.service';
 import { SkuBundleService } from './services/sku-bundle.service';
+import { SkuImageImportProcessor } from './processors/sku-image-import.processor';
+import { QUEUE_NAMES } from '../../infrastructure/queue/queue.constants';
 import { ProductController } from './controllers/product.controller';
 import { SkuController } from './controllers/sku.controller';
 import { BarcodeController } from './controllers/barcode.controller';
@@ -31,6 +35,7 @@ import { BarcodeController } from './controllers/barcode.controller';
       SkuImageEntity,
       SkuBundleComponentEntity,
     ]),
+    BullModule.registerQueue({ name: QUEUE_NAMES.media }),
     CatalogModule,
     OperationLogModule,
     ObjectStorageModule,
@@ -41,12 +46,21 @@ import { BarcodeController } from './controllers/barcode.controller';
     SkuService,
     BarcodeService,
     SkuImageService,
+    SkuImageImportService,
+    SkuImageImportProcessor,
     SkuBundleService,
     ProductRepository,
     SkuRepository,
     SkuBarcodeRepository,
     SkuImageRepository,
   ],
-  exports: [ProductService, SkuService, BarcodeService, SkuImageService, SkuBundleService],
+  exports: [
+    ProductService,
+    SkuService,
+    BarcodeService,
+    SkuImageService,
+    SkuImageImportService,
+    SkuBundleService,
+  ],
 })
 export class ProductModule {}

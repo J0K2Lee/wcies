@@ -26,6 +26,7 @@ import {
   CreateListingRequestDto,
   ListingDetailDto,
   ListingMappingStatsDto,
+  ListingOnboardContextDto,
   ListingOnboardRequestDto,
   ListingOnboardResponseDto,
   MapListingSkuRequestDto,
@@ -111,6 +112,17 @@ export class ListingController {
   @ApiOkEnvelope(ListingMappingStatsDto)
   async mappingStats(): Promise<{ success: true; data: ListingMappingStatsDto }> {
     return ok(await this.listingService.getMappingStats());
+  }
+
+  @Get(':listingId/onboard-context')
+  @ApiOperation({
+    summary: '建档弹窗上下文（Sprint 8.5）：变体图片/类目键/类目建议/预填尺寸重量 + 缺省挂靠商品',
+  })
+  @ApiOkEnvelope(ListingOnboardContextDto)
+  async onboardContext(
+    @Param('listingId') listingId: string,
+  ): Promise<{ success: true; data: ListingOnboardContextDto }> {
+    return ok(await this.onboardingService.getOnboardContext(listingId));
   }
 
   @Post('exports/unmapped')

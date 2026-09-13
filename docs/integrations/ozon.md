@@ -15,8 +15,11 @@
 |---|---|---|
 | Endpoint / Request / Response 字段 | 官方 OpenAPI 规范 json 逐字段核对 | 2026-09-09 |
 | Webhook 事件类型与消息结构 | 官方规范（/v1/notification/* 枚举）+ 开源客户端结构（diphantxm/ozon-api-client）交叉 | 2026-09-09 |
+| Webhook 订阅类型完整清单（14 种）、各事件 payload、push 模型状态词表、`{version,name,time}` 应答格式 | 官方规范 v2.1 内嵌文档段逐项核对（`notification.v1.*` 枚举 + 描述文本）；**真实投递未验证**（从未配置真实 webhook） | 2026-09-13 |
 | Webhook 无签名机制 | 官方文档与所有已知开源实现均无验签 API | 2026-09-09 |
 | 真实凭证实测 | 真实 Smoke Test（只读：凭证验证 + Listing + 订单拉取 + 手动同步 + 幂等复测），单店 | 2026-09-09 |
+| `/v1/description-category/tree`（ZH_HANS + RU） | 真实 API 冒烟（只读），单店（Sprint 8.5 T0） | 2026-09-14 |
+| `/v4/product/info/attributes` | 真实 API 冒烟（只读），单店（Sprint 8.5 T0） | 2026-09-14 |
 
 ## 1. Credential 结构
 
@@ -134,7 +137,11 @@ Request：`{posting_number: string, with:{}}`；Response：`{result: <posting>}`
 
 ## 6. Webhook 能力（官方确认支持，已实现）
 
-- 配置入口：OZON 卖家后台（Settings → Push notifications）或 `POST /v1/notification/set {types:[...], url}`。
+- 配置入口：OZON 卖家后台（Settings → Push notifications）或
+  `POST /v1/notification/set {types:[...], url}`。
+  配套管理端点（规范 v2.1 beta 组）：`/v1/notification/list`、`/update`、`/enable`、
+  `/delete`、`/check`（对指定 URL 发测试通知并校验连通）、`/v1/notification/push-type/list`
+  （列出可用类型）。
 - WCIES 接收地址（配置到 OZON 后台的 URL）：
 
   ```text
@@ -143,15 +150,66 @@ Request：`{posting_number: string, with:{}}`；Response：`{result: <posting>}`
 
   （每店铺一个 URL 段；本机开发需公网可达，如内网穿透。）
 
-- 事件类型（官方枚举）：`TYPE_NEW_POSTING`、`TYPE_POSTING_CANCELLED`、`TYPE_STATE_CHANGED`、`TYPE_STOCKS_CHANGED`、`TYPE_CREATE/UPDATE/CREATE_OR_UPDATE_ITEM`、聊天类、`TYPE_PING`。
-- **消息体**：`{message_type, ...事件字段}`；NEW_POSTING 只带 `posting_number + products[{sku,quantity}] + seller_id + warehouse_id + in_process_at` —— **不含订单完整事实**。
+### 6.1 订阅类型完整清单（规范 v2.1 `notification.v1.*.Type.Enum`，2026-09-13 逐项核对）
+
+订单/发货类（**仅 FBS / rFBS 发货单**会推送）：
+
+| 类型 | 含义 | 消息体关键载荷 |
+|---|---|---|
+| `TYPE_NEW_POSTING` | 新发货单 | `posting_number`、`products[{sku,offer_id,quantity}]`、`in_process_at`、`warehouse_id`、`shipment_date`、`tracking_number`、`delivery_date_begin/end`、`seller_id` |
+| `TYPE_POSTING_SHIPPED` | 发货单进入配送 | 枚举中存在；规范文档段**未给 payload 示例**（仅枚举+描述） |
+| `TYPE_POSTING_CANCELLED` | **发货单取消** | `posting_number`、`products[{sku,quantity}]`、`old_state`、`new_state`（如 `posting_canceled`）、`changed_state_date`、**`reason{id,message}`**、`warehouse_id`、`seller_id` |
+| `TYPE_STATE_CHANGED` | 发货单状态变化 | `posting_number`、`new_state`、`changed_state_date`、`warehouse_id`、`seller_id` |
+| `TYPE_CUTOFF_DATE_CHANGED` | **发货截止时间变化**（对应 `shipment_date`） | `posting_number`、`new_cutoff_date`、`old_cutoff_date`、`warehouse_id`、`seller_id`；**官方标注测试期**，`new_cutoff_date` 可能为空，建议以 `/v3/posting/fbs/get` 回读为准 |
+| `TYPE_DELIVERY_DATE_CHANGED` | 送达日期变化 | `posting_number`、`new/old_delivery_date_begin/end`、`warehouse_id`、`seller_id` |
+
+商品/库存类：
+
+| 类型 | 含义 | 消息体关键载荷 |
+|---|---|---|
+| `TYPE_CREATE_ITEM` / `TYPE_UPDATE_ITEM` / `TYPE_CREATE_OR_UPDATE_ITEM` | 商品创建/更新/两者 | （见规范文档段） |
+| `TYPE_STOCKS_CHANGED` | 卖家仓库存量变化 | `items[{product_id, sku, updated_at, stocks[{warehouse_id, present, reserved}]}]`、`seller_id`——渠道库存推送（Allocator）阶段的关键输入 |
+
+聊天类：`TYPE_NEW_MESSAGE` / `TYPE_UPDATE_MESSAGE` / `TYPE_MESSAGE_READ` / `TYPE_CHAT_CLOSED`。
+
+**`TYPE_PING` 不在订阅枚举中**：它是平台在初次接入及此后**周期性**发送的连通性检查
+（`{message_type:'TYPE_PING', time}`），无需订阅、不可关闭。
+
+### 6.2 两套状态词表（STATE_CHANGED / CANCELLED 的 `new_state` 用 push 模型，非 Seller API 词表）
+
+规范给出映射表（节选）：
+
+| Seller API `status`（我们 `platform_status` 存的词表） | Push 模型 `new_state` |
+|---|---|
+| `awaiting_approve` / `awaiting_packaging` | `posting_created` |
+| `awaiting_deliver` | `posting_transferring_to_delivery` / `posting_in_carriage` / `posting_not_in_carriage` |
+| `delivering` | `posting_on_way_to_city` / `posting_transferred_to_courier_service` / `posting_in_courier_service` / `posting_on_way_to_pickup_point` / `posting_in_pickup_point` |
+| `delivered` | `posting_delivered` / `posting_received` |
+| `cancelled` | `posting_canceled` |
+
+→ **不得**把 push 词表字符串直接写入 `platform_status`；WCIES 的回读式处理
+（用 `/v3/posting/fbs/get` / `fetchOrdersByPlatformIds` 取 Seller API 词表原文）天然规避此坑。
+
+### 6.3 安全与处理约定（不变）
+
+- **消息体**：`{message_type, ...事件字段}`；webhook **不含订单完整事实**（NEW_POSTING
+  官方还警告：延迟支付订单 `in_process_at` 可能为空）。
 - **无签名机制**（官方无验签 API）。WCIES 的身份保障三层：
   1. URL 内 storeCode 与店铺一一对应；
   2. `payload.seller_id` 必须等于该店铺凭证 `clientId`，不匹配 → raw event `REJECTED`（仍回 200 防重试风暴）；
   3. Webhook 仅是提示：处理器用已认证 API 回读 posting 原文后才入库。
 - 幂等：无事件 ID → 按 `(store, sha256(canonical payload))` 去重（`external_raw_events` 唯一索引）。
-- 期望响应：`{"result": true}`（非 WCIES envelope；非 2xx OZON 会重试）。
 - 处理流：校验形状 → 存 raw event（PENDING）→ 入 `wcies.webhook` 队列 → 立即 200。HTTP 请求内**不**建单、**不**锁库存、**不**调用平台 API。
+
+### 6.4 ⚠️ 响应格式存在文档冲突（未定论，待真实订阅时验证）
+
+- 现实现与本文旧版：`{"result": true}`（来自 docs.ozon.ru 传统 Webhook API 章节）。
+- 规范 v2.1 push-notification 文档段：成功应答 **`{version, name, time}`**，错误为
+  4xx/5xx `{error:{code,message,details}}`；且 `/v1/notification/check` 的错误枚举含
+  `WRONG_RESULT_FIELD`、`WRONG_RESULT_TIME_FIELD`——**暗示新体系会校验应答体形状**。
+- 两处冲突未在真实环境验证（我们从未配置过真实 webhook）。HTTP 200 + 任意 body 大概率
+  可被旧体系接受；但若经新版 beta 方法配置并用 `/check` 验证，`{result:true}` 可能被判
+  `WRONG_RESULT_FIELD`。**接入前必须实测一次**，以实测结果为准修订本节与控制器。
 
 ## 7. 平台 ID 语义（关键）
 
@@ -164,7 +222,46 @@ Request：`{posting_number: string, with:{}}`；Response：`{result: <posting>}`
 | `posting_number` | 发货单号（履约单位，稳定） | `orders.platform_order_id` 业务唯一键 |
 | `seller_id` | 卖家账号 ID = Client-Id | Webhook 身份校验 |
 
-## 8. 已知限制 / 坑
+## 8. 类目树与商品属性 API（Sprint 8.5 冒烟已验证，尚未接入同步）
+
+### POST /v1/description-category/tree（2026-09-14 真实冒烟）
+
+Request：`{language: "ZH_HANS" | "RU" | "EN" | "TR" | "DEFAULT"}`；Response：`{result: TreeNode[]}`。
+
+- **`ZH_HANS` 官方简体中文直出可用**（人工判读质量正常，例：`儿童用品 > 积木玩具套装 > 积木`）。
+- 真实规模：根 26 / 类目共 7933 / type 节点 7365；`disabled` 全树为 0（当前没有禁用节点）。
+- **树恰好 3 层**：L1 类目（26）→ L2 类目（542）→ L3 即 type 条目（7365）；
+  type 只出现在第 3 层，无第 4 层，故规划中的「层级塌缩」实际为 1:1 直映（L1→一级、L2→二级、type→三级）。
+- **type 节点不携带 `description_category_id`**（仅 `type_id`/`type_name`）——复合键
+  `(category_id, type_id)` 的 category 部分必须取 type 的**父节点**（L2）的 id。
+- 19 个 type_id 出现在多个父类目下（如 971445087 挂在 3 个类目）——复合键精确匹配是必需的，
+  仅按 type_id 会歧义。
+- ZH_HANS 与 RU 两次拉取的 type 键集完全一致（双语合并可行）。
+- 坑：无分页（整树一次返回，~8k 节点）。
+
+### POST /v4/product/info/attributes（2026-09-14 真实冒烟）
+
+Request：`{filter: {product_id[] | offer_id[] | sku[]}, limit ≤ 1000}`（**filter 必填**，缺省 400）。
+
+- ⚠ **真实响应为 `{"result": [<item>...]}`——`result` 直接是数组**，与规范 schema 的
+  `result.items` 信封不一致（与 `/v3/product/info/list` 同类的「规范 ≠ 真实」坑，实现按真实结构解析）。
+- Item 关键字段（实测）：`id`（=product_id）、`offer_id`、`name`、`height/depth/width` +
+  `dimension_unit`（实测 `"mm"`）、`weight` + `weight_unit`（实测 `"g"`）、
+  `description_category_id`、`type_id`、`primary_image`、`images[]`、`barcode`、`attributes[]`。
+- 审核未通过（declined）/ 新建（new）商品同样返回属性数据（4/4 实测）。
+- filter 三种 id 形式均可用；字符串/数字 product_id 均被接受。
+- 已知限制：未观察到分页游标（result 即全量），按 ≤1000 分批请求即可。
+
+### 存量数据直查（2026-09-14，SQL，零 API）
+
+`platform_listing_skus.raw_data` 是 v3 info 的**扁平对象**（键在顶层，非 `product_info` 子键）：
+`primary_image` / `description_category_id` / `type_id` / `color_image` 覆盖 1324/1324（100%），
+`images` 数组非空 1317/1324（99.5%）。现有数据中唯一 `(category_id, type_id)` 复合键 22 个、
+涉及 14 个类目。
+⚠ **图片字段为单元素 JSON 数组**：真实数据中 `primary_image`/`color_image` 形如
+`["https://…"]`（规范声明为 string，又一处规范≠真实；T8 走查发现，读取需兼容两种形态）。
+
+## 9. 已知限制 / 坑
 
 1. `ON CONFLICT` 部分唯一索引 + TypeORM `TableIndex({unique,where})` 会**静默丢 UNIQUE**（本 Sprint 踩过，已改 raw SQL；见 20260911_002/004）。
 2. pg 驱动 `UPDATE ... RETURNING` 经 TypeORM `query()` 返回 `[rows, rowCount]` 二元组（与 INSERT 不同），判断行数必须归一化。
@@ -173,7 +270,7 @@ Request：`{posting_number: string, with:{}}`；Response：`{result: <posting>}`
 5. OZON 文档站点 antibot 较强，抓取验证需搜索缓存/开源实现交叉核对，禁止凭记忆写字段。
 6. FBO/FBP 订单、价格/库存推送、平台发货写操作：本 Sprint 明确禁止（Read-first）。
 
-## 9. 环境变量
+## 10. 环境变量
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
@@ -184,7 +281,7 @@ Request：`{posting_number: string, with:{}}`；Response：`{result: <posting>}`
 | `ORDER_SYNC_INTERVAL_SECONDS` | 0（关） | 订单轮询频率（≥60s；需店铺 settings.sync.orderSyncEnabled） |
 | `LISTING_SYNC_INTERVAL_SECONDS` | 0（关） | Listing 同步频率（≥300s；需店铺 opt-in） |
 
-## 10. Real Smoke Test
+## 11. Real Smoke Test
 
 **已执行（2026-09-09，单店 OZON-SMOKE1，只读）** —— 范围：Credential Validation + Fetch Listings + Fetch Orders + Manual Listing/Order Sync + 同窗口幂等复测。未执行任何平台写操作、未开启轮询、未配置 Webhook。
 

@@ -346,6 +346,8 @@ export class ListingService {
    * Cross-module tx participant (Sprint 8 T1): binds a synced UNMAPPED
    * variant to an internal SKU on the CALLER's transaction. Same guards as
    * mapUnmappedSku(); operation logging stays with the caller (after commit).
+   * The mapping is re-read through the CALLER's manager so the guard sees
+   * the row the caller locked (Sprint 8.5 T1), not a stale snapshot.
    * Returns the updated mapping entity.
    */
   async mapUnmappedSkuInTx(
@@ -354,7 +356,12 @@ export class ListingService {
     mappingId: string,
     skuId: string,
   ): Promise<PlatformListingSkuEntity> {
-    const mapping = await this.findOwnedMappingOrThrow(listingId, mappingId);
+    const mapping = await manager
+      .getRepository(PlatformListingSkuEntity)
+      .findOneBy({ id: mappingId });
+    if (mapping === null || mapping.listingId !== listingId) {
+      throw new ListingSkuMappingNotFoundError(mappingId);
+    }
     if (mapping.skuId !== null) {
       throw new ListingSkuMappingInvalidStateError(mappingId, 'already mapped');
     }
@@ -372,6 +379,27 @@ export class ListingService {
       .getRepository(PlatformListingSkuEntity)
       .findOneByOrFail({ id: mappingId });
     return updated;
+  }
+
+  /**
+   * Sprint 8.5 T5: variant feeds for the enrichment sync (store-scoped,
+   * idempotent - rows already enriched are not re-fetched).
+   */
+  async listEnrichmentTargets(storeId: string, limit: number): Promise<string[]> {
+    return this.repository.listEnrichmentTargets(storeId, limit);
+  }
+
+  /**
+   * Sprint 8.5 T5: merges a v4 attribute payload into the store's variant
+   * rows for one platform product (dedicated raw_data key, never overwrites
+   * existing keys). Returns updated row count.
+   */
+  async applyProductAttributes(
+    storeId: string,
+    platformProductId: string,
+    attributes: Record<string, unknown>,
+  ): Promise<number> {
+    return this.repository.mergeProductAttributes(storeId, platformProductId, attributes);
   }
 
   async updateMapping(

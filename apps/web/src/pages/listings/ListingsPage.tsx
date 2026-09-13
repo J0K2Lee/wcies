@@ -4,12 +4,14 @@ import {
   Alert,
   Button,
   Checkbox,
+  Cascader,
   Drawer,
   Form,
   Input,
   InputNumber,
   Modal,
   Popconfirm,
+  Radio,
   Select,
   Space,
 } from 'antd';
@@ -91,6 +93,68 @@ interface OnboardResult {
   product: { id: string; productCode: string; nameZh: string };
   sku: { id: string; skuCode: string; nameZh: string };
   barcode: string | null;
+  productCreated: boolean;
+}
+
+/** Sprint 8.5: one feed powering the enhanced onboarding dialog. */
+interface OnboardContextVariant {
+  id: string;
+  mappingStatus: string;
+  platformSkuId: string | null;
+  offerId: string | null;
+  sellerSku: string | null;
+  skuCode: string | null;
+  productId: string | null;
+  productCode: string | null;
+  primaryImage: string | null;
+  colorImage: string | null;
+  descriptionCategoryId: string | null;
+  descriptionTypeId: string | null;
+  suggestedCategoryId: string | null;
+  weightG: number | null;
+  lengthMm: number | null;
+  widthMm: number | null;
+  heightMm: number | null;
+}
+
+interface OnboardContext {
+  listingId: string;
+  title: string | null;
+  defaultAttachProductId: string | null;
+  defaultAttachProductCode: string | null;
+  defaultAttachProductName: string | null;
+  variants: OnboardContextVariant[];
+}
+
+interface CategoryNode {
+  id: string;
+  nameZh: string;
+  nameRu: string | null;
+  level: number;
+  children: CategoryNode[];
+}
+
+interface CategoryOption {
+  value: string;
+  label: string;
+  children?: CategoryOption[];
+}
+
+interface BrandItem {
+  id: string;
+  name: string;
+  nameZh: string | null;
+  status: string;
+}
+
+/** Variant-aware SKU name prefill (Sprint 8.5 T7): title + variant discriminator. */
+function buildVariantSkuName(title: string | null, variant: OnboardContextVariant): string {
+  const base = title?.trim() ?? '';
+  const discriminator = variant.offerId ?? variant.sellerSku ?? variant.platformSkuId;
+  if (discriminator !== null && discriminator !== '') {
+    return base === '' ? discriminator : `${base} / ${discriminator}`;
+  }
+  return base;
 }
 
 const listingStatusBadge = (value: string) => (
@@ -132,8 +196,34 @@ export function ListingsPage() {
   const [onboardListingId, setOnboardListingId] = useState<string | null>(null);
   const [onboardVariantId, setOnboardVariantId] = useState<string | null>(null);
   const [onboardResult, setOnboardResult] = useState<OnboardResult | null>(null);
+  /** Sprint 8.5 T2: 'attach' pins the listing's onboarded product; 'new' forces a fresh one. */
+  const [onboardMode, setOnboardMode] = useState<'attach' | 'new'>('new');
+  /** After 保存并下一变体: the product just created is pinned for the next variant. */
+  const [onboardPinnedProductId, setOnboardPinnedProductId] = useState<string | null>(null);
   const [onboardForm] = Form.useForm();
   const [printCopies, setPrintCopies] = useState(1);
+  // Sprint 8.5 T3 tools: tree sync + one-click import.
+  const [categoryToolsOpen, setCategoryToolsOpen] = useState(false);
+  const [toolsStoreId, setToolsStoreId] = useState<string | null>(null);
+  const [categoryImportPreview, setCategoryImportPreview] = useState<{
+    stats: {
+      totalNodes: number;
+      skippedDisabled: number;
+      skippedOrphaned: number;
+      duplicateCompositeKeys: number;
+      toCreate: { level1: number; level2: number; level3: number };
+    };
+    conflicts: Array<{ name: string; level: number; reason: string }>;
+    previewTopLevels: Array<{
+      nameZh: string;
+      nameRu: string | null;
+      level2Count: number;
+      level3Count: number;
+    }>;
+  } | null>(null);
+  // Brand quick-create (Sprint 8.5 T4, mirrors ProductsPage's pattern).
+  const [brandModalOpen, setBrandModalOpen] = useState(false);
+  const [brandForm] = Form.useForm();
 
   const list = useApiQuery<{ data: ListingRow[]; meta: { total: number } }>(
     '/api/v1/listings',
@@ -185,22 +275,97 @@ export function ListingsPage() {
     {},
     ['listing-mapping-stats'],
   );
-  // Detail feed for the onboarding dialog (shares cache with the drawer).
-  const onboardDetail = useApiQuery<{ data: ListingDetail }>(
-    '/api/v1/listings/{id}',
+  // Context feed for the onboarding dialog (Sprint 8.5): images, platform
+  // category keys + suggestions, v4-prefilled dims, attach target.
+  const onboardContextQuery = useApiQuery<{ data: OnboardContext }>(
+    '/api/v1/listings/{id}/onboard-context',
     {},
-    ['listing-detail', onboardListingId],
+    ['listing-onboard-context', onboardListingId],
     { id: onboardListingId ?? '' },
     onboardListingId !== null,
   );
+  const onboardCtx = onboardContextQuery.data?.data;
   const onboardUnmapped = useMemo(
-    () =>
-      (onboardDetail.data?.data?.skus ?? []).filter(
-        (variant) => variant.mappingStatus === 'UNMAPPED',
-      ),
-    [onboardDetail.data],
+    () => (onboardCtx?.variants ?? []).filter((variant) => variant.mappingStatus === 'UNMAPPED'),
+    [onboardCtx],
   );
-  const onboardSelectedVariantId = onboardVariantId ?? onboardUnmapped[0]?.id ?? null;
+  const onboardSelectedVariantId =
+    onboardVariantId ?? (onboardUnmapped.length > 0 ? (onboardUnmapped[0]?.id ?? null) : null);
+  const onboardSelectedVariant = useMemo(
+    () =>
+      (onboardCtx?.variants ?? []).find((variant) => variant.id === onboardSelectedVariantId) ??
+      null,
+    [onboardCtx, onboardSelectedVariantId],
+  );
+  // Category tree + brands for the enhanced fields (Sprint 8.5 T3c/T4).
+  const categories = useApiQuery<{ data: CategoryNode[] }>(
+    '/api/v1/categories',
+    {},
+    ['categories'],
+    undefined,
+    onboardListingId !== null,
+  );
+  const brands = useApiQuery<{ data: BrandItem[] }>(
+    '/api/v1/brands',
+    { keyword: '' },
+    ['brands'],
+    undefined,
+    onboardListingId !== null,
+  );
+  const categoryPathById = useMemo(() => {
+    const pathById = new Map<string, string[]>();
+    const walk = (nodes: CategoryNode[], trail: string[]): void => {
+      for (const node of nodes) {
+        const path = [...trail, node.id];
+        pathById.set(node.id, path);
+        walk(node.children, path);
+      }
+    };
+    walk(categories.data?.data ?? [], []);
+    return pathById;
+  }, [categories.data]);
+  const categoryOptions = useMemo(() => {
+    const toOptions = (nodes: CategoryNode[]): CategoryOption[] =>
+      nodes.map((node) => ({
+        value: node.id,
+        label: node.nameRu !== null ? `${node.nameZh} (${node.nameRu})` : node.nameZh,
+        children: node.children.length > 0 ? toOptions(node.children) : undefined,
+      }));
+    return toOptions(categories.data?.data ?? []);
+  }, [categories.data]);
+  const brandOptions = (brands.data?.data ?? []).map((brand) => ({
+    value: brand.id,
+    label: brand.name,
+  }));
+
+  /**
+   * T2 attach resolution, mirrored from the backend default: a pinned
+   * product (save-and-next-variant) wins, else the attach radio's target
+   * when the listing already has an onboarded product. null = create new.
+   */
+  const onboardAttachTargetId =
+    onboardPinnedProductId !== null
+      ? onboardPinnedProductId
+      : onboardMode === 'attach'
+        ? (onboardCtx?.defaultAttachProductId ?? null)
+        : null;
+  /** T3c hint under the category cascader: exact-match suggestion or miss. */
+  const categoryExtraHint = (): string => {
+    const variant = onboardSelectedVariant;
+    if (variant === null || variant.descriptionCategoryId === null) {
+      return '该变体无平台类目信息，可人工选择三级分类。';
+    }
+    if (variant.suggestedCategoryId !== null) {
+      return '已按 OZON 类目映射自动选中（可改）：命中 (category, type) 复合键精确匹配。';
+    }
+    return '该 OZON 类目尚未映射：人工选择后勾选「记住此映射」，同类目后续自动命中（绝不按名称相似度猜）。';
+  };
+  // Category-tools helpers: the OZON platform row + its stores.
+  const ozonPlatform = (platforms.data?.data ?? []).find((platform) => platform.code === 'OZON');
+  const ozonPlatformId = ozonPlatform?.id ?? null;
+  const ozonStoreOptions = (stores.data?.data ?? [])
+    .filter((store) => store.platformId === ozonPlatformId)
+    .map((store) => ({ value: store.id, label: `${store.storeCode} ${store.name}` }));
 
   const refreshListings = () => {
     void queryClient.invalidateQueries({ queryKey: ['listings'] });
@@ -208,15 +373,25 @@ export function ListingsPage() {
     void queryClient.invalidateQueries({ queryKey: ['listing-mapping-stats'] });
   };
 
-  // Sprint 8 T1: one transaction on the backend - Product + SKU + optional
-  // internal barcode + mapping. Any failure rolls back whole.
+  // Sprint 8 T1 + 8.5: one transaction on the backend - Product (or attach)
+  // + SKU + optional internal barcode + mapping (+ remember-category row).
+  // Any failure rolls back whole.
   const onboardMutation = useMutation({
     mutationFn: (input: {
       listingId: string;
       mappingId: string;
-      productNameZh: string;
+      createNewProduct: boolean;
+      existingProductId?: string;
+      productNameZh?: string;
       skuNameZh: string;
+      brandId?: string;
+      categoryId?: string;
+      rememberCategoryMapping: boolean;
       generateBarcode: boolean;
+      weightG?: number;
+      lengthMm?: number;
+      widthMm?: number;
+      heightMm?: number;
     }) =>
       apiPost<OnboardResult>(
         '/api/v1/listings/{listingId}/skus/{id}/onboard',
@@ -224,6 +399,15 @@ export function ListingsPage() {
           productNameZh: input.productNameZh,
           skuNameZh: input.skuNameZh,
           generateBarcode: input.generateBarcode,
+          createNewProduct: input.createNewProduct,
+          existingProductId: input.existingProductId,
+          brandId: input.brandId,
+          categoryId: input.categoryId,
+          rememberCategoryMapping: input.rememberCategoryMapping,
+          weightG: input.weightG,
+          lengthMm: input.lengthMm,
+          widthMm: input.widthMm,
+          heightMm: input.heightMm,
         },
         { listingId: input.listingId, id: input.mappingId },
       ),
@@ -233,8 +417,22 @@ export function ListingsPage() {
         `建档并映射完成：${result.sku.skuCode}${result.barcode !== null ? `（条码 ${result.barcode}）` : ''}`,
       );
       refreshListings();
+      void queryClient.invalidateQueries({ queryKey: ['listing-onboard-context'] });
+      void queryClient.invalidateQueries({ queryKey: ['categories'] });
     },
     onError: (error: Error) => void message.error(`建档失败（已整体回滚）: ${error.message}`),
+  });
+
+  const brandCreateMutation = useMutation({
+    mutationFn: (values: { name: string }) => apiPost<BrandItem>('/api/v1/brands', values),
+    onSuccess: (brand) => {
+      void message.success(`品牌已创建：${brand.name}`);
+      setBrandModalOpen(false);
+      brandForm.resetFields();
+      onboardForm.setFieldValue('brandId', brand.id);
+      void queryClient.invalidateQueries({ queryKey: ['brands'] });
+    },
+    onError: (error: Error) => void message.error(error.message),
   });
 
   // Sprint 8 T2: export the unmapped set (respects the current platform/store
@@ -252,15 +450,59 @@ export function ListingsPage() {
     onError: (error: Error) => void message.error(error.message),
   });
 
+  // Sprint 8.5 T3 tools: tree sync + one-click import (dry-run -> confirm).
+  const treeSyncMutation = useMutation({
+    mutationFn: (triggerStoreId: string) =>
+      apiPost('/api/v1/sync/category-tree', { storeId: triggerStoreId }),
+    onSuccess: () => {
+      void message.success('类目树同步已提交（ZH_HANS + RU 双语合并），完成后即可生成导入预演');
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+  const enrichmentSyncMutation = useMutation({
+    mutationFn: (triggerStoreId: string) =>
+      apiPost('/api/v1/sync/product-enrichment', { storeId: triggerStoreId }),
+    onSuccess: () => {
+      void message.success('商品属性补齐（尺寸/重量）已提交，建档弹窗将逐步出现预填值');
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+  const importPreviewMutation = useMutation({
+    mutationFn: (platformIdInput: string) =>
+      apiPost<NonNullable<typeof categoryImportPreview>>(
+        '/api/v1/listings/category-import/preview',
+        { platformId: platformIdInput },
+      ),
+    onSuccess: (preview) => {
+      setCategoryImportPreview(preview);
+      void message.info('导入预演已生成（未落库），确认无误后点击「确认导入」');
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+  const importExecuteMutation = useMutation({
+    mutationFn: (platformIdInput: string) =>
+      apiPost<{
+        created: { level1: number; level2: number; level3: number };
+        mappingCount: number;
+      }>('/api/v1/listings/category-import/execute', { platformId: platformIdInput }),
+    onSuccess: (result) => {
+      void message.success(
+        `导入完成：一级 ${result.created.level1} / 二级 ${result.created.level2} / 三级 ${result.created.level3}，映射 ${result.mappingCount} 条`,
+      );
+      setCategoryImportPreview(null);
+      void queryClient.invalidateQueries({ queryKey: ['categories'] });
+    },
+    onError: (error: Error) => void message.error(`导入被拒绝: ${error.message}`),
+  });
+
   /** Opens quick-onboarding for an unmapped listing row (variant chosen inside). */
-  const openOnboard = (listingId: string, title: string | null) => {
+  const openOnboard = (listingId: string) => {
     setOnboardResult(null);
     setOnboardVariantId(null);
-    onboardForm.setFieldsValue({
-      productNameZh: title ?? '',
-      skuNameZh: title ?? '',
-      generateBarcode: true,
-    });
+    setOnboardPinnedProductId(null);
+    setOnboardMode('new');
+    onboardForm.resetFields();
+    onboardForm.setFieldsValue({ generateBarcode: true, rememberCategoryMapping: true });
     setOnboardListingId(listingId);
   };
 
@@ -268,18 +510,95 @@ export function ListingsPage() {
     setOnboardListingId(null);
     setOnboardVariantId(null);
     setOnboardResult(null);
+    setOnboardPinnedProductId(null);
     onboardForm.resetFields();
   };
 
-  // Keep the name fields in sync while the dialog opens with no result yet.
+  /**
+   * Prefills the editable fields for the currently selected variant: names
+   * from the listing title, category from the composite-key suggestion,
+   * dims/weight from the v4 enrichment payload.
+   */
   useEffect(() => {
-    if (onboardListingId !== null && onboardResult === null) {
-      const title = onboardDetail.data?.data?.title ?? '';
-      if (title !== '' && (onboardForm.getFieldValue('productNameZh') ?? '') === '') {
-        onboardForm.setFieldsValue({ productNameZh: title, skuNameZh: title });
-      }
+    if (onboardListingId === null || onboardResult !== null || onboardCtx === undefined) {
+      return;
     }
-  }, [onboardListingId, onboardResult, onboardDetail.data, onboardForm]);
+    const suggested = onboardSelectedVariant?.suggestedCategoryId ?? null;
+    onboardForm.setFieldsValue({
+      productNameZh: onboardForm.getFieldValue('productNameZh') || (onboardCtx.title ?? ''),
+      skuNameZh:
+        onboardSelectedVariant === null
+          ? (onboardCtx.title ?? '')
+          : buildVariantSkuName(onboardCtx.title, onboardSelectedVariant),
+      categoryPath: suggested !== null ? (categoryPathById.get(suggested) ?? undefined) : undefined,
+      weightG: onboardSelectedVariant?.weightG ?? undefined,
+      lengthMm: onboardSelectedVariant?.lengthMm ?? undefined,
+      widthMm: onboardSelectedVariant?.widthMm ?? undefined,
+      heightMm: onboardSelectedVariant?.heightMm ?? undefined,
+    });
+  }, [
+    onboardListingId,
+    onboardResult,
+    onboardCtx,
+    onboardSelectedVariant,
+    categoryPathById,
+    onboardForm,
+  ]);
+
+  /**
+   * Sprint 8.5 T7 保存并下一变体: after a successful submit, jump straight to
+   * the next UNMAPPED variant with the just-created product pinned, keeping
+   * the category/brand/barcode choices from the previous round.
+   */
+  const startNextVariant = () => {
+    if (onboardResult === null || onboardCtx === undefined) {
+      return;
+    }
+    const remaining = onboardCtx.variants.filter(
+      (variant) => variant.mappingStatus === 'UNMAPPED' && variant.id !== onboardResult.mappingId,
+    );
+    // The context is cached from before this submit; the just-mapped variant
+    // is excluded explicitly. If stale data still shows others, refetch wins.
+    const next =
+      remaining[0] ??
+      onboardUnmapped.find((variant) => variant.id !== onboardResult.mappingId) ??
+      null;
+    if (next === null) {
+      void message.info('该 Listing 的变体已全部建档完成');
+      closeOnboard();
+      return;
+    }
+    const previous = {
+      categoryId: onboardForm.getFieldValue('categoryPath') as string[] | undefined,
+      brandId: onboardForm.getFieldValue('brandId') as string | undefined,
+      generateBarcode: onboardForm.getFieldValue('generateBarcode') !== false,
+      rememberCategoryMapping: onboardForm.getFieldValue('rememberCategoryMapping') !== false,
+    };
+    setOnboardResult(null);
+    setOnboardPinnedProductId(onboardResult.product.id);
+    setOnboardMode('attach');
+    setOnboardVariantId(next.id);
+    onboardForm.setFieldsValue({
+      productNameZh: onboardResult.product.nameZh,
+      generateBarcode: previous.generateBarcode,
+      rememberCategoryMapping: previous.rememberCategoryMapping,
+      brandId: previous.brandId,
+      categoryPath: previous.categoryId,
+      weightG: next.weightG ?? undefined,
+      lengthMm: next.lengthMm ?? undefined,
+      widthMm: next.widthMm ?? undefined,
+      heightMm: next.heightMm ?? undefined,
+      skuNameZh: buildVariantSkuName(onboardCtx.title, next),
+    });
+    void queryClient.invalidateQueries({ queryKey: ['listing-onboard-context'] });
+  };
+  /** Whether another UNMAPPED variant remains after the current result (T7). */
+  const hasNextVariant =
+    onboardResult !== null &&
+    onboardCtx !== undefined &&
+    onboardCtx.variants.some(
+      (variant) => variant.mappingStatus === 'UNMAPPED' && variant.id !== onboardResult.mappingId,
+    );
 
   const mapMutation = useMutation({
     mutationFn: (input: { listingId: string; mappingId: string; skuId: string }) =>
@@ -491,9 +810,12 @@ export function ListingsPage() {
         title="SKU映射"
         description="管理平台商品（Listing）与内部SKU的变体映射；人工确认的映射不会被后续同步覆盖"
         secondary={
-          <Button loading={exportMutation.isPending} onClick={() => exportMutation.mutate()}>
-            导出未映射清单
-          </Button>
+          <>
+            <Button onClick={() => setCategoryToolsOpen(true)}>OZON类目工具</Button>
+            <Button loading={exportMutation.isPending} onClick={() => exportMutation.mutate()}>
+              导出未映射清单
+            </Button>
+          </>
         }
         primary={
           <Button type="primary" onClick={() => setCreateOpen(true)}>
@@ -657,7 +979,7 @@ export function ListingsPage() {
                         type="link"
                         size="small"
                         style={{ paddingInline: 4 }}
-                        onClick={() => openOnboard(record.id, record.title)}
+                        onClick={() => openOnboard(record.id)}
                       >
                         建档并映射
                       </Button>
@@ -1024,10 +1346,12 @@ export function ListingsPage() {
                             onClick={() => {
                               setOnboardResult(null);
                               setOnboardVariantId(row.id);
+                              setOnboardPinnedProductId(null);
+                              setOnboardMode('new');
+                              onboardForm.resetFields();
                               onboardForm.setFieldsValue({
-                                productNameZh: listingDetail.title ?? '',
-                                skuNameZh: listingDetail.title ?? '',
                                 generateBarcode: true,
+                                rememberCategoryMapping: true,
                               });
                               setOnboardListingId(listingDetail.id);
                             }}
@@ -1201,11 +1525,16 @@ export function ListingsPage() {
         />
       </Drawer>
 
-      {/* ---- Sprint 8 T1: quick onboarding (one dialog, one transaction) ---- */}
+      {/* ---- Sprint 8 / 8.5: quick onboarding (one dialog, one transaction) ---- */}
       <Modal
-        title="建档并映射（新建商品 + SKU + 映射）"
+        title={
+          onboardAttachTargetId !== null
+            ? '建档并映射（挂靠已有商品 + 新建SKU + 映射）'
+            : '建档并映射（新建商品 + SKU + 映射）'
+        }
         open={onboardListingId !== null}
         zIndex={1100}
+        width={680}
         onCancel={closeOnboard}
         footer={
           onboardResult === null
@@ -1226,12 +1555,34 @@ export function ListingsPage() {
                       if (onboardListingId === null) {
                         return;
                       }
+                      const categoryPath = values.categoryPath as string[] | undefined;
                       onboardMutation.mutate({
                         listingId: onboardListingId,
                         mappingId: onboardSelectedVariantId,
-                        productNameZh: values.productNameZh as string,
+                        createNewProduct: onboardAttachTargetId === null,
+                        existingProductId:
+                          onboardAttachTargetId === null ? undefined : onboardAttachTargetId,
+                        productNameZh:
+                          onboardAttachTargetId === null
+                            ? (values.productNameZh as string)
+                            : undefined,
                         skuNameZh: values.skuNameZh as string,
+                        brandId:
+                          onboardAttachTargetId === null
+                            ? (values.brandId as string | undefined)
+                            : undefined,
+                        categoryId:
+                          onboardAttachTargetId === null &&
+                          categoryPath !== undefined &&
+                          categoryPath.length === 3
+                            ? categoryPath[2]
+                            : undefined,
+                        rememberCategoryMapping: values.rememberCategoryMapping !== false,
                         generateBarcode: values.generateBarcode !== false,
+                        weightG: values.weightG as number | undefined,
+                        lengthMm: values.lengthMm as number | undefined,
+                        widthMm: values.widthMm as number | undefined,
+                        heightMm: values.heightMm as number | undefined,
                       });
                     });
                   }}
@@ -1262,6 +1613,13 @@ export function ListingsPage() {
                       </Button>,
                     ]
                   : []),
+                ...(hasNextVariant
+                  ? [
+                      <Button key="next" type="primary" ghost onClick={startNextVariant}>
+                        保存并下一变体
+                      </Button>,
+                    ]
+                  : []),
                 <Button key="done" type="primary" onClick={closeOnboard}>
                   完成
                 </Button>,
@@ -1274,7 +1632,11 @@ export function ListingsPage() {
               type="success"
               showIcon
               title="建档、条码、映射已在一个事务中完成"
-              description="失败会整体回滚，不会留下「建了 SKU 但没映射」的半成品。收货/拣货扫描可直接使用该条码。"
+              description={
+                onboardResult.productCreated
+                  ? '失败会整体回滚，不会留下「建了 SKU 但没映射」的半成品。商品图将从平台 CDN 异步转存到自有桶。'
+                  : '本次 SKU 挂靠到已有商品（同 Listing 变体不裂变）。商品图将从平台 CDN 异步转存到自有桶。'
+              }
             />
             <InfoGrid
               columns={2}
@@ -1308,21 +1670,31 @@ export function ListingsPage() {
                 />
               </Space>
             )}
+            {hasNextVariant && (
+              <Alert
+                type="info"
+                showIcon
+                title="该 Listing 还有未建档的变体"
+                description="点「保存并下一变体」继续：商品已锁定挂靠，类目/品牌/条码选择沿用，名称按下一变体预填。"
+              />
+            )}
           </Space>
         ) : (
           <Form form={onboardForm} layout="vertical" preserve={false}>
-            <Alert
-              type="info"
-              showIcon
-              style={{ marginBottom: 12 }}
-              title="一步完成：新建商品 + 新建SKU +（可选）生成内部条码 + 映射该变体"
-              description="编码由系统按序号自动生成；商品名/SKU 名已按 Listing 标题预填，可修改。已映射的变体不提供此操作。"
-            />
             {onboardUnmapped.length > 1 && (
               <Form.Item label="要建档映射的变体（该 Listing 有多个未映射变体）" required>
                 <Select
                   value={onboardSelectedVariantId}
-                  onChange={setOnboardVariantId}
+                  onChange={(value) => {
+                    setOnboardVariantId(value);
+                    onboardForm.setFieldsValue({
+                      weightG: undefined,
+                      lengthMm: undefined,
+                      widthMm: undefined,
+                      heightMm: undefined,
+                      categoryPath: undefined,
+                    });
+                  }}
                   options={onboardUnmapped.map((variant) => ({
                     value: variant.id,
                     label: `${variant.platformSkuId ?? '—'} / ${variant.offerId ?? variant.sellerSku ?? '—'}`,
@@ -1330,7 +1702,7 @@ export function ListingsPage() {
                 />
               </Form.Item>
             )}
-            {onboardUnmapped.length === 0 && !onboardDetail.isLoading && (
+            {onboardUnmapped.length === 0 && !onboardContextQuery.isLoading && (
               <Alert
                 type="warning"
                 showIcon
@@ -1339,25 +1711,327 @@ export function ListingsPage() {
                 description="可能刚刚已完成映射，请刷新列表后重试。"
               />
             )}
-            <Form.Item
-              name="productNameZh"
-              label="商品名（Product）"
-              rules={[{ required: true, message: '请填写商品名' }]}
-            >
-              <Input maxLength={255} placeholder="默认取 Listing 标题" />
-            </Form.Item>
+            {onboardSelectedVariant?.primaryImage != null && (
+              <Space align="start" style={{ marginBottom: 12 }}>
+                <img
+                  src={onboardSelectedVariant.primaryImage}
+                  alt="平台商品图"
+                  style={{
+                    maxHeight: 120,
+                    maxWidth: 120,
+                    objectFit: 'contain',
+                    borderRadius: 6,
+                    border: `1px solid ${colors.border}`,
+                  }}
+                />
+                <span style={{ fontSize: 12.5, color: colors.textTertiary, maxWidth: 320 }}>
+                  平台商品图预览（CDN
+                  直链）。建档成功后系统会把颜色图/首图异步转存到自有存储并设为商品主图。
+                </span>
+              </Space>
+            )}
+            {(onboardCtx?.defaultAttachProductId !== null &&
+              onboardCtx?.defaultAttachProductId !== undefined) ||
+            onboardPinnedProductId !== null ? (
+              <Form.Item label="多变体挂靠（同 Listing 变体默认共用一个商品）" required>
+                <Radio.Group
+                  value={onboardMode}
+                  onChange={(event) => setOnboardMode(event.target.value as 'attach' | 'new')}
+                  disabled={onboardPinnedProductId !== null}
+                >
+                  <Radio value="attach">
+                    挂靠已有商品
+                    {onboardCtx?.defaultAttachProductCode != null &&
+                      `（${onboardCtx.defaultAttachProductCode} ${onboardCtx.defaultAttachProductName ?? ''}）`}
+                  </Radio>
+                  <Radio value="new">另建新商品（变体实为不同商品时使用）</Radio>
+                </Radio.Group>
+                {onboardPinnedProductId !== null && (
+                  <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+                    连续建档模式：已锁定挂靠本次新建的商品。
+                  </span>
+                )}
+              </Form.Item>
+            ) : null}
+            {onboardAttachTargetId === null ? (
+              <>
+                <Form.Item
+                  name="productNameZh"
+                  label="商品名（Product）"
+                  rules={[{ required: true, message: '请填写商品名' }]}
+                >
+                  <Input maxLength={255} placeholder="默认取 Listing 标题" />
+                </Form.Item>
+                <Form.Item
+                  name="brandId"
+                  label={
+                    <Space size={4}>
+                      品牌
+                      <Button
+                        type="link"
+                        size="small"
+                        style={{ padding: 0, height: 'auto' }}
+                        onClick={() => {
+                          brandForm.resetFields();
+                          setBrandModalOpen(true);
+                        }}
+                      >
+                        + 新增品牌
+                      </Button>
+                    </Space>
+                  }
+                >
+                  <Select
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder="选择品牌（可搜可现场快建）"
+                    options={brandOptions}
+                  />
+                </Form.Item>
+                <Form.Item
+                  name="categoryPath"
+                  label="商品分类（三级）"
+                  extra={categoryExtraHint()}
+                  rules={[
+                    {
+                      validator: (_rule, value: string[] | undefined) =>
+                        value === undefined || value.length === 0
+                          ? Promise.resolve()
+                          : value.length === 3
+                            ? Promise.resolve()
+                            : Promise.reject(new Error('必须选择到三级分类')),
+                    },
+                  ]}
+                >
+                  <Cascader<CategoryOption>
+                    allowClear
+                    showSearch
+                    placeholder="选择三级分类（支持搜索中文名）"
+                    options={categoryOptions}
+                  />
+                </Form.Item>
+                {onboardSelectedVariant?.descriptionCategoryId != null && (
+                  <Form.Item
+                    name="rememberCategoryMapping"
+                    valuePropName="checked"
+                    initialValue={true}
+                  >
+                    <Checkbox>
+                      记住此映射（OZON 类目 {onboardSelectedVariant.descriptionCategoryId}:
+                      {onboardSelectedVariant.descriptionTypeId} →
+                      所选内部类目；同类目后续自动命中）
+                    </Checkbox>
+                  </Form.Item>
+                )}
+              </>
+            ) : (
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 12 }}
+                title={`挂靠已有商品：${onboardCtx?.defaultAttachProductCode ?? ''} ${
+                  onboardCtx?.defaultAttachProductName ?? ''
+                }`}
+                description="品牌/分类沿用该商品已有档案；本次只新建 SKU 并映射变体。"
+              />
+            )}
             <Form.Item
               name="skuNameZh"
               label="SKU 名"
               rules={[{ required: true, message: '请填写 SKU 名' }]}
             >
-              <Input maxLength={255} placeholder="默认取 Listing 标题" />
+              <Input maxLength={255} placeholder="默认按变体标识预填" />
             </Form.Item>
-            <Form.Item name="generateBarcode" valuePropName="checked" initialValue={true}>
+            <Space wrap size="middle">
+              <Form.Item name="weightG" label="重量（g）" style={{ marginBottom: 0 }}>
+                <InputNumber min={0} placeholder="重量" style={{ width: 120 }} />
+              </Form.Item>
+              <Form.Item name="lengthMm" label="长（mm）" style={{ marginBottom: 0 }}>
+                <InputNumber min={0} placeholder="长" style={{ width: 110 }} />
+              </Form.Item>
+              <Form.Item name="widthMm" label="宽（mm）" style={{ marginBottom: 0 }}>
+                <InputNumber min={0} placeholder="宽" style={{ width: 110 }} />
+              </Form.Item>
+              <Form.Item name="heightMm" label="高（mm）" style={{ marginBottom: 0 }}>
+                <InputNumber min={0} placeholder="高" style={{ width: 110 }} />
+              </Form.Item>
+            </Space>
+            <span
+              style={{
+                fontSize: 12.5,
+                color: colors.textTertiary,
+                display: 'block',
+                marginTop: 4,
+              }}
+            >
+              尺寸/重量按平台 v4 属性预填（可改）；体积由后端按长×宽×高计算，不可直接填写。
+            </span>
+            <Form.Item
+              name="generateBarcode"
+              valuePropName="checked"
+              initialValue={true}
+              style={{ marginTop: 12 }}
+            >
               <Checkbox>生成内部条码（WCSKU…，建档后可直接打印标签贴到实物上）</Checkbox>
             </Form.Item>
           </Form>
         )}
+      </Modal>
+
+      {/* ---- Sprint 8.5 T4: brand quick-create (same pattern as ProductsPage) ---- */}
+      <Modal
+        title="新增品牌"
+        open={brandModalOpen}
+        zIndex={1200}
+        onCancel={() => setBrandModalOpen(false)}
+        confirmLoading={brandCreateMutation.isPending}
+        onOk={() =>
+          void brandForm.validateFields().then((values) => {
+            brandCreateMutation.mutate({ name: values.name as string });
+          })
+        }
+      >
+        <Form form={brandForm} layout="vertical">
+          <Form.Item
+            name="name"
+            label="品牌名称"
+            rules={[{ required: true, message: '请输入品牌名称' }]}
+          >
+            <Input maxLength={200} placeholder="如 MOULD KING" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* ---- Sprint 8.5 T3: category tools (tree sync + one-click import) ---- */}
+      <Modal
+        title="OZON 类目工具"
+        open={categoryToolsOpen}
+        zIndex={1100}
+        width={760}
+        footer={null}
+        onCancel={() => {
+          setCategoryToolsOpen(false);
+          setCategoryImportPreview(null);
+        }}
+      >
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
+          <section>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>
+              第 1 步：同步类目树（手动，低频）
+            </div>
+            <Space wrap>
+              <Select
+                placeholder="选择 OZON 店铺（用其凭证拉取）"
+                style={{ width: 260 }}
+                value={toolsStoreId}
+                onChange={setToolsStoreId}
+                options={ozonStoreOptions}
+              />
+              <Button
+                loading={treeSyncMutation.isPending}
+                disabled={toolsStoreId === null}
+                onClick={() => toolsStoreId !== null && treeSyncMutation.mutate(toolsStoreId)}
+              >
+                同步类目树（中文+俄语）
+              </Button>
+              <Button
+                loading={enrichmentSyncMutation.isPending}
+                disabled={toolsStoreId === null}
+                onClick={() => toolsStoreId !== null && enrichmentSyncMutation.mutate(toolsStoreId)}
+              >
+                补齐商品属性（尺寸/重量）
+              </Button>
+            </Space>
+            <p style={{ fontSize: 12.5, color: colors.textTertiary, marginTop: 8 }}>
+              树同步拉取官方简体中文 + 俄语双语树并缓存（约 8k 节点）；属性补齐调用 v4
+              接口把尺寸/重量并入 listing 原始数据。两者均按同步任务记录，可到同步中心查看结果。
+            </p>
+          </section>
+          <section>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>第 2 步：一键导入内部三级类目</div>
+            <Space wrap style={{ marginBottom: 12 }}>
+              <Button
+                loading={importPreviewMutation.isPending}
+                disabled={ozonPlatformId === null}
+                onClick={() =>
+                  ozonPlatformId !== null && importPreviewMutation.mutate(ozonPlatformId)
+                }
+              >
+                生成导入预演（不落库）
+              </Button>
+              <Button
+                type="primary"
+                loading={importExecuteMutation.isPending}
+                disabled={
+                  categoryImportPreview === null || categoryImportPreview.conflicts.length > 0
+                }
+                onClick={() =>
+                  ozonPlatformId !== null && importExecuteMutation.mutate(ozonPlatformId)
+                }
+              >
+                确认导入（单事务）
+              </Button>
+            </Space>
+            {categoryImportPreview !== null && (
+              <Space orientation="vertical" style={{ width: '100%' }} size="small">
+                <Alert
+                  type={categoryImportPreview.conflicts.length > 0 ? 'warning' : 'success'}
+                  showIcon
+                  title={
+                    categoryImportPreview.conflicts.length > 0
+                      ? `发现 ${categoryImportPreview.conflicts.length} 处命名冲突，需人工处理后才能导入（不做静默跳过）`
+                      : '预演通过：无冲突，可确认导入'
+                  }
+                  description={
+                    categoryImportPreview.conflicts.length > 0
+                      ? categoryImportPreview.conflicts
+                          .slice(0, 5)
+                          .map((conflict) => `${conflict.name}：${conflict.reason}`)
+                          .join('；')
+                      : 'OZON 一级→内部一级、二级→内部二级、类型→内部三级，1:1 直映；编码自动生成，导入后同类目建档自动命中。'
+                  }
+                />
+                <InfoGrid
+                  columns={2}
+                  items={[
+                    { label: '一级', children: `${categoryImportPreview.stats.toCreate.level1}` },
+                    { label: '二级', children: `${categoryImportPreview.stats.toCreate.level2}` },
+                    {
+                      label: '三级(类型)',
+                      children: `${categoryImportPreview.stats.toCreate.level3}`,
+                    },
+                    {
+                      label: '跳过(禁用/孤儿)',
+                      children: `${categoryImportPreview.stats.skippedDisabled + categoryImportPreview.stats.skippedOrphaned}`,
+                    },
+                  ]}
+                />
+                <DataTable<{
+                  nameZh: string;
+                  nameRu: string | null;
+                  level2Count: number;
+                  level3Count: number;
+                }>
+                  rowKey="nameZh"
+                  size="small"
+                  pagination={false}
+                  dataSource={categoryImportPreview.previewTopLevels}
+                  columns={[
+                    { title: '一级类目（中文）', dataIndex: 'nameZh' },
+                    {
+                      title: '原名（俄语）',
+                      dataIndex: 'nameRu',
+                      render: (value: string | null) => value ?? '—',
+                    },
+                    { title: '二级数', dataIndex: 'level2Count', width: 80 },
+                    { title: '三级数', dataIndex: 'level3Count', width: 80 },
+                  ]}
+                />
+              </Space>
+            )}
+          </section>
+        </Space>
       </Modal>
     </div>
   );

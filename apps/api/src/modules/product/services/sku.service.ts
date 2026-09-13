@@ -305,10 +305,22 @@ export class SkuService {
    * Cross-module tx participant (Sprint 8 T1): creates the SKU row on the
    * CALLER's transaction with the standard derived code (decision 0002).
    * Logging stays with the caller (after commit).
+   *
+   * Sprint 8.5 T5: optional physical attributes (v4-enriched prefills,
+   * user-editable in the dialog). Same all-or-none dimension rule and
+   * backend-computed volume as the regular create() - the client can never
+   * write volume_mm3 directly.
    */
   async createForOnboardingInTx(
     manager: EntityManager,
-    input: { productId: string; nameZh: string },
+    input: {
+      productId: string;
+      nameZh: string;
+      weightG?: number | null;
+      lengthMm?: number | null;
+      widthMm?: number | null;
+      heightMm?: number | null;
+    },
   ): Promise<SkuEntity> {
     const product = await manager.getRepository(ProductEntity).findOneBy({
       id: input.productId,
@@ -316,6 +328,10 @@ export class SkuService {
     if (product === null) {
       throw new ProductNotFoundError(input.productId);
     }
+    const lengthMm = input.lengthMm ?? null;
+    const widthMm = input.widthMm ?? null;
+    const heightMm = input.heightMm ?? null;
+    assertDimensionsConsistent(lengthMm, widthMm, heightMm);
     const skuCode = await this.businessCode.nextSkuCode(product.id, product.codeSeq, manager);
     const repository = manager.getRepository(SkuEntity);
     const created = repository.create({
@@ -326,11 +342,11 @@ export class SkuService {
       model: null,
       color: null,
       size: null,
-      weightG: null,
-      lengthMm: null,
-      widthMm: null,
-      heightMm: null,
-      volumeMm3: null,
+      weightG: toNumeric(input.weightG ?? null),
+      lengthMm,
+      widthMm,
+      heightMm,
+      volumeMm3: toNumeric(computeVolumeMm3(lengthMm, widthMm, heightMm)),
       purchaseUrl: null,
       latestPurchasePrice: null,
       movingAverageCost: null,

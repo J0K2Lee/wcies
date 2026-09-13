@@ -11,7 +11,11 @@ import {
 import { OzonClient, OzonAuth } from './ozon.client';
 import { mapPostingToOrder, mapProductToListing, mapWebhookPayload } from './ozon.mapper';
 import { StoreCredentialMalformedError } from '../integration.errors';
-import { OzonProductInfoItem, OzonProductListItem } from './types/api.types';
+import {
+  OzonProductAttributesResponse,
+  OzonProductInfoItem,
+  OzonProductListItem,
+} from './types/api.types';
 import { PlatformApiError } from '../platform-error';
 import {
   INITIAL_ORDER_WINDOW_DAYS,
@@ -125,6 +129,22 @@ export class OzonAdapter implements PlatformAdapter {
     return mapWebhookPayload(payload);
   }
 
+  /**
+   * Sprint 8.5 T5: packed product attributes (dimensions/weight/category).
+   * OZON-specific read outside the generic adapter contract - used by the
+   * enrichment sync; response shape per the 2026-09-14 smoke (§ozon.md 8).
+   */
+  async fetchProductAttributes(
+    context: StoreContext,
+    productIds: readonly string[],
+  ): Promise<OzonProductAttributesResponse> {
+    return this.client.productAttributes(
+      parseAuth(context.credential, context.storeId),
+      context.storeId,
+      productIds,
+    );
+  }
+
   async fetchOrdersByPlatformIds(
     context: StoreContext,
     platformOrderIds: readonly string[],
@@ -198,6 +218,18 @@ function parseAuth(credential: Readonly<Record<string, unknown>>, storeId: strin
     throw new StoreCredentialMalformedError(storeId, 'OZON', 'expected { clientId, apiKey }');
   }
   return { clientId, apiKey };
+}
+
+/**
+ * Shared credential parse for OZON-specific services that call the client
+ * outside the generic adapter contract (category tree sync, attribute
+ * enrichment). Same validation, same error.
+ */
+export function parseOzonAuth(
+  credential: Readonly<Record<string, unknown>>,
+  storeId: string,
+): OzonAuth {
+  return parseAuth(credential, storeId);
 }
 
 /**

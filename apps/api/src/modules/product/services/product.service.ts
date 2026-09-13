@@ -318,17 +318,49 @@ export class ProductService {
   }
 
   /**
+   * Cross-module entity lookup on the CALLER's transaction (Sprint 8.5 T2):
+   * the onboarding attach mode validates the target product inside its
+   * locked transaction.
+   */
+  async getEntityByIdInTx(manager: EntityManager, id: string): Promise<ProductEntity | null> {
+    return manager.getRepository(ProductEntity).findOneBy({ id });
+  }
+
+  /**
    * Cross-module tx participant (Sprint 8 T1): creates the product row on the
    * CALLER's transaction so listing quick-onboarding commits or rolls back as
    * one unit. Sequence is taken on the same manager - a rollback returns the
    * number instead of burning it. Operation logging stays with the CALLER
    * (after commit) so a rolled-back attempt leaves no audit orphans.
+   *
+   * Sprint 8.5 T3c/T4: brand and category use the SAME validation rules as
+   * the regular create() (brand exists; category exists and is level 3).
    */
   async createForOnboardingInTx(
     manager: EntityManager,
-    input: { nameZh: string; nameRu?: string | null },
+    input: {
+      nameZh: string;
+      nameRu?: string | null;
+      brandId?: string | null;
+      categoryId?: string | null;
+    },
     operator: OperatorContext,
   ): Promise<ProductEntity> {
+    if (input.brandId !== undefined && input.brandId !== null) {
+      const brand = await this.catalogService.findBrandEntityById(input.brandId);
+      if (brand === null) {
+        throw new BrandNotFoundError(input.brandId);
+      }
+    }
+    if (input.categoryId !== undefined && input.categoryId !== null) {
+      const category = await this.catalogService.findCategoryEntityById(input.categoryId);
+      if (category === null) {
+        throw new CategoryNotFoundError(input.categoryId);
+      }
+      if (category.level !== 3) {
+        throw new CategoryLevelInvalidError(input.categoryId, category.level);
+      }
+    }
     const { productCode, codeSeq } = await this.businessCode.nextProductCode(manager);
     const repository = manager.getRepository(ProductEntity);
     const created = repository.create({
@@ -336,8 +368,8 @@ export class ProductService {
       codeSeq,
       nameZh: input.nameZh,
       nameRu: input.nameRu ?? null,
-      brandId: null,
-      categoryId: null,
+      brandId: input.brandId ?? null,
+      categoryId: input.categoryId ?? null,
       mainImageId: null,
       status: 'DRAFT',
       remark: null,
@@ -345,6 +377,16 @@ export class ProductService {
       updatedBy: operator.userId,
     });
     return repository.save(created);
+  }
+
+  /**
+   * Sprint 8.5 T6: backfills the product's main image only while it is empty
+   * (first imported image wins; later ones never overwrite a human choice).
+   * Returns true when the row was updated.
+   */
+  async setMainImageIfEmpty(productId: string, imageId: string): Promise<boolean> {
+    const result = await this.repository.updateMainImageIfEmpty(productId, imageId);
+    return result;
   }
 
   private async findRowOrThrow(id: string): Promise<ProductRowWithCounts> {

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { QUEUE_NAMES } from '../../../infrastructure/queue/queue.constants';
-import { SYNC_TYPE_QUEUES, SyncTriggerType, SyncType } from '../sync.constants';
+import { SyncTriggerType, SyncType } from '../sync.constants';
 import { SyncJobRepository } from '../repositories/sync-job.repository';
 import { SyncCursorRepository } from '../repositories/sync-cursor.repository';
 import { SyncContextService } from './sync-context.service';
@@ -26,6 +26,10 @@ export class SyncDispatchService {
     private readonly orderSyncQueue: Queue<SyncDispatchJobPayload>,
     @InjectQueue(QUEUE_NAMES.listingSync)
     private readonly listingSyncQueue: Queue<SyncDispatchJobPayload>,
+    @InjectQueue(QUEUE_NAMES.categoryTree)
+    private readonly categoryTreeQueue: Queue<SyncDispatchJobPayload>,
+    @InjectQueue(QUEUE_NAMES.enrichment)
+    private readonly enrichmentQueue: Queue<SyncDispatchJobPayload>,
     private readonly jobRepo: SyncJobRepository,
     private readonly cursorRepo: SyncCursorRepository,
     private readonly contextService: SyncContextService,
@@ -53,11 +57,13 @@ export class SyncDispatchService {
       throw new SyncAlreadyRunningError(input.storeId, input.syncType, active?.id ?? null);
     }
 
-    const queue =
-      SYNC_TYPE_QUEUES[input.syncType] === 'orderSync'
-        ? this.orderSyncQueue
-        : this.listingSyncQueue;
-    await queue.add(
+    const queueByType: Record<SyncType, Queue<SyncDispatchJobPayload>> = {
+      ORDER_SYNC: this.orderSyncQueue,
+      LISTING_SYNC: this.listingSyncQueue,
+      CATEGORY_TREE_SYNC: this.categoryTreeQueue,
+      PRODUCT_ENRICHMENT_SYNC: this.enrichmentQueue,
+    };
+    await queueByType[input.syncType].add(
       'run',
       { syncJobId: job.id },
       {

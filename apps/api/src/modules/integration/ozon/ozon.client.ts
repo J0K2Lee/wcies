@@ -1,7 +1,9 @@
 import {
+  OzonCategoryTreeResponse,
   OzonErrorBody,
   OzonFbsPostingGetResponse,
   OzonFbsPostingListResponse,
+  OzonProductAttributesResponse,
   OzonProductInfoListResponse,
   OzonProductListResponse,
 } from './types/api.types';
@@ -143,6 +145,40 @@ export class OzonClient {
       endpoint: '/v3/posting/fbs/get',
       storeId,
       body: { posting_number: postingNumber, with: {} },
+    });
+  }
+
+  /**
+   * Full description-category tree in one shot (Sprint 8.5 T3a). No
+   * pagination - the live tree is ~8k nodes in a single response
+   * (verified 2026-09-14).
+   */
+  async descriptionCategoryTree(
+    auth: OzonAuth,
+    storeId: string,
+    language: 'ZH_HANS' | 'RU',
+  ): Promise<OzonCategoryTreeResponse> {
+    return this.request<OzonCategoryTreeResponse>(auth, {
+      endpoint: '/v1/description-category/tree',
+      storeId,
+      body: { language },
+    });
+  }
+
+  /**
+   * Packed product attributes (Sprint 8.5 T5): dimensions/weight/category
+   * per product. filter is REQUIRED by the live API (400 otherwise) and
+   * product_id accepts up to 1000 values per call.
+   */
+  async productAttributes(
+    auth: OzonAuth,
+    storeId: string,
+    productIds: readonly string[],
+  ): Promise<OzonProductAttributesResponse> {
+    return this.request<OzonProductAttributesResponse>(auth, {
+      endpoint: '/v4/product/info/attributes',
+      storeId,
+      body: { filter: { product_id: [...productIds] }, limit: 1000 },
     });
   }
 

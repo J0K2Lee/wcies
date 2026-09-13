@@ -116,10 +116,24 @@ Sprint 5 起，平台同步会产生**未映射**的平台 SKU 事实：
 Sprint 8 起（2026-09-12，规划 §T1/T2/T3）：
 
 12. **快捷建档**：`POST /listings/:listingId/skus/:mappingId/onboard`。一个数据库事务内创建 Product + SKU +（可选）内部条码，并把该变体绑定为 MAPPED；任一步失败**整体回滚**，不存在「建了 SKU 但没映射」的半成品。编码沿用集中序号（`PN%06d` / `SKU{9}` / `WCSKU%08d`，不新增规则）；商品名/SKU 名默认取 `listing.title`，两者最终都为空 → 422 `LISTING_ONBOARD_NAME_REQUIRED`。只允许从 **UNMAPPED** 变体发起（已映射变体返回 409 `LISTING_SKU_MAPPING_INVALID_STATE`）。条码为该 SKU 首条码时自动为主条码。审计在各实体写入成功（提交后）记录，Action 含 `CREATE`（product/sku/barcode）与 `MAP`。
-13. **LISTING_MAPPING 导入绑定同步行**：导入行落到**已存在**的 Listing 且平台标识（优先 `platform_sku_id`，其次 `offer_id`、`seller_sku`）命中该 Listing 一条 ACTIVE 的 UNMAPPED 同步变体时，**绑定该行**（等价人工映射，sku_id 写入、置 MAPPED），**不插入重复变体行**。「相同映射（同 Listing 同 SKU）拒绝」与决策 0012（至少一个平台标识）规则不变；未命中任何同步变体时维持原有新建行为。
-14. **未映射工作台**（派生展示，不新增业务状态）：
+
+Sprint 8.5 起（2026-09-14，决策 0014/0015）——快捷建档增强：
+
+13. **并发语义（决策 0014）**：onboard 事务**开头**对 mapping 行 `SELECT … FOR UPDATE`，「检查 → 建档 → 映射」全程串行化；并发双请求仅一成功，另一在锁释放后 re-check 失败得到同一个 409，**不产生任何主数据孤儿**。重复提交语义保持 409，不做幂等成功。
+14. **多变体挂靠（决策 0014）**：同一 Listing 的后续变体**默认挂靠**该 Listing 首个已建档变体的 Product（`nextSkuCode` 顺延 SKU002/003…，无新编码规则）；弹窗可显式切换「另建新商品」（DTO `createNewProduct: true`）或指定挂靠目标（`existingProductId`，不存在 → 404 `PRODUCT_NOT_FOUND`）。挂靠时不改动已有 Product 的品牌/分类档案。
+15. **新增建档字段**：
+    - 品牌 `brandId?`（人工 Select + 现场快建，复用常规品牌存在性校验；**不做**自动提取）；
+    - 分类 `categoryId?`（必须三级，复用 `CATEGORY_LEVEL_INVALID` 校验）；
+    - 尺寸/重量 `lengthMm/widthMm/heightMm/weightG?`（可编辑预填；沿用全有或全无 + 体积后端计算规则）。
+16. **DRAFT 标记语义**：快捷建档的 Product 停留 **DRAFT** 仅作「档案未补全」标记，**不阻断任何业务**（不阻断映射、订单解析、收发货）；可见性优化放 backlog。
+17. **平台类目映射（决策 0015）**：`platform_category_mappings` 以 `(platform_id, external_category_id, external_type_id)` **复合键**精确映射内部三级分类；type 节点不携带自身 category id（T0 冒烟事实），复合键的 category 部分取其**父类目**。弹窗「记住此映射」（默认勾选）在 onboard **同一事务**内写映射行（source=ONBOARD），`ON CONFLICT DO NOTHING`——已有映射（树导入或更早的记住）永不被覆盖。**任何未命中都回退人工三级 Cascader 选择，绝不按名称相似度自动匹配**。
+18. **OZON 类目树导入（决策 0015）**：手动同步 `/v1/description-category/tree`（ZH_HANS + RU 双语合并）到缓存表 `platform_category_nodes`（按 SyncJob 记录）；一键导入按「一级类目→内部一级、二级类目→内部二级、type→内部三级」1:1 直映（真实树恰好三层，T0 冒烟验证；更深层级跳过并列入预演报告），仅导入 `disabled=false`，dry-run 预演报告冲突清单（与现有分类按 `name_ru` 精确查重），存在**真冲突**时执行 **409 拒绝**（§89：先查重、歧义报错、禁止静默丢弃）；确认后**单事务**批量建类目（经 catalog 公开 Service，`CN%05d` 批量取号）+ 写映射行（source=TREE_IMPORT）。
+    **同父同名候选的去重命名（2026-09-14 真实数据发现）**：真实树存在同父级下同名 type（全树 57 组），内部 `(parent_id, lower(name_zh))` 唯一索引不允许——导入时对第二及以后的同名候选**确定性追加外部 id 后缀**（如 `其他 (91543)`），首 个保留原名；每一处在预演报告 `disambiguatedNames` 中列出。不丢弃、不合并、复合键映射不受影响。
+19. **SKU 图片（决策 0014）**：建档弹窗预览用 `raw_data.primary_image` CDN 直链；onboard 事务提交成功后入 BullMQ 异步转存 `color_image ?? primary_image` → 自有私有桶（`SkuImageService.upload` 通道）→ 首图 `isPrimary=true` → 首次回填 `products.main_image_id`（仅当为空）。图片失败自动重试，**不进建档事务**、不影响建档事实。
+20. **LISTING_MAPPING 导入绑定同步行**：导入行落到**已存在**的 Listing 且平台标识（优先 `platform_sku_id`，其次 `offer_id`、`seller_sku`）命中该 Listing 一条 ACTIVE 的 UNMAPPED 同步变体时，**绑定该行**（等价人工映射，sku_id 写入、置 MAPPED），**不插入重复变体行**。「相同映射（同 Listing 同 SKU）拒绝」与决策 0012（至少一个平台标识）规则不变；未命中任何同步变体时维持原有新建行为。
+21. **未映射工作台**（派生展示，不新增业务状态）：
     - `GET /listings/mapping-stats` 返回全局 MAPPED/UNMAPPED 计数，判定与第 11 条同一条件；
-    - 列表行携带 `hasOrderException`（是否存在 OPEN 的 `ORDER_SKU_MAPPING_FAILED` 异常经订单行 `store + platform_product_id` 撞上该 Listing）；
+    - 列表行携带 `hasOrderException`（是否存在 OPEN 的 `ORDER_SKU_MAPPING_FAILED` 异常经订单行 `store + platform_product_id` 撞上该 Listing；2026-09-14 真实数据修正：OZON 订单行的 `platform_product_id` 实为 **sku id**，故命中条件同时比对 Listing 的 `platform_product_id` **与其变体的 `platform_sku_id`**）；
     - `mappingState=UNMAPPED` 筛选下，`hasOrderException` 的行**排序置顶**，其余按 `created_at DESC`。该标志不参与任何写路径判定。
 
 ## 9. Listing Resolver（订单安全边界）
@@ -161,6 +175,12 @@ Sprint 8 新增（2026-09-12）：
 
 - 快捷建档：`LISTING_ONBOARD_NAME_REQUIRED`（422，无标题且未填名称）。
 - 模板下载：`IMPORT_TEMPLATE_INVALID`（422，未知模板类型）。
+
+Sprint 8.5 新增（2026-09-14）：
+
+- 类目树未同步：`CATEGORY_TREE_NOT_SYNCED`（409，先在同步中心触发类目树同步）。
+- 类目导入冲突：`CATEGORY_IMPORT_CONFLICTS`（409，details 携带冲突清单，禁止静默跳过）。
+- 挂靠目标不存在：复用 `PRODUCT_NOT_FOUND`（404）。
 
 ## 13. 修改本文档的条件
 

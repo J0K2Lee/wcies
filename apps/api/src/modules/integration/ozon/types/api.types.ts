@@ -118,3 +118,56 @@ export interface OzonErrorBody {
   readonly details?: unknown;
   [key: string]: unknown;
 }
+
+// ---------------------------------------------------------------------------
+// POST /v1/description-category/tree (Sprint 8.5 T3a; verified 2026-09-14)
+// ---------------------------------------------------------------------------
+
+export interface OzonCategoryTreeNode {
+  readonly description_category_id?: number;
+  readonly category_name?: string;
+  readonly children?: readonly OzonCategoryTreeNode[];
+  readonly disabled?: boolean;
+  /** Present on TYPE entries (depth 3); they carry NO description_category_id. */
+  readonly type_id?: number;
+  readonly type_name?: string;
+  readonly [key: string]: unknown;
+}
+
+export interface OzonCategoryTreeResponse {
+  readonly result: readonly OzonCategoryTreeNode[];
+}
+
+// ---------------------------------------------------------------------------
+// POST /v4/product/info/attributes (Sprint 8.5 T5; verified 2026-09-14)
+// ---------------------------------------------------------------------------
+
+export interface OzonProductAttributesItem {
+  /** Ozon product_id (same value v3 info/list reports as `id`). */
+  readonly id: number;
+  readonly offer_id?: string;
+  readonly name?: string;
+  readonly depth?: number;
+  readonly height?: number;
+  readonly width?: number;
+  /** Observed value: "mm" (spec allows mm/cm/in). */
+  readonly dimension_unit?: string;
+  readonly weight?: number;
+  /** Observed value: "g". */
+  readonly weight_unit?: string;
+  readonly description_category_id?: number;
+  readonly type_id?: number;
+  readonly primary_image?: string;
+  readonly images?: readonly string[];
+  readonly attributes?: readonly unknown[];
+  readonly [key: string]: unknown;
+}
+
+export interface OzonProductAttributesResponse {
+  /**
+   * Real + smoke-verified (2026-09-14): `result` is a DIRECT ARRAY - the
+   * spec's `result.items` envelope does not match the live response (same
+   * class of spec-vs-real gap as /v3/product/info/list).
+   */
+  readonly result: readonly OzonProductAttributesItem[];
+}

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DeepPartial, QueryDeepPartialEntity, Repository } from 'typeorm';
+import { DeepPartial, EntityManager, QueryDeepPartialEntity, Repository } from 'typeorm';
 import { PlatformListingEntity } from '../entities/platform-listing.entity';
 import { PlatformListingSkuEntity } from '../entities/platform-listing-sku.entity';
 
@@ -120,9 +120,12 @@ export class ListingRepository {
         'mapping_status',
       )
       // Sprint 8 T3: "an order ran into this unmapped listing" - an OPEN
-      // ORDER_SKU_MAPPING_FAILED exception whose order item matches this
-      // listing by store + platform_product_id (the identifiers the order
-      // line carries when the resolver fails). Derived fact, no writes.
+      // ORDER_SKU_MAPPING_FAILED exception whose order item points at this
+      // listing by store + platform identifiers. Derived fact, no writes.
+      // Sprint 8.5 real-data fix: OZON order lines carry the SKU id in
+      // platform_product_id while listings are keyed by product id, so the
+      // match must ALSO hit the listing's variant platform_sku_id (the
+      // documented intent: the exception "runs into" this listing).
       .addSelect(
         (sub) =>
           sub
@@ -134,7 +137,14 @@ export class ListingRepository {
             .andWhere("se.status = 'OPEN'")
             .andWhere("se.reference_type = 'ORDER_ITEM'")
             .andWhere('exc_o.store_id = listing.store_id')
-            .andWhere('exc_oi.platform_product_id = listing.platform_product_id'),
+            .andWhere(
+              `(exc_oi.platform_product_id = listing.platform_product_id
+                 OR EXISTS (
+                   SELECT 1 FROM platform_listing_skus exc_pls
+                   WHERE exc_pls.listing_id = listing.id
+                     AND exc_pls.platform_sku_id = exc_oi.platform_product_id
+                     AND exc_pls.platform_sku_id IS NOT NULL))`,
+            ),
         'has_order_exception',
       );
 
@@ -311,6 +321,131 @@ export class ListingRepository {
 
   async findMappingById(id: string): Promise<PlatformListingSkuEntity | null> {
     return this.mappingRepository.findOneBy({ id });
+  }
+
+  /**
+   * Sprint 8.5 T1: row lock on the mapping INSIDE the onboarding
+   * transaction. Taking the lock first serializes "check -> create -> map"
+   * end to end, so two concurrent onboards of the same variant cannot both
+   * build master data (the loser re-checks after the lock and gets the same
+   * 409 as a plain double submit).
+   */
+  async lockMappingByIdInTx(
+    manager: EntityManager,
+    id: string,
+  ): Promise<PlatformListingSkuEntity | null> {
+    const rows = await manager
+      .getRepository(PlatformListingSkuEntity)
+      .createQueryBuilder('pls')
+      .setLock('pessimistic_write')
+      .where('pls.id = :id', { id })
+      .getOne();
+    return rows ?? null;
+  }
+
+  /**
+   * Sprint 8.5 T2: the listing's default attach target - the product of the
+   * earliest mapped variant (read on the CALLER's locked transaction so a
+   * concurrent onboard of a sibling variant is ordered by the same lock).
+   */
+  async findFirstMappedProductInTx(
+    manager: EntityManager,
+    listingId: string,
+  ): Promise<{ id: string; productCode: string; nameZh: string } | null> {
+    const rows = await manager.query<Array<{ id: string; product_code: string; name_zh: string }>>(
+      `SELECT p.id, p.product_code, p.name_zh
+       FROM platform_listing_skus pls
+       INNER JOIN skus s ON s.id = pls.sku_id
+       INNER JOIN products p ON p.id = s.product_id
+       WHERE pls.listing_id = $1 AND pls.sku_id IS NOT NULL
+       ORDER BY pls.created_at ASC, pls.id ASC
+       LIMIT 1`,
+      [listingId],
+    );
+    const first = rows[0];
+    return first === undefined
+      ? null
+      : { id: first.id, productCode: first.product_code, nameZh: first.name_zh };
+  }
+
+  /**
+   * Sprint 8.5: one join feed for the onboarding dialog - variant rows with
+   * their mapped internal refs plus the raw_data fields the dialog consumes
+   * (images, platform category keys, v4-enriched dimensions).
+   */
+  async listOnboardContextVariants(listingId: string): Promise<
+    Array<{
+      mapping: PlatformListingSkuEntity;
+      skuCode: string | null;
+      productId: string | null;
+      productCode: string | null;
+      productName: string | null;
+    }>
+  > {
+    const qb = this.mappingRepository
+      .createQueryBuilder('pls')
+      .leftJoin('skus', 'sku', 'sku.id = pls.sku_id')
+      .leftJoin('products', 'product', 'product.id = sku.product_id')
+      .addSelect('sku.sku_code', 'sku_code')
+      .addSelect('product.id', 'product_id')
+      .addSelect('product.product_code', 'product_code')
+      .addSelect('product.name_zh', 'product_name')
+      .where('pls.listing_id = :listingId', { listingId })
+      .orderBy('pls.createdAt', 'ASC');
+    const { raw: rawRows, entities } = await qb.getRawAndEntities();
+    const rawList = rawRows as Array<Record<string, unknown>>;
+    return rawList.map((raw, index) => ({
+      mapping: entities[index] as PlatformListingSkuEntity,
+      skuCode: raw['sku_code'] === null ? null : String(raw['sku_code'] as string),
+      productId: raw['product_id'] === null ? null : String(raw['product_id'] as string),
+      productCode: raw['product_code'] === null ? null : String(raw['product_code'] as string),
+      productName: raw['product_name'] === null ? null : String(raw['product_name'] as string),
+    }));
+  }
+
+  /**
+   * Sprint 8.5 T5: variant rows of a store that have no v4 attribute payload
+   * yet, keyed by their listing's platform_product_id (the v4 filter key).
+   */
+  async listEnrichmentTargets(storeId: string, limit: number): Promise<string[]> {
+    const rows = await this.listingRepository.query<Array<{ platform_product_id: string }>>(
+      `SELECT DISTINCT listing.platform_product_id
+       FROM platform_listing_skus pls
+       INNER JOIN platform_listings listing ON listing.id = pls.listing_id
+       WHERE listing.store_id = $1
+         AND pls.status = 'ACTIVE'
+         AND pls.raw_data->'product_attributes' IS NULL
+       LIMIT $2`,
+      [storeId, limit],
+    );
+    return rows.map((row) => row.platform_product_id);
+  }
+
+  /**
+   * Sprint 8.5 T5: merges the v4 attribute payload into the variant rows'
+   * raw_data under the DEDICATED product_attributes key (existing keys are
+   * never touched). Rows already carrying the key are skipped (idempotent
+   * re-runs). Returns the number of updated variant rows.
+   */
+  async mergeProductAttributes(
+    storeId: string,
+    platformProductId: string,
+    attributes: Record<string, unknown>,
+  ): Promise<number> {
+    const result = await this.listingRepository.query<Array<{ id: string }>>(
+      `UPDATE platform_listing_skus pls
+       SET raw_data = COALESCE(pls.raw_data, '{}'::jsonb) || jsonb_build_object('product_attributes', $3::jsonb),
+           updated_at = now()
+       FROM platform_listings listing
+       WHERE listing.id = pls.listing_id
+         AND listing.store_id = $1
+         AND listing.platform_product_id = $2
+         AND pls.status = 'ACTIVE'
+         AND pls.raw_data->'product_attributes' IS NULL
+       RETURNING pls.id`,
+      [storeId, platformProductId, JSON.stringify(attributes)],
+    );
+    return result.length;
   }
 
   /** Sync upsert lookup (Sprint 5 §19): ACTIVE row by platform SKU id. */

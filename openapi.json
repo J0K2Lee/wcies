@@ -3783,6 +3783,45 @@
         "tags": ["listings"]
       }
     },
+    "/api/v1/listings/{listingId}/onboard-context": {
+      "get": {
+        "operationId": "ListingController_onboardContext",
+        "parameters": [
+          {
+            "name": "listingId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ListingOnboardContextDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "建档弹窗上下文（Sprint 8.5）：变体图片/类目键/类目建议/预填尺寸重量 + 缺省挂靠商品",
+        "tags": ["listings"]
+      }
+    },
     "/api/v1/listings/exports/unmapped": {
       "post": {
         "operationId": "ListingController_exportUnmapped",
@@ -4328,6 +4367,86 @@
           }
         },
         "summary": "Delete a mapping without order history",
+        "tags": ["listings"]
+      }
+    },
+    "/api/v1/listings/category-import/preview": {
+      "post": {
+        "operationId": "CategoryImportController_preview",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryImportRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CategoryImportPreviewDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "类目导入预演（dry-run，不落库；冲突清单 + 建树预览）",
+        "tags": ["listings"]
+      }
+    },
+    "/api/v1/listings/category-import/execute": {
+      "post": {
+        "operationId": "CategoryImportController_execute",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryImportRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CategoryImportResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "确认导入（单事务：三级类目 + 复合键映射；有冲突时 409 拒绝）",
         "tags": ["listings"]
       }
     },
@@ -8339,6 +8458,86 @@
         "tags": ["sync"]
       }
     },
+    "/api/v1/sync/category-tree": {
+      "post": {
+        "operationId": "SyncController_triggerCategoryTreeSync",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TriggerSyncRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SyncJobDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "手动触发类目树同步（Sprint 8.5 T3a：ZH_HANS+RU 双语合并落缓存表）",
+        "tags": ["sync"]
+      }
+    },
+    "/api/v1/sync/product-enrichment": {
+      "post": {
+        "operationId": "SyncController_triggerProductEnrichmentSync",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TriggerSyncRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SyncJobDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "手动触发商品属性补齐（Sprint 8.5 T5：v4 attributes 并入 raw_data）",
+        "tags": ["sync"]
+      }
+    },
     "/api/v1/sync/jobs": {
       "get": {
         "operationId": "SyncController_list",
@@ -8357,7 +8556,12 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": ["LISTING_SYNC", "ORDER_SYNC"]
+              "enum": [
+                "LISTING_SYNC",
+                "ORDER_SYNC",
+                "CATEGORY_TREE_SYNC",
+                "PRODUCT_ENRICHMENT_SYNC"
+              ]
             }
           },
           {
@@ -11264,6 +11468,154 @@
         },
         "required": ["mapped", "unmapped"]
       },
+      "OnboardContextVariantDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mappingStatus": {
+            "type": "string",
+            "enum": ["UNMAPPED", "MAPPED"]
+          },
+          "platformSkuId": {
+            "type": "object",
+            "nullable": true
+          },
+          "offerId": {
+            "type": "object",
+            "nullable": true
+          },
+          "sellerSku": {
+            "type": "object",
+            "nullable": true
+          },
+          "skuCode": {
+            "type": "object",
+            "nullable": true,
+            "description": "已映射时该变体绑定的内部 SKU 编码"
+          },
+          "productId": {
+            "type": "object",
+            "nullable": true,
+            "description": "已映射时该变体绑定的内部商品 id（挂靠目标）"
+          },
+          "productCode": {
+            "type": "object",
+            "nullable": true,
+            "description": "已映射时该变体绑定的内部商品编码"
+          },
+          "primaryImage": {
+            "type": "object",
+            "nullable": true,
+            "description": "raw_data.primary_image CDN 直链"
+          },
+          "colorImage": {
+            "type": "object",
+            "nullable": true,
+            "description": "raw_data.color_image CDN 直链（转存优先用它）"
+          },
+          "descriptionCategoryId": {
+            "type": "object",
+            "nullable": true,
+            "description": "平台类目 id（raw_data.description_category_id）"
+          },
+          "descriptionTypeId": {
+            "type": "object",
+            "nullable": true,
+            "description": "平台类型 id（raw_data.type_id）"
+          },
+          "suggestedCategoryId": {
+            "type": "object",
+            "nullable": true,
+            "format": "uuid",
+            "description": "复合键命中的内部三级分类（未命中为 null，人工选择）"
+          },
+          "weightG": {
+            "type": "object",
+            "nullable": true,
+            "description": "v4 enrichment 预填重量（g）"
+          },
+          "lengthMm": {
+            "type": "object",
+            "nullable": true,
+            "description": "v4 enrichment 预填长（mm）"
+          },
+          "widthMm": {
+            "type": "object",
+            "nullable": true,
+            "description": "v4 enrichment 预填宽（mm）"
+          },
+          "heightMm": {
+            "type": "object",
+            "nullable": true,
+            "description": "v4 enrichment 预填高（mm）"
+          }
+        },
+        "required": [
+          "id",
+          "mappingStatus",
+          "platformSkuId",
+          "offerId",
+          "sellerSku",
+          "skuCode",
+          "productId",
+          "productCode",
+          "primaryImage",
+          "colorImage",
+          "descriptionCategoryId",
+          "descriptionTypeId",
+          "suggestedCategoryId",
+          "weightG",
+          "lengthMm",
+          "widthMm",
+          "heightMm"
+        ]
+      },
+      "ListingOnboardContextDto": {
+        "type": "object",
+        "properties": {
+          "listingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "object",
+            "nullable": true
+          },
+          "defaultAttachProductId": {
+            "type": "object",
+            "nullable": true,
+            "format": "uuid",
+            "description": "缺省挂靠目标：该 Listing 首个已建档变体的商品；无则为 null（新建）"
+          },
+          "defaultAttachProductCode": {
+            "type": "object",
+            "nullable": true,
+            "example": "PN000012"
+          },
+          "defaultAttachProductName": {
+            "type": "object",
+            "nullable": true,
+            "example": "VK87 MAX V2 机械键盘"
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OnboardContextVariantDto"
+            }
+          }
+        },
+        "required": [
+          "listingId",
+          "title",
+          "defaultAttachProductId",
+          "defaultAttachProductCode",
+          "defaultAttachProductName",
+          "variants"
+        ]
+      },
       "UnmappedListingExportResponseDto": {
         "type": "object",
         "properties": {
@@ -11508,9 +11860,22 @@
             "nullable": true,
             "example": "WCSKU00000042",
             "description": "未勾选生成时为 null"
+          },
+          "productCreated": {
+            "type": "boolean",
+            "example": false,
+            "description": "Sprint 8.5 T2：本次是否新建了商品（false = 挂靠已有商品）"
           }
         },
-        "required": ["listingId", "mappingId", "mappingStatus", "product", "sku", "barcode"]
+        "required": [
+          "listingId",
+          "mappingId",
+          "mappingStatus",
+          "product",
+          "sku",
+          "barcode",
+          "productCreated"
+        ]
       },
       "ListingOnboardRequestDto": {
         "type": "object",
@@ -11529,6 +11894,46 @@
             "type": "boolean",
             "default": true,
             "description": "同时生成内部条码（WCSKU…），生成后可直接打印标签"
+          },
+          "existingProductId": {
+            "type": "string",
+            "description": "Sprint 8.5 T2：挂靠到该已有商品（多变体同挂一个 Product）",
+            "format": "uuid"
+          },
+          "createNewProduct": {
+            "type": "boolean",
+            "description": "Sprint 8.5 T2：显式另建新商品（覆盖「缺省自动挂靠已有商品」）"
+          },
+          "brandId": {
+            "type": "string",
+            "description": "Sprint 8.5 T4：商品品牌（仅新建商品时生效）",
+            "format": "uuid"
+          },
+          "categoryId": {
+            "type": "string",
+            "description": "Sprint 8.5 T3c：商品分类（三级，仅新建商品时生效）",
+            "format": "uuid"
+          },
+          "rememberCategoryMapping": {
+            "type": "boolean",
+            "default": true,
+            "description": "Sprint 8.5 T3c：记住「平台类目→内部类目」映射（onboard 同一事务写入，同类目后续自动命中）"
+          },
+          "weightG": {
+            "type": "number",
+            "description": "Sprint 8.5 T5：重量（g），可编辑预填"
+          },
+          "lengthMm": {
+            "type": "number",
+            "description": "Sprint 8.5 T5：长（mm）"
+          },
+          "widthMm": {
+            "type": "number",
+            "description": "Sprint 8.5 T5：宽（mm）"
+          },
+          "heightMm": {
+            "type": "number",
+            "description": "Sprint 8.5 T5：高（mm）"
           }
         }
       },
@@ -11555,6 +11960,130 @@
             "enum": ["ACTIVE", "INACTIVE"]
           }
         }
+      },
+      "CategoryImportStatsDto": {
+        "type": "object",
+        "properties": {
+          "totalNodes": {
+            "type": "number",
+            "example": 7933
+          },
+          "skippedDisabled": {
+            "type": "number",
+            "example": 0
+          },
+          "skippedOrphaned": {
+            "type": "number",
+            "example": 0
+          },
+          "duplicateCompositeKeys": {
+            "type": "number",
+            "example": 22
+          },
+          "toCreate": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "totalNodes",
+          "skippedDisabled",
+          "skippedOrphaned",
+          "duplicateCompositeKeys",
+          "toCreate"
+        ]
+      },
+      "CategoryImportConflictDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "积木"
+          },
+          "level": {
+            "type": "number",
+            "example": 3
+          },
+          "reason": {
+            "type": "string",
+            "example": "name_ru「Конструктор」与现有分类「积木」精确重名"
+          }
+        },
+        "required": ["name", "level", "reason"]
+      },
+      "CategoryImportTopLevelPreviewDto": {
+        "type": "object",
+        "properties": {
+          "nameZh": {
+            "type": "string",
+            "example": "儿童用品"
+          },
+          "nameRu": {
+            "type": "object",
+            "nullable": true,
+            "example": "Детские товары"
+          },
+          "level2Count": {
+            "type": "number",
+            "example": 21
+          },
+          "level3Count": {
+            "type": "number",
+            "example": 289
+          }
+        },
+        "required": ["nameZh", "nameRu", "level2Count", "level3Count"]
+      },
+      "CategoryImportPreviewDto": {
+        "type": "object",
+        "properties": {
+          "platformId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/CategoryImportStatsDto"
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CategoryImportConflictDto"
+            }
+          },
+          "previewTopLevels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CategoryImportTopLevelPreviewDto"
+            }
+          }
+        },
+        "required": ["platformId", "stats", "conflicts", "previewTopLevels"]
+      },
+      "CategoryImportRequestDto": {
+        "type": "object",
+        "properties": {
+          "platformId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": ["platformId"]
+      },
+      "CategoryImportResultDto": {
+        "type": "object",
+        "properties": {
+          "platformId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created": {
+            "type": "object"
+          },
+          "mappingCount": {
+            "type": "number",
+            "example": 7365
+          }
+        },
+        "required": ["platformId", "created", "mappingCount"]
       },
       "ImportJobResponseDto": {
         "type": "object",
@@ -15592,7 +16121,7 @@
           },
           "syncType": {
             "type": "string",
-            "enum": ["LISTING_SYNC", "ORDER_SYNC"]
+            "enum": ["LISTING_SYNC", "ORDER_SYNC", "CATEGORY_TREE_SYNC", "PRODUCT_ENRICHMENT_SYNC"]
           },
           "status": {
             "type": "string",

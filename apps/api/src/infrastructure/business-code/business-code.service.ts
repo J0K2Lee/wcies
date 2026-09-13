@@ -120,6 +120,35 @@ export class BusinessCodeService {
     return Number(result[0]?.next_value ?? Number.NaN);
   }
 
+  /**
+   * Takes `count` consecutive numbers from a scope in ONE statement
+   * (Sprint 8.5 T3b: the tree import needs ~8k category codes and must not
+   * issue one UPSERT per code inside its transaction). Returns the inclusive
+   * [from, to] range.
+   */
+  async nextRange(
+    scopeKey: string,
+    count: number,
+    manager?: EntityManager,
+  ): Promise<{ from: number; to: number }> {
+    const executor = manager ?? this.dataSource;
+    const result = await executor.query<
+      Array<{ from_value: string | number; to_value: string | number }>
+    >(
+      `INSERT INTO business_code_sequences (scope_key, next_value, updated_at)
+       VALUES ($1, $2::bigint, now())
+       ON CONFLICT (scope_key)
+       DO UPDATE SET next_value = business_code_sequences.next_value + $2::bigint,
+                     updated_at = now()
+       RETURNING next_value - $2::bigint + 1 AS from_value, next_value AS to_value`,
+      [scopeKey, count],
+    );
+    return {
+      from: Number(result[0]?.from_value ?? Number.NaN),
+      to: Number(result[0]?.to_value ?? Number.NaN),
+    };
+  }
+
   async nextWarehouseCode(warehouseType: WarehouseCodeType): Promise<string> {
     return formatWarehouseCode(warehouseType, await this.next(warehouseScope(warehouseType)));
   }

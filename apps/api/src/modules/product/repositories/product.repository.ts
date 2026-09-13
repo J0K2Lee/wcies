@@ -114,6 +114,20 @@ export class ProductRepository {
     await this.repository.update({ id }, patch);
   }
 
+  /**
+   * Sprint 8.5 T6: conditional main-image backfill - only fills while empty,
+   * so a later image import can never overwrite a human-picked main image.
+   */
+  async updateMainImageIfEmpty(id: string, imageId: string): Promise<boolean> {
+    const result = (await this.repository.query(
+      'UPDATE products SET main_image_id = $2, updated_at = now() WHERE id = $1 AND main_image_id IS NULL',
+      [id, imageId],
+    )) as unknown;
+    // pg driver via TypeORM returns [rows, rowCount] for UPDATE statements.
+    const rowCount = Array.isArray(result) ? Number((result as unknown[])[1] ?? 0) : 0;
+    return rowCount === 1;
+  }
+
   /** Tables referencing products that block a hard delete (decision 0003). */
   async countReferences(id: string): Promise<Array<{ table: string; count: number }>> {
     const rows = await this.repository.query<Array<Record<string, string | number>>>(

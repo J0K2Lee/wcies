@@ -1,7 +1,13 @@
 /** Sync domain vocabulary (Sprint 5 task §10-§12). Centralized - no magic
  *  strings in services (AGENTS.md §64). */
 
-export const SYNC_TYPES = ['LISTING_SYNC', 'ORDER_SYNC'] as const;
+export const SYNC_TYPES = [
+  'LISTING_SYNC',
+  'ORDER_SYNC',
+  // Sprint 8.5: manual, store-credential-scoped reference-data syncs.
+  'CATEGORY_TREE_SYNC',
+  'PRODUCT_ENRICHMENT_SYNC',
+] as const;
 export type SyncType = (typeof SYNC_TYPES)[number];
 
 export const SYNC_JOB_STATUSES = ['PENDING', 'RUNNING', 'SUCCESS', 'PARTIAL', 'FAILED'] as const;
@@ -21,9 +27,14 @@ export const RAW_EVENT_STATUSES = [
 export type RawEventStatus = (typeof RAW_EVENT_STATUSES)[number];
 
 /** Which queue serves which sync type. */
-export const SYNC_TYPE_QUEUES: Record<SyncType, 'orderSync' | 'listingSync'> = {
+export const SYNC_TYPE_QUEUES: Record<
+  SyncType,
+  'orderSync' | 'listingSync' | 'categoryTree' | 'enrichment'
+> = {
   ORDER_SYNC: 'orderSync',
   LISTING_SYNC: 'listingSync',
+  CATEGORY_TREE_SYNC: 'categoryTree',
+  PRODUCT_ENRICHMENT_SYNC: 'enrichment',
 };
 
 export const ORDER_SYNC_SOURCE = {

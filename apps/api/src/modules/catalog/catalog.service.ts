@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { EntityManager } from 'typeorm';
 import {
   OperatorContext,
   OperationLogService,
@@ -184,10 +185,7 @@ export class CatalogService {
 
     // Same-name sibling under the same parent (incl. between roots); the DB
     // unique index is the backstop, this gives the friendly error.
-    const duplicate = await this.repository.findSiblingByName(
-      dto.parentId ?? null,
-      dto.nameZh,
-    );
+    const duplicate = await this.repository.findSiblingByName(dto.parentId ?? null, dto.nameZh);
     if (duplicate !== null) {
       throw new CategoryNameDuplicatedError(dto.nameZh, dto.parentId ?? null);
     }
@@ -227,16 +225,8 @@ export class CatalogService {
       throw new CategoryNotFoundError(id);
     }
 
-    if (
-      dto.nameZh !== undefined &&
-      dto.nameZh.trim() !== '' &&
-      dto.nameZh !== category.nameZh
-    ) {
-      const duplicate = await this.repository.findSiblingByName(
-        category.parentId,
-        dto.nameZh,
-        id,
-      );
+    if (dto.nameZh !== undefined && dto.nameZh.trim() !== '' && dto.nameZh !== category.nameZh) {
+      const duplicate = await this.repository.findSiblingByName(category.parentId, dto.nameZh, id);
       if (duplicate !== null) {
         throw new CategoryNameDuplicatedError(dto.nameZh, category.parentId);
       }
@@ -327,6 +317,121 @@ export class CatalogService {
   /** Cross-module validation for Product service. */
   async findCategoryEntityById(id: string): Promise<CategoryEntity | null> {
     return this.repository.findCategoryById(id);
+  }
+
+  /**
+   * Bulk category creation on the CALLER's transaction (Sprint 8.5 T3b):
+   * the platform tree import creates ~8k three-level categories inside one
+   * transaction, codes pre-allocated by the orchestrator (BusinessCodeService
+   * nextRange). Same invariants as createCategory() - level derives from the
+   * parent, depth capped at 3, sibling name_zh unique within the batch AND
+   * against existing rows (the DB unique index stays the backstop).
+   * Rows are inserted level by level; a parent must appear in an earlier
+   * level of the same batch (the import walks the tree top-down).
+   */
+  async createCategoriesBulkInTx(
+    manager: EntityManager,
+    rows: ReadonlyArray<{
+      level: number;
+      parentId: string | null;
+      nameZh: string;
+      nameRu: string | null;
+      code: string;
+      sortOrder: number;
+    }>,
+  ): Promise<CategoryEntity[]> {
+    if (rows.length === 0) {
+      return [];
+    }
+    for (const row of rows) {
+      if ((row.level === 1) !== (row.parentId === null)) {
+        throw new CategoryLevelInvalidError(row.code, row.level);
+      }
+      if (row.level < 1 || row.level > 3) {
+        throw new CategoryDepthExceededError(row.parentId ?? 'root', row.level);
+      }
+    }
+
+    // Sibling name_zh uniqueness within the batch (friendly error before the
+    // DB unique index fires mid-transaction).
+    const seenSiblingNames = new Set<string>();
+    for (const row of rows) {
+      const siblingKey = `${row.parentId ?? 'root'}:${row.nameZh.toLowerCase()}`;
+      if (seenSiblingNames.has(siblingKey)) {
+        throw new CategoryNameDuplicatedError(row.nameZh, row.parentId);
+      }
+      seenSiblingNames.add(siblingKey);
+    }
+    // ...and against existing rows. Two small columns for the whole table -
+    // the table is empty-to-small at import time.
+    const existing = await manager
+      .getRepository(CategoryEntity)
+      .createQueryBuilder('category')
+      .select(['category.parentId', 'category.nameZh'])
+      .getMany();
+    const existingKeys = new Set(
+      existing.map((row) => `${row.parentId ?? 'root'}:${row.nameZh.toLowerCase()}`),
+    );
+    for (const row of rows) {
+      if (existingKeys.has(`${row.parentId ?? 'root'}:${row.nameZh.toLowerCase()}`)) {
+        throw new CategoryNameDuplicatedError(row.nameZh, row.parentId);
+      }
+    }
+
+    // Level-2/3 rows point at parents created earlier in this same batch.
+    // Validate every parent reference resolves (batch-first or existing DB
+    // row with level - 1) while inserting level by level.
+    const dbParentLevels = new Map(
+      existing.length === 0
+        ? []
+        : (
+            await manager
+              .getRepository(CategoryEntity)
+              .createQueryBuilder('category')
+              .select(['category.id', 'category.level'])
+              .getMany()
+          ).map((row) => [row.id, row.level] as const),
+    );
+    const repository = manager.getRepository(CategoryEntity);
+    const saved: CategoryEntity[] = [];
+    for (let level = 1; level <= 3; level += 1) {
+      const levelRows = rows.filter((row) => row.level === level);
+      if (levelRows.length === 0) {
+        continue;
+      }
+      const batchParentIds = new Set(
+        saved.filter((row) => row.level === level - 1).map((row) => row.id),
+      );
+      const prepared = levelRows.map((row) => {
+        if (
+          row.parentId !== null &&
+          !batchParentIds.has(row.parentId) &&
+          dbParentLevels.get(row.parentId) !== level - 1
+        ) {
+          throw new CategoryNotFoundError(row.parentId);
+        }
+        const category = new CategoryEntity();
+        category.parentId = row.parentId;
+        category.code = row.code;
+        category.level = row.level;
+        category.nameZh = row.nameZh;
+        category.nameRu = row.nameRu;
+        category.sortOrder = row.sortOrder;
+        category.status = 'ACTIVE';
+        return category;
+      });
+      for (let start = 0; start < prepared.length; start += 500) {
+        const chunk = prepared.slice(start, start + 500);
+        const inserted = (await repository.insert(chunk)) as {
+          identifiers: Array<{ id?: string }>;
+        };
+        chunk.forEach((category, index) => {
+          category.id = inserted.identifiers[index]?.id ?? '';
+        });
+      }
+      saved.push(...prepared);
+    }
+    return saved;
   }
 
   /**
