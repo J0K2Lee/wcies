@@ -586,6 +586,20 @@ export function SkusPage() {
     { skuId: printFor?.id ?? '' },
     printFor !== null,
   );
+  // 打印弹窗打开时条码列表是异步到达的：若此时仍未选中（主条码为空的
+  // SKU，或行菜单入口在数据到达前打开），自动补选主条码或首个条码，
+  // 不让用户面对空下拉。
+  useEffect(() => {
+    if (printFor === null || printBarcode !== '') {
+      return;
+    }
+    const barcodes = printBarcodes.data?.data ?? [];
+    if (barcodes.length === 0) {
+      return;
+    }
+    const primary = barcodes.find((b) => b.isPrimary) ?? barcodes[0]!;
+    setPrintBarcode(primary.barcode);
+  }, [printFor, printBarcode, printBarcodes.data]);
 
   const rows = list.data?.data ?? [];
 
@@ -983,8 +997,9 @@ export function SkusPage() {
                       key: 'print',
                       label: '打印条码标签',
                       onClick: () => {
-                        const primary = printBarcodes.data?.data.find((b) => b.isPrimary);
-                        setPrintBarcode(primary?.barcode ?? '');
+                        // 行数据自带主条码；printBarcodes 查询此刻必然未加载
+                        // （其 key 依赖这里才设置的 printFor），不能在这里取。
+                        setPrintBarcode(record.primaryBarcode ?? '');
                         setPrintCopies(1);
                         setPrintFor(record);
                       },
