@@ -188,11 +188,12 @@ export class OrderIngestionService {
     | { ok: false; code: string; details: Record<string, unknown> }
   > {
     try {
+      // Decision 0016: offer id is NOT passed - it is editable on the
+      // platform, so it can never be the basis of order resolution.
       const resolved = await this.resolver.resolveInternalSku({
         storeId: order.storeId,
         platformSkuId: item.platformSkuId ?? undefined,
         sellerSku: item.sellerSku ?? undefined,
-        offerId: item.offerId ?? undefined,
       });
       return { ok: true, skuId: resolved.internalSkuId, listingSkuId: resolved.listingSkuId };
     } catch (error: unknown) {

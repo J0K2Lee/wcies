@@ -194,3 +194,39 @@ export class CategoryTreeItemDto extends CategoryResponseDto {
   @ApiProperty({ type: [CategoryTreeItemDto] })
   children!: CategoryTreeItemDto[];
 }
+
+/**
+ * Column-pruned category node (Sprint 8.5R1): the category pickers and the
+ * classification manager only ever read these fields, so the 8k-node OZON
+ * tree is shipped without the entity's bookkeeping columns. `code` IS kept -
+ * the 分类管理 panel displays it (ProductsPage). `GET /categories` stays as-is
+ * for callers that need the full entity shape.
+ */
+export class CategoryTreeLiteItemDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ format: 'uuid', nullable: true })
+  parentId!: string | null;
+
+  @ApiProperty({ example: 'CN00251' })
+  code!: string;
+
+  @ApiProperty({ example: '键盘' })
+  nameZh!: string;
+
+  @ApiProperty({ nullable: true })
+  nameRu!: string | null;
+
+  @ApiProperty({ example: 3, description: '1..3; products may only reference level 3' })
+  level!: number;
+
+  @ApiProperty({ example: 0 })
+  sortOrder!: number;
+
+  @ApiProperty({ example: 'ACTIVE' })
+  status!: string;
+
+  @ApiProperty({ type: [CategoryTreeLiteItemDto] })
+  children!: CategoryTreeLiteItemDto[];
+}

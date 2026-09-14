@@ -7,6 +7,7 @@ import {
   Cascader,
   Drawer,
   Form,
+  Image,
   Input,
   InputNumber,
   Modal,
@@ -147,10 +148,20 @@ interface BrandItem {
   status: string;
 }
 
-/** Variant-aware SKU name prefill (Sprint 8.5 T7): title + variant discriminator. */
-function buildVariantSkuName(title: string | null, variant: OnboardContextVariant): string {
+/**
+ * Variant-aware name prefill (Sprint 8.5 T7, revised in 8.5R1): the variant's
+ * Offer ID LEADS - it is the string operators see on the platform and use to
+ * tell variants apart. The listing title (usually Russian) is only the
+ * fallback; platform SKU id / seller SKU are the last resort so variants can
+ * never collapse into indistinguishable duplicates.
+ */
+function buildVariantName(title: string | null, variant: OnboardContextVariant): string {
+  const offer = variant.offerId?.trim() ?? '';
+  if (offer !== '') {
+    return offer;
+  }
   const base = title?.trim() ?? '';
-  const discriminator = variant.offerId ?? variant.sellerSku ?? variant.platformSkuId;
+  const discriminator = variant.sellerSku ?? variant.platformSkuId;
   if (discriminator !== null && discriminator !== '') {
     return base === '' ? discriminator : `${base} / ${discriminator}`;
   }
@@ -298,8 +309,10 @@ export function ListingsPage() {
     [onboardCtx, onboardSelectedVariantId],
   );
   // Category tree + brands for the enhanced fields (Sprint 8.5 T3c/T4).
+  // Sprint 8.5R1: the lite endpoint (8k nodes) - the picker never reads the
+  // pruned columns, and the full tree cost megabytes per page open.
   const categories = useApiQuery<{ data: CategoryNode[] }>(
-    '/api/v1/categories',
+    '/api/v1/categories/tree-lite',
     {},
     ['categories'],
     undefined,
@@ -392,6 +405,7 @@ export function ListingsPage() {
       lengthMm?: number;
       widthMm?: number;
       heightMm?: number;
+      latestPurchasePrice?: number;
     }) =>
       apiPost<OnboardResult>(
         '/api/v1/listings/{listingId}/skus/{id}/onboard',
@@ -408,6 +422,7 @@ export function ListingsPage() {
           lengthMm: input.lengthMm,
           widthMm: input.widthMm,
           heightMm: input.heightMm,
+          latestPurchasePrice: input.latestPurchasePrice,
         },
         { listingId: input.listingId, id: input.mappingId },
       ),
@@ -516,20 +531,21 @@ export function ListingsPage() {
 
   /**
    * Prefills the editable fields for the currently selected variant: names
-   * from the listing title, category from the composite-key suggestion,
-   * dims/weight from the v4 enrichment payload.
+   * from the variant's Offer ID (listing title as fallback), category from the
+   * composite-key suggestion, dims/weight from the v4 enrichment payload.
    */
   useEffect(() => {
     if (onboardListingId === null || onboardResult !== null || onboardCtx === undefined) {
       return;
     }
     const suggested = onboardSelectedVariant?.suggestedCategoryId ?? null;
+    const variantName =
+      onboardSelectedVariant === null
+        ? (onboardCtx.title ?? '')
+        : buildVariantName(onboardCtx.title, onboardSelectedVariant);
     onboardForm.setFieldsValue({
-      productNameZh: onboardForm.getFieldValue('productNameZh') || (onboardCtx.title ?? ''),
-      skuNameZh:
-        onboardSelectedVariant === null
-          ? (onboardCtx.title ?? '')
-          : buildVariantSkuName(onboardCtx.title, onboardSelectedVariant),
+      productNameZh: onboardForm.getFieldValue('productNameZh') || variantName,
+      skuNameZh: variantName,
       categoryPath: suggested !== null ? (categoryPathById.get(suggested) ?? undefined) : undefined,
       weightG: onboardSelectedVariant?.weightG ?? undefined,
       lengthMm: onboardSelectedVariant?.lengthMm ?? undefined,
@@ -588,7 +604,10 @@ export function ListingsPage() {
       lengthMm: next.lengthMm ?? undefined,
       widthMm: next.widthMm ?? undefined,
       heightMm: next.heightMm ?? undefined,
-      skuNameZh: buildVariantSkuName(onboardCtx.title, next),
+      skuNameZh: buildVariantName(onboardCtx.title, next),
+      // The price belongs to the SKU being built: never carried over from the
+      // previous variant (unlike brand/category, which are product-level).
+      latestPurchasePrice: undefined,
     });
     void queryClient.invalidateQueries({ queryKey: ['listing-onboard-context'] });
   };
@@ -1075,9 +1094,9 @@ export function ListingsPage() {
             {(fields, { add, remove }) => (
               <>
                 <p style={{ fontSize: 12.5, color: colors.textTertiary, marginBottom: 10 }}>
-                  每个变体至少要填一个平台标识（Platform SKU ID / Seller SKU / Offer ID）：
-                  订单靠这些标识反查内部 SKU，三个都空则该映射永远不会被订单匹配到。 OZON 的 Offer
-                  ID 即卖家货号，Platform SKU ID 填平台返回的 sku。
+                  每个变体至少要填 Platform SKU ID 或 Seller SKU： 订单只按这两个标识反查内部
+                  SKU（Offer ID 可被运营在平台侧修改，不作为解析依据； 仍会作为平台事实记录）。OZON
+                  的 Platform SKU ID 填平台返回的 sku。
                 </p>
                 {fields.map((field) => (
                   <Space key={field.key} align="baseline" wrap>
@@ -1100,28 +1119,25 @@ export function ListingsPage() {
                     </Form.Item>
                     <Form.Item
                       name={[field.name, 'platformSkuId']}
-                      dependencies={[
-                        ['skuVariants', field.name, 'sellerSku'],
-                        ['skuVariants', field.name, 'offerId'],
-                      ]}
+                      dependencies={[['skuVariants', field.name, 'sellerSku']]}
                       rules={[
                         ({ getFieldValue }) => ({
                           validator: (_rule, value: unknown) => {
                             const variants = getFieldValue('skuVariants') as Array<{
                               platformSkuId?: string;
                               sellerSku?: string;
-                              offerId?: string;
                             }>;
                             const row = variants?.[field.name];
                             const text = (input: unknown): string =>
                               typeof input === 'string' ? input.trim() : '';
-                            const hasAny =
-                              text(value) !== '' ||
-                              text(row?.sellerSku) !== '' ||
-                              text(row?.offerId) !== '';
+                            const hasAny = text(value) !== '' || text(row?.sellerSku) !== '';
                             return hasAny
                               ? Promise.resolve()
-                              : Promise.reject(new Error('至少填一个平台标识'));
+                              : Promise.reject(
+                                  new Error(
+                                    '至少填 Platform SKU ID 或 Seller SKU（Offer ID 不作为解析依据）',
+                                  ),
+                                );
                           },
                         }),
                       ]}
@@ -1132,7 +1148,7 @@ export function ListingsPage() {
                       <Input placeholder="Seller SKU" style={{ width: 130 }} />
                     </Form.Item>
                     <Form.Item name={[field.name, 'offerId']}>
-                      <Input placeholder="Offer ID" style={{ width: 120 }} />
+                      <Input placeholder="Offer ID（仅记录）" style={{ width: 140 }} />
                     </Form.Item>
                     <Button danger onClick={() => remove(field.name)}>
                       删除
@@ -1489,7 +1505,8 @@ export function ListingsPage() {
           }
         >
           <p style={{ color: colors.textTertiary, fontSize: 12.5 }}>
-            修改平台标识。要更换绑定的内部 SKU，请使用「人工映射」。
+            修改平台标识。要更换绑定的内部 SKU，请使用「人工映射」。 Offer ID
+            仅记录为平台事实——它可被运营在平台侧修改，不参与订单解析。
           </p>
           <Form form={mappingEditForm} layout="vertical">
             <Form.Item name="platformSkuId" label="Platform SKU ID">
@@ -1583,6 +1600,7 @@ export function ListingsPage() {
                         lengthMm: values.lengthMm as number | undefined,
                         widthMm: values.widthMm as number | undefined,
                         heightMm: values.heightMm as number | undefined,
+                        latestPurchasePrice: values.latestPurchasePrice as number | undefined,
                       });
                     });
                   }}
@@ -1693,6 +1711,8 @@ export function ListingsPage() {
                       widthMm: undefined,
                       heightMm: undefined,
                       categoryPath: undefined,
+                      // Per-SKU value: never carried across variants.
+                      latestPurchasePrice: undefined,
                     });
                   }}
                   options={onboardUnmapped.map((variant) => ({
@@ -1713,12 +1733,12 @@ export function ListingsPage() {
             )}
             {onboardSelectedVariant?.primaryImage != null && (
               <Space align="start" style={{ marginBottom: 12 }}>
-                <img
+                <Image
                   src={onboardSelectedVariant.primaryImage}
                   alt="平台商品图"
+                  width={120}
+                  height={120}
                   style={{
-                    maxHeight: 120,
-                    maxWidth: 120,
                     objectFit: 'contain',
                     borderRadius: 6,
                     border: `1px solid ${colors.border}`,
@@ -1726,7 +1746,7 @@ export function ListingsPage() {
                 />
                 <span style={{ fontSize: 12.5, color: colors.textTertiary, maxWidth: 320 }}>
                   平台商品图预览（CDN
-                  直链）。建档成功后系统会把颜色图/首图异步转存到自有存储并设为商品主图。
+                  直链，点击可放大）。建档成功后系统会把颜色图/首图异步转存到自有存储并设为商品主图。
                 </span>
               </Space>
             )}
@@ -1856,6 +1876,18 @@ export function ListingsPage() {
               <Form.Item name="heightMm" label="高（mm）" style={{ marginBottom: 0 }}>
                 <InputNumber min={0} placeholder="高" style={{ width: 110 }} />
               </Form.Item>
+              <Form.Item
+                name="latestPurchasePrice"
+                label="最新采购价（CNY）"
+                style={{ marginBottom: 0 }}
+              >
+                <InputNumber
+                  min={0}
+                  step={0.01}
+                  placeholder="人工录入，可留空"
+                  style={{ width: 150 }}
+                />
+              </Form.Item>
             </Space>
             <span
               style={{
@@ -1866,6 +1898,7 @@ export function ListingsPage() {
               }}
             >
               尺寸/重量按平台 v4 属性预填（可改）；体积由后端按长×宽×高计算，不可直接填写。
+              采购价为本 SKU 的人工维护值，不影响由收货确认维护的移动加权平均成本。
             </span>
             <Form.Item
               name="generateBarcode"

@@ -91,7 +91,8 @@ export class ListingController {
 
   @Get('resolve')
   @ApiOperation({
-    summary: 'Resolve an internal SKU by platform identifiers (STRICTLY store-scoped)',
+    summary:
+      'Resolve an internal SKU by platform identifiers (STRICTLY store-scoped, decision 0016)',
   })
   @ApiOkEnvelope(ResolveSkuResponseDto)
   async resolve(
@@ -102,7 +103,6 @@ export class ListingController {
         storeId: query.storeId,
         platformSkuId: query.platformSkuId,
         sellerSku: query.sellerSku,
-        offerId: query.offerId,
       }),
     );
   }

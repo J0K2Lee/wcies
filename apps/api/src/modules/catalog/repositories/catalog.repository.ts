@@ -4,6 +4,18 @@ import { DeepPartial, Repository } from 'typeorm';
 import { BrandEntity } from '../entities/brand.entity';
 import { CategoryEntity } from '../entities/category.entity';
 
+/** Pruned category projection for tree consumers (Sprint 8.5R1). */
+export interface CategoryLiteRow {
+  id: string;
+  parentId: string | null;
+  code: string;
+  nameZh: string;
+  nameRu: string | null;
+  level: number;
+  sortOrder: number;
+  status: string;
+}
+
 /** Data access only - no business rules here (AGENTS.md §8). */
 @Injectable()
 export class CatalogRepository {
@@ -60,6 +72,26 @@ export class CatalogRepository {
 
   async listCategories(): Promise<CategoryEntity[]> {
     return this.categoryRepository.find({ order: { sortOrder: 'ASC', code: 'ASC' } });
+  }
+
+  /**
+   * Sprint 8.5R1: the same ordering with the heavy bookkeeping columns pruned
+   * (created_at/updated_at etc.) for the 8k-node tree consumers. Column
+   * pruning happens in SQL - the rows never leave Postgres in the first place.
+   */
+  async listCategoriesLite(): Promise<CategoryLiteRow[]> {
+    return this.categoryRepository.query<CategoryLiteRow[]>(
+      `SELECT id,
+              parent_id AS "parentId",
+              code,
+              name_zh AS "nameZh",
+              name_ru AS "nameRu",
+              level,
+              sort_order AS "sortOrder",
+              status
+         FROM categories
+        ORDER BY sort_order ASC, code ASC`,
+    );
   }
 
   async findCategoryById(id: string): Promise<CategoryEntity | null> {

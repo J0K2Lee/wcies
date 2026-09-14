@@ -310,6 +310,10 @@ export class SkuService {
    * user-editable in the dialog). Same all-or-none dimension rule and
    * backend-computed volume as the regular create() - the client can never
    * write volume_mm3 directly.
+   *
+   * Sprint 8.5R1: optional latest purchase price - the human-entry channel
+   * for master-data §4.3 (`latest_purchase_price` is operator-maintained and
+   * independent of the moving average cost, which only receipts confirm).
    */
   async createForOnboardingInTx(
     manager: EntityManager,
@@ -320,6 +324,7 @@ export class SkuService {
       lengthMm?: number | null;
       widthMm?: number | null;
       heightMm?: number | null;
+      latestPurchasePrice?: number | null;
     },
   ): Promise<SkuEntity> {
     const product = await manager.getRepository(ProductEntity).findOneBy({
@@ -348,7 +353,7 @@ export class SkuService {
       heightMm,
       volumeMm3: toNumeric(computeVolumeMm3(lengthMm, widthMm, heightMm)),
       purchaseUrl: null,
-      latestPurchasePrice: null,
+      latestPurchasePrice: toNumeric(input.latestPurchasePrice ?? null),
       movingAverageCost: null,
       costCurrency: 'CNY',
       serialTracking: false,

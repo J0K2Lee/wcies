@@ -223,6 +223,15 @@ export class ListingOnboardRequestDto {
   @IsNumber()
   @Min(0)
   heightMm?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Sprint 8.5R1：最新采购价（CNY，人工录入通道；与仅由收货确认维护的移动加权平均成本无关）',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  latestPurchasePrice?: number;
 }
 
 export class ListingOnboardProductDto {
@@ -554,23 +563,17 @@ export class ResolveSkuRequestDto {
   @IsUUID()
   storeId!: string;
 
-  @ApiPropertyOptional({ maxLength: 255 })
+  @ApiPropertyOptional({ maxLength: 255, description: '解析标识之一（决策 0016）' })
   @IsOptional()
   @IsString()
   @MaxLength(255)
   platformSkuId?: string;
 
-  @ApiPropertyOptional({ maxLength: 255 })
+  @ApiPropertyOptional({ maxLength: 255, description: '解析标识之一（决策 0016）' })
   @IsOptional()
   @IsString()
   @MaxLength(255)
   sellerSku?: string;
-
-  @ApiPropertyOptional({ maxLength: 255 })
-  @IsOptional()
-  @IsString()
-  @MaxLength(255)
-  offerId?: string;
 }
 
 export class ResolveSkuResponseDto {
@@ -586,7 +589,11 @@ export class ResolveSkuResponseDto {
   @ApiProperty({ example: 'SKU000001' })
   internalSkuCode!: string;
 
-  @ApiProperty({ example: 'ABC', nullable: true })
+  @ApiProperty({
+    example: null,
+    nullable: true,
+    description: '决策 0016 起恒为 null：Offer ID 可被运营修改，不作为订单解析依据（字段保留兼容）',
+  })
   matchedOfferId!: string | null;
 
   @ApiProperty({ example: 'VK87-BLK', nullable: true })

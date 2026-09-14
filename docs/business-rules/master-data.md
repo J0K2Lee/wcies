@@ -104,7 +104,7 @@ Sprint 5 起，平台同步会产生**未映射**的平台 SKU 事实：
 5. 平台同步 upsert 规则：按 `(listing_id, platform_sku_id)` 查找——存在则仅刷新平台事实（offer_id / seller_sku / raw_data），**绝不触碰 sku_id 与 mapping_status**（人工映射永不被同步覆盖）；不存在则插入 `sku_id = NULL, mapping_status = 'UNMAPPED'` 的行。
 6. Resolver 只解析 `sku_id IS NOT NULL AND mapping_status = 'MAPPED'` 的 ACTIVE 行；UNMAPPED 行参与订单解析时按既有规则产生 `ORDER_SKU_MAPPING_FAILED`。
 7. 人工映射入口：`POST /listings/:listingId/skus/:mappingId/map {skuId}`（UNMAPPED → MAPPED，记 Operation Log）。
-8. **映射必须携带平台标识**（决策 0012，2026-09-11）：创建变体映射时 `platform_sku_id / seller_sku / offer_id` **至少填一个**，全空返回 422 `LISTING_SKU_MAPPING_IDENTIFIER_REQUIRED`。原因：订单解析只认这三个标识（见 §9），全空的映射行永远匹配不到任何订单，只会在日后表现为一个无法解释的 `ORDER_SKU_MAPPING_FAILED`。判定顺序上「同一 SKU 已映射到该 Listing」（409）优先于本规则。
+8. **映射必须携带平台标识**（决策 0012，2026-09-11；决策 0016 收紧，2026-09-14）：创建变体映射时 `platform_sku_id / seller_sku` **至少填一个**，纯 Offer ID 或三个全空返回 422 `LISTING_SKU_MAPPING_IDENTIFIER_REQUIRED`，文案「至少填写 Platform SKU ID 或 Seller SKU；Offer ID 可被运营修改，不作为订单解析依据」。原因：订单解析只认 `platform_sku_id / seller_sku`（见 §9），`offer_id` 可被运营在平台侧随时修改，按它解析会在改名后静默失配。判定顺序上「同一 SKU 已映射到该 Listing」（409）优先于本规则。`offer_id` 仍照常入库、展示、导出，仅**不参与解析与绑定**（决策 0016）。
    - 平台已同步的商品**不要用「新建映射」**：该 Listing 已存在，新建会因唯一键冲突失败；正确做法是在该 Listing 详情里对已同步的未映射变体做「人工映射」，这样映射自带平台标识。
 9. 严禁自动猜测映射（名字相似/条码一致都不是依据）。
 10. `platform_listings.last_seen_at` 记录最近一次被 Listing Sync 观察到的时间；同步未见到某 listing **不做**任何自动下架/删除。
@@ -130,21 +130,28 @@ Sprint 8.5 起（2026-09-14，决策 0014/0015）——快捷建档增强：
 18. **OZON 类目树导入（决策 0015）**：手动同步 `/v1/description-category/tree`（ZH_HANS + RU 双语合并）到缓存表 `platform_category_nodes`（按 SyncJob 记录）；一键导入按「一级类目→内部一级、二级类目→内部二级、type→内部三级」1:1 直映（真实树恰好三层，T0 冒烟验证；更深层级跳过并列入预演报告），仅导入 `disabled=false`，dry-run 预演报告冲突清单（与现有分类按 `name_ru` 精确查重），存在**真冲突**时执行 **409 拒绝**（§89：先查重、歧义报错、禁止静默丢弃）；确认后**单事务**批量建类目（经 catalog 公开 Service，`CN%05d` 批量取号）+ 写映射行（source=TREE_IMPORT）。
     **同父同名候选的去重命名（2026-09-14 真实数据发现）**：真实树存在同父级下同名 type（全树 57 组），内部 `(parent_id, lower(name_zh))` 唯一索引不允许——导入时对第二及以后的同名候选**确定性追加外部 id 后缀**（如 `其他 (91543)`），首 个保留原名；每一处在预演报告 `disambiguatedNames` 中列出。不丢弃、不合并、复合键映射不受影响。
 19. **SKU 图片（决策 0014）**：建档弹窗预览用 `raw_data.primary_image` CDN 直链；onboard 事务提交成功后入 BullMQ 异步转存 `color_image ?? primary_image` → 自有私有桶（`SkuImageService.upload` 通道）→ 首图 `isPrimary=true` → 首次回填 `products.main_image_id`（仅当为空）。图片失败自动重试，**不进建档事务**、不影响建档事实。
-20. **LISTING_MAPPING 导入绑定同步行**：导入行落到**已存在**的 Listing 且平台标识（优先 `platform_sku_id`，其次 `offer_id`、`seller_sku`）命中该 Listing 一条 ACTIVE 的 UNMAPPED 同步变体时，**绑定该行**（等价人工映射，sku_id 写入、置 MAPPED），**不插入重复变体行**。「相同映射（同 Listing 同 SKU）拒绝」与决策 0012（至少一个平台标识）规则不变；未命中任何同步变体时维持原有新建行为。
+20. **LISTING_MAPPING 导入绑定同步行**：导入行落到**已存在**的 Listing 且平台标识（优先 `platform_sku_id`，其次 `seller_sku`）命中该 Listing 一条 ACTIVE 的 UNMAPPED 同步变体时，**绑定该行**（等价人工映射，sku_id 写入、置 MAPPED），**不插入重复变体行**。「相同映射（同 Listing 同 SKU）拒绝」与决策 0012/0016（至少一个**解析**标识：Platform SKU ID 或 Seller SKU）规则不变；`offer_id` 不是绑定标识（决策 0016），仅 offer 命中的行不绑定，走新建路径并按 0016 拒绝；未命中任何同步变体时维持原有新建行为。
 21. **未映射工作台**（派生展示，不新增业务状态）：
     - `GET /listings/mapping-stats` 返回全局 MAPPED/UNMAPPED 计数，判定与第 11 条同一条件；
     - 列表行携带 `hasOrderException`（是否存在 OPEN 的 `ORDER_SKU_MAPPING_FAILED` 异常经订单行 `store + platform_product_id` 撞上该 Listing；2026-09-14 真实数据修正：OZON 订单行的 `platform_product_id` 实为 **sku id**，故命中条件同时比对 Listing 的 `platform_product_id` **与其变体的 `platform_sku_id`**）；
     - `mappingState=UNMAPPED` 筛选下，`hasOrderException` 的行**排序置顶**，其余按 `created_at DESC`。该标志不参与任何写路径判定。
 
+Sprint 8.5R1 起（2026-09-14，人工验收修复；映射规则变更见决策 0016）：
+
+22. **建档弹窗补最新采购价**：`latestPurchasePrice?`（NUMERIC，≥0）随 onboard 请求在同一事务写入 `skus.latest_purchase_price`。这是人工维护通道（§4.3）；移动加权平均成本仍**只由收货确认**维护（§4.4），两者互不覆盖。名称预填（商品名/SKU 名优先取当前变体的 Offer ID，无 Offer ID 回退 Listing 标题）属**前端预填行为**，后端缺省规则不变（仍取 `listing.title`）。
+23. **类目树精简端点**：`GET /categories/tree-lite` 返回 `id/parentId/code/nameZh/nameRu/level/sortOrder/status/children`（SQL 列裁剪，去掉 `createdAt/updatedAt` 等），供商品 / SKU / Listing 三个页面的类目选择器与「分类管理」树消费；层级语义、排序（`sort_order, code`）与 `GET /categories` 完全一致。`GET /categories` 行为不变（向后兼容），两者共用同一建树实现以免形状漂移。
+24. **映射解析不使用 Offer ID**（决策 0016）：见 §9 第 6 条。人工映射要求至少一个**解析标识**（Platform SKU ID 或 Seller SKU）；纯 Offer ID 被拒（422 文案见 §12）。`offer_id` 仍同步入库、列表展示、Excel 导出列保留、关键字搜索可命中，仅从解析/绑定链路移除。
+
 ## 9. Listing Resolver（订单安全边界）
 
-`ListingResolverService.resolveInternalSku({ storeId, platformSkuId?, sellerSku?, offerId? })`：
+`ListingResolverService.resolveInternalSku({ storeId, platformSkuId?, sellerSku? })`：
 
 1. 解析查询必须携带 `storeId`（Repository 层结构性保证，全局查找不可能发生）。
-2. 提供 0 个标识 → `LISTING_SKU_RESOLVE_FAILED`。
+2. 提供 0 个**解析标识** → `LISTING_SKU_RESOLVE_FAILED`。
 3. 0 候选 → `LISTING_SKU_RESOLVE_FAILED`（订单阶段转 `ORDER_SKU_MAPPING_FAILED`）。
 4. 同 Store 内 >1 候选 → `LISTING_SKU_RESOLVE_AMBIGUOUS`；禁止"取第一条"。
 5. 匹配语义：任一提供的标识命中即视为候选（OR），歧义判定覆盖全部候选。
+6. **解析标识只有 `platform_sku_id` 与 `seller_sku`**（决策 0016，2026-09-14）：`offer_id` 可被运营在平台侧修改，**不作为解析依据**（请求 DTO 已无该字段，历史请求带 `offerId` 时等同于未提供标识）。响应字段 `matchedOfferId` 保留但**恒为 null**（前端契约兼容）。Platform Product ID 维度由「Listing(store + platform_product_id) → 变体(platform_sku_id) → 内部 SKU」结构承载，不另开解析分支。
 
 ## 10. Excel 导入
 
@@ -181,6 +188,11 @@ Sprint 8.5 新增（2026-09-14）：
 - 类目树未同步：`CATEGORY_TREE_NOT_SYNCED`（409，先在同步中心触发类目树同步）。
 - 类目导入冲突：`CATEGORY_IMPORT_CONFLICTS`（409，details 携带冲突清单，禁止静默跳过）。
 - 挂靠目标不存在：复用 `PRODUCT_NOT_FOUND`（404）。
+
+Sprint 8.5R1 修订（2026-09-14）：
+
+- `LISTING_SKU_MAPPING_IDENTIFIER_REQUIRED`（422）**文案收紧**：「至少填写 Platform SKU ID 或 Seller SKU；Offer ID 可被运营修改，不作为订单解析依据」——纯 Offer ID 与全空同样被拒（决策 0016）。错误码本身不变，既有调用方无需改判定。
+- 新增只读端点 `GET /categories/tree-lite`（列裁剪类目树）；`GET /categories` 行为不变。
 
 ## 13. 修改本文档的条件
 

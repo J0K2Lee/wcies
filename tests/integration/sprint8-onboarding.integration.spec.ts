@@ -172,9 +172,10 @@ describe('T1 quick onboarding (one transaction, no half-products)', () => {
     expect(detail.body.data.skus[0].mappingStatus).toBe('MAPPED');
     expect(detail.body.data.skus[0].skuCode).toBe(data.sku.skuCode);
 
-    // Orders can resolve the new mapping store-scoped.
+    // Orders can resolve the new mapping store-scoped (by platform SKU id -
+    // offer id is not a resolution identifier, decision 0016).
     const resolved = await client.get<{ internalSkuCode: string }>(
-      `/api/v1/listings/resolve?storeId=${storeId}&offerId=${encodeURIComponent(`${PREFIX}-OBO1`)}`,
+      `/api/v1/listings/resolve?storeId=${storeId}&platformSkuId=${encodeURIComponent(`${PREFIX}-OBPS1`)}`,
     );
     expect(resolved.body.data.internalSkuCode).toBe(data.sku.skuCode);
   });

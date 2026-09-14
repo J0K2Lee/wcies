@@ -16,6 +16,11 @@ import { ResolveSkuResponseDto } from '../dto/listing.dto';
  * - multiple matches within the same store raise
  *   LISTING_SKU_RESOLVE_AMBIGUOUS - "take the first row" is forbidden;
  * - no match raises LISTING_SKU_RESOLVE_FAILED.
+ *
+ * Decision 0016: identifiers are platform SKU id + seller SKU only. Offer id
+ * is editable on the platform by operators, so it may never be the basis of
+ * order resolution. `matchedOfferId` stays on the response (always null) so
+ * existing clients keep their shape.
  */
 @Injectable()
 export class ListingResolverService {
@@ -28,12 +33,10 @@ export class ListingResolverService {
     storeId: string;
     platformSkuId?: string;
     sellerSku?: string;
-    offerId?: string;
   }): Promise<ResolveSkuResponseDto> {
     const identifiers = {
       platformSkuId: trimOrUndefined(input.platformSkuId),
       sellerSku: trimOrUndefined(input.sellerSku),
-      offerId: trimOrUndefined(input.offerId),
     };
     const providedCount = Object.values(identifiers).filter((value) => value !== undefined).length;
     if (providedCount === 0) {
@@ -73,7 +76,7 @@ export class ListingResolverService {
       listingSkuId: match.id,
       internalSkuId: sku.id,
       internalSkuCode: sku.skuCode,
-      matchedOfferId: match.offerId,
+      matchedOfferId: null,
       matchedSellerSku: match.sellerSku,
       matchedPlatformSkuId: match.platformSkuId,
     };

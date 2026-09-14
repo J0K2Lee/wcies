@@ -186,6 +186,7 @@ export class ListingOnboardingService {
         lengthMm: dto.lengthMm ?? null,
         widthMm: dto.widthMm ?? null,
         heightMm: dto.heightMm ?? null,
+        latestPurchasePrice: dto.latestPurchasePrice ?? null,
       });
       const barcode =
         generateBarcode === true
@@ -435,9 +436,7 @@ function readExternalCategoryKey(
  * treated as absent - the dialog leaves the field empty rather than
  * guessing a conversion.
  */
-function readProductAttributes(
-  rawData: Record<string, unknown> | null,
-): {
+function readProductAttributes(rawData: Record<string, unknown> | null): {
   weightG: number | null;
   lengthMm: number | null;
   widthMm: number | null;

@@ -606,13 +606,14 @@ export class ListingRepository {
 
   /**
    * Active UNMAPPED synced variant on a listing matching any provided
-   * identifier (platform SKU id first, then offer, then seller SKU), so the
+   * identifier (platform SKU id first, then seller SKU), so the
    * LISTING_MAPPING import binds the synced row instead of inserting a twin
-   * (Sprint 8 T2 closed loop).
+   * (Sprint 8 T2 closed loop). Offer id is not a binding identifier
+   * (decision 0016: the platform lets operators edit it).
    */
   async findUnmappedVariantByIdentifiers(
     listingId: string,
-    input: { platformSkuId?: string | null; sellerSku?: string | null; offerId?: string | null },
+    input: { platformSkuId?: string | null; sellerSku?: string | null },
   ): Promise<PlatformListingSkuEntity | null> {
     const qb = this.mappingRepository
       .createQueryBuilder('pls')
@@ -621,10 +622,10 @@ export class ListingRepository {
       .andWhere("pls.mapping_status = 'UNMAPPED'")
       .andWhere("pls.status = 'ACTIVE'");
     // Identifier priority: platform SKU id first (sync rows are keyed by it),
-    // then offer id, then seller SKU.
+    // then seller SKU. Offer id is DELIBERATELY absent (decision 0016): it is
+    // editable on the platform, so binding by it would silently drift.
     const ordered: Array<[string | null | undefined, string]> = [
       [input.platformSkuId, 'platform_sku_id'],
-      [input.offerId, 'offer_id'],
       [input.sellerSku, 'seller_sku'],
     ];
     const conditions: string[] = [];
@@ -654,12 +655,15 @@ export class ListingRepository {
    * STRICTLY store-scoped candidate search (task §52): the query ALWAYS
    * carries store_id; global identifier lookups are forbidden. Matches any
    * provided identifier; ambiguity detection is the caller's job.
+   *
+   * Decision 0016: offer id is NOT a resolution identifier - the platform
+   * lets operators edit it, so a mapping that can only be found by offer id
+   * would drift out from under the orders it serves.
    */
   async findResolveCandidates(input: {
     storeId: string;
     platformSkuId?: string;
     sellerSku?: string;
-    offerId?: string;
   }): Promise<ResolveCandidate[]> {
     const qb = this.mappingRepository
       .createQueryBuilder('pls')
@@ -679,10 +683,6 @@ export class ListingRepository {
     if (input.sellerSku !== undefined && input.sellerSku !== '') {
       conditions.push('pls.seller_sku = :sellerSku');
       qb.setParameter('sellerSku', input.sellerSku);
-    }
-    if (input.offerId !== undefined && input.offerId !== '') {
-      conditions.push('pls.offer_id = :offerId');
-      qb.setParameter('offerId', input.offerId);
     }
     qb.andWhere(`(${conditions.join(' OR ')})`);
 

@@ -311,9 +311,10 @@ describe('LISTING_MAPPING import (task §58: unknown store / unknown sku rows)',
     }
     expect(final?.importedRows).toBe(1);
 
-    // the imported mapping resolves store-scoped
+    // the imported mapping resolves store-scoped by its platform SKU id
+    // (decision 0016: offer id is not an identifier)
     const resolved = await client.get<{ internalSkuCode: string }>(
-      `/api/v1/listings/resolve?storeId=${store.body.data.id}&offerId=${PREFIX}-O1`,
+      `/api/v1/listings/resolve?storeId=${store.body.data.id}&platformSkuId=ps1`,
     );
     expect(resolved.body.data.internalSkuCode).toBe(sku.body.data.skuCode);
   });

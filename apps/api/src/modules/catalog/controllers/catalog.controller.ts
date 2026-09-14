@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ok } from '../../../common/dto/api-response';
 import { ApiOkEnvelope, ApiOkNoDataEnvelope } from '../../../common/swagger/api-envelope';
@@ -8,6 +19,7 @@ import {
   BrandResponseDto,
   CategoryResponseDto,
   CategoryTreeItemDto,
+  CategoryTreeLiteItemDto,
   CreateBrandRequestDto,
   CreateCategoryRequestDto,
   UpdateBrandRequestDto,
@@ -71,6 +83,15 @@ export class CatalogController {
   @ApiOkEnvelope(CategoryTreeItemDto)
   async listCategoryTree(): Promise<{ success: true; data: CategoryTreeItemDto[] }> {
     return ok(await this.catalogService.listCategoryTree());
+  }
+
+  @Get('categories/tree-lite')
+  @ApiOperation({
+    summary: 'List the category tree without entity bookkeeping columns (8k-node pickers)',
+  })
+  @ApiOkEnvelope(CategoryTreeLiteItemDto)
+  async listCategoryTreeLite(): Promise<{ success: true; data: CategoryTreeLiteItemDto[] }> {
+    return ok(await this.catalogService.listCategoryTreeLite());
   }
 
   @Post('categories')

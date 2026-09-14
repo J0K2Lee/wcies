@@ -121,14 +121,12 @@ describe('category depth limits (decision 0005 §9.4)', () => {
     // Move subtreeCase (height 2) under another L1: newLevel 2 + 1 = 3 OK;
     // child must shift to 3 in the same transaction.
     const targetL1 = await createCategory({ nameZh: `${PREFIX} 带子移动目标` });
-    const movedTree = await client.patch<CategoryDto>(
-      `/api/v1/categories/${subtreeCase.data.id}`,
-      { parentId: targetL1.data.id },
-    );
+    const movedTree = await client.patch<CategoryDto>(`/api/v1/categories/${subtreeCase.data.id}`, {
+      parentId: targetL1.data.id,
+    });
     expect(movedTree.body.data.level).toBe(2);
-    const tree = await client.get<Array<CategoryDto & { children: CategoryDto[] }>>(
-      '/api/v1/categories',
-    );
+    const tree =
+      await client.get<Array<CategoryDto & { children: CategoryDto[] }>>('/api/v1/categories');
     const movedNode = tree.body.data
       .find((node) => node.id === targetL1.data.id)
       ?.children.find((node) => node.id === subtreeCase.data.id);
@@ -231,20 +229,84 @@ describe('brand naming (decision 0006)', () => {
     const missing = await client.post('/api/v1/brands', { nameZh: '只有中文名' });
     expect(missing.status).toBe(400);
 
-    const created = await client.post<{ name: string; nameZh: string | null; nameEn: string | null }>(
-      '/api/v1/brands',
-      { name: `${PREFIX} Brand`, nameZh: `${PREFIX} 品牌中文名` },
-    );
+    const created = await client.post<{
+      name: string;
+      nameZh: string | null;
+      nameEn: string | null;
+    }>('/api/v1/brands', { name: `${PREFIX} Brand`, nameZh: `${PREFIX} 品牌中文名` });
     expect(created.body.success).toBe(true);
     expect(created.body.data.name).toBe(`${PREFIX} Brand`);
     expect(created.body.data.nameZh).toBe(`${PREFIX} 品牌中文名`);
     expect(created.body.data.nameEn).toBeNull();
 
-    const minimal = await client.post<{ name: string; nameZh: string | null }>(
-      '/api/v1/brands',
-      { name: `${PREFIX} Minimal` },
-    );
+    const minimal = await client.post<{ name: string; nameZh: string | null }>('/api/v1/brands', {
+      name: `${PREFIX} Minimal`,
+    });
     expect(minimal.body.success).toBe(true);
     expect(minimal.body.data.nameZh).toBeNull();
+  });
+});
+
+/**
+ * Sprint 8.5R1: the column-pruned tree the category pickers and the
+ * 分类管理 tree consume. 8k-node OZON trees made the full endpoint ship
+ * megabytes per page; the lite shape must stay semantically identical.
+ */
+interface CategoryLiteNode {
+  id: string;
+  parentId: string | null;
+  code: string;
+  nameZh: string;
+  nameRu: string | null;
+  level: number;
+  sortOrder: number;
+  status: string;
+  children: CategoryLiteNode[];
+}
+
+function findLiteNode(nodes: CategoryLiteNode[], id: string): CategoryLiteNode | undefined {
+  for (const node of nodes) {
+    if (node.id === id) {
+      return node;
+    }
+    const nested = findLiteNode(node.children, id);
+    if (nested !== undefined) {
+      return nested;
+    }
+  }
+  return undefined;
+}
+
+describe('category tree-lite (Sprint 8.5R1 column pruning)', () => {
+  it('returns the same hierarchy without entity bookkeeping columns', async () => {
+    const l1 = await createCategory({ nameZh: `${PREFIX} 精简根` });
+    const l2 = await createCategory({ parentId: l1.data.id, nameZh: `${PREFIX} 精简二级` });
+    const l3 = await createCategory({ parentId: l2.data.id, nameZh: `${PREFIX} 精简三级` });
+
+    const lite = await client.get<CategoryLiteNode[]>('/api/v1/categories/tree-lite');
+    expect(lite.status).toBe(200);
+    const root = findLiteNode(lite.body.data, l1.data.id);
+    expect(root).toBeDefined();
+    expect(root?.level).toBe(1);
+    // Picker fields survive the pruning...
+    expect(typeof root?.code).toBe('string');
+    expect(root?.nameZh).toBe(`${PREFIX} 精简根`);
+    expect(root?.status).toBe('ACTIVE');
+    // ...the entity bookkeeping columns do not.
+    expect(root as unknown as Record<string, unknown>).not.toHaveProperty('createdAt');
+    expect(root as unknown as Record<string, unknown>).not.toHaveProperty('updatedAt');
+
+    const child = findLiteNode(root?.children ?? [], l2.data.id);
+    expect(child?.parentId).toBe(l1.data.id);
+    const grandChild = findLiteNode(child?.children ?? [], l3.data.id);
+    expect(grandChild?.level).toBe(3);
+    expect(grandChild?.children).toEqual([]);
+  });
+
+  it('keeps the full endpoint intact (backward compatibility)', async () => {
+    const full = await client.get<Array<Record<string, unknown>>>('/api/v1/categories');
+    expect(full.status).toBe(200);
+    const flat = JSON.stringify(full.body.data);
+    expect(flat).toContain(`${PREFIX} 精简三级`);
   });
 });

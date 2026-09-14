@@ -352,6 +352,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/categories/tree-lite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the category tree without entity bookkeeping columns (8k-node pickers) */
+        get: operations["CatalogController_listCategoryTreeLite"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/categories/{id}": {
         parameters: {
             query?: never;
@@ -905,7 +922,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Resolve an internal SKU by platform identifiers (STRICTLY store-scoped) */
+        /** Resolve an internal SKU by platform identifiers (STRICTLY store-scoped, decision 0016) */
         get: operations["ListingController_resolve"];
         put?: never;
         post?: never;
@@ -2714,6 +2731,27 @@ export interface components {
             updatedAt: string;
             children: components["schemas"]["CategoryTreeItemDto"][];
         };
+        CategoryTreeLiteItemDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            parentId: Record<string, never> | null;
+            /** @example CN00251 */
+            code: string;
+            /** @example 键盘 */
+            nameZh: string;
+            nameRu: Record<string, never> | null;
+            /**
+             * @description 1..3; products may only reference level 3
+             * @example 3
+             */
+            level: number;
+            /** @example 0 */
+            sortOrder: number;
+            /** @example ACTIVE */
+            status: string;
+            children: components["schemas"]["CategoryTreeLiteItemDto"][];
+        };
         CategoryResponseDto: {
             /** Format: uuid */
             id: string;
@@ -3536,7 +3574,10 @@ export interface components {
             internalSkuId: string;
             /** @example SKU000001 */
             internalSkuCode: string;
-            /** @example ABC */
+            /**
+             * @description 决策 0016 起恒为 null：Offer ID 可被运营修改，不作为订单解析依据（字段保留兼容）
+             * @example null
+             */
             matchedOfferId: Record<string, never> | null;
             /** @example VK87-BLK */
             matchedSellerSku: Record<string, never> | null;
@@ -3759,6 +3800,8 @@ export interface components {
             widthMm?: number;
             /** @description Sprint 8.5 T5：高（mm） */
             heightMm?: number;
+            /** @description Sprint 8.5R1：最新采购价（CNY，人工录入通道；与仅由收货确认维护的移动加权平均成本无关） */
+            latestPurchasePrice?: number;
         };
         UpdateListingSkuRequestDto: {
             platformSkuId?: Record<string, never> | null;
@@ -3786,6 +3829,12 @@ export interface components {
             /** @example name_ru「Конструктор」与现有分类「积木」精确重名 */
             reason: string;
         };
+        CategoryImportRenameDto: {
+            /** @example 其他 */
+            name: string;
+            /** @example 其他 (91543) */
+            renamedTo: string;
+        };
         CategoryImportTopLevelPreviewDto: {
             /** @example 儿童用品 */
             nameZh: string;
@@ -3801,6 +3850,10 @@ export interface components {
             platformId: string;
             stats: components["schemas"]["CategoryImportStatsDto"];
             conflicts: components["schemas"]["CategoryImportConflictDto"][];
+            /** @description 同父同名候选的确定性去重命名（§89 不丢弃） */
+            disambiguatedNames: components["schemas"]["CategoryImportRenameDto"][];
+            /** @example 57 */
+            disambiguatedCount: number;
             previewTopLevels: components["schemas"]["CategoryImportTopLevelPreviewDto"][];
         };
         CategoryImportRequestDto: {
@@ -6001,6 +6054,29 @@ export interface operations {
             };
         };
     };
+    CatalogController_listCategoryTreeLite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["CategoryTreeLiteItemDto"];
+                    };
+                };
+            };
+        };
+    };
     CatalogController_removeCategory: {
         parameters: {
             query?: never;
@@ -7403,9 +7479,10 @@ export interface operations {
             query: {
                 /** @description MANDATORY store scope (task §52) */
                 storeId: string;
+                /** @description 解析标识之一（决策 0016） */
                 platformSkuId?: string;
+                /** @description 解析标识之一（决策 0016） */
                 sellerSku?: string;
-                offerId?: string;
             };
             header?: never;
             path?: never;

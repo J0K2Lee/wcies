@@ -217,6 +217,7 @@ describe('ListingOnboardingService', () => {
       lengthMm: null,
       widthMm: null,
       heightMm: null,
+      latestPurchasePrice: null,
     });
     expect(result.product.id).toBe('prod-9');
     expect(result.productCreated).toBe(false);
@@ -254,7 +255,7 @@ describe('ListingOnboardingService', () => {
     ).rejects.toMatchObject({ code: 'PRODUCT_NOT_FOUND', httpStatus: 404 });
   });
 
-  it('passes brand/category to the product create and dims to the sku create (T3c/T4/T5)', async () => {
+  it('passes brand/category to the product create, dims + purchase price to the sku create (T3c/T4/T5/R1)', async () => {
     const ctx = buildService();
     await ctx.service.onboard(
       'listing-1',
@@ -266,6 +267,7 @@ describe('ListingOnboardingService', () => {
         lengthMm: 300,
         widthMm: 220,
         heightMm: 40,
+        latestPurchasePrice: 88.5,
       },
       operator,
     );
@@ -281,6 +283,7 @@ describe('ListingOnboardingService', () => {
       lengthMm: 300,
       widthMm: 220,
       heightMm: 40,
+      latestPurchasePrice: 88.5,
     });
   });
 

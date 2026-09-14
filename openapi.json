@@ -1141,6 +1141,36 @@
         "tags": ["catalog"]
       }
     },
+    "/api/v1/categories/tree-lite": {
+      "get": {
+        "operationId": "CatalogController_listCategoryTreeLite",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CategoryTreeLiteItemDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "List the category tree without entity bookkeeping columns (8k-node pickers)",
+        "tags": ["catalog"]
+      }
+    },
     "/api/v1/categories/{id}": {
       "patch": {
         "operationId": "CatalogController_updateCategory",
@@ -3703,6 +3733,7 @@
             "name": "platformSkuId",
             "required": false,
             "in": "query",
+            "description": "解析标识之一（决策 0016）",
             "schema": {
               "maxLength": 255,
               "type": "string"
@@ -3712,15 +3743,7 @@
             "name": "sellerSku",
             "required": false,
             "in": "query",
-            "schema": {
-              "maxLength": 255,
-              "type": "string"
-            }
-          },
-          {
-            "name": "offerId",
-            "required": false,
-            "in": "query",
+            "description": "解析标识之一（决策 0016）",
             "schema": {
               "maxLength": 255,
               "type": "string"
@@ -3749,7 +3772,7 @@
             }
           }
         },
-        "summary": "Resolve an internal SKU by platform identifiers (STRICTLY store-scoped)",
+        "summary": "Resolve an internal SKU by platform identifiers (STRICTLY store-scoped, decision 0016)",
         "tags": ["listings"]
       }
     },
@@ -9491,6 +9514,62 @@
           "children"
         ]
       },
+      "CategoryTreeLiteItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "parentId": {
+            "type": "object",
+            "format": "uuid",
+            "nullable": true
+          },
+          "code": {
+            "type": "string",
+            "example": "CN00251"
+          },
+          "nameZh": {
+            "type": "string",
+            "example": "键盘"
+          },
+          "nameRu": {
+            "type": "object",
+            "nullable": true
+          },
+          "level": {
+            "type": "number",
+            "example": 3,
+            "description": "1..3; products may only reference level 3"
+          },
+          "sortOrder": {
+            "type": "number",
+            "example": 0
+          },
+          "status": {
+            "type": "string",
+            "example": "ACTIVE"
+          },
+          "children": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CategoryTreeLiteItemDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "parentId",
+          "code",
+          "nameZh",
+          "nameRu",
+          "level",
+          "sortOrder",
+          "status",
+          "children"
+        ]
+      },
       "CategoryResponseDto": {
         "type": "object",
         "properties": {
@@ -11430,8 +11509,9 @@
           },
           "matchedOfferId": {
             "type": "object",
-            "example": "ABC",
-            "nullable": true
+            "example": null,
+            "nullable": true,
+            "description": "决策 0016 起恒为 null：Offer ID 可被运营修改，不作为订单解析依据（字段保留兼容）"
           },
           "matchedSellerSku": {
             "type": "object",
@@ -11934,6 +12014,10 @@
           "heightMm": {
             "type": "number",
             "description": "Sprint 8.5 T5：高（mm）"
+          },
+          "latestPurchasePrice": {
+            "type": "number",
+            "description": "Sprint 8.5R1：最新采购价（CNY，人工录入通道；与仅由收货确认维护的移动加权平均成本无关）"
           }
         }
       },
@@ -12010,6 +12094,20 @@
         },
         "required": ["name", "level", "reason"]
       },
+      "CategoryImportRenameDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "其他"
+          },
+          "renamedTo": {
+            "type": "string",
+            "example": "其他 (91543)"
+          }
+        },
+        "required": ["name", "renamedTo"]
+      },
       "CategoryImportTopLevelPreviewDto": {
         "type": "object",
         "properties": {
@@ -12049,6 +12147,17 @@
               "$ref": "#/components/schemas/CategoryImportConflictDto"
             }
           },
+          "disambiguatedNames": {
+            "description": "同父同名候选的确定性去重命名（§89 不丢弃）",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CategoryImportRenameDto"
+            }
+          },
+          "disambiguatedCount": {
+            "type": "number",
+            "example": 57
+          },
           "previewTopLevels": {
             "type": "array",
             "items": {
@@ -12056,7 +12165,14 @@
             }
           }
         },
-        "required": ["platformId", "stats", "conflicts", "previewTopLevels"]
+        "required": [
+          "platformId",
+          "stats",
+          "conflicts",
+          "disambiguatedNames",
+          "disambiguatedCount",
+          "previewTopLevels"
+        ]
       },
       "CategoryImportRequestDto": {
         "type": "object",

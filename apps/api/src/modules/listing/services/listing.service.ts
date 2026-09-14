@@ -419,6 +419,23 @@ export class ListingService {
     if (dto.sellerSku !== undefined) patch.sellerSku = dto.sellerSku;
     if (dto.offerId !== undefined) patch.offerId = dto.offerId;
     if (dto.status !== undefined) patch.status = dto.status;
+
+    // Decision 0016: the same invariant as creation, enforced on the RESULT of
+    // the edit - identifiers may be replaced, never erased down to "no
+    // resolution identifier left", or the row would silently stop matching
+    // orders. Checked only when the request touches identifiers, so a legacy
+    // identifier-less row can still be edited (e.g. deactivated).
+    if (dto.platformSkuId !== undefined || dto.sellerSku !== undefined) {
+      const mergedPlatformSkuId =
+        dto.platformSkuId !== undefined ? dto.platformSkuId : mapping.platformSkuId;
+      const mergedSellerSku = dto.sellerSku !== undefined ? dto.sellerSku : mapping.sellerSku;
+      const blank = (value: string | null | undefined): boolean =>
+        value === null || value === undefined || value.trim() === '';
+      if (blank(mergedPlatformSkuId) && blank(mergedSellerSku)) {
+        throw new ListingSkuMappingIdentifierRequiredError(listingId);
+      }
+    }
+
     if (Object.keys(patch).length > 0) {
       await this.repository.updateMapping(mappingId, patch);
     }
@@ -618,7 +635,10 @@ export class ListingService {
     // variant on this listing, BIND that row (exactly what 人工映射 does).
     // Inserting a twin would leave the synced row orphaned next to the new
     // MAPPED row and pollute the variant list on every export-import cycle.
-    const synced = await this.repository.findUnmappedVariantByIdentifiers(input.listingId, input);
+    const synced = await this.repository.findUnmappedVariantByIdentifiers(input.listingId, {
+      platformSkuId: input.platformSkuId,
+      sellerSku: input.sellerSku,
+    });
     if (synced !== null) {
       await this.repository.updateMapping(synced.id, {
         skuId: input.skuId,
@@ -656,12 +676,12 @@ export class ListingService {
       throw new SkuNotFoundError(variant.skuId);
     }
 
-    // Decision 0012: a human-created mapping must carry at least one platform
-    // identifier. Without one the resolver can never match it (orders carry
-    // platformSkuId/offerId/sellerSku), so the row would be a dead end that
-    // only shows up later as an inexplicable ORDER_SKU_MAPPING_FAILED.
-    // Checked after the duplicate test so "already mapped" keeps winning when
-    // both apply - it is the more specific diagnosis.
+    // Decision 0012 + 0016: a human-created mapping must carry at least one
+    // RESOLUTION identifier (platform SKU id or seller SKU). Offer id alone is
+    // rejected - the platform lets operators edit it, so such a row could stop
+    // resolving without anyone touching WCIES. Checked after the duplicate
+    // test so "already mapped" keeps winning when both apply - it is the more
+    // specific diagnosis.
     const duplicate = await this.repository.findMappingByListingAndSku(listingId, variant.skuId);
     if (duplicate !== null) {
       throw new ListingSkuMappingAlreadyExistsError(listingId, variant.skuId);
@@ -669,8 +689,9 @@ export class ListingService {
 
     const platformSkuId = variant.platformSkuId?.trim() || null;
     const sellerSku = variant.sellerSku?.trim() || null;
+    // Offer id is still stored as a platform fact, just never resolves.
     const offerId = variant.offerId?.trim() || null;
-    if (platformSkuId === null && sellerSku === null && offerId === null) {
+    if (platformSkuId === null && sellerSku === null) {
       throw new ListingSkuMappingIdentifierRequiredError(listingId);
     }
 

@@ -477,7 +477,6 @@ describe('T5 v4 attribute prefill (mm/g normalization)', () => {
     expect(sku.rows[0]?.length_mm).toBe(300);
     expect(Number(sku.rows[0]?.volume_mm3)).toBe(300 * 220 * 40);
   });
-
   it('normalizes cm -> mm and kg -> g (unit conversion is server-side)', async () => {
     const seeded = await seedListing({
       platformProductId: `${PREFIX}-T5U`,
@@ -504,5 +503,38 @@ describe('T5 v4 attribute prefill (mm/g normalization)', () => {
     expect(context.variants[0]?.widthMm).toBe(220);
     expect(context.variants[0]?.heightMm).toBe(40);
     expect(context.variants[0]?.weightG).toBe(1000);
+  });
+});
+
+describe('T5b latest purchase price lands on the SKU (Sprint 8.5R1)', () => {
+  it('stores the operator-entered price; omitted stays null', async () => {
+    const seeded = await seedListing({
+      platformProductId: `${PREFIX}-T5B`,
+      title: `${PREFIX} 采购价`,
+      variants: [{ platformSkuId: `${PREFIX}-T5BPS1` }, { platformSkuId: `${PREFIX}-T5BPS2` }],
+    });
+
+    const withPrice = await onboard(seeded.listingId, seeded.mappingIds[0]!, {
+      skuNameZh: `${PREFIX} 采购价有`,
+      latestPurchasePrice: 88.5,
+    });
+    expect(withPrice.status).toBe(201);
+    const priced = await db.query<{ latest_purchase_price: string | null }>(
+      'SELECT latest_purchase_price::text FROM skus WHERE id = $1',
+      [withPrice.data.sku.id],
+    );
+    expect(Number(priced.rows[0]?.latest_purchase_price)).toBe(88.5);
+
+    // The field is optional - an onboard without it keeps the column null
+    // (master-data §4.3: the price is maintained by hand, never invented).
+    const withoutPrice = await onboard(seeded.listingId, seeded.mappingIds[1]!, {
+      skuNameZh: `${PREFIX} 采购价无`,
+    });
+    expect(withoutPrice.status).toBe(201);
+    const unpriced = await db.query<{ latest_purchase_price: string | null }>(
+      'SELECT latest_purchase_price::text FROM skus WHERE id = $1',
+      [withoutPrice.data.sku.id],
+    );
+    expect(unpriced.rows[0]?.latest_purchase_price ?? null).toBeNull();
   });
 });

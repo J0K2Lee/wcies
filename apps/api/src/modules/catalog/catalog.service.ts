@@ -26,11 +26,32 @@ import {
   BrandResponseDto,
   CategoryResponseDto,
   CategoryTreeItemDto,
+  CategoryTreeLiteItemDto,
   CreateBrandRequestDto,
   CreateCategoryRequestDto,
   UpdateBrandRequestDto,
   UpdateCategoryRequestDto,
 } from './dto/catalog.dto';
+
+/**
+ * Nests flat rows by parentId (rows already ordered by sort_order/code, so
+ * siblings keep that order). Shared by the full and the pruned tree so the
+ * two responses can never drift apart.
+ */
+function buildNestedTree<TRow extends { id: string; parentId: string | null }, TNode>(
+  rows: TRow[],
+  toNode: (row: TRow, children: TNode[]) => TNode,
+): TNode[] {
+  const byParent = new Map<string | null, TRow[]>();
+  for (const row of rows) {
+    const list = byParent.get(row.parentId) ?? [];
+    list.push(row);
+    byParent.set(row.parentId, list);
+  }
+  const build = (parentId: string | null): TNode[] =>
+    (byParent.get(parentId) ?? []).map((row) => toNode(row, build(row.id)));
+  return build(null);
+}
 
 /** Brand + Category master data (task §13/§14; Sprint 6 decisions 0005/0006). */
 @Injectable()
@@ -154,6 +175,16 @@ export class CatalogService {
   async listCategoryTree(): Promise<CategoryTreeItemDto[]> {
     const categories = await this.repository.listCategories();
     return this.buildTree(categories);
+  }
+
+  /**
+   * Sprint 8.5R1: the tree the pickers workbench consumes - same shape minus
+   * the entity bookkeeping columns, so an 8k-node OZON tree does not ship
+   * megabytes per page. Semantics (ordering, hierarchy) are identical.
+   */
+  async listCategoryTreeLite(): Promise<CategoryTreeLiteItemDto[]> {
+    const categories = await this.repository.listCategoriesLite();
+    return buildNestedTree(categories, (category, children) => ({ ...category, children }));
   }
 
   async createCategory(
@@ -478,20 +509,10 @@ export class CatalogService {
   }
 
   private buildTree(categories: CategoryEntity[]): CategoryTreeItemDto[] {
-    const byParent = new Map<string | null, CategoryEntity[]>();
-    for (const category of categories) {
-      const list = byParent.get(category.parentId) ?? [];
-      list.push(category);
-      byParent.set(category.parentId, list);
-    }
-    const build = (parentId: string | null): CategoryTreeItemDto[] => {
-      const children = byParent.get(parentId) ?? [];
-      return children.map((category) => ({
-        ...this.categoryToResponse(category),
-        children: build(category.id),
-      }));
-    };
-    return build(null);
+    return buildNestedTree(categories, (category, children) => ({
+      ...this.categoryToResponse(category),
+      children,
+    }));
   }
 
   private brandToResponse(brand: BrandEntity): BrandResponseDto {

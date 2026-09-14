@@ -11,10 +11,12 @@ import {
   Modal,
   Popconfirm,
   Select,
+  Space,
+  Switch,
   Tabs,
   Upload,
 } from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { apiDelete, apiPatch, apiPost, useApiQuery } from '../../api/hooks';
 import { SkuCreateModal } from '../../components/SkuCreateModal';
@@ -159,6 +161,48 @@ function categoryPathOf(options: CategoryOption[], id: string): string[] | undef
   return undefined;
 }
 
+/**
+ * Every value the edit form shows (Sprint 8.5R1): the form previously omitted
+ * 长/宽/高/SN管理, so opening 编辑 asked for fields the operator could not even
+ * see. `undefined` (not null) keeps the PATCH body a partial update.
+ */
+function editFormValues(sku: SkuRow): Record<string, unknown> {
+  return {
+    nameZh: sku.nameZh,
+    nameRu: sku.nameRu ?? undefined,
+    model: sku.model ?? undefined,
+    color: sku.color ?? undefined,
+    size: sku.size ?? undefined,
+    weightG: sku.weightG ?? undefined,
+    lengthMm: sku.lengthMm ?? undefined,
+    widthMm: sku.widthMm ?? undefined,
+    heightMm: sku.heightMm ?? undefined,
+    purchaseUrl: sku.purchaseUrl ?? undefined,
+    latestPurchasePrice: sku.latestPurchasePrice ?? undefined,
+    serialTracking: sku.serialTracking,
+  };
+}
+
+/**
+ * All-or-none dimension rule, mirrored from the backend
+ * (SKU_DIMENSIONS_INVALID): the API rejects 1 or 2 of 长/宽/高.
+ */
+function dimensionGroupRule(form: { getFieldValue: (name: string) => unknown }): {
+  validator: () => Promise<void>;
+} {
+  return {
+    validator: () => {
+      const filled = (['lengthMm', 'widthMm', 'heightMm'] as const).filter((name) => {
+        const value = form.getFieldValue(name);
+        return value !== undefined && value !== null;
+      });
+      return filled.length === 0 || filled.length === 3
+        ? Promise.resolve()
+        : Promise.reject(new Error('长/宽/高需三项都填，或三项都留空'));
+    },
+  };
+}
+
 const fmtQty = (value: string): string => (Number(value) % 1 === 0 ? String(Number(value)) : value);
 
 export function SkusPage() {
@@ -218,7 +262,9 @@ export function SkusPage() {
     ['skus', page, keyword, brandId, categoryId, status, hasListing],
   );
   const brands = useApiQuery<Envelope<BrandItem[]>>('/api/v1/brands', { keyword: '' }, ['brands']);
-  const categories = useApiQuery<Envelope<CategoryNode[]>>('/api/v1/categories', {}, [
+  // Sprint 8.5R1: tree-lite (column-pruned) - the cascader only reads these
+  // fields, and the full 8k-node tree cost megabytes per page load.
+  const categories = useApiQuery<Envelope<CategoryNode[]>>('/api/v1/categories/tree-lite', {}, [
     'categories',
   ]);
   /** Filter cascader options: any level selectable (backend matches subtree). */
@@ -515,6 +561,22 @@ export function SkusPage() {
   });
 
   const sku = detail.data?.data;
+  // Prefill (Sprint 8.5R1): re-apply as soon as a fresh detail is available
+  // while the modal is open. 操作 → 编辑 opens the modal BEFORE the detail
+  // query resolves, so a one-shot prefill at click time left the form blank -
+  // and the PATCH then had to be typed out from scratch.
+  const editPrefilledFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!editOpen) {
+      editPrefilledFor.current = null;
+      return;
+    }
+    if (sku === undefined || editPrefilledFor.current === sku.id) {
+      return;
+    }
+    editPrefilledFor.current = sku.id;
+    editForm.setFieldsValue(editFormValues(sku));
+  }, [editOpen, sku, editForm]);
   const printBarcodes = useApiQuery<{
     data: Array<{ barcode: string; isPrimary: boolean; barcodeType: string }>;
   }>(
@@ -561,7 +623,6 @@ export function SkusPage() {
                 src={selectedRow.primaryImageUrl}
                 width={56}
                 height={56}
-                preview={false}
                 style={{ objectFit: 'cover', borderRadius: 8 }}
               />
             ) : (
@@ -787,16 +848,15 @@ export function SkusPage() {
                   {record.primaryImageUrl !== null ? (
                     <Image
                       src={record.primaryImageUrl}
-                      width={44}
-                      height={44}
-                      preview={false}
+                      width={56}
+                      height={56}
                       style={{ objectFit: 'cover', borderRadius: 8, flexShrink: 0 }}
                     />
                   ) : (
                     <div
                       style={{
-                        width: 44,
-                        height: 44,
+                        width: 56,
+                        height: 56,
                         borderRadius: 8,
                         background: colors.neutralBg,
                         flexShrink: 0,
@@ -1049,19 +1109,7 @@ export function SkusPage() {
                     return;
                   }
                   editForm.resetFields();
-                  editForm.setFieldsValue({
-                    nameZh: sku.nameZh,
-                    nameRu: sku.nameRu ?? undefined,
-                    model: sku.model ?? undefined,
-                    color: sku.color ?? undefined,
-                    size: sku.size ?? undefined,
-                    weightG: sku.weightG ?? undefined,
-                    lengthMm: sku.lengthMm ?? undefined,
-                    widthMm: sku.widthMm ?? undefined,
-                    heightMm: sku.heightMm ?? undefined,
-                    purchaseUrl: sku.purchaseUrl ?? undefined,
-                    latestPurchasePrice: sku.latestPurchasePrice ?? undefined,
-                  });
+                  editForm.setFieldsValue(editFormValues(sku));
                   setEditOpen(true);
                 }}
               >
@@ -1407,14 +1455,55 @@ export function SkusPage() {
           <Form.Item name="size" label="尺寸">
             <Input />
           </Form.Item>
-          <Form.Item name="weightG" label="重量(g)">
-            <Input type="number" />
-          </Form.Item>
-          <Form.Item name="purchaseUrl" label="采购链接">
-            <Input maxLength={1000} />
-          </Form.Item>
-          <Form.Item name="latestPurchasePrice" label="最新采购价（CNY）">
-            <Input type="number" />
+          <Space wrap size="middle">
+            <Form.Item name="weightG" label="重量(g)" style={{ marginBottom: 0 }}>
+              <InputNumber min={0} step={1} style={{ width: 130 }} />
+            </Form.Item>
+            <Form.Item
+              name="lengthMm"
+              label="长(mm)"
+              dependencies={['widthMm', 'heightMm']}
+              rules={[dimensionGroupRule(editForm)]}
+              style={{ marginBottom: 0 }}
+            >
+              <InputNumber min={0} step={1} precision={0} style={{ width: 110 }} />
+            </Form.Item>
+            <Form.Item name="widthMm" label="宽(mm)" style={{ marginBottom: 0 }}>
+              <InputNumber min={0} step={1} precision={0} style={{ width: 110 }} />
+            </Form.Item>
+            <Form.Item name="heightMm" label="高(mm)" style={{ marginBottom: 0 }}>
+              <InputNumber min={0} step={1} precision={0} style={{ width: 110 }} />
+            </Form.Item>
+          </Space>
+          <span
+            style={{
+              fontSize: 12.5,
+              color: colors.textTertiary,
+              display: 'block',
+              marginTop: 4,
+            }}
+          >
+            长/宽/高为「全有或全无」；体积由后端按长×宽×高计算，不可直接填写。
+          </span>
+          <Space wrap size="middle" style={{ marginTop: 16 }}>
+            <Form.Item name="purchaseUrl" label="采购链接" style={{ marginBottom: 0 }}>
+              <Input maxLength={1000} style={{ width: 320 }} />
+            </Form.Item>
+            <Form.Item
+              name="latestPurchasePrice"
+              label="最新采购价（CNY）"
+              style={{ marginBottom: 0 }}
+            >
+              <InputNumber min={0} step={0.01} prefix="¥" style={{ width: 160 }} />
+            </Form.Item>
+          </Space>
+          <Form.Item
+            name="serialTracking"
+            label="SN序列号管理"
+            valuePropName="checked"
+            style={{ marginTop: 16, marginBottom: 0 }}
+          >
+            <Switch />
           </Form.Item>
         </Form>
       </Modal>

@@ -291,7 +291,10 @@ export function ProductsPage() {
     ['products', 'list', page, keyword, status, brandFilter, categoryFilterId],
   );
 
-  const categories = useApiQuery<{ data: CategoryNode[] }>('/api/v1/categories', {}, [
+  // Sprint 8.5R1: tree-lite - same hierarchy/ordering, no entity bookkeeping
+  // columns. The 8k-node OZON tree used to ship megabytes to this page (and
+  // to the category manager tree, which then rendered all of them).
+  const categories = useApiQuery<{ data: CategoryNode[] }>('/api/v1/categories/tree-lite', {}, [
     'categories',
   ]);
   const brands = useApiQuery<{ data: BrandItem[] }>('/api/v1/brands', { keyword: '' }, ['brands']);
@@ -342,6 +345,13 @@ export function ProductsPage() {
     [categoryTree],
   );
   const manageTreeData = useMemo(() => buildManageTreeData(categoryTree), [categoryTree]);
+  // Sprint 8.5R1: expanding all 8k nodes at mount froze the dialog. Start with
+  // the 26 level-1 nodes expanded and let the (virtualised) Tree load the rest
+  // as the operator drills in.
+  const manageDefaultExpandedKeys = useMemo(
+    () => categoryTree.filter((node) => node.level === 1).map((node) => node.id),
+    [categoryTree],
+  );
 
   const manageSelected =
     manageSelectedId !== null ? (categoryById.get(manageSelectedId) ?? null) : null;
@@ -1630,8 +1640,6 @@ export function ProductsPage() {
         <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 20 }}>
           <div
             style={{
-              maxHeight: 480,
-              overflow: 'auto',
               border: `1px solid ${colors.borderSoft}`,
               borderRadius: 8,
               padding: 8,
@@ -1640,9 +1648,13 @@ export function ProductsPage() {
             {categories.data === undefined ? (
               <span style={{ fontSize: 12.5, color: colors.textTertiary }}>加载中…</span>
             ) : (
+              // `height` turns on the Tree's own virtual scrolling: only the
+              // visible rows exist in the DOM, so selecting a node no longer
+              // re-renders thousands of them.
               <Tree
                 blockNode
-                defaultExpandAll
+                height={440}
+                defaultExpandedKeys={manageDefaultExpandedKeys}
                 selectedKeys={manageSelectedId !== null ? [manageSelectedId] : []}
                 onSelect={(keys) => {
                   const first = keys[0];
