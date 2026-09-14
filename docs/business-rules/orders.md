@@ -124,6 +124,9 @@ FAILED
 1. `FAILED` **不是终点**。人工在 SKU 映射中补齐平台变体映射后，必须能通过重试让订单继续。
 2. 修复后仍缺货时**必须落到 BACKORDERED**。`allocateMappedItem` 在库存不足时只返回 `reserved:false` 而不改行状态——对已是 BACKORDERED 的行没问题，但刚修复的 FAILED 行是 PENDING，若不一并写 BACKORDERED 就会静默停在 PENDING 且无库存异常，操作员看不到任何待办。
 3. 重试成功（`reserved:true` 或转 BACKORDERED）后订单汇总状态重算，以便离开 EXCEPTION。
+4. 映射修复成功但**分配阶段抛错**（如店铺暂无可用库存绑定仓库）时：行保持
+   MAPPED，映射异常已关闭，订单汇总状态**同样重算**（分配错误照常返回调用方）
+   ——修复映射的事实必须反映到订单状态，操作员可随时再次「重新尝试分配」。
 
 ---
 
