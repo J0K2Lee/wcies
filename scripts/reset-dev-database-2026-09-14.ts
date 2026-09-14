@@ -5,7 +5,11 @@
  * STAGING, external fulfillment, T4 walkthrough).
  *
  * KEPT (hard-coded): users (login), platforms (system dictionary required to
- * create any store), migrations (TypeORM bookkeeping). Everything else in
+ * create any store), migrations (TypeORM bookkeeping), and the one-time
+ * category reference data - categories / platform_category_nodes /
+ * platform_category_mappings (user instruction 2026-09-14: the OZON tree is
+ * imported ONCE and must survive test resets; OZON sync would rebuild the
+ * node cache but NOT the hand-made「记住此映射」entries). Everything else in
  * schema `public` is truncated and every business sequence restarts at 1
  * (fresh ORD00000001 / EXC00000001 ...).
  *
@@ -22,8 +26,16 @@
 import 'dotenv/config';
 import { Client } from 'pg';
 
-/** Tables that must survive the wipe (login + system dictionary + migrations). */
-const KEEP_TABLES = new Set(['users', 'platforms', 'migrations']);
+/** Tables that must survive the wipe (login + system dictionary + migrations
+ *  + one-time category reference data, user instruction 2026-09-14). */
+const KEEP_TABLES = new Set([
+  'users',
+  'platforms',
+  'migrations',
+  'categories',
+  'platform_category_nodes',
+  'platform_category_mappings',
+]);
 
 function fail(reason: string): never {
   console.error(`[reset-dev-db] ABORT: ${reason}`);
