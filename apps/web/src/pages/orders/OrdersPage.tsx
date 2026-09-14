@@ -13,14 +13,16 @@ import {
   Tooltip,
 } from 'antd';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { ExportOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { apiGet, apiPost, useApiQuery } from '../../api/hooks';
+import { apiPost, useApiQuery } from '../../api/hooks';
 import {
   ActionMenu,
   ContextAction,
   ContextMetric,
   ContextSection,
   DataTable,
+  EntityLink,
   EntitySummary,
   ERP_STATUS_META,
   FULFILLMENT_STATUS_META,
@@ -577,6 +579,21 @@ export function OrdersPage() {
               </div>
             </ContextSection>
           )}
+          {selectedRow.mappingFailedCount > 0 &&
+            failedMappingItems.length > 0 &&
+            mappingSearchKeyword(failedMappingItems[0]!) !== null && (
+              // 与异常中心一致的「关联操作」入口: EntityLink 深链到映射工作台
+              <ContextSection title="关联操作">
+                <EntityLink
+                  to={`/platform-mappings?keyword=${encodeURIComponent(
+                    mappingSearchKeyword(failedMappingItems[0]!) ?? '',
+                  )}&mappingState=UNMAPPED`}
+                  icon={<ExportOutlined />}
+                  primary="映射失败行 · 去快捷建档"
+                  secondary={`自动搜索 ${mappingSearchKeyword(failedMappingItems[0]!)}`}
+                />
+              </ContextSection>
+            )}
           {selectedRow.mappingFailedCount === 0 && selectedRow.backorderedCount > 0 && (
             <ContextSection title="风险">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1073,44 +1090,6 @@ export function OrdersPage() {
                                   cancelMutation.mutate(row.id);
                                 },
                               });
-                            },
-                          },
-                        ]
-                      : []),
-                    ...(row.mappingFailedCount > 0
-                      ? [
-                          {
-                            key: 'quick-onboard',
-                            label: `映射失败 ${row.mappingFailedCount} 行 · 去快捷建档`,
-                            onClick: async () => {
-                              // Identifiers live on the order lines: reuse the
-                              // cached detail when it belongs to this order,
-                              // otherwise fetch it once, then deep-link to the
-                              // mapping workbench pre-searched with the FIRST
-                              // failed line's platform identifier.
-                              let items = detail?.id === row.id ? detail.items : undefined;
-                              if (items === undefined) {
-                                try {
-                                  items = (
-                                    await apiGet<{ items: OrderItem[] }>(
-                                      '/api/v1/orders/{id}',
-                                      {},
-                                      { id: row.id },
-                                    )
-                                  ).items;
-                                } catch (error: unknown) {
-                                  message.error(
-                                    `读取订单行失败：${error instanceof Error ? error.message : String(error)}`,
-                                  );
-                                  return;
-                                }
-                              }
-                              const failed = items.find((item) => item.mappingStatus === 'FAILED');
-                              if (failed === undefined) {
-                                message.info('该订单已没有映射失败行（可能刚刚重试成功）');
-                                return;
-                              }
-                              openMappingWorkbench(failed);
                             },
                           },
                         ]
