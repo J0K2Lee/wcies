@@ -14,7 +14,7 @@ import {
   Tree,
   TreeSelect,
 } from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useState } from 'react';
 import { apiDelete, apiPatch, apiPost, useApiQuery } from '../../api/hooks';
 import { SkuCreateModal } from '../../components/SkuCreateModal';
 import {
@@ -71,7 +71,8 @@ interface CategoryOption {
 
 interface ManageTreeNode {
   key: string;
-  title: string;
+  /** Plain text normally; a ReactNode only when a search hit is highlighted. */
+  title: ReactNode;
   children?: ManageTreeNode[];
 }
 
@@ -186,15 +187,79 @@ const buildFilterCategoryOptions = (nodes: CategoryNode[]): CategoryOption[] =>
     };
   });
 
-const buildManageTreeData = (nodes: CategoryNode[]): ManageTreeNode[] =>
+const buildManageTreeData = (nodes: CategoryNode[], highlight?: string): ManageTreeNode[] =>
   [...nodes].sort(bySortOrder).map((node) => {
-    const children = buildManageTreeData(node.children);
+    const children = buildManageTreeData(node.children, highlight);
     return {
       key: node.id,
-      title: categoryOptionLabel(node),
+      title:
+        highlight === undefined
+          ? categoryOptionLabel(node)
+          : highlightKeyword(categoryOptionLabel(node), highlight),
       ...(children.length > 0 ? { children } : {}),
     };
   });
+
+/** Ids of every node that has children - used to auto-expand search results. */
+const collectBranchKeys = (nodes: CategoryNode[]): string[] =>
+  nodes.flatMap((node) =>
+    node.children.length > 0 ? [node.id, ...collectBranchKeys(node.children)] : [],
+  );
+
+/** Fuzzy search fields for the manager tree (case-insensitive substring). */
+const categoryMatchesKeyword = (node: CategoryNode, needle: string): boolean =>
+  [node.nameZh, node.nameRu, node.code].some((value) =>
+    (value ?? '').toLowerCase().includes(needle),
+  );
+
+/**
+ * Prunes the tree to matching nodes plus their ancestors: a hit deep in the
+ * 8k-node OZON tree must stay reachable, and an ancestor need not match itself.
+ */
+function filterCategoryTree(
+  nodes: CategoryNode[],
+  needle: string,
+): { nodes: CategoryNode[]; matches: number } {
+  let matches = 0;
+  const walk = (list: CategoryNode[]): CategoryNode[] =>
+    list.flatMap((node) => {
+      const children = walk(node.children);
+      const hit = categoryMatchesKeyword(node, needle);
+      if (hit) {
+        matches += 1;
+      }
+      return hit || children.length > 0 ? [{ ...node, children }] : [];
+    });
+  return { nodes: walk(nodes), matches };
+}
+
+/** Wraps the matched substring so a hit is visible inside a long name. */
+function highlightKeyword(text: string, keyword: string): ReactNode {
+  const needle = keyword.trim();
+  if (needle === '') {
+    return text;
+  }
+  const index = text.toLowerCase().indexOf(needle.toLowerCase());
+  if (index === -1) {
+    return text;
+  }
+  return (
+    <>
+      {text.slice(0, index)}
+      <span
+        style={{
+          background: colors.warningBg,
+          color: colors.warning,
+          borderRadius: 3,
+          padding: '0 1px',
+        }}
+      >
+        {text.slice(index, index + needle.length)}
+      </span>
+      {text.slice(index + needle.length)}
+    </>
+  );
+}
 
 const collectSubtreeIds = (node: CategoryNode): string[] => [
   node.id,
@@ -263,6 +328,10 @@ export function ProductsPage() {
   // ---- Category management modal ----
   const [manageOpen, setManageOpen] = useState(false);
   const [manageSelectedId, setManageSelectedId] = useState<string | null>(null);
+  /** Fuzzy filter over the 8k-node tree (nameZh / nameRu / code). */
+  const [manageKeyword, setManageKeyword] = useState('');
+  /** null = follow the mode's auto-expansion; an array = the operator's own. */
+  const [manageExpandedKeys, setManageExpandedKeys] = useState<string[] | null>(null);
   const [categoryInfoForm] = Form.useForm();
   const [categoryStructureForm] = Form.useForm();
 
@@ -344,14 +413,39 @@ export function ProductsPage() {
     () => buildFilterCategoryOptions(categoryTree),
     [categoryTree],
   );
-  const manageTreeData = useMemo(() => buildManageTreeData(categoryTree), [categoryTree]);
+  /**
+   * Manager-tree search (2026-09-14): fuzzy filter over the 8k-node tree.
+   * While a keyword is active the tree shows matches + their ancestors only.
+   */
+  const manageSearch = useMemo(() => {
+    const needle = manageKeyword.trim().toLowerCase();
+    if (needle === '') {
+      return { active: false, nodes: categoryTree, matches: 0 };
+    }
+    const filtered = filterCategoryTree(categoryTree, needle);
+    return { active: true, nodes: filtered.nodes, matches: filtered.matches };
+  }, [categoryTree, manageKeyword]);
+
+  const manageTreeData = useMemo(
+    () =>
+      buildManageTreeData(
+        manageSearch.nodes,
+        manageSearch.active ? manageKeyword.trim() : undefined,
+      ),
+    [manageSearch, manageKeyword],
+  );
   // Sprint 8.5R1: expanding all 8k nodes at mount froze the dialog. Start with
   // the 26 level-1 nodes expanded and let the (virtualised) Tree load the rest
-  // as the operator drills in.
-  const manageDefaultExpandedKeys = useMemo(
-    () => categoryTree.filter((node) => node.level === 1).map((node) => node.id),
-    [categoryTree],
+  // as the operator drills in. A search flips that to "everything that has
+  // children", so no hit can hide behind a collapsed branch.
+  const manageAutoExpandedKeys = useMemo(
+    () =>
+      manageSearch.active
+        ? collectBranchKeys(manageSearch.nodes)
+        : categoryTree.filter((node) => node.level === 1).map((node) => node.id),
+    [manageSearch, categoryTree],
   );
+  const manageVisibleExpandedKeys = manageExpandedKeys ?? manageAutoExpandedKeys;
 
   const manageSelected =
     manageSelectedId !== null ? (categoryById.get(manageSelectedId) ?? null) : null;
@@ -1631,6 +1725,8 @@ export function ProductsPage() {
         afterOpenChange={(open) => {
           if (!open) {
             setManageSelectedId(null);
+            setManageKeyword('');
+            setManageExpandedKeys(null);
             categoryInfoForm.resetFields();
             categoryStructureForm.resetFields();
           }
@@ -1640,13 +1736,44 @@ export function ProductsPage() {
         <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 20 }}>
           <div
             style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
               border: `1px solid ${colors.borderSoft}`,
               borderRadius: 8,
               padding: 8,
             }}
           >
+            <Input.Search
+              allowClear
+              placeholder="搜索分类（中文名 / 俄文名 / 编码）"
+              aria-label="搜索分类"
+              value={manageKeyword}
+              onChange={(event) => {
+                setManageKeyword(event.target.value);
+                // Searching re-expands the filtered tree; keeping a manual
+                // expand state would hide hits behind collapsed branches.
+                setManageExpandedKeys(null);
+              }}
+            />
+            {manageSearch.active && (
+              <span
+                style={{
+                  fontSize: 12,
+                  color: manageSearch.matches === 0 ? colors.danger : colors.textTertiary,
+                }}
+              >
+                {manageSearch.matches === 0
+                  ? '未找到匹配的分类'
+                  : `匹配 ${manageSearch.matches} 个分类（自动带出其父级，高亮为命中片段）`}
+              </span>
+            )}
             {categories.data === undefined ? (
               <span style={{ fontSize: 12.5, color: colors.textTertiary }}>加载中…</span>
+            ) : manageSearch.active && manageSearch.matches === 0 ? (
+              <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+                换个关键词试试：支持中文名、俄文名与编码（如 CN00004）的模糊匹配。
+              </span>
             ) : (
               // `height` turns on the Tree's own virtual scrolling: only the
               // visible rows exist in the DOM, so selecting a node no longer
@@ -1654,7 +1781,8 @@ export function ProductsPage() {
               <Tree
                 blockNode
                 height={440}
-                defaultExpandedKeys={manageDefaultExpandedKeys}
+                expandedKeys={manageVisibleExpandedKeys}
+                onExpand={(keys) => setManageExpandedKeys(keys.map(String))}
                 selectedKeys={manageSelectedId !== null ? [manageSelectedId] : []}
                 onSelect={(keys) => {
                   const first = keys[0];

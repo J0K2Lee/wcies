@@ -1,6 +1,6 @@
 /**
  * Code 128-B encoder (Sprint 7 T6.1, decision 0007: Code128 is the scan
- * carrier - internal WCSKU codes contain letters, so EAN-13 is not an
+ * carrier - internal `W…` codes contain letters, so EAN-13 is not an
  * option). Self-implemented on purpose: no new dependencies allowed
  * (AGENTS.md §73), and the symbol set we print (ASCII 32..127) fits
  * subset B with no mode switching.

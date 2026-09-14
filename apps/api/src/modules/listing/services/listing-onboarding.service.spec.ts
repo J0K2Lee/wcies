@@ -109,7 +109,7 @@ function buildService(overrides?: BuildOptions) {
   const barcodeService = {
     generateInternalInTx: vi.fn(async () => {
       invocationOrder.push('barcode');
-      return { id: 'bc-1', barcode: 'WCSKU00000001' };
+      return { id: 'bc-1', barcode: 'W00000001' };
     }),
   } as unknown as BarcodeService;
 
@@ -185,7 +185,7 @@ describe('ListingOnboardingService', () => {
     ]);
     expect(ctx.repository.lockMappingByIdInTx).toHaveBeenCalledWith(expect.anything(), 'mapping-1');
     expect(result.sku.skuCode).toBe('SKU000001001');
-    expect(result.barcode).toBe('WCSKU00000001');
+    expect(result.barcode).toBe('W00000001');
     expect(result.mappingStatus).toBe('MAPPED');
     expect(result.productCreated).toBe(true);
   });

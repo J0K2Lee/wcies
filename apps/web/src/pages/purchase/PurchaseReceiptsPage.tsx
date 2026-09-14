@@ -1110,7 +1110,7 @@ function ReceiptItemsEditor({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
             新到货没有系统条码是正常情况：选择它是哪个
-            SKU，把实物上的条码绑定给它；实物没有条码则生成内部条码（WCSKU…）打印后贴上。一个 SKU
+            SKU，把实物上的条码绑定给它；实物没有条码则生成内部条码（W…）打印后贴上。一个 SKU
             可有多个条码，不会覆盖已有条码。
           </span>
           <SkuPicker value={bindSku} onChange={setBindSku} />

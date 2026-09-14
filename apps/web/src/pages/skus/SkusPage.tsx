@@ -1049,7 +1049,7 @@ export function SkusPage() {
             style={{ width: 140 }}
           />
           <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
-            Code128 条码，新窗口打印；无条码可先在下方条码区生成内部条码 WCSKU…。
+            Code128 条码，新窗口打印；无条码可先在下方条码区生成内部条码 W…。
           </span>
         </div>
       </Modal>

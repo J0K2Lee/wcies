@@ -18,7 +18,7 @@
 | Category | `code` | `CN%05d`，一/二/三级共用一条序列 | `category` | 同上 |
 | Product | `product_code` | `PN%06d`，如 `PN000001` | `product` | 创建后只读（决策 0002） |
 | SKU | `sku_code` | `SKU{商品序号 6 位}{商品内 SKU 序号 3 位}`，如 `SKU000001001` | `sku:{productId}` | 生成后冻结（决策 0002） |
-| 内部条码 | `barcode`(INTERNAL) | PG sequence，`WCSKU%08d`（保持独立，不与 SKU 编码合并） | 现有 sequence | — |
+| 内部条码 | `barcode`(INTERNAL) | PG sequence，`W%08d`（决策 0017；旧 `WCSKU%08d` 不迁移，已发出的继续有效） | 现有 sequence | — |
 | Bin 条码 | `barcode` | `BIN-{warehouseCode}-{binCode}` | — | 可 |
 | Supplier（Sprint 7） | `code` | `SUP%04d`，如 `SUP0001` | `supplier` | 创建时可留空自动生成；创建后不可改 |
 | 采购单（Sprint 7） | `po_no` | `PO%06d`，如 `PO000001` | `purchase_order` | 服务端生成，不可改 |
@@ -45,6 +45,10 @@
 1. `barcode` 全系统唯一：一个条码永远不能绑定两个内部 SKU；冲突错误码 `SKU_BARCODE_ALREADY_EXISTS`。
 2. 一个 SKU 可有多个条码，最多一个 `is_primary = true`，由数据库 partial unique index（`WHERE is_primary`）保证；切换主条码在事务中先降级旧主条码。
 3. 条码类型：`EAN / GTIN / MANUFACTURER / INTERNAL / OTHER`；69 码归入 EAN/GTIN，不设 CN_69_CODE。
+4. **内部条码格式**（决策 0017，2026-09-14）：`W%08d`，如 `W00000014`，由 PG sequence `seq_internal_barcode` 取号；宽度是最小宽度，序号溢出自然进位。
+   - 旧格式 `WCSKU%08d` **不做数据迁移**：条码是不透明唯一串，已贴在实物上的标签无法重印；解析（`/barcodes/:barcode/resolve`）与打印对两种格式一视同仁（按字符串精确匹配）。
+   - 打印载体仍是 Code128-B（决策 0007）。符号模块数 178 → 134（13 字符 → 9 字符，每字符 11 模块；去掉的 `CSKU` 正好省下 44 个模块，−25%）：同一标签宽度下模块宽度约提升 33%，条更宽、更易扫。
+   - 生成入口只有两处（常规 `POST /skus/:id/barcodes/generate-internal` 与建档事务内的 `generateInternalInTx`），两者必须共用同一格式化函数（`formatInternalBarcode`），禁止各自拼串。
 
 ## 4. SKU 物理属性
 

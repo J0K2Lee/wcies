@@ -90,11 +90,11 @@ describe('barcode resolution (Sprint 7 T5)', () => {
     expect(after.status).toBe(200);
     expect(after.body.data.skuId).toBe(sku.body.data.id);
 
-    // The generated internal barcode (WCSKU...) also resolves.
+    // The generated internal barcode (decision 0017: W + 8 digits) resolves.
     const generated = await client.post<{ barcode: string }>(
       `/api/v1/skus/${sku.body.data.id}/barcodes/generate-internal`,
     );
-    expect(generated.body.data.barcode).toMatch(/^WCSKU\d{8}$/);
+    expect(generated.body.data.barcode).toMatch(/^W\d{8}$/);
     const internal = await client.get<Resolved>(
       `/api/v1/barcodes/${generated.body.data.barcode}/resolve`,
     );

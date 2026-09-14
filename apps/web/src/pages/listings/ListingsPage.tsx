@@ -1906,7 +1906,7 @@ export function ListingsPage() {
               initialValue={true}
               style={{ marginTop: 12 }}
             >
-              <Checkbox>生成内部条码（WCSKU…，建档后可直接打印标签贴到实物上）</Checkbox>
+              <Checkbox>生成内部条码（W…，建档后可直接打印标签贴到实物上）</Checkbox>
             </Form.Item>
           </Form>
         )}

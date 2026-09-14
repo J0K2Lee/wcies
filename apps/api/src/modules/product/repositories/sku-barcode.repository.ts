@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { SkuBarcodeEntity } from '../entities/sku-barcode.entity';
+import { formatInternalBarcode } from '../constants/barcode.constants';
 
 /**
  * Data access only - no business rules here (AGENTS.md §8).
@@ -40,7 +41,7 @@ export class SkuBarcodeRepository {
       "SELECT nextval('seq_internal_barcode') AS nextval",
     );
     const value = Number(result[0]?.nextval ?? 1);
-    return `WCSKU${String(value).padStart(8, '0')}`;
+    return formatInternalBarcode(value);
   }
 
   /** Creates a barcode; when isPrimary, demotes the existing primary atomically. */

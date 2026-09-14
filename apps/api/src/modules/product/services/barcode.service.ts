@@ -12,6 +12,7 @@ import {
   CreateBarcodeRequestDto,
   UpdateBarcodeRequestDto,
 } from '../dto/barcode-image.dto';
+import { formatInternalBarcode } from '../constants/barcode.constants';
 
 const ENTITY_TYPE = 'SKU_BARCODE';
 
@@ -19,7 +20,8 @@ const ENTITY_TYPE = 'SKU_BARCODE';
  * SKU barcodes (task §28-§32).
  * - barcode is globally unique (one barcode never binds two SKUs);
  * - at most one is_primary per SKU (DB partial unique index);
- * - INTERNAL barcodes (WCSKU%08d) can be generated when no vendor code exists.
+ * - INTERNAL barcodes (decision 0017: `W%08d`) can be generated when no
+ *   vendor code exists.
  */
 @Injectable()
 export class BarcodeService {
@@ -72,7 +74,7 @@ export class BarcodeService {
     return this.toResponse(barcode);
   }
 
-  /** Generates an INTERNAL barcode (WCSKU%08d) for the SKU (task §32). */
+  /** Generates an INTERNAL barcode (`W%08d`, decision 0017) for the SKU (task §32). */
   async generateInternal(skuId: string, operator: OperatorContext): Promise<BarcodeResponseDto> {
     await this.assertSkuExists(skuId);
     const barcodeValue = await this.repository.nextInternalBarcode();
@@ -82,8 +84,8 @@ export class BarcodeService {
   /**
    * Cross-module tx participant (Sprint 8 T1): same generation as
    * generateInternal() but on the CALLER's transaction. The sequence itself
-   * (nextval) is non-transactional by design - a rollback may skip a WCSKU
-   * number, which is acceptable (internal barcodes have no density contract).
+   * (nextval) is non-transactional by design - a rollback may skip an internal
+   * barcode number, which is acceptable (they have no density contract).
    * Logging stays with the caller (after commit). Returns the raw entity.
    */
   async generateInternalInTx(manager: EntityManager, skuId: string): Promise<SkuBarcodeEntity> {
@@ -91,7 +93,7 @@ export class BarcodeService {
       "SELECT nextval('seq_internal_barcode') AS nextval",
     );
     const value = Number(result[0]?.nextval ?? 1);
-    const barcodeValue = `WCSKU${String(value).padStart(8, '0')}`;
+    const barcodeValue = formatInternalBarcode(value);
     const barcodeRepository = manager.getRepository(SkuBarcodeEntity);
     const existing = await barcodeRepository.findOneBy({ barcode: barcodeValue });
     if (existing !== null) {

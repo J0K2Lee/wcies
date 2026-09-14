@@ -2122,7 +2122,7 @@
             }
           }
         },
-        "summary": "Generate an INTERNAL barcode (WCSKU%08d) for the SKU",
+        "summary": "Generate an INTERNAL barcode (W%08d, decision 0017) for the SKU",
         "tags": ["skus"]
       }
     },
@@ -11938,7 +11938,7 @@
           "barcode": {
             "type": "object",
             "nullable": true,
-            "example": "WCSKU00000042",
+            "example": "W00000042",
             "description": "未勾选生成时为 null"
           },
           "productCreated": {
@@ -11973,7 +11973,7 @@
           "generateBarcode": {
             "type": "boolean",
             "default": true,
-            "description": "同时生成内部条码（WCSKU…），生成后可直接打印标签"
+            "description": "同时生成内部条码（W…，决策 0017），生成后可直接打印标签"
           },
           "existingProductId": {
             "type": "string",

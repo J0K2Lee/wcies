@@ -556,7 +556,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Generate an INTERNAL barcode (WCSKU%08d) for the SKU */
+        /** Generate an INTERNAL barcode (W%08d, decision 0017) for the SKU */
         post: operations["SkuController_generateInternalBarcode"];
         delete?: never;
         options?: never;
@@ -3751,7 +3751,7 @@ export interface components {
             sku: components["schemas"]["ListingOnboardSkuDto"];
             /**
              * @description 未勾选生成时为 null
-             * @example WCSKU00000042
+             * @example W00000042
              */
             barcode: Record<string, never> | null;
             /**
@@ -3766,7 +3766,7 @@ export interface components {
             /** @description SKU 名；缺省取 Listing 标题 */
             skuNameZh?: string;
             /**
-             * @description 同时生成内部条码（WCSKU…），生成后可直接打印标签
+             * @description 同时生成内部条码（W…，决策 0017），生成后可直接打印标签
              * @default true
              */
             generateBarcode: boolean;

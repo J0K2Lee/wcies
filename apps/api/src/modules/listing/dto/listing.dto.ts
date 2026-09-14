@@ -154,7 +154,7 @@ export class ListingOnboardRequestDto {
 
   @ApiPropertyOptional({
     default: true,
-    description: '同时生成内部条码（WCSKU…），生成后可直接打印标签',
+    description: '同时生成内部条码（W…，决策 0017），生成后可直接打印标签',
   })
   @IsOptional()
   @IsBoolean()
@@ -274,7 +274,7 @@ export class ListingOnboardResponseDto {
   })
   sku!: ListingOnboardSkuDto;
 
-  @ApiProperty({ nullable: true, example: 'WCSKU00000042', description: '未勾选生成时为 null' })
+  @ApiProperty({ nullable: true, example: 'W00000042', description: '未勾选生成时为 null' })
   barcode!: string | null;
 
   @ApiProperty({

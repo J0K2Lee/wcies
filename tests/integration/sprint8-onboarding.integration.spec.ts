@@ -146,7 +146,7 @@ describe('T1 quick onboarding (one transaction, no half-products)', () => {
     // Codes come from the centralized sequences - no new code rules (§6.6).
     expect(data.product.productCode).toMatch(/^PN\d{6,}$/);
     expect(data.sku.skuCode).toMatch(/^SKU\d{9,}$/);
-    expect(data.barcode).toMatch(/^WCSKU\d{8}$/);
+    expect(data.barcode).toMatch(/^W\d{8}$/);
     expect(data.mappingStatus).toBe('MAPPED');
 
     // DB facts: product + sku + PRIMARY barcode, all visible.

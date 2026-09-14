@@ -10,7 +10,7 @@ import { barsOf, encodeCode128B } from './code128';
 
 describe('encodeCode128B', () => {
   it('frames every encoding with Start B and the 13-module Stop pattern', () => {
-    const { bits } = encodeCode128B('WCSKU00000001');
+    const { bits } = encodeCode128B('W00000014');
     expect(bits.startsWith('11010010000')).toBe(true); // Start B (104)
     expect(bits.endsWith('1100011101011')).toBe(true); // Stop (106)
   });
@@ -21,6 +21,18 @@ describe('encodeCode128B', () => {
     // start(11) + data*11 + check(11) + stop(13)
     expect(modules).toBe(11 + value.length * 11 + 11 + 13);
     expect(bits.length).toBe(modules);
+  });
+
+  // Decision 0017: the whole point of the short internal prefix is label
+  // width - Code128 pays 11 modules per character, so dropping the four `CSKU`
+  // characters removes exactly 4 x 11 = 44 modules from the same barcode.
+  it('encodes the short internal barcode in 134 modules instead of 178', () => {
+    const short = encodeCode128B('W00000014');
+    const legacy = encodeCode128B('WCSKU00000014');
+    expect(short.modules).toBe(11 + 9 * 11 + 11 + 13);
+    expect(legacy.modules).toBe(11 + 13 * 11 + 11 + 13);
+    expect(short.modules).toBe(134);
+    expect(legacy.modules - short.modules).toBe(44);
   });
 
   it('computes the Code128 checksum (start + sum(value*pos)) mod 103', () => {
