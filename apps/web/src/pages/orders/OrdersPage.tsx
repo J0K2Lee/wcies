@@ -584,10 +584,12 @@ export function OrdersPage() {
             mappingSearchKeyword(failedMappingItems[0]!) !== null && (
               // 与异常中心一致的「关联操作」入口: EntityLink 深链到映射工作台
               <ContextSection title="关联操作">
+                {/* 目标是 /listings「SKU映射」工作台（快速建档所在），与异常中心
+                    「前往 SKU 映射」同一深链格式；/platform-mappings 是映射总览。 */}
                 <EntityLink
-                  to={`/platform-mappings?keyword=${encodeURIComponent(
+                  to={`/listings?keyword=${encodeURIComponent(
                     mappingSearchKeyword(failedMappingItems[0]!) ?? '',
-                  )}&mappingState=UNMAPPED`}
+                  )}`}
                   icon={<ExportOutlined />}
                   primary="映射失败行 · 去快捷建档"
                   secondary={`自动搜索 ${mappingSearchKeyword(failedMappingItems[0]!)}`}
