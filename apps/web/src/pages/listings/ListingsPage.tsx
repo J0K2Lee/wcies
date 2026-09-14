@@ -132,8 +132,16 @@ interface CategoryNode {
   nameZh: string;
   nameRu: string | null;
   level: number;
+  sortOrder: number;
+  status: string;
   children: CategoryNode[];
 }
+
+const categoryOptionLabel = (node: CategoryNode): string =>
+  node.status === 'ACTIVE' ? node.nameZh : `${node.nameZh}（停用）`;
+
+const bySortOrder = (a: CategoryNode, b: CategoryNode): number =>
+  a.sortOrder - b.sortOrder || a.nameZh.localeCompare(b.nameZh);
 
 interface CategoryOption {
   value: string;
@@ -234,6 +242,17 @@ export function ListingsPage() {
   } | null>(null);
   // Brand quick-create (Sprint 8.5 T4, mirrors ProductsPage's pattern).
   const [brandModalOpen, setBrandModalOpen] = useState(false);
+  // 新增分类（与商品页「新增分类」同一形态：一级/二级级联 + 内联建父级 + 三级命名）
+  const [categoryCreateOpen, setCategoryCreateOpen] = useState(false);
+  const [categoryForm] = Form.useForm<{
+    parent1Id?: string;
+    parent2Id?: string;
+    nameZh?: string;
+    nameRu?: string;
+  }>();
+  const [inlineMode, setInlineMode] = useState<'level1' | 'level2' | null>(null);
+  const [inlineNameZh, setInlineNameZh] = useState('');
+  const [inlineNameRu, setInlineNameRu] = useState('');
   const [brandForm] = Form.useForm();
 
   const list = useApiQuery<{ data: ListingRow[]; meta: { total: number } }>(
@@ -346,6 +365,23 @@ export function ListingsPage() {
       }));
     return toOptions(categories.data?.data ?? []);
   }, [categories.data]);
+  const categoryById = useMemo(() => {
+    const byId = new Map<string, CategoryNode>();
+    const walk = (nodes: CategoryNode[]): void => {
+      for (const node of nodes) {
+        byId.set(node.id, node);
+        walk(node.children);
+      }
+    };
+    walk(categories.data?.data ?? []);
+    return byId;
+  }, [categories.data]);
+  const categoryParent1Id = Form.useWatch('parent1Id', categoryForm);
+  const level2Options = useMemo(() => {
+    const parent1 =
+      categoryParent1Id !== undefined ? (categoryById.get(categoryParent1Id) ?? null) : null;
+    return parent1 === null ? [] : [...parent1.children].sort(bySortOrder);
+  }, [categoryParent1Id, categoryById]);
   const brandOptions = (brands.data?.data ?? []).map((brand) => ({
     value: brand.id,
     label: brand.name,
@@ -439,7 +475,8 @@ export function ListingsPage() {
   });
 
   const brandCreateMutation = useMutation({
-    mutationFn: (values: { name: string }) => apiPost<BrandItem>('/api/v1/brands', values),
+    mutationFn: (values: { name: string; nameZh?: string; nameEn?: string; nameRu?: string }) =>
+      apiPost<BrandItem>('/api/v1/brands', values),
     onSuccess: (brand) => {
       void message.success(`品牌已创建：${brand.name}`);
       setBrandModalOpen(false);
@@ -449,6 +486,72 @@ export function ListingsPage() {
     },
     onError: (error: Error) => void message.error(error.message),
   });
+
+  // 与商品页「新增分类」一致：级联选父级 + 内联建父级 + 三级命名；
+  // 三级创建成功后自动回填建档表单的 categoryPath。
+  const createCategoryMutation = useMutation({
+    mutationFn: (input: {
+      kind: 'level1' | 'level2' | 'leaf';
+      parentId?: string;
+      path?: string[];
+      nameZh: string;
+      nameRu?: string;
+    }) =>
+      apiPost<{ id: string }>('/api/v1/categories', {
+        parentId: input.parentId,
+        nameZh: input.nameZh,
+        nameRu: input.nameRu,
+      }),
+    onSuccess: (created, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['categories'] });
+      if (variables.kind === 'level1') {
+        void message.success('一级分类已创建');
+        categoryForm.setFieldValue('parent1Id', created.id);
+        categoryForm.setFieldValue('parent2Id', undefined);
+        setInlineMode(null);
+        setInlineNameZh('');
+        setInlineNameRu('');
+      } else if (variables.kind === 'level2') {
+        void message.success('二级分类已创建');
+        categoryForm.setFieldValue('parent2Id', created.id);
+        setInlineMode(null);
+        setInlineNameZh('');
+        setInlineNameRu('');
+      } else {
+        void message.success('分类已创建，已填入建档表单');
+        onboardForm.setFieldValue('categoryPath', [...(variables.path ?? []), created.id]);
+        setCategoryCreateOpen(false);
+      }
+    },
+    onError: (error: Error) => void message.error(`创建分类失败: ${error.message}`),
+  });
+
+  const submitInlineCategory = (kind: 'level1' | 'level2') => {
+    const nameZh = inlineNameZh.trim();
+    if (nameZh === '') {
+      void message.warning('请输入中文名称');
+      return;
+    }
+    if (kind === 'level2') {
+      const parent1Id = categoryForm.getFieldValue('parent1Id') as string | undefined;
+      if (parent1Id === undefined || parent1Id === '') {
+        void message.warning('请先选择一级分类');
+        return;
+      }
+      createCategoryMutation.mutate({
+        kind: 'level2',
+        parentId: parent1Id,
+        nameZh,
+        nameRu: inlineNameRu.trim() || undefined,
+      });
+      return;
+    }
+    createCategoryMutation.mutate({
+      kind: 'level1',
+      nameZh,
+      nameRu: inlineNameRu.trim() || undefined,
+    });
+  };
 
   // Sprint 8 T2: export the unmapped set (respects the current platform/store
   // filters) as an import-compatible Excel and download via signed URL.
@@ -1811,7 +1914,23 @@ export function ListingsPage() {
                 </Form.Item>
                 <Form.Item
                   name="categoryPath"
-                  label="商品分类（三级）"
+                  label={
+                    <Space size={4}>
+                      商品分类（三级）
+                      <Button
+                        type="link"
+                        size="small"
+                        style={{ padding: 0, height: 'auto' }}
+                        onClick={() => {
+                          categoryForm.resetFields();
+                          setInlineMode(null);
+                          setCategoryCreateOpen(true);
+                        }}
+                      >
+                        + 新增分类
+                      </Button>
+                    </Space>
+                  }
                   extra={categoryExtraHint()}
                   rules={[
                     {
@@ -1912,26 +2031,252 @@ export function ListingsPage() {
         )}
       </Modal>
 
-      {/* ---- Sprint 8.5 T4: brand quick-create (same pattern as ProductsPage) ---- */}
+      {/* ---- 品牌快建：与商品页「新增品牌」完全一致（四语名称，编码自动生成）---- */}
       <Modal
         title="新增品牌"
         open={brandModalOpen}
         zIndex={1200}
+        afterOpenChange={(open) => {
+          if (!open) {
+            brandForm.resetFields();
+          }
+        }}
         onCancel={() => setBrandModalOpen(false)}
-        confirmLoading={brandCreateMutation.isPending}
         onOk={() =>
           void brandForm.validateFields().then((values) => {
-            brandCreateMutation.mutate({ name: values.name as string });
+            brandCreateMutation.mutate({
+              name: (values.name as string).trim(),
+              nameZh: (values.nameZh as string | undefined)?.trim() || undefined,
+              nameEn: (values.nameEn as string | undefined)?.trim() || undefined,
+              nameRu: (values.nameRu as string | undefined)?.trim() || undefined,
+            });
           })
         }
+        confirmLoading={brandCreateMutation.isPending}
       >
+        <p style={{ marginTop: 0, fontSize: 12.5, color: colors.textTertiary }}>
+          品牌编码无需填写，创建后自动生成。
+        </p>
         <Form form={brandForm} layout="vertical">
           <Form.Item
             name="name"
-            label="品牌名称"
-            rules={[{ required: true, message: '请输入品牌名称' }]}
+            label="一般名称"
+            rules={[{ required: true, message: '请输入一般名称' }]}
           >
-            <Input maxLength={200} placeholder="如 MOULD KING" />
+            <Input maxLength={200} placeholder="主显示名，如 Valkyrie" />
+          </Form.Item>
+          <Form.Item name="nameZh" label="中文名称（选填）">
+            <Input maxLength={200} />
+          </Form.Item>
+          <Form.Item name="nameEn" label="英文名称（选填）">
+            <Input maxLength={200} />
+          </Form.Item>
+          <Form.Item name="nameRu" label="俄文名称（选填）">
+            <Input maxLength={200} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* ---- 新增分类：与商品页「新增分类」完全一致（级联 + 内联建父级 + 三级命名）---- */}
+      <Modal
+        title="新增分类"
+        open={categoryCreateOpen}
+        zIndex={1200}
+        afterOpenChange={(open) => {
+          if (!open) {
+            categoryForm.resetFields();
+            setInlineMode(null);
+            setInlineNameZh('');
+            setInlineNameRu('');
+          }
+        }}
+        onCancel={() => setCategoryCreateOpen(false)}
+        onOk={() =>
+          void categoryForm.validateFields().then((values) => {
+            const parent1Id = values.parent1Id;
+            const parent2Id = values.parent2Id;
+            if (parent1Id === undefined || parent2Id === undefined) {
+              return;
+            }
+            createCategoryMutation.mutate({
+              kind: 'leaf',
+              parentId: parent2Id,
+              path: [parent1Id, parent2Id],
+              nameZh: (values.nameZh as string).trim(),
+              nameRu: values.nameRu?.trim() || undefined,
+            });
+          })
+        }
+        confirmLoading={createCategoryMutation.isPending}
+      >
+        <p style={{ marginTop: 0, fontSize: 12.5, color: colors.textTertiary }}>
+          分类编码无需填写，创建后自动生成。商品只能挂载三级分类。
+        </p>
+        <Form form={categoryForm} layout="vertical">
+          <Form.Item
+            name="parent1Id"
+            label="一级分类"
+            rules={[{ required: true, message: '请选择一级分类' }]}
+          >
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder="搜索或选择一级分类"
+              onChange={() => categoryForm.setFieldValue('parent2Id', undefined)}
+              options={[...(categories.data?.data ?? [])]
+                .sort(bySortOrder)
+                .map((node) => ({ value: node.id, label: categoryOptionLabel(node) }))}
+            />
+          </Form.Item>
+          {inlineMode === 'level1' ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                padding: 12,
+                marginBottom: 16,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 8,
+              }}
+            >
+              <span style={{ fontSize: 13, fontWeight: 550 }}>新增一级分类</span>
+              <Input
+                placeholder="中文名称（必填）"
+                maxLength={200}
+                value={inlineNameZh}
+                onChange={(event) => setInlineNameZh(event.target.value)}
+              />
+              <Input
+                placeholder="俄文名称（选填）"
+                maxLength={200}
+                value={inlineNameRu}
+                onChange={(event) => setInlineNameRu(event.target.value)}
+              />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Button
+                  size="small"
+                  type="primary"
+                  loading={createCategoryMutation.isPending}
+                  onClick={() => submitInlineCategory('level1')}
+                >
+                  创建并选中
+                </Button>
+                <Button
+                  size="small"
+                  onClick={() => {
+                    setInlineMode(null);
+                    setInlineNameZh('');
+                    setInlineNameRu('');
+                  }}
+                >
+                  取消
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              size="small"
+              type="link"
+              style={{ padding: 0, marginTop: -12, marginBottom: 16 }}
+              onClick={() => {
+                setInlineNameZh('');
+                setInlineNameRu('');
+                setInlineMode('level1');
+              }}
+            >
+              ＋ 新增一级分类
+            </Button>
+          )}
+
+          <Form.Item
+            name="parent2Id"
+            label="二级分类"
+            dependencies={['parent1Id']}
+            rules={[{ required: true, message: '请选择二级分类' }]}
+          >
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder="先选择一级分类"
+              disabled={categoryParent1Id === undefined || categoryParent1Id === ''}
+              options={level2Options.map((node) => ({
+                value: node.id,
+                label: categoryOptionLabel(node),
+              }))}
+            />
+          </Form.Item>
+          {inlineMode === 'level2' ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                padding: 12,
+                marginBottom: 16,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 8,
+              }}
+            >
+              <span style={{ fontSize: 13, fontWeight: 550 }}>新增二级分类</span>
+              <Input
+                placeholder="中文名称（必填）"
+                maxLength={200}
+                value={inlineNameZh}
+                onChange={(event) => setInlineNameZh(event.target.value)}
+              />
+              <Input
+                placeholder="俄文名称（选填）"
+                maxLength={200}
+                value={inlineNameRu}
+                onChange={(event) => setInlineNameRu(event.target.value)}
+              />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Button
+                  size="small"
+                  type="primary"
+                  loading={createCategoryMutation.isPending}
+                  onClick={() => submitInlineCategory('level2')}
+                >
+                  创建并选中
+                </Button>
+                <Button
+                  size="small"
+                  onClick={() => {
+                    setInlineMode(null);
+                    setInlineNameZh('');
+                    setInlineNameRu('');
+                  }}
+                >
+                  取消
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              size="small"
+              type="link"
+              style={{ padding: 0, marginTop: -12, marginBottom: 16 }}
+              disabled={categoryParent1Id === undefined || categoryParent1Id === ''}
+              onClick={() => {
+                setInlineNameZh('');
+                setInlineNameRu('');
+                setInlineMode('level2');
+              }}
+            >
+              ＋ 新增二级分类
+            </Button>
+          )}
+
+          <Form.Item
+            name="nameZh"
+            label="三级分类名称"
+            rules={[{ required: true, message: '请输入三级分类名称' }]}
+          >
+            <Input maxLength={200} placeholder="如 积木拼插" />
+          </Form.Item>
+          <Form.Item name="nameRu" label="俄文名称（选填）">
+            <Input maxLength={200} />
           </Form.Item>
         </Form>
       </Modal>
