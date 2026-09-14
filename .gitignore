@@ -41,3 +41,6 @@ tmp/
 # Agent session tooling artifacts (plans, throwaway scripts) - not project code
 .zcode/
 gui-*-screenshots/
+
+# DB backups (local only, never commit)
+backups/
