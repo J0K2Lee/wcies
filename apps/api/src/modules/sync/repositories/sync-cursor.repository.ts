@@ -16,6 +16,11 @@ export class SyncCursorRepository {
     return this.repository.findOneBy({ storeId, syncType });
   }
 
+  /** All cursor rows of a store - the failure picture for SYNC_FAILED (T2). */
+  async listByStore(storeId: string): Promise<SyncCursorEntity[]> {
+    return this.repository.find({ where: { storeId }, order: { updatedAt: 'DESC' } });
+  }
+
   async cursorData(storeId: string, syncType: SyncType): Promise<Record<string, unknown> | null> {
     const row = await this.find(storeId, syncType);
     return row?.cursorData ?? null;

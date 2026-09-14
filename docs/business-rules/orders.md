@@ -207,11 +207,45 @@ EXCEPTION
 - 传输/解析/系统级失败：同步任务 FAILED，游标不动，重试安全（见 docs/integrations/ozon.md）。
 - 平台状态（platform_status）仅作事实存储，不驱动 ERP 状态机（§1 规则不变）。
 
+## 已摄入订单的平台状态更新（Sprint 9 T1）
+
+ORDER_SYNC 再遇到已存在的订单（窗口重叠再投递，或定向回读刷新）时，
+从「跳过」改为「对比更新」：
+
+1. **只更新平台事实字段**：`platform_status` / `shipment_deadline` / `raw_data`。
+   绝不直接改 `erp_status`（§1）。平台未提供的字段（NULL 输入）保持库内原值，
+   历史上 `platform_status IS NULL` 的行不得被「看起来空」而清理或改写。
+2. **窗口游标从不回看**：OZON 窗口按 `in_process_at`（订单创建时间）过滤，
+   已摄入订单不会再出现在后续窗口中。因此每次 ORDER_SYNC 在窗口推进后，
+   对该店铺**非 ERP 终态**（CANCELLED / SHIPPED 除外）的订单按 `ordered_at`
+   正序（上限 100）逐单**定向回读**（`/v3/posting/fbs/get`，即 webhook 提示
+   复用的已验证读法），用于感知取消 / 状态 / 时限变化。单单失败只计入
+   failedCount，不拖垮整批。
+3. **幂等**：状态无变化（含 `raw_data` 键序无关比较——PG jsonb 不保留键序）
+   时零写入，不产生任何行更新或历史记录。
+4. **平台取消 = 自动执行**（决策 1-D1b=A）：平台状态变为 `cancelled`
+   （由平台 Mapper 判定并以 `platformCancelled` 布尔传递，平台词表不进入
+   订单核心）时，直接调用既有 `OrderService.cancel()`：Reserved 行释放
+   Reservation、Picked 行建 Interception。重复的 cancelled 同步命中
+   cancel 的幂等早退与 `ORDER_RELEASE:<orderItemId>` 幂等键，只释放一次。
+   **新单即取消**（窗口内首次摄入即 `cancelled`）同样在摄入后立即走 cancel。
+5. **取消关闭缺货异常**：订单取消（任何触发方）时，自动 RESOLVE 其订单行的
+   OPEN `ORDER_OUT_OF_STOCK` 与 `ORDER_SHIPMENT_DEADLINE_NEAR`——
+   永不发货的订单不得继续要货。
+6. **时限重算**：每次再遇（无论字段是否变化）按 §16 重评估时限异常。
+7. **平台状态历史**：`platform_status` 迁移写入独立表
+   `platform_status_history`（决策 5，方案 B），与 ERP 状态机表物理隔离；
+   订单详情将两条时间线按 `created_at` 合并返回。
+8. **发货/送达差异可见**：平台 `delivering/delivered` 而 ERP 未发货的订单，
+   订单列表与详情展示醒目标记（纯展示，不产生 ERP 动作）。正式收口走
+   §8A「标记外部履约」。
+
 ---
 
 # 8. 取消订单
 
-内部 `cancelOrder()`：Sprint 3 由人工/API 测试触发，不接平台取消事件。
+内部 `cancelOrder()`：人工 / API 触发，或**平台取消自动传导**（Sprint 9 T1，
+平台状态 `cancelled` → 同一 `OrderService.cancel()` 链路，决策 1-D1b=A）。
 
 ## Reserved 取消
 
@@ -234,6 +268,36 @@ OrderItem = BACKORDERED
 ↓
 fulfillment_status = RELEASED
 ```
+
+**取消的异常收口（Sprint 9 T1）**：订单取消（任何触发方）时，该订单全部
+订单行的 OPEN `ORDER_OUT_OF_STOCK` 与订单级 `ORDER_SHIPMENT_DEADLINE_NEAR`
+自动 RESOLVED——永不发货的订单不得继续占用待采购/催货注意力。
+
+## 标记外部履约（Sprint 9 T6，决策 6 = A）
+
+订单在 WCIES 之外完成（如线下采购直发买家，货物从未进入系统仓库）的
+正式收口动作：`POST /orders/:id/mark-external-fulfillment`（原因必填）。
+
+```text
+订单行（非 SHIPPED/RELEASED）
+↓
+fulfillment_status = RELEASED（关账）
+↓
+erp_status → SHIPPED（显式迁移，历史记录「标记外部履约：<原因>」）
+↓
+RESOLVE 该订单的 ORDER_OUT_OF_STOCK / ORDER_SHIPMENT_DEADLINE_NEAR
+↓
+OperationLog：MARK_EXTERNAL_FULFILLMENT（操作人 + 原因）
+```
+
+规则：
+
+1. **不产生任何库存流水**（货从未入系统，§14 账本不受影响）。
+2. 不新增 ERP 状态（§98）：复用 SHIPPED 作为「履约完成」的关账状态；
+   真实履约路径（拣货→打包→出库）与外部履约通过历史原因可区分。
+3. **存在 RESERVED / PICKED 行时拒绝**：释放预约或拦截回库属于库存动作，
+   必须走「取消订单」流程，不得借外部履约绕过。
+4. 已 CANCELLED / SHIPPED 的订单不可标记。
 
 ## PENDING / 映射失败行取消
 
@@ -281,8 +345,12 @@ CREATED → ASSIGNED → LOCATING → INTERCEPTED → RETURNED_TO_STOCK → CLOS
 2. 拦截范围：仅"已发生实体拣货且未出库"的商品。Shipment 已 `SHIPPED` 的行禁止仓内拦截（`INTERCEPTION_NOT_ALLOWED_AFTER_SHIPMENT`）。
 3. 扫码验证（后端强制）：SKU 条码（`INTERCEPTION_SKU_MISMATCH`）、SN（SN 商品必须属于该订单 Reservation 且状态 PICKED，`INTERCEPTION_SERIAL_MISMATCH`）、目标回库 Bin（必须属于该仓库）。
 4. 回库（原子事务）：解包（PackageItem / PackageItemSerial **作废为 VOIDED，不得物理删除**；SEALED 包裹 → `REPACK_REQUIRED`，清空包裹 → `CANCELLED`；ShipmentItem 快照行**同样作废为 VOIDED，不得物理删除**；Shipment 阶梯重算）→ 库存 `RETURN_PICKED`（Picked - N，On Hand 不变，SN → IN_STOCK 回目标 Bin，Reservation → RELEASED）→ OrderItem → RELEASED。状态历史（`order_interception_histories`）逐跳记录，内部合并步骤也留痕。作废语义与审计字段见 §15A「Shipment / Package 行的作废（VOIDED）生命周期」。
-5. 失败：`FAILED` 不动库存（Picked 保持），创建 `ORDER_INTERCEPTION_FAILED` 异常并发送通知。
-6. 关闭：`RETURNED_TO_STOCK` / `FAILED` → `CLOSED`。
+5. **暂存位兜底（Sprint 9 T3，决策 4 = A）**：回库时未扫码且未显式传入
+   目标库位（`targetBinId IS NULL`）的，**自动创建**该仓库的 `STAGING`
+   库位（幂等：已存在则复用；创建记 OperationLog）并回库——仓库没有
+   暂存位不得阻塞实体找回。已扫码 / 已传入库位的仍严格校验归属。
+6. 失败：`FAILED` 不动库存（Picked 保持），创建 `ORDER_INTERCEPTION_FAILED` 异常并发送通知。
+7. 关闭：`RETURNED_TO_STOCK` / `FAILED` → `CLOSED`。
 
 禁止 Picked 取消时自动恢复库存。
 
@@ -430,7 +498,7 @@ Sprint 4 在此基础上增加三个原子业务命令（显式 QueryRunner + In
 
 `system_exceptions` 至少：exception_type / severity / status / reference_type / reference_id / store_id / message / details / created_at / resolved_at。
 
-- 类型：`ORDER_SKU_MAPPING_FAILED` / `ORDER_OUT_OF_STOCK` / `ORDER_INVALID_STATE` / `ORDER_INTERCEPTION_FAILED`（Sprint 4）/ `ORDER_SHIPMENT_DEADLINE_NEAR`（Sprint 7，见 §16）。
+- 类型：`ORDER_SKU_MAPPING_FAILED` / `ORDER_OUT_OF_STOCK` / `ORDER_INVALID_STATE` / `ORDER_INTERCEPTION_FAILED`（Sprint 4）/ `ORDER_SHIPMENT_DEADLINE_NEAR`（Sprint 7，见 §16）/ `SYNC_FAILED`（Sprint 9 T2，见 §15B）。
 - 状态：`OPEN / RESOLVED / IGNORED`；禁止物理删除历史异常。
 - severity 取值：`LOW / MEDIUM / HIGH`（技术必需的分级字段）。
 
@@ -462,6 +530,10 @@ Sprint 4 在此基础上增加三个原子业务命令（显式 QueryRunner + In
    OPEN（既有部分唯一索引兜底）。
 5. 异常解决：订单全部发货（erpStatus = SHIPPED）或取消时自动 RESOLVED；
    也可人工 IGNORED/RESOLVED。
+6. **重评估（Sprint 9 T1）**：时限是时间敏感事实——摄入时还很远的时限会
+   随时间流逝变得紧急。因此每次 ORDER_SYNC 再遇该订单（无论字段是否
+   变化）都重评估：剩余 < 24h / 已超时 → 创建（去重）；平台把时限推迟到
+   ≥ 24h 后 → RESOLVE 既有 OPEN。重评估本身零写入（异常中心幂等保证）。
 
 ---
 
@@ -471,6 +543,23 @@ Sprint 4 在此基础上增加三个原子业务命令（显式 QueryRunner + In
 由采购单明细实时派生，**不落库**（AGENTS.md §13）。派生规则、防重复采购与
 「待采购」筛选语义见 `docs/business-rules/purchase.md` §3.5（单一事实源，
 本文档不重复定义）。未映射 SKU 的行该字段为 NULL。
+
+---
+
+# 15B. SYNC_FAILED 异常（Sprint 9 T2，决策 3）
+
+店铺定时同步持续失败进入异常中心：
+
+- **触发**：该店铺任一 syncType（ORDER_SYNC / LISTING_SYNC，按
+  `sync_cursors.consecutive_failures` 计）**连续失败 ≥ 3 次**。
+- **引用**：`referenceType = STORE`、`referenceId = storeId`——每店铺**至多
+  一条 OPEN**（复用既有 (type, reference) OPEN 部分唯一索引），details 记录
+  各失败 syncType 的连续失败次数；失败画像变化时**更新**该 OPEN 行
+  （message/details 刷新，不堆积新行）。
+- **severity**：HIGH。
+- **自动解决**：该店铺全部 syncType 恢复健康（连续失败清零）时自动 RESOLVED。
+- 手动触发的同步失败同样计数（与调度无关）；类目树 / 属性增强同步
+  （手动、无游标）不参与该异常。
 
 ---
 

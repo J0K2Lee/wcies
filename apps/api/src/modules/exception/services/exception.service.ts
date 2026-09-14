@@ -142,6 +142,46 @@ export class ExceptionService {
     });
   }
 
+  /** Own-transaction variant of resolveByReferenceInTx for standalone flows. */
+  async resolveByReference(input: {
+    exceptionType: string;
+    referenceType: string;
+    referenceId: string;
+  }): Promise<void> {
+    await this.dataSource.transaction(async (manager) =>
+      this.resolveByReferenceInTx(manager, input),
+    );
+  }
+
+  /**
+   * Create-or-refresh the single OPEN exception of a reference (Sprint 9 T2
+   * SYNC_FAILED): same dedup as create(), but a repeat call with a CHANGED
+   * message/details rewrites the open row instead of returning stale text -
+   * the failure picture must stay current while the condition persists.
+   */
+  async upsertOpen(input: CreateExceptionInput): Promise<ExceptionDto> {
+    return this.dataSource.transaction(async (manager) => {
+      const existing = await this.repository.findOpenByReferenceTx(
+        manager,
+        input.exceptionType,
+        input.referenceType,
+        input.referenceId,
+      );
+      if (existing !== null) {
+        await this.repository.updateOpenMessageDetails(manager, existing.id, {
+          message: input.message,
+          details: input.details ?? null,
+        });
+        return this.toDto({
+          ...existing,
+          message: input.message,
+          details: input.details ?? null,
+        });
+      }
+      return this.createInTx(manager, input);
+    });
+  }
+
   async list(
     filters: ExceptionListFilters,
     page: { page: number; pageSize: number },

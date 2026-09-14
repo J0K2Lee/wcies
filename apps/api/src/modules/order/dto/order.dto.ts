@@ -246,6 +246,17 @@ export class OrderHistoryDto {
   @ApiProperty({ type: Date }) createdAt!: Date;
 }
 
+/** Raw platform status transition (Sprint 9 T1, decision 5 = plan B). */
+export class PlatformStatusHistoryDto {
+  @ApiProperty() id!: string;
+  @ApiProperty({ nullable: true, type: String, example: 'awaiting_packaging' })
+  fromStatus!: string | null;
+  @ApiProperty({ example: 'delivering' }) toStatus!: string;
+  @ApiProperty({ nullable: true, type: String, example: 'ORDER_SYNC' }) source!: string | null;
+  @ApiProperty({ nullable: true, type: String }) operatorName!: string | null;
+  @ApiProperty({ type: Date }) createdAt!: Date;
+}
+
 export class OrderInterceptionDto {
   @ApiProperty() id!: string;
   @ApiProperty({ example: 'ITC00000001' }) interceptionNo!: string;
@@ -293,6 +304,11 @@ export class OrderDetailDto {
   @ApiProperty({ type: Date }) updatedAt!: Date;
   @ApiProperty({ type: [OrderItemDto] }) items!: OrderItemDto[];
   @ApiProperty({ type: [OrderHistoryDto] }) history!: OrderHistoryDto[];
+  @ApiProperty({
+    type: [PlatformStatusHistoryDto],
+    description: '平台状态迁移时间线（与 ERP 历史按 createdAt 合并展示）',
+  })
+  platformStatusHistory!: PlatformStatusHistoryDto[];
   @ApiProperty({ type: [OrderInterceptionDto] }) interceptions!: OrderInterceptionDto[];
   @ApiProperty({ type: [OrderPickingTaskDto] }) pickingTasks!: OrderPickingTaskDto[];
 }
@@ -320,4 +336,20 @@ export class OrderCancelResultDto {
   @ApiProperty({ enum: ERP_ORDER_STATUSES }) erpStatus!: string;
   @ApiProperty() releasedItems!: number;
   @ApiProperty() interceptions!: number;
+}
+
+/** Sprint 9 T6: close out an order fulfilled outside WCIES. */
+export class OrderMarkExternalFulfillmentRequestDto {
+  @ApiProperty({
+    description: '外部履约原因（必填，记入状态历史与操作日志；如线下直发买家）',
+  })
+  @IsString()
+  @Length(1, 500)
+  reason!: string;
+}
+
+export class OrderMarkExternalFulfillmentResultDto {
+  @ApiProperty() orderId!: string;
+  @ApiProperty({ enum: ERP_ORDER_STATUSES }) erpStatus!: string;
+  @ApiProperty() releasedItems!: number;
 }

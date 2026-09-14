@@ -409,6 +409,30 @@ export class WarehouseBinService {
     return (await this.repository.findBinById(created.id)) as WarehouseBinEntity;
   }
 
+  /**
+   * Interception fallback bin (Sprint 9 T3, decision 4 = A): when a
+   * cancelled-picked item must return to stock and no target bin was scanned,
+   * the warehouse may simply have NO staging location yet - auto-creating one
+   * `STAGING` bin must never block the physical recovery flow. Idempotent:
+   * returns the existing STAGING bin when present. Creation goes through
+   * create(), so the operation log records it.
+   */
+  async ensureStagingBin(
+    warehouseId: string,
+    operator: OperatorContext,
+  ): Promise<WarehouseBinEntity> {
+    const existing = await this.repository.findBinByCode(warehouseId, 'STAGING');
+    if (existing !== null) {
+      return existing;
+    }
+    const created = await this.create(
+      warehouseId,
+      { binCode: 'STAGING', remark: '拦截暂存位（系统自动创建，Sprint 9 决策 4）' },
+      operator,
+    );
+    return (await this.repository.findBinById(created.id)) as WarehouseBinEntity;
+  }
+
   private async assertWarehouseExists(
     warehouseId: string,
   ): Promise<{ id: string; warehouseCode: string }> {

@@ -12,7 +12,9 @@ import { OrderItemEntity } from '../entities/order-item.entity';
 import { OrderRepository, OrderListFilters } from '../repositories/order.repository';
 import { OrderItemRepository } from '../repositories/order-item.repository';
 import { OrderStatusHistoryRepository } from '../repositories/order-status-history.repository';
+import { PlatformStatusHistoryRepository } from '../repositories/platform-status-history.repository';
 import { OrderStatusService } from './order-status.service';
+import { OrderDeadlineExceptionService } from './order-deadline-exception.service';
 import { OrderIngestionService } from './order-ingestion.service';
 import { ErpOrderStatus, orderReleaseKey } from '../enums/order.constants';
 import {
@@ -29,6 +31,11 @@ import { OrderDetailDto, OrderListItemDto } from '../dto/order.dto';
  * Order application service (Sprint 3): list/detail, cancellation with
  * per-line inventory handling, and backorder retry. Stock is only ever
  * touched through the exported Inventory services (AGENTS.md §10).
+ *
+ * Sprint 9 T1 adds platform FACT maintenance for already-ingested orders
+ * (compare-and-update platform_status / shipment_deadline / raw_data +
+ * platform_status_history + automatic cancel propagation), and T6 adds the
+ * "mark externally fulfilled" close-out action.
  */
 @Injectable()
 export class OrderService {
@@ -37,7 +44,9 @@ export class OrderService {
     private readonly orderRepo: OrderRepository,
     private readonly itemRepo: OrderItemRepository,
     private readonly historyRepo: OrderStatusHistoryRepository,
+    private readonly platformStatusHistoryRepo: PlatformStatusHistoryRepository,
     private readonly statusService: OrderStatusService,
+    private readonly deadlineExceptionService: OrderDeadlineExceptionService,
     private readonly ingestionService: OrderIngestionService,
     private readonly reservationService: ReservationService,
     private readonly inventoryQuery: InventoryQueryService,
@@ -105,10 +114,11 @@ export class OrderService {
 
   async getDetail(id: string): Promise<OrderDetailDto> {
     const order = await this.getOrderOrThrow(id);
-    const [store, items, history, interceptions] = await Promise.all([
+    const [store, items, history, platformStatusHistory, interceptions] = await Promise.all([
       this.storeService.getEntityWithPlatform(order.storeId),
       this.itemRepo.findByOrderIdWithSku(order.id),
       this.historyRepo.listByOrderId(order.id),
+      this.platformStatusHistoryRepo.listByOrderId(order.id),
       this.interceptionPort.listByOrderId(order.id),
     ]);
 
@@ -207,6 +217,16 @@ export class OrderService {
         fromStatus: entry.fromStatus,
         toStatus: entry.toStatus,
         reason: entry.reason,
+        operatorName: entry.operatorName,
+        createdAt: entry.createdAt,
+      })),
+      // Separate timeline of RAW platform transitions (Sprint 9 T1, decision
+      // 5 = B); the frontend merges it with `history` by createdAt.
+      platformStatusHistory: platformStatusHistory.map((entry) => ({
+        id: entry.id,
+        fromStatus: entry.fromStatus,
+        toStatus: entry.toStatus,
+        source: entry.source,
         operatorName: entry.operatorName,
         createdAt: entry.createdAt,
       })),
@@ -378,8 +398,12 @@ export class OrderService {
     }
 
     await this.statusService.transition(orderId, 'CANCELLED', operator, reason ?? '订单取消');
-    // A cancelled order will never ship: its deadline alert (if any) is done.
+    // A cancelled order will never ship: its deadline alert (if any) is done,
+    // and the out-of-stock exceptions of its never-reserved lines are moot -
+    // a platform-cancelled BACKORDERED order must not keep nagging for stock
+    // that will never be purchased for it (Sprint 9 T1, orders.md §8).
     await this.resolveDeadlineException(order.id);
+    await this.resolveStockExceptions(items);
     await this.operationLog.record({
       entityType: 'ORDER',
       entityId: order.id,
@@ -398,6 +422,183 @@ export class OrderService {
       releasedItems: released,
       interceptions: interceptionNos,
     };
+  }
+
+  // --------------------------------------------------------------------------
+  // Platform fact updates for already-ingested orders (Sprint 9 T1)
+  // --------------------------------------------------------------------------
+
+  /**
+   * Refresh candidates for ORDER_SYNC's targeted re-read pass: orders of the
+   * store that are not yet ERP-terminal (CANCELLED / SHIPPED). Their platform
+   * cancellation or deadline change must still reach us even though the
+   * in_process_at window cursor has moved past them.
+   */
+  async listPlatformRefreshCandidates(
+    storeId: string,
+    limit: number,
+  ): Promise<Array<{ id: string; platformOrderId: string }>> {
+    return this.orderRepo.listPlatformRefreshCandidates(storeId, limit);
+  }
+
+  /**
+   * Compare-and-update the platform FACTS of an already-ingested order and
+   * propagate consequences (Sprint 9 T1, orders.md §7a):
+   *
+   * - only platform_status / shipment_deadline / raw_data are written -
+   *   NEVER erp_status directly (AGENTS.md §38);
+   * - a platform_status transition appends platform_status_history;
+   * - platform cancellation runs the EXISTING cancel() chain (Reserved ->
+   *   release, Picked -> interception, BACKORDERED -> plain close);
+   * - the deadline exception is re-evaluated on every encounter (time
+   *   passes even when no fact changed);
+   * - unchanged facts write NOTHING (idempotent re-sync).
+   */
+  async applySyncedPlatformFacts(
+    input: OrderPlatformFactsInput,
+    operator: OperatorContext,
+  ): Promise<OrderPlatformFactsResult> {
+    const order = await this.orderRepo.findByStoreAndPlatformOrder(
+      input.storeId,
+      input.platformOrderId,
+    );
+    if (order === null) {
+      // Concurrent window pass just created it, or it was deleted - nothing
+      // to update; the next encounter handles it.
+      return { applied: false, changed: false, cancelled: false };
+    }
+
+    const oldStatus = order.platformStatus ?? null;
+    const newStatus = input.platformStatus ?? null;
+    // NULL input must never count as a change: historical rows whose
+    // platform_status IS NULL keep their value until the platform actually
+    // delivers one (planning §1.3 point 4).
+    const statusChanged = newStatus !== null && newStatus !== oldStatus;
+    const newDeadline = toInstantOrNull(input.shipmentDeadline);
+    const deadlineChanged = !sameInstant(newDeadline, order.shipmentDeadline ?? null);
+    // Key-order-insensitive comparison: PG jsonb normalizes key order on the
+    // round-trip, so a naive JSON.stringify diff would flag EVERY re-sync as
+    // changed and break the zero-write idempotency rule.
+    const rawChanged =
+      canonicalJson(input.rawData ?? null) !== canonicalJson(order.rawData ?? null);
+
+    let cancelled = false;
+    if (statusChanged || deadlineChanged || rawChanged) {
+      const effectiveDeadline = newDeadline ?? order.shipmentDeadline ?? null;
+      const effectiveRawData = input.rawData ?? order.rawData ?? null;
+      await this.dataSource.transaction(async (runner) => {
+        await this.orderRepo.updatePlatformFacts(runner, order.id, {
+          platformStatus: newStatus ?? oldStatus,
+          shipmentDeadline: effectiveDeadline,
+          rawData: effectiveRawData,
+        });
+        if (statusChanged) {
+          await this.platformStatusHistoryRepo.insert(runner, {
+            orderId: order.id,
+            fromStatus: oldStatus,
+            toStatus: newStatus,
+            source: input.source,
+            operatorName: operator.username,
+          });
+        }
+      });
+    }
+
+    // Platform cancellation -> the existing cancel chain (decision 1-D1b=A).
+    // Repeated cancelled re-syncs hit cancel()'s idempotent early return and
+    // the reservation release's ORDER_RELEASE:<orderItemId> idempotency key.
+    if (input.platformCancelled && order.erpStatus !== 'CANCELLED') {
+      await this.cancel(
+        order.id,
+        operator,
+        `平台状态更新为 cancelled，自动取消（平台单号 ${input.platformOrderId}）`,
+      );
+      cancelled = true;
+    } else {
+      // Time-based re-evaluation even when nothing changed (deadline was far
+      // at ingest, now < 24h). No-op writes when the OPEN state is correct.
+      await this.deadlineExceptionService.evaluate({
+        id: order.id,
+        orderNo: order.orderNo,
+        storeId: order.storeId,
+        shipmentDeadline: newDeadline ?? order.shipmentDeadline ?? null,
+      });
+    }
+    return { applied: true, changed: statusChanged || deadlineChanged || rawChanged, cancelled };
+  }
+
+  // --------------------------------------------------------------------------
+  // External fulfillment close-out (Sprint 9 T6)
+  // --------------------------------------------------------------------------
+
+  /**
+   * Marks an order as fulfilled OUTSIDE WCIES (Sprint 9 T6, decision 6 = A):
+   * the goods never entered our warehouses, so no inventory transaction is
+   * produced (AGENTS.md §14). Close-out = lines to RELEASED + order to
+   * SHIPPED (no new ERP state, orders.md §8A) + reason/operator recorded +
+   * the order's out-of-stock / deadline exceptions closed.
+   *
+   * Lines holding stock (RESERVED / PICKED) reject the action - releasing a
+   * reservation or unpicking IS inventory movement and belongs to cancel()
+   * / interception, not to this marker.
+   */
+  async markExternalFulfillment(
+    orderId: string,
+    operator: OperatorContext,
+    reason: string,
+  ): Promise<{ orderId: string; erpStatus: string; releasedItems: number }> {
+    const order = await this.getOrderOrThrow(orderId);
+    if (order.erpStatus === 'CANCELLED') {
+      throw new OrderInvalidStateError('订单已取消，无需标记外部履约', { orderId });
+    }
+    if (order.erpStatus === 'SHIPPED') {
+      throw new OrderInvalidStateError('订单已发货，无需标记外部履约', { orderId });
+    }
+    const items = await this.itemRepo.findByOrderId(order.id);
+    const blocking = items.filter(
+      (item) => item.fulfillmentStatus === 'RESERVED' || item.fulfillmentStatus === 'PICKED',
+    );
+    if (blocking.length > 0) {
+      throw new OrderInvalidStateError(
+        '订单存在已占用库存的行（RESERVED / PICKED），请走取消订单流程释放或拦截库存，不能标记外部履约',
+        {
+          orderId,
+          blockingLineNos: blocking.map((item) => item.lineNo),
+        },
+      );
+    }
+
+    let released = 0;
+    for (const item of items) {
+      if (item.fulfillmentStatus === 'SHIPPED' || item.fulfillmentStatus === 'RELEASED') {
+        continue;
+      }
+      await this.setItemReleased(item);
+      released += 1;
+    }
+
+    const trimmedReason = reason.trim().slice(0, 450);
+    await this.statusService.transition(
+      orderId,
+      'SHIPPED',
+      operator,
+      `标记外部履约：${trimmedReason}`,
+    );
+    await this.resolveDeadlineException(orderId);
+    await this.resolveStockExceptions(items);
+    await this.operationLog.record({
+      entityType: 'ORDER',
+      entityId: order.id,
+      entityCode: order.orderNo,
+      action: 'MARK_EXTERNAL_FULFILLMENT',
+      changes: {
+        erpStatus: { from: order.erpStatus, to: 'SHIPPED' },
+        reason: { from: null, to: trimmedReason },
+        releasedItems: { from: null, to: released },
+      },
+      operator,
+    });
+    return { orderId, erpStatus: 'SHIPPED', releasedItems: released };
   }
 
   // --------------------------------------------------------------------------
@@ -535,6 +736,23 @@ export class OrderService {
   }
 
   /**
+   * Closes the OPEN ORDER_OUT_OF_STOCK exceptions of the given lines: an
+   * order that will never ship (cancelled / externally fulfilled) must stop
+   * asking for stock (Sprint 9 T1/T6). No-op when none are open.
+   */
+  private async resolveStockExceptions(items: OrderItemEntity[]): Promise<void> {
+    await this.dataSource.transaction(async (runner) => {
+      for (const item of items) {
+        await this.exceptionService.resolveByReferenceInTx(runner, {
+          exceptionType: 'ORDER_OUT_OF_STOCK',
+          referenceType: 'ORDER_ITEM',
+          referenceId: item.id,
+        });
+      }
+    });
+  }
+
+  /**
    * Marks a line RELEASED inside the interception return-to-stock transaction
    * (Sprint 4 task §37): the goods are physically back in a bin, so the line
    * reaches the cancelled terminal state together with the stock patch.
@@ -572,4 +790,66 @@ export class OrderService {
       await this.itemRepo.updateFulfillment(runner, item.id, { fulfillmentStatus: 'RELEASED' });
     });
   }
+}
+
+/** Platform facts delivered by a sync for an already-ingested order (T1). */
+export interface OrderPlatformFactsInput {
+  storeId: string;
+  platformOrderId: string;
+  /** Raw platform status string; null = the platform did not deliver one. */
+  platformStatus: string | null;
+  /** Mapper-derived flag - platform vocabulary never leaks into core (§31). */
+  platformCancelled: boolean;
+  shipmentDeadline: Date | string | null;
+  rawData: Record<string, unknown> | null;
+  /** Channel that delivered the facts (ORDER_SYNC / WEBHOOK / ...). */
+  source: string;
+}
+
+export interface OrderPlatformFactsResult {
+  /** False when the order does not exist (race) - nothing was touched. */
+  applied: boolean;
+  /** True when at least one platform fact column was rewritten. */
+  changed: boolean;
+  /** True when this call propagated a platform cancellation. */
+  cancelled: boolean;
+}
+
+function sameInstant(a: Date | string | null, b: Date | string | null): boolean {
+  const left = a === null ? null : new Date(a).getTime();
+  const right = b === null ? null : new Date(b).getTime();
+  if (left === null || right === null) {
+    return left === right;
+  }
+  return left === right;
+}
+
+function toInstantOrNull(value: Date | string | null): Date | null {
+  if (value === null) {
+    return null;
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/** Stable JSON form: object keys sorted recursively, so two payloads that
+ *  differ only in key order (e.g. before/after a PG jsonb round-trip)
+ *  compare equal. */
+function canonicalJson(value: unknown): string {
+  if (value === null || value === undefined) {
+    return 'null';
+  }
+  if (typeof value !== 'object') {
+    return JSON.stringify(value) ?? 'null';
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => canonicalJson(entry)).join(',')}]`;
+  }
+  const record = value as Record<string, unknown>;
+  const entries = Object.entries(record)
+    .filter(([, entry]) => entry !== undefined)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+  return `{${entries
+    .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
+    .join(',')}}`;
 }

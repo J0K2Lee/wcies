@@ -130,6 +130,13 @@ export interface PlatformOrderRaw {
   readonly currency: string | null;
   readonly items: readonly PlatformOrderItemRaw[];
   readonly rawData: Record<string, unknown>;
+  /**
+   * True when the platform reports this order cancelled. Derived by the
+   * PLATFORM MAPPER from its own status vocabulary (platform semantics stay
+   * out of the core, AGENTS.md §31/§33) - the core never compares
+   * platform_status strings itself (Sprint 9 T1).
+   */
+  readonly platformCancelled?: boolean;
 }
 
 // ---------------------------------------------------------------------------

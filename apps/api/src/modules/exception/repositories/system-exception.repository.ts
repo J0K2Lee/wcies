@@ -53,6 +53,21 @@ export class SystemExceptionRepository {
       .update({ id }, { ...patch, updatedAt: new Date() });
   }
 
+  /**
+   * Refreshes message + details of an OPEN row (Sprint 9 T2 SYNC_FAILED):
+   * the dedup key stays unique per (type, reference), so a changed failure
+   * picture updates the ONE open row instead of piling up new ones.
+   */
+  async updateOpenMessageDetails(
+    manager: EntityManager,
+    id: string,
+    patch: { message: string; details: Record<string, unknown> | null },
+  ): Promise<void> {
+    await manager
+      .getRepository(SystemExceptionEntity)
+      .update({ id }, { ...patch, updatedAt: new Date() } as never);
+  }
+
   /** In-transaction OPEN-row check for idempotent creation (no spam, task §24). */
   async findOpenByReferenceTx(
     manager: EntityManager,

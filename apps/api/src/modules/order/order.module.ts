@@ -14,10 +14,13 @@ import { PurchaseModule } from '../purchase/purchase.module';
 import { OrderEntity } from './entities/order.entity';
 import { OrderItemEntity } from './entities/order-item.entity';
 import { OrderStatusHistoryEntity } from './entities/order-status-history.entity';
+import { PlatformStatusHistoryEntity } from './entities/platform-status-history.entity';
 import { OrderRepository } from './repositories/order.repository';
 import { OrderItemRepository } from './repositories/order-item.repository';
 import { OrderStatusHistoryRepository } from './repositories/order-status-history.repository';
+import { PlatformStatusHistoryRepository } from './repositories/platform-status-history.repository';
 import { OrderStatusService } from './services/order-status.service';
+import { OrderDeadlineExceptionService } from './services/order-deadline-exception.service';
 import { OrderIngestionService } from './services/order-ingestion.service';
 import { OrderService } from './services/order.service';
 import { OrderController } from './controllers/order.controller';
@@ -31,7 +34,12 @@ import { OrderController } from './controllers/order.controller';
  */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([OrderEntity, OrderItemEntity, OrderStatusHistoryEntity]),
+    TypeOrmModule.forFeature([
+      OrderEntity,
+      OrderItemEntity,
+      OrderStatusHistoryEntity,
+      PlatformStatusHistoryEntity,
+    ]),
     StoreModule,
     ListingModule,
     InventoryModule,
@@ -49,7 +57,9 @@ import { OrderController } from './controllers/order.controller';
     OrderRepository,
     OrderItemRepository,
     OrderStatusHistoryRepository,
+    PlatformStatusHistoryRepository,
     OrderStatusService,
+    OrderDeadlineExceptionService,
     OrderIngestionService,
     OrderService,
   ],

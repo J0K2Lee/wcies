@@ -8,6 +8,7 @@ import { ListingModule } from '../listing/listing.module';
 import { OrderModule } from '../order/order.module';
 import { PlatformModule } from '../platform/platform.module';
 import { StoreModule } from '../store/store.module';
+import { ExceptionModule } from '../exception/exception.module';
 import { ExternalRawEventEntity } from './entities/external-raw-event.entity';
 import { SyncCursorEntity } from './entities/sync-cursor.entity';
 import { SyncJobEntity } from './entities/sync-job.entity';
@@ -20,6 +21,7 @@ import { ProductEnrichmentSyncService } from './services/product-enrichment-sync
 import { OrderSyncService } from './services/order-sync.service';
 import { SyncContextService } from './services/sync-context.service';
 import { SyncDispatchService } from './services/sync-dispatch.service';
+import { SyncFailureAlertService } from './services/sync-failure-alert.service';
 import { SyncJobService } from './services/sync-job.service';
 import { WebhookIngestService, WebhookProcessService } from './services/webhook.service';
 import { SyncController } from './controllers/sync.controller';
@@ -56,6 +58,7 @@ import {
     PlatformModule,
     ListingModule,
     OrderModule,
+    ExceptionModule,
   ],
   controllers: [SyncController, OzonWebhookController],
   providers: [
@@ -64,6 +67,7 @@ import {
     ExternalRawEventRepository,
     SyncContextService,
     SyncDispatchService,
+    SyncFailureAlertService,
     SyncJobService,
     ListingSyncService,
     OrderSyncService,

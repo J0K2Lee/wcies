@@ -11,6 +11,7 @@ import {
   Popconfirm,
   Select,
   Space,
+  Switch,
   Tooltip,
 } from 'antd';
 import {
@@ -62,10 +63,27 @@ interface StoreRow {
   sellerId: string | null;
   defaultCurrency: string | null;
   status: string;
+  settings: Record<string, unknown> | null;
   createdAt: string;
   updatedAt: string;
   credentialConfigured: boolean;
   bindingCount: number;
+}
+
+/** Sprint 9 T2: store sync toggles live under settings.sync (read-modify-write). */
+function readSyncSettings(settings: Record<string, unknown> | null | undefined): {
+  orderSyncEnabled: boolean;
+  listingSyncEnabled: boolean;
+} {
+  const sync = settings?.['sync'];
+  if (typeof sync !== 'object' || sync === null) {
+    return { orderSyncEnabled: false, listingSyncEnabled: false };
+  }
+  const raw = sync as Record<string, unknown>;
+  return {
+    orderSyncEnabled: raw['orderSyncEnabled'] === true,
+    listingSyncEnabled: raw['listingSyncEnabled'] === true,
+  };
 }
 
 interface SyncJobLite {
@@ -90,6 +108,8 @@ interface SyncOverview {
   } | null;
   lastOrderSync: { status: string; finishedAt: string | null } | null;
   lastListingSync: { status: string; finishedAt: string | null } | null;
+  lastCategoryTreeSync: { status: string; finishedAt: string | null } | null;
+  lastProductEnrichmentSync: { status: string; finishedAt: string | null } | null;
   consecutiveFailures: number;
   activeJobId: string | null;
 }
@@ -114,6 +134,9 @@ interface BindingRow {
 }
 
 type Envelope<T> = { data: T; meta: { total: number } };
+
+/** Sprint 9 T2: staleness threshold for the order-sync freshness marker. */
+const ORDER_SYNC_STALE_MS = 15 * 60 * 1000;
 
 /** Latest job per store per sync type, derived once from the recent-jobs query. */
 function buildLatestJobMap(jobs: SyncJobLite[]): Map<string, SyncJobLite> {
@@ -393,6 +416,42 @@ export function StoresPage() {
     onSuccess: () => {
       void message.success('状态已更新');
       refreshStore(null);
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  // Sprint 9 T2: toggle settings.sync.orderSyncEnabled / listingSyncEnabled
+  // through the existing PATCH /stores/:id (backend merges, never replaces).
+  const syncSettingsMutation = useMutation({
+    mutationFn: ({
+      store,
+      patch,
+    }: {
+      store: StoreRow;
+      patch: Partial<{ orderSyncEnabled: boolean; listingSyncEnabled: boolean }>;
+    }) => {
+      const current = readSyncSettings(store.settings);
+      const next = { ...current, ...patch };
+      return apiPatch(
+        '/api/v1/stores/{id}',
+        {
+          settings: {
+            ...(store.settings ?? {}),
+            sync: {
+              orderSyncEnabled: next.orderSyncEnabled,
+              listingSyncEnabled: next.listingSyncEnabled,
+            },
+          },
+        },
+        { id: store.id },
+      );
+    },
+    onSuccess: (_data, variables) => {
+      void message.success('同步设置已保存');
+      void queryClient.invalidateQueries({ queryKey: ['stores'] });
+      void queryClient.invalidateQueries({
+        queryKey: ['store-sync-overview', variables.store.id],
+      });
     },
     onError: (error: Error) => void message.error(error.message),
   });
@@ -885,6 +944,10 @@ export function StoresPage() {
             onConfigure={() => detailRow !== null && openCredentialModal(detailRow.id)}
             onSync={(type) => triggerFor(detailRow.id, type)}
             syncing={syncMutation.isPending}
+            onToggleSyncSetting={(patch) =>
+              syncSettingsMutation.mutate({ store: detailRow, patch })
+            }
+            syncSettingsSaving={syncSettingsMutation.isPending}
             onToggle={() =>
               statusMutation.mutate({
                 id: detailRow.id,
@@ -1010,6 +1073,8 @@ function StoreDetailBody({
   onConfigure,
   onSync,
   syncing,
+  onToggleSyncSetting,
+  syncSettingsSaving,
   onToggle,
   toggling,
 }: {
@@ -1027,9 +1092,21 @@ function StoreDetailBody({
   onConfigure: () => void;
   onSync: (type: 'orders' | 'listings') => void;
   syncing: boolean;
+  onToggleSyncSetting: (
+    patch: Partial<{ orderSyncEnabled: boolean; listingSyncEnabled: boolean }>,
+  ) => void;
+  syncSettingsSaving: boolean;
   onToggle: () => void;
   toggling: boolean;
 }) {
+  const syncSettings = readSyncSettings(store.settings);
+  // Sprint 9 T2 freshness: automatic polling is ON but the last successful
+  // order sync is older than 3x the 300s interval -> flag red.
+  const lastOrderFinishedAt = overview?.lastOrderSync?.finishedAt ?? null;
+  const orderSyncStale =
+    syncSettings.orderSyncEnabled &&
+    lastOrderFinishedAt !== null &&
+    Date.now() - new Date(lastOrderFinishedAt).getTime() > ORDER_SYNC_STALE_MS;
   return (
     <Space orientation="vertical" size="large" style={{ width: '100%' }}>
       <section>
@@ -1177,7 +1254,11 @@ function StoreDetailBody({
               overview?.lastOrderSync ? (
                 <Space size={6}>
                   <SyncStatusBadge status={overview.lastOrderSync.status} />
-                  <RelativeTime value={overview.lastOrderSync.finishedAt} />
+                  <span
+                    style={orderSyncStale ? { color: colors.danger, fontWeight: 600 } : undefined}
+                  >
+                    <RelativeTime value={overview.lastOrderSync.finishedAt} />
+                  </span>
                 </Space>
               ) : overview === undefined ? (
                 '加载中…'
@@ -1202,6 +1283,32 @@ function StoreDetailBody({
             }
           />
           <InfoField
+            label="类目树（最近）"
+            value={
+              overview?.lastCategoryTreeSync ? (
+                <Space size={6}>
+                  <SyncStatusBadge status={overview.lastCategoryTreeSync.status} />
+                  <RelativeTime value={overview.lastCategoryTreeSync.finishedAt} />
+                </Space>
+              ) : (
+                '从未同步'
+              )
+            }
+          />
+          <InfoField
+            label="商品属性增强（最近）"
+            value={
+              overview?.lastProductEnrichmentSync ? (
+                <Space size={6}>
+                  <SyncStatusBadge status={overview.lastProductEnrichmentSync.status} />
+                  <RelativeTime value={overview.lastProductEnrichmentSync.finishedAt} />
+                </Space>
+              ) : (
+                '从未同步'
+              )
+            }
+          />
+          <InfoField
             label="连续失败"
             value={
               overview !== undefined && overview.consecutiveFailures > 0 ? (
@@ -1218,6 +1325,11 @@ function StoreDetailBody({
             }
           />
         </div>
+        {orderSyncStale && (
+          <p style={{ fontSize: 12.5, color: colors.danger, margin: '8px 0 0' }}>
+            订单自动同步已开启，但超过 15 分钟没有成功记录——请检查同步任务或凭证。
+          </p>
+        )}
         <Space style={{ marginTop: 12 }}>
           <Button type="primary" loading={syncing} onClick={() => onSync('orders')}>
             手动同步订单
@@ -1226,6 +1338,37 @@ function StoreDetailBody({
             手动同步商品（Listing）
           </Button>
         </Space>
+      </section>
+
+      <section>
+        <SectionTitle>自动同步（定时轮询）</SectionTitle>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', rowGap: 12 }}>
+          <InfoField
+            label="订单自动同步（约 5 分钟一次）"
+            value={
+              <Switch
+                checked={syncSettings.orderSyncEnabled}
+                loading={syncSettingsSaving}
+                disabled={store.status !== 'ACTIVE'}
+                onChange={(checked) => onToggleSyncSetting({ orderSyncEnabled: checked })}
+              />
+            }
+          />
+          <InfoField
+            label="商品（Listing）自动同步"
+            value={
+              <Switch
+                checked={syncSettings.listingSyncEnabled}
+                loading={syncSettingsSaving}
+                disabled={store.status !== 'ACTIVE'}
+                onChange={(checked) => onToggleSyncSetting({ listingSyncEnabled: checked })}
+              />
+            }
+          />
+        </div>
+        <p style={{ fontSize: 12.5, color: colors.textTertiary, margin: '8px 0 0' }}>
+          开关只影响调度器的自动轮询；手动同步始终可用。商品同步默认仅手动（Sprint 9 决策 2）。
+        </p>
       </section>
 
       <section>

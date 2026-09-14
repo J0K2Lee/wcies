@@ -5,6 +5,7 @@ import { SyncJobEntity } from '../entities/sync-job.entity';
 import { SyncJobRepository } from '../repositories/sync-job.repository';
 import { SyncCursorRepository } from '../repositories/sync-cursor.repository';
 import { SyncContextService } from './sync-context.service';
+import { SyncFailureAlertService } from './sync-failure-alert.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 
 export interface ListingSyncOutcome {
@@ -31,6 +32,7 @@ export class ListingSyncService {
     private readonly listingService: ListingService,
     private readonly jobRepo: SyncJobRepository,
     private readonly cursorRepo: SyncCursorRepository,
+    private readonly failureAlert: SyncFailureAlertService,
     private readonly logger: AppLoggerService,
   ) {}
 
@@ -135,6 +137,8 @@ export class ListingSyncService {
       resetFailures: advanced,
       incrementFailures: outcome.status === 'FAILED',
     });
+    // Sprint 9 T2: same SYNC_FAILED health reporting as ORDER_SYNC.
+    await this.failureAlert.onFinalized(syncJob.storeId);
     this.logger.info('listing sync finished', {
       module: 'sync',
       storeId: syncJob.storeId,

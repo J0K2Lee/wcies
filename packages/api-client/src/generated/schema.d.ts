@@ -1633,6 +1633,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/orders/{id}/mark-external-fulfillment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 标记外部履约（订单在系统外完成：行关账、不产生库存流水、关闭缺货/时限异常） */
+        post: operations["OrderController_markExternalFulfillment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/orders/items/{itemId}/retry-allocation": {
         parameters: {
             query?: never;
@@ -4209,7 +4226,7 @@ export interface components {
             /** @example EXC00000001 */
             exceptionNo: string;
             /** @enum {string} */
-            exceptionType: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR";
+            exceptionType: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR" | "SYNC_FAILED";
             /** @enum {string} */
             severity: "LOW" | "MEDIUM" | "HIGH";
             /** @enum {string} */
@@ -4317,6 +4334,18 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
+        PlatformStatusHistoryDto: {
+            id: string;
+            /** @example awaiting_packaging */
+            fromStatus: string | null;
+            /** @example delivering */
+            toStatus: string;
+            /** @example ORDER_SYNC */
+            source: string | null;
+            operatorName: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
         OrderInterceptionDto: {
             id: string;
             /** @example ITC00000001 */
@@ -4373,6 +4402,8 @@ export interface components {
             updatedAt: string;
             items: components["schemas"]["OrderItemDto"][];
             history: components["schemas"]["OrderHistoryDto"][];
+            /** @description 平台状态迁移时间线（与 ERP 历史按 createdAt 合并展示） */
+            platformStatusHistory: components["schemas"]["PlatformStatusHistoryDto"][];
             interceptions: components["schemas"]["OrderInterceptionDto"][];
             pickingTasks: components["schemas"]["OrderPickingTaskDto"][];
         };
@@ -4442,6 +4473,16 @@ export interface components {
         OrderCancelRequestDto: {
             /** @description 取消原因（记入历史与拦截任务） */
             reason?: string;
+        };
+        OrderMarkExternalFulfillmentResultDto: {
+            orderId: string;
+            /** @enum {string} */
+            erpStatus: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+            releasedItems: number;
+        };
+        OrderMarkExternalFulfillmentRequestDto: {
+            /** @description 外部履约原因（必填，记入状态历史与操作日志；如线下直发买家） */
+            reason: string;
         };
         OrderRetryAllocationResultDto: {
             orderItemId: string;
@@ -5281,6 +5322,10 @@ export interface components {
             credential: Record<string, never> | null;
             lastOrderSync: Record<string, never> | null;
             lastListingSync: Record<string, never> | null;
+            /** @description 最近一次类目树同步（Sprint 8.5，手动；只展示不告警） */
+            lastCategoryTreeSync: Record<string, never> | null;
+            /** @description 最近一次商品属性增强同步（Sprint 8.5，手动；只展示不告警） */
+            lastProductEnrichmentSync: Record<string, never> | null;
             /** @description 连续失败次数（成功即清零） */
             consecutiveFailures: number;
             activeJobId: string | null;
@@ -8532,7 +8577,7 @@ export interface operations {
     ExceptionController_list: {
         parameters: {
             query?: {
-                exceptionType?: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR";
+                exceptionType?: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR" | "SYNC_FAILED";
                 status?: "OPEN" | "RESOLVED" | "IGNORED";
                 referenceType?: string;
                 referenceId?: string;
@@ -8757,6 +8802,35 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["OrderCancelResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    OrderController_markExternalFulfillment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderMarkExternalFulfillmentRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderMarkExternalFulfillmentResultDto"];
                     };
                 };
             };

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { DataSource } from 'typeorm';
 import { OrderIngestionService } from './order-ingestion.service';
 import { OrderStatusService } from './order-status.service';
+import { OrderDeadlineExceptionService } from './order-deadline-exception.service';
 import { OrderRepository } from '../repositories/order.repository';
 import { OrderItemRepository } from '../repositories/order-item.repository';
 import { OrderStatusHistoryRepository } from '../repositories/order-status-history.repository';
@@ -135,6 +136,9 @@ function build(input: {
   const statusService = {
     recomputeOrderStatus: vi.fn().mockResolvedValue('READY_TO_PICK'),
   } as unknown as OrderStatusService;
+  const deadlineExceptionService = {
+    evaluate: vi.fn().mockResolvedValue(undefined),
+  } as unknown as OrderDeadlineExceptionService;
   const logger = { log: vi.fn(), warn: vi.fn() } as unknown as AppLoggerService;
   const service = new OrderIngestionService(
     dataSource,
@@ -147,6 +151,7 @@ function build(input: {
     itemRepo,
     historyRepo,
     statusService,
+    deadlineExceptionService,
     logger,
   );
   return { service, exceptionService, reservationService, statusService, itemRepo };
@@ -238,12 +243,10 @@ describe('OrderIngestionService (task §11-§24)', () => {
       reserveStock: vi.fn().mockResolvedValue({ id: 'rsv-2' }),
     } as unknown as ReservationService;
     const bindingService = {
-      list: vi
-        .fn()
-        .mockResolvedValue({
-          items: [{ status: 'ACTIVE', isInventorySource: true, priority: 1, warehouseId: 'wh-1' }],
-          meta: {},
-        }),
+      list: vi.fn().mockResolvedValue({
+        items: [{ status: 'ACTIVE', isInventorySource: true, priority: 1, warehouseId: 'wh-1' }],
+        meta: {},
+      }),
     } as unknown as StoreWarehouseBindingService;
     const exceptionService = {
       createInTx: vi.fn().mockResolvedValue({ id: 'exc' }),
@@ -251,15 +254,13 @@ describe('OrderIngestionService (task §11-§24)', () => {
     const orderRepo = {
       findByStoreAndPlatformOrder: vi.fn().mockResolvedValue(null),
       nextOrderNo: vi.fn().mockResolvedValue('ORD1'),
-      insertWithItems: vi
-        .fn()
-        .mockResolvedValue({
-          id: 'order-1',
-          orderNo: 'ORD1',
-          erpStatus: 'NEW',
-          storeId: 'store-1',
-          platformOrderId: 'P-1',
-        }),
+      insertWithItems: vi.fn().mockResolvedValue({
+        id: 'order-1',
+        orderNo: 'ORD1',
+        erpStatus: 'NEW',
+        storeId: 'store-1',
+        platformOrderId: 'P-1',
+      }),
     } as unknown as OrderRepository;
     let call = 0;
     const itemRepo = {
@@ -276,6 +277,9 @@ describe('OrderIngestionService (task §11-§24)', () => {
     const statusService = {
       recomputeOrderStatus: vi.fn().mockResolvedValue('PARTIALLY_BACKORDERED'),
     } as unknown as OrderStatusService;
+    const deadlineExceptionService = {
+      evaluate: vi.fn().mockResolvedValue(undefined),
+    } as unknown as OrderDeadlineExceptionService;
     const logger = { log: vi.fn(), warn: vi.fn() } as unknown as AppLoggerService;
     const service = new OrderIngestionService(
       dataSource,
@@ -288,6 +292,7 @@ describe('OrderIngestionService (task §11-§24)', () => {
       itemRepo,
       historyRepo,
       statusService,
+      deadlineExceptionService,
       logger,
     );
     await service.ingest(baseInput(), OPERATOR);

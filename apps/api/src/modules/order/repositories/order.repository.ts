@@ -130,6 +130,52 @@ export class OrderRepository {
     await manager.getRepository(OrderEntity).update({ id }, { erpStatus, updatedAt: new Date() });
   }
 
+  /**
+   * Platform FACT patch (Sprint 9 T1): platform_status / shipment_deadline /
+   * raw_data only - never erp_status (AGENTS.md §38). Callers keep the stored
+   * value for fields the platform did not deliver (null input), so a NULL
+   * historical platform_status is never wiped by an empty fact set.
+   */
+  async updatePlatformFacts(
+    manager: EntityManager,
+    id: string,
+    patch: {
+      platformStatus: string | null;
+      shipmentDeadline: Date | null;
+      rawData: Record<string, unknown> | null;
+    },
+  ): Promise<void> {
+    await manager.getRepository(OrderEntity).update({ id }, {
+      platformStatus: patch.platformStatus,
+      shipmentDeadline: patch.shipmentDeadline,
+      rawData: patch.rawData,
+      updatedAt: new Date(),
+    } as never);
+  }
+
+  /**
+   * Orders ORDER_SYNC re-reads by posting number (Sprint 9 T1 refresh pass):
+   * everything not yet ERP-terminal. CANCELLED is sticky (nothing left to
+   * learn) and SHIPPED goods have left the warehouse, so neither needs
+   * platform status anymore; BACKORDERED / PICKED / PICKING orders DO -
+   * their platform cancellation or deadline change must reach us.
+   */
+  async listPlatformRefreshCandidates(
+    storeId: string,
+    limit: number,
+  ): Promise<Array<{ id: string; platformOrderId: string }>> {
+    const entities = await this.dataSource
+      .getRepository(OrderEntity)
+      .createQueryBuilder('o')
+      .select(['o.id', 'o.platformOrderId'])
+      .where('o.store_id = :storeId', { storeId })
+      .andWhere("o.erp_status NOT IN ('CANCELLED', 'SHIPPED')")
+      .orderBy('o.ordered_at', 'ASC')
+      .take(limit)
+      .getMany();
+    return entities.map((order) => ({ id: order.id, platformOrderId: order.platformOrderId }));
+  }
+
   /** Paged list with aggregated row counts + open exceptions (no N+1, task §61/§90). */
   async listWithAggregates(
     filters: OrderListFilters,

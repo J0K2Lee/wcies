@@ -96,6 +96,8 @@ const EXCEPTION_TYPE_LABEL: Record<string, string> = {
   ORDER_OUT_OF_STOCK: '订单缺货',
   ORDER_INVALID_STATE: '订单状态异常',
   ORDER_INTERCEPTION_FAILED: '拦截失败',
+  ORDER_SHIPMENT_DEADLINE_NEAR: '发货时限临近',
+  SYNC_FAILED: '同步失败',
 };
 
 /** Sync job type → label. */
@@ -235,7 +237,10 @@ export function DashboardPage() {
               </span>
             ) : (
               abnormalJobs.slice(0, 5).map((job) => (
-                <div key={job.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                <div
+                  key={job.id}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}
+                >
                   <StatusBadge
                     tone={SYNC_STATUS_META[job.status]?.tone ?? 'neutral'}
                     label={job.storeCode}
@@ -259,9 +264,7 @@ export function DashboardPage() {
             {oosInventory.isLoading ? (
               <Skeleton active paragraph={false} />
             ) : oosTotal === 0 ? (
-              <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
-                暂无可售库存预警
-              </span>
+              <span style={{ fontSize: 12.5, color: colors.textTertiary }}>暂无可售库存预警</span>
             ) : (
               <>
                 {oosRows.map((row) => (
@@ -430,7 +433,14 @@ export function DashboardPage() {
                   </div>
                 ))}
                 {openExceptionTotal > exceptions.length && (
-                  <span style={{ fontSize: 12, color: colors.textTertiary, paddingTop: 6, display: 'block' }}>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: colors.textTertiary,
+                      paddingTop: 6,
+                      display: 'block',
+                    }}
+                  >
                     仅显示前 {exceptions.length} 条，共 {fmtNumber(openExceptionTotal)} 条
                   </span>
                 )}
@@ -464,7 +474,11 @@ export function DashboardPage() {
             ) : (
               <>
                 {storesWithoutCredential.slice(0, 5).map((store) => (
-                  <div key={store.id} style={TODO_ROW_STYLE} onClick={() => void navigate('/stores')}>
+                  <div
+                    key={store.id}
+                    style={TODO_ROW_STYLE}
+                    onClick={() => void navigate('/stores')}
+                  >
                     <PlatformTag code={store.platformCode} />
                     <span
                       style={{
@@ -479,12 +493,26 @@ export function DashboardPage() {
                     >
                       {store.name}
                     </span>
-                    <span style={{ fontSize: 12, color: colors.textTertiary }}>{store.storeCode}</span>
-                    <StatusBadge tone="warning" label="未配置凭证" hint="credentialConfigured = false" showDot={false} />
+                    <span style={{ fontSize: 12, color: colors.textTertiary }}>
+                      {store.storeCode}
+                    </span>
+                    <StatusBadge
+                      tone="warning"
+                      label="未配置凭证"
+                      hint="credentialConfigured = false"
+                      showDot={false}
+                    />
                   </div>
                 ))}
                 {storesWithoutCredential.length > 5 && (
-                  <span style={{ fontSize: 12, color: colors.textTertiary, paddingTop: 6, display: 'block' }}>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: colors.textTertiary,
+                      paddingTop: 6,
+                      display: 'block',
+                    }}
+                  >
                     仅显示前 5 条，共 {fmtNumber(storesWithoutCredential.length)} 条
                   </span>
                 )}

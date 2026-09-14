@@ -70,6 +70,14 @@ export function mapProductToListing(
 // Orders
 // ---------------------------------------------------------------------------
 
+/**
+ * OZON FBS Seller-API status for a cancelled posting (docs/integrations/ozon.md
+ * §Posting 字段映射, verified 2026-09). Kept HERE so the platform vocabulary
+ * never leaks into the order core (AGENTS.md §31/§33): the core only sees
+ * `platformCancelled: true`.
+ */
+const OZON_POSTING_STATUS_CANCELLED = 'cancelled';
+
 export function mapPostingToOrder(posting: OzonFbsPosting): PlatformOrderRaw {
   if (typeof posting.posting_number !== 'string' || posting.posting_number === '') {
     throw malformed('posting', 'posting_number missing');
@@ -119,6 +127,7 @@ export function mapPostingToOrder(posting: OzonFbsPosting): PlatformOrderRaw {
   return {
     platformOrderId: posting.posting_number,
     platformStatus: posting.status,
+    platformCancelled: posting.status === OZON_POSTING_STATUS_CANCELLED,
     fulfillmentMode: 'FBS',
     orderedAt,
     shipmentDeadline,

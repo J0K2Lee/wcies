@@ -410,9 +410,11 @@ export class InterceptionService implements OrderInterceptionPort {
       targetBinId = bin.id;
     }
     if (targetBinId === null) {
-      throw new InterceptionStateInvalidError('缺少目标回库库位：请先扫码或传入 binBarcode', {
-        interceptionId: id,
-      });
+      // Sprint 9 T3 (decision 4 = A): a warehouse without a staging bin must
+      // not block the physical recovery - auto-create `STAGING` (idempotent,
+      // operation-logged) instead of rejecting the return.
+      const stagingBin = await this.binService.ensureStagingBin(interception.warehouseId, operator);
+      targetBinId = stagingBin.id;
     }
     if (item.reservationId === null) {
       throw new InterceptionStateInvalidError('订单行缺少 Reservation，无法回库', {

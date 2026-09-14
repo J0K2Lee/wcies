@@ -66,12 +66,15 @@ export class SyncJobService {
     }
     const platform = await this.platformService.getEntityById(store.platformId);
     const credential = await this.credentialService.getValidationMeta(storeId, 'MAIN_API');
-    const [lastOrder, lastListing, orderCursor, active] = await Promise.all([
-      this.jobRepo.lastFinished(storeId, 'ORDER_SYNC'),
-      this.jobRepo.lastFinished(storeId, 'LISTING_SYNC'),
-      this.cursorRepo.find(storeId, 'ORDER_SYNC'),
-      this.jobRepo.findActiveByStoreAndType(storeId, 'ORDER_SYNC'),
-    ]);
+    const [lastOrder, lastListing, lastCategoryTree, lastEnrichment, orderCursor, active] =
+      await Promise.all([
+        this.jobRepo.lastFinished(storeId, 'ORDER_SYNC'),
+        this.jobRepo.lastFinished(storeId, 'LISTING_SYNC'),
+        this.jobRepo.lastFinished(storeId, 'CATEGORY_TREE_SYNC'),
+        this.jobRepo.lastFinished(storeId, 'PRODUCT_ENRICHMENT_SYNC'),
+        this.cursorRepo.find(storeId, 'ORDER_SYNC'),
+        this.jobRepo.findActiveByStoreAndType(storeId, 'ORDER_SYNC'),
+      ]);
     return {
       storeId,
       storeCode: store.storeCode,
@@ -79,6 +82,10 @@ export class SyncJobService {
       credential,
       lastOrderSync: lastOrder,
       lastListingSync: lastListing,
+      // Sprint 9 T2: reference-data syncs shown for freshness only - never
+      // alerted on (planning decision 2).
+      lastCategoryTreeSync: lastCategoryTree,
+      lastProductEnrichmentSync: lastEnrichment,
       consecutiveFailures: orderCursor?.consecutiveFailures ?? 0,
       activeJobId: active?.id ?? null,
     };

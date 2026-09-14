@@ -64,6 +64,8 @@ const EXCEPTION_TYPE_META: Record<string, { label: string; category: string }> =
   ORDER_OUT_OF_STOCK: { label: '订单缺货', category: '库存' },
   ORDER_INVALID_STATE: { label: '订单状态异常', category: '订单' },
   ORDER_INTERCEPTION_FAILED: { label: '拦截失败', category: '拦截' },
+  ORDER_SHIPMENT_DEADLINE_NEAR: { label: '发货时限临近', category: '订单' },
+  SYNC_FAILED: { label: '同步失败', category: '同步' },
 };
 
 const EXCEPTION_STATUS_META: Record<

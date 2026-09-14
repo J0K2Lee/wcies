@@ -10,6 +10,7 @@ import {
   Select,
   Tabs,
   Timeline,
+  Tooltip,
 } from 'antd';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
@@ -115,6 +116,14 @@ interface OrderDetail {
     operatorName: string | null;
     createdAt: string;
   }>;
+  /** Raw platform status transitions (Sprint 9 T1); merged into the timeline. */
+  platformStatusHistory: Array<{
+    fromStatus: string | null;
+    toStatus: string;
+    source: string | null;
+    operatorName: string | null;
+    createdAt: string;
+  }> | null;
   interceptions: Array<{
     interceptionNo: string;
     status: string;
@@ -189,6 +198,18 @@ function fmtDateTime(value: string): string {
 }
 
 /**
+ * Sprint 9 T1.4 divergence marker: the platform reports shipped-side progress
+ * (delivering / delivered) while the ERP order has not shipped. Pure display
+ * of platform FACTS - ORD00000001-style offline-fulfilled orders.
+ */
+function platformDivergent(platformStatus: string | null, erpStatus: string): boolean {
+  if (platformStatus !== 'delivering' && platformStatus !== 'delivered') {
+    return false;
+  }
+  return erpStatus !== 'SHIPPED' && erpStatus !== 'CANCELLED';
+}
+
+/**
  * Shipment-deadline tiering (Sprint 7 task §8, orders.md §16): overdue /
  * <24h urgent (red), <3 days approaching (orange), otherwise neutral.
  * Pure display of a platform FACT - never an ERP status.
@@ -237,6 +258,9 @@ export function OrdersPage() {
     quantity: number;
     unitCost?: number;
   }>();
+  // Sprint 9 T6: the order being marked as externally fulfilled.
+  const [externalTarget, setExternalTarget] = useState<OrderListItem | null>(null);
+  const [externalForm] = Form.useForm<{ reason: string }>();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [ingestOpen, setIngestOpen] = useState(false);
@@ -315,6 +339,27 @@ export function OrdersPage() {
       void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
     },
     onError: (error: Error) => message.error(`取消失败：${error.message}`),
+  });
+
+  // Sprint 9 T6: close out an order fulfilled outside WCIES (no stock moves).
+  const markExternalMutation = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      apiPost<{ releasedItems: number }>(
+        '/api/v1/orders/{id}/mark-external-fulfillment',
+        {
+          reason,
+        },
+        { id },
+      ),
+    onSuccess: (result: { releasedItems: number }) => {
+      message.success(`已标记外部履约（关账 ${result.releasedItems} 行），订单转入 SHIPPED`);
+      setExternalTarget(null);
+      externalForm.resetFields();
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
+      void queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+    },
+    onError: (error: Error) => message.error(`标记失败：${error.message}`),
   });
 
   const retryMutation = useMutation({
@@ -908,6 +953,15 @@ export function OrdersPage() {
                       ×{row.openExceptionsCount}
                     </span>
                   )}
+                  {platformDivergent(row.platformStatus, value) && (
+                    <Tooltip
+                      title={`平台状态 ${row.platformStatus}：平台侧已发货/送达，系统未发货`}
+                    >
+                      <span style={{ fontSize: 12, color: colors.warning, fontWeight: 600 }}>
+                        ⚠
+                      </span>
+                    </Tooltip>
+                  )}
                 </span>
               ),
             },
@@ -976,6 +1030,18 @@ export function OrdersPage() {
                           },
                         ]
                       : []),
+                    ...(row.erpStatus !== 'CANCELLED' && row.erpStatus !== 'SHIPPED'
+                      ? [
+                          {
+                            key: 'mark-external',
+                            label: '标记外部履约',
+                            onClick: () => {
+                              setExternalTarget(row);
+                              externalForm.setFieldsValue({ reason: '' });
+                            },
+                          },
+                        ]
+                      : []),
                   ]}
                 />
               ),
@@ -1016,6 +1082,11 @@ export function OrdersPage() {
               <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
                 平台状态 {detail.platformStatus ?? '—'}
               </span>
+              {platformDivergent(detail.platformStatus, detail.erpStatus) && (
+                <Tooltip title="平台侧已发货/送达，但系统内该订单尚未发货——请核实是否线下直发（可「标记外部履约」收口）或数据遗漏。">
+                  <StatusBadge tone="danger" label="平台已发货，系统未发货" />
+                </Tooltip>
+              )}
             </div>
             <div style={{ marginBottom: 16 }}>
               <InfoGrid
@@ -1197,25 +1268,57 @@ export function OrdersPage() {
                 },
                 {
                   key: 'history',
-                  label: `状态历史 (${detail.history.length})`,
+                  label: `状态历史 (${detail.history.length + (detail.platformStatusHistory?.length ?? 0)})`,
                   children: (
                     <Timeline
-                      items={detail.history.map((entry) => ({
-                        content: (
-                          <div>
-                            <span style={{ fontWeight: 600 }}>
-                              {ERP_STATUS_META[entry.fromStatus ?? '']?.label ??
-                                entry.fromStatus ??
-                                '∅'}{' '}
-                              → {ERP_STATUS_META[entry.toStatus]?.label ?? entry.toStatus}
-                            </span>
-                            <div style={{ color: colors.textTertiary, fontSize: 12.5 }}>
-                              {fmtDateTime(entry.createdAt)} · {entry.operatorName ?? 'system'}
-                              {entry.reason ? ` · ${entry.reason}` : ''}
+                      items={[
+                        // Sprint 9 T1 (decision 5 = B): the ERP timeline and the
+                        // raw platform timeline are stored separately and merged
+                        // here by createdAt (newest first).
+                        ...(detail.platformStatusHistory ?? []).map((entry) => ({
+                          createdAt: entry.createdAt,
+                          node: (
+                            <div>
+                              <span style={{ fontWeight: 600 }}>
+                                {entry.fromStatus ?? '∅'} → {entry.toStatus}
+                              </span>{' '}
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  color: colors.textTertiary,
+                                  border: `1px solid ${colors.border}`,
+                                  borderRadius: 4,
+                                  padding: '0 4px',
+                                }}
+                              >
+                                平台{entry.source ? ` · ${entry.source}` : ''}
+                              </span>
+                              <div style={{ color: colors.textTertiary, fontSize: 12.5 }}>
+                                {fmtDateTime(entry.createdAt)} · {entry.operatorName ?? 'sync'}
+                              </div>
                             </div>
-                          </div>
-                        ),
-                      }))}
+                          ),
+                        })),
+                        ...detail.history.map((entry) => ({
+                          createdAt: entry.createdAt,
+                          node: (
+                            <div>
+                              <span style={{ fontWeight: 600 }}>
+                                {ERP_STATUS_META[entry.fromStatus ?? '']?.label ??
+                                  entry.fromStatus ??
+                                  '∅'}{' '}
+                                → {ERP_STATUS_META[entry.toStatus]?.label ?? entry.toStatus}
+                              </span>
+                              <div style={{ color: colors.textTertiary, fontSize: 12.5 }}>
+                                {fmtDateTime(entry.createdAt)} · {entry.operatorName ?? 'system'}
+                                {entry.reason ? ` · ${entry.reason}` : ''}
+                              </div>
+                            </div>
+                          ),
+                        })),
+                      ]
+                        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+                        .map((entry) => ({ content: entry.node }))}
                     />
                   ),
                 },
@@ -1294,6 +1397,49 @@ export function OrdersPage() {
             extra="如：淘宝 订单号 12345678；固定供应商请到采购单页面选择"
           >
             <Input maxLength={500} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={`标记外部履约：${externalTarget?.orderNo ?? ''}`}
+        open={externalTarget !== null}
+        onCancel={() => setExternalTarget(null)}
+        onOk={() => {
+          void externalForm
+            .validateFields()
+            .then((values) =>
+              markExternalMutation.mutate({
+                id: (externalTarget as OrderListItem).id,
+                reason: values.reason,
+              }),
+            );
+        }}
+        okText="标记并关账"
+        cancelText="取消"
+        confirmLoading={markExternalMutation.isPending}
+        destroyOnHidden
+      >
+        <Form form={externalForm} layout="vertical" preserve={false}>
+          <span
+            style={{
+              fontSize: 12.5,
+              color: colors.textTertiary,
+              display: 'block',
+              marginBottom: 12,
+            }}
+          >
+            适用于货物从未进入 WCIES
+            仓库、在系统外完成的订单（如线下采购直发买家）。订单行将关账（RELEASED）、订单转入
+            SHIPPED，不产生任何库存流水，并关闭该订单的缺货/时限异常。存在 RESERVED / PICKED
+            行的订单请走「取消订单」。
+          </span>
+          <Form.Item
+            name="reason"
+            label="外部履约原因（必填）"
+            rules={[{ required: true, message: '请填写原因，如：线下采购直发买家' }]}
+          >
+            <Input.TextArea rows={3} maxLength={500} showCount />
           </Form.Item>
         </Form>
       </Modal>

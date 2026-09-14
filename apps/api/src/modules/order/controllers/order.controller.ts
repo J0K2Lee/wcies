@@ -25,6 +25,8 @@ import {
   OrderIngestResultDto,
   OrderListItemDto,
   OrderListQueryDto,
+  OrderMarkExternalFulfillmentRequestDto,
+  OrderMarkExternalFulfillmentResultDto,
   OrderRetryAllocationResultDto,
 } from '../dto/order.dto';
 
@@ -86,6 +88,22 @@ export class OrderController {
     @CurrentOperator() operator: OperatorContext,
   ) {
     return ok<OrderCancelResultDto>(await this.orderService.cancel(id, operator, request.reason));
+  }
+
+  @Post(':id/mark-external-fulfillment')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '标记外部履约（订单在系统外完成：行关账、不产生库存流水、关闭缺货/时限异常）',
+  })
+  @ApiOkEnvelope(OrderMarkExternalFulfillmentResultDto)
+  async markExternalFulfillment(
+    @Param('id') id: string,
+    @Body() request: OrderMarkExternalFulfillmentRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ) {
+    return ok<OrderMarkExternalFulfillmentResultDto>(
+      await this.orderService.markExternalFulfillment(id, operator, request.reason),
+    );
   }
 
   @Post('items/:itemId/retry-allocation')

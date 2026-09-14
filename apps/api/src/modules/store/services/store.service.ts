@@ -9,7 +9,11 @@ import { BusinessCodeService } from '../../../infrastructure/business-code/busin
 import { PlatformService } from '../../platform/platform.service';
 import { PlatformNotFoundError } from '../../platform/errors/platform-errors';
 import { StoreEntity } from '../entities/store.entity';
-import { StoreCodeAlreadyExistsError, StoreInUseError, StoreNotFoundError } from '../errors/store-errors';
+import {
+  StoreCodeAlreadyExistsError,
+  StoreInUseError,
+  StoreNotFoundError,
+} from '../errors/store-errors';
 import { StoreRepository, StoreRowWithCounts } from '../repositories/store.repository';
 import {
   CreateStoreRequestDto,
@@ -106,7 +110,13 @@ export class StoreService {
     if (dto.name !== undefined) patch.name = dto.name;
     if (dto.sellerId !== undefined) patch.sellerId = dto.sellerId;
     if (dto.defaultCurrency !== undefined) patch.defaultCurrency = dto.defaultCurrency;
-    if (dto.settings !== undefined) patch.settings = dto.settings;
+    if (dto.settings !== undefined) {
+      // Read-modify-write (Sprint 9 T2): the whole settings column is NULL
+      // on real stores, and callers toggle ONE key (e.g. sync.orderSyncEnabled)
+      // - a blind replace would wipe every other setting. Top-level keys in
+      // the payload win; absent keys keep their stored value.
+      patch.settings = { ...(found.store.settings ?? {}), ...dto.settings };
+    }
 
     if (Object.keys(patch).length > 0) {
       await this.repository.update(id, patch);

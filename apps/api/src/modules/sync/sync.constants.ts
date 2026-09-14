@@ -64,6 +64,13 @@ export function readStoreSyncSettings(settings: Record<string, unknown> | null):
   };
 }
 
+/**
+ * Sprint 9 T2 (decision 3): a store's (SYNC_FAILED, STORE) exception opens
+ * once ANY of its sync types fails this many times in a row, and resolves
+ * when every sync type of the store is healthy again.
+ */
+export const SYNC_FAILED_CONSECUTIVE_FAILURES = 3;
+
 /** Payload of a wcies.webhook background job (raw event follow-up). */
 export interface WebhookJobPayload {
   readonly rawEventId: string;

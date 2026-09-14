@@ -21,11 +21,9 @@ import { OrderRepository } from '../repositories/order.repository';
 import { OrderItemRepository } from '../repositories/order-item.repository';
 import { OrderStatusHistoryRepository } from '../repositories/order-status-history.repository';
 import { OrderStatusService } from './order-status.service';
+import { OrderDeadlineExceptionService } from './order-deadline-exception.service';
 import { orderReserveKey } from '../enums/order.constants';
 import { OrderIngestInvalidError } from '../errors/order.errors';
-
-/** Deadline within this window (or past) raises ORDER_SHIPMENT_DEADLINE_NEAR. */
-const DEADLINE_NEAR_MS = 24 * 60 * 60 * 1000;
 
 export interface OrderIngestResult {
   orderId: string;
@@ -71,6 +69,7 @@ export class OrderIngestionService {
     private readonly itemRepo: OrderItemRepository,
     private readonly historyRepo: OrderStatusHistoryRepository,
     private readonly statusService: OrderStatusService,
+    private readonly deadlineExceptionService: OrderDeadlineExceptionService,
     private readonly logger: AppLoggerService,
   ) {}
 
@@ -158,7 +157,7 @@ export class OrderIngestionService {
       operator,
       '订单摄入完成，按行结果汇总',
     );
-    await this.raiseDeadlineExceptionIfNear(order);
+    await this.deadlineExceptionService.evaluate(order);
     return {
       orderId: order.id,
       orderNo: order.orderNo,
@@ -441,40 +440,6 @@ export class OrderIngestionService {
       }
       throw error;
     }
-  }
-
-  /**
-   * Sprint 7 (orders.md §16): a shipment deadline that is already past or
-   * within 24h is a direct economic risk (the platform re-tariffs after it),
-   * so ingestion raises ORDER_SHIPMENT_DEADLINE_NEAR. Deduplicated per
-   * (type, ORDER reference) while an OPEN row exists.
-   */
-  private async raiseDeadlineExceptionIfNear(order: OrderEntity): Promise<void> {
-    // HTTP input arrives as an ISO string (validation-only DTO) and TypeORM
-    // writes it fine, but the saved entity handed back may still carry the
-    // string - normalize before use. `?? null` also covers pre-column mocks.
-    const raw = order.shipmentDeadline ?? null;
-    const deadline = raw === null ? null : new Date(raw);
-    if (deadline === null || Number.isNaN(deadline.getTime())) {
-      return;
-    }
-    const remainingMs = deadline.getTime() - Date.now();
-    if (remainingMs >= DEADLINE_NEAR_MS) {
-      return;
-    }
-    const overdue = remainingMs < 0;
-    const deadlineIso = deadline.toISOString();
-    await this.exceptionService.create({
-      exceptionType: 'ORDER_SHIPMENT_DEADLINE_NEAR',
-      severity: overdue ? 'HIGH' : 'MEDIUM',
-      referenceType: 'ORDER',
-      referenceId: order.id,
-      storeId: order.storeId,
-      message: overdue
-        ? `订单 ${order.orderNo} 平台发货时限已超时（${deadlineIso}），平台将按更高费率计费`
-        : `订单 ${order.orderNo} 平台发货时限临近（${deadlineIso}，剩余不足 24 小时）`,
-      details: { orderNo: order.orderNo, shipmentDeadline: deadlineIso },
-    });
   }
 
   /**

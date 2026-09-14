@@ -72,6 +72,18 @@ export class StoreSyncOverviewDto {
     status: string;
     finishedAt: Date | null;
   } | null;
+  @ApiProperty({
+    nullable: true,
+    type: Object,
+    description: '最近一次类目树同步（Sprint 8.5，手动；只展示不告警）',
+  })
+  lastCategoryTreeSync!: { status: string; finishedAt: Date | null } | null;
+  @ApiProperty({
+    nullable: true,
+    type: Object,
+    description: '最近一次商品属性增强同步（Sprint 8.5，手动；只展示不告警）',
+  })
+  lastProductEnrichmentSync!: { status: string; finishedAt: Date | null } | null;
   @ApiProperty({ description: '连续失败次数（成功即清零）' }) consecutiveFailures!: number;
   @ApiProperty({ nullable: true, type: String }) activeJobId!: string | null;
 }

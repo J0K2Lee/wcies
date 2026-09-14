@@ -5632,7 +5632,8 @@
                 "ORDER_OUT_OF_STOCK",
                 "ORDER_INVALID_STATE",
                 "ORDER_INTERCEPTION_FAILED",
-                "ORDER_SHIPMENT_DEADLINE_NEAR"
+                "ORDER_SHIPMENT_DEADLINE_NEAR",
+                "SYNC_FAILED"
               ]
             }
           },
@@ -6079,6 +6080,55 @@
           }
         },
         "summary": "取消订单（按行处理库存：Reserved 释放 / Picked 拦截）",
+        "tags": ["orders"]
+      }
+    },
+    "/api/v1/orders/{id}/mark-external-fulfillment": {
+      "post": {
+        "operationId": "OrderController_markExternalFulfillment",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderMarkExternalFulfillmentRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/OrderMarkExternalFulfillmentResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "标记外部履约（订单在系统外完成：行关账、不产生库存流水、关闭缺货/时限异常）",
         "tags": ["orders"]
       }
     },
@@ -13203,7 +13253,8 @@
               "ORDER_OUT_OF_STOCK",
               "ORDER_INVALID_STATE",
               "ORDER_INTERCEPTION_FAILED",
-              "ORDER_SHIPMENT_DEADLINE_NEAR"
+              "ORDER_SHIPMENT_DEADLINE_NEAR",
+              "SYNC_FAILED"
             ]
           },
           "severity": {
@@ -13548,6 +13599,37 @@
         },
         "required": ["id", "fromStatus", "toStatus", "reason", "operatorName", "createdAt"]
       },
+      "PlatformStatusHistoryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "fromStatus": {
+            "type": "string",
+            "nullable": true,
+            "example": "awaiting_packaging"
+          },
+          "toStatus": {
+            "type": "string",
+            "example": "delivering"
+          },
+          "source": {
+            "type": "string",
+            "nullable": true,
+            "example": "ORDER_SYNC"
+          },
+          "operatorName": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": ["id", "fromStatus", "toStatus", "source", "operatorName", "createdAt"]
+      },
       "OrderInterceptionDto": {
         "type": "object",
         "properties": {
@@ -13729,6 +13811,13 @@
               "$ref": "#/components/schemas/OrderHistoryDto"
             }
           },
+          "platformStatusHistory": {
+            "description": "平台状态迁移时间线（与 ERP 历史按 createdAt 合并展示）",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlatformStatusHistoryDto"
+            }
+          },
           "interceptions": {
             "type": "array",
             "items": {
@@ -13761,6 +13850,7 @@
           "updatedAt",
           "items",
           "history",
+          "platformStatusHistory",
           "interceptions",
           "pickingTasks"
         ]
@@ -13956,6 +14046,44 @@
             "description": "取消原因（记入历史与拦截任务）"
           }
         }
+      },
+      "OrderMarkExternalFulfillmentResultDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "erpStatus": {
+            "type": "string",
+            "enum": [
+              "NEW",
+              "ALLOCATING",
+              "READY_TO_PICK",
+              "PARTIALLY_BACKORDERED",
+              "BACKORDERED",
+              "PICKING",
+              "PICKED",
+              "PARTIALLY_SHIPPED",
+              "SHIPPED",
+              "CANCELLED",
+              "EXCEPTION"
+            ]
+          },
+          "releasedItems": {
+            "type": "number"
+          }
+        },
+        "required": ["orderId", "erpStatus", "releasedItems"]
+      },
+      "OrderMarkExternalFulfillmentRequestDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "外部履约原因（必填，记入状态历史与操作日志；如线下直发买家）"
+          }
+        },
+        "required": ["reason"]
       },
       "OrderRetryAllocationResultDto": {
         "type": "object",
@@ -16357,6 +16485,16 @@
             "type": "object",
             "nullable": true
           },
+          "lastCategoryTreeSync": {
+            "type": "object",
+            "nullable": true,
+            "description": "最近一次类目树同步（Sprint 8.5，手动；只展示不告警）"
+          },
+          "lastProductEnrichmentSync": {
+            "type": "object",
+            "nullable": true,
+            "description": "最近一次商品属性增强同步（Sprint 8.5，手动；只展示不告警）"
+          },
           "consecutiveFailures": {
             "type": "number",
             "description": "连续失败次数（成功即清零）"
@@ -16373,6 +16511,8 @@
           "credential",
           "lastOrderSync",
           "lastListingSync",
+          "lastCategoryTreeSync",
+          "lastProductEnrichmentSync",
           "consecutiveFailures",
           "activeJobId"
         ]

@@ -16,6 +16,13 @@ export const EXCEPTION_TYPES = [
    * Reference: ORDER/orderId. Auto-resolved on SHIPPED / CANCELLED.
    */
   'ORDER_SHIPMENT_DEADLINE_NEAR',
+  /**
+   * Sprint 9 T2 (decision 3): a store's scheduled sync keeps failing. One
+   * OPEN row per store (reference STORE/storeId); details carries the
+   * per-syncType consecutive-failure counts. Auto-resolved as soon as every
+   * sync type of the store is healthy again.
+   */
+  'SYNC_FAILED',
 ] as const;
 export type ExceptionType = (typeof EXCEPTION_TYPES)[number];
 
@@ -27,6 +34,11 @@ export type ExceptionSeverity = (typeof EXCEPTION_SEVERITIES)[number];
 export const EXCEPTION_STATUSES = ['OPEN', 'RESOLVED', 'IGNORED'] as const;
 export type ExceptionStatus = (typeof EXCEPTION_STATUSES)[number];
 
-/** Reference owners used by Sprint 3/4 creators. */
-export const EXCEPTION_REFERENCE_TYPES = ['ORDER', 'ORDER_ITEM', 'ORDER_INTERCEPTION'] as const;
+/** Reference owners used by exception creators (STORE since Sprint 9 T2). */
+export const EXCEPTION_REFERENCE_TYPES = [
+  'ORDER',
+  'ORDER_ITEM',
+  'ORDER_INTERCEPTION',
+  'STORE',
+] as const;
 export type ExceptionReferenceType = (typeof EXCEPTION_REFERENCE_TYPES)[number];
