@@ -175,6 +175,10 @@ export function StoresPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  // 店铺基础信息编辑（改名）。此前页面无任何 PATCH /stores/{id} 的名称入口，
+  // 后端契约一直支持（storeCode / platform 不可改）。
+  const [editTarget, setEditTarget] = useState<StoreRow | null>(null);
+  const [editForm] = Form.useForm<{ name: string }>();
   const [credentialOpen, setCredentialOpen] = useState(false);
   // Id snapshot taken when the credential modal opens: the drawer's onClose
   // may null out detailId while the modal is open - the submission must use
@@ -471,6 +475,17 @@ export function StoresPage() {
     onError: (error: Error) => void message.error(error.message),
   });
 
+  const renameStoreMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      apiPatch('/api/v1/stores/{id}', { name }, { id }),
+    onSuccess: () => {
+      void message.success('店铺已保存');
+      setEditTarget(null);
+      refreshStore(null);
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
   // ---- KPI (task §8.1): derived from the loaded page + latest jobs only ----
   const kpi = useMemo(() => {
     const syncFailed = rows.filter(
@@ -743,6 +758,14 @@ export function StoresPage() {
               onClick: () => {
                 setSelectedId(null);
                 void navigate(`/exceptions?storeId=${row.id}`);
+              },
+            },
+            {
+              key: 'edit',
+              label: '编辑店铺',
+              onClick: () => {
+                setEditTarget(row);
+                editForm.setFieldsValue({ name: row.name });
               },
             },
             { type: 'divider' },
@@ -1051,6 +1074,47 @@ export function StoresPage() {
           >
             <Input.Password placeholder="加密存储，不会回显" />
           </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={`编辑店铺：${editTarget?.storeCode ?? ''}`}
+        open={editTarget !== null}
+        onCancel={() => setEditTarget(null)}
+        onOk={() => {
+          void editForm
+            .validateFields()
+            .then((values) =>
+              renameStoreMutation.mutate({
+                id: (editTarget as StoreRow).id,
+                name: values.name.trim(),
+              }),
+            );
+        }}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={renameStoreMutation.isPending}
+        destroyOnHidden
+      >
+        <Form
+          form={editForm}
+          layout="vertical"
+          preserve={false}
+          initialValues={{ name: editTarget === null ? '' : editTarget.name }}
+        >
+          <Form.Item
+            name="name"
+            label="店铺名称"
+            rules={[
+              { required: true, message: '请输入店铺名称' },
+              { max: 200, message: '最长 200 字' },
+            ]}
+          >
+            <Input maxLength={200} />
+          </Form.Item>
+          <span style={{ fontSize: 12.5, color: colors.textTertiary, display: 'block' }}>
+            店铺编码与所属平台不可修改；改名会记入操作日志。
+          </span>
         </Form>
       </Modal>
     </div>
