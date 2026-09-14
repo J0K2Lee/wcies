@@ -119,7 +119,7 @@ Sprint 5 起，平台同步会产生**未映射**的平台 SKU 事实：
 
 Sprint 8 起（2026-09-12，规划 §T1/T2/T3）：
 
-12. **快捷建档**：`POST /listings/:listingId/skus/:mappingId/onboard`。一个数据库事务内创建 Product + SKU +（可选）内部条码，并把该变体绑定为 MAPPED；任一步失败**整体回滚**，不存在「建了 SKU 但没映射」的半成品。编码沿用集中序号（`PN%06d` / `SKU{9}` / `WCSKU%08d`，不新增规则）；商品名/SKU 名默认取 `listing.title`，两者最终都为空 → 422 `LISTING_ONBOARD_NAME_REQUIRED`。只允许从 **UNMAPPED** 变体发起（已映射变体返回 409 `LISTING_SKU_MAPPING_INVALID_STATE`）。条码为该 SKU 首条码时自动为主条码。审计在各实体写入成功（提交后）记录，Action 含 `CREATE`（product/sku/barcode）与 `MAP`。
+12. **快捷建档**：`POST /listings/:listingId/skus/:mappingId/onboard`。一个数据库事务内创建 Product + SKU +（可选）内部条码，并把该变体绑定为 MAPPED；任一步失败**整体回滚**，不存在「建了 SKU 但没映射」的半成品。编码沿用集中序号（`PN%06d` / `SKU{9}` / `W%08d`（决策 0017；历史行可能仍是 `WCSKU%08d`），不新增规则）；商品名/SKU 名默认取 `listing.title`，两者最终都为空 → 422 `LISTING_ONBOARD_NAME_REQUIRED`。只允许从 **UNMAPPED** 变体发起（已映射变体返回 409 `LISTING_SKU_MAPPING_INVALID_STATE`）。条码为该 SKU 首条码时自动为主条码。审计在各实体写入成功（提交后）记录，Action 含 `CREATE`（product/sku/barcode）与 `MAP`。
 
 Sprint 8.5 起（2026-09-14，决策 0014/0015）——快捷建档增强：
 

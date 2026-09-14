@@ -569,7 +569,8 @@ purchase_receipt_items     收货单明细
 **方案**：收货单明细录入时支持扫码——前端扫码 → 调条码解析 → 得到 SKU → 加入明细。
 后端需补一个「按条码查 SKU」的查询接口（现有 `findByBarcode` 是服务层方法，未暴露 HTTP）。
 
-**提示**：SKU 的内部条码规则是 `WCSKU%08d`（`master-data.md §1`）；
+**提示**：SKU 的内部条码规则是 `W%08d`（`master-data.md §1`；2026-09-14 决策 0017 起，
+此前为 `WCSKU%08d`）；
 若商品自带厂商条码（EAN/GTIN），也可录入为附加条码，扫码时一并匹配。
 
 ### 9.2 库位如何确定（分三种情况，都不是"猜"）
@@ -658,7 +659,7 @@ SKU 与数量**，让人自己决定。这是"给人信息"而不是"替人决�
 |---|---|
 | 一个 SKU 多个条码 | ✅ 支持（`sku_barcodes`，最多一个 `is_primary`，DB 部分唯一索引保证） |
 | 条码类型 | ✅ 5 种：`EAN / GTIN / MANUFACTURER / INTERNAL / OTHER` |
-| 生成内部条码 | ✅ `POST /skus/:skuId/barcodes/generate-internal`，规则 `WCSKU%08d` |
+| 生成内部条码 | ✅ `POST /skus/:skuId/barcodes/generate-internal`，规则 `W%08d`（决策 0017，2026-09-14；此前 `WCSKU%08d`） |
 | SN 管理 | ✅ `skus.serial_tracking` 开关 + `inventory_serials` 表 |
 | 收货时 SN 校验 | ✅ **强制**：SN 商品必须提供与数量一致的 SN 列表，非 SN 商品禁止提供 |
 | 拣货时 SN 校验 | ✅ **强制**：SN 商品必须扫 SN，且必须匹配该库位已有 SN |

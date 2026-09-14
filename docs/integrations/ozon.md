@@ -101,8 +101,8 @@ Request：`{posting_number: string, with:{}}`；Response：`{result: <posting>}`
 | `posting_number` | `orders.platform_order_id`（**业务唯一键 store+posting_number**；OZON 一张 order_id 可能拆多个 posting，posting 才是履约单位） |
 | `status` | `orders.platform_status`（原样保存事实：awaiting_packaging / awaiting_deliver / delivering / delivered / cancelled …） |
 | `in_process_at` | `orders.ordered_at` |
-| `products[].sku` | `order_items.platform_sku_id` + `platform_product_id`（String(OZON sku)） |
-| `products[].offer_id` | `order_items.offer_id`（→ ListingResolver 以 store+offer_id/platform_sku_id 解析内部 SKU） |
+| `products[].sku` | `order_items.platform_sku_id` + `platform_product_id`（String(OZON sku)）——**订单解析的标识**（决策 0016：只认 `platform_sku_id` / `seller_sku`） |
+| `products[].offer_id` | `order_items.offer_id`（**平台事实**：入库、展示、导出、关键字搜索；**不参与解析**——offer_id 可被运营在平台侧随时修改，见决策 0016） |
 | `products[].quantity` | `order_items.quantity`（整数 → String） |
 | `products[].currency_code` | `orders.currency`（取第一行） |
 | （整体） | `orders.raw_data`（完整 posting 原文）+ 每行 `order_items.raw_data` |
