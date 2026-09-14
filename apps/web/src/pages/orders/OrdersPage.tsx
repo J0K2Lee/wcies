@@ -792,20 +792,24 @@ export function OrdersPage() {
       title: '异常',
       key: 'exceptions',
       width: 200,
-      render: (_: unknown, row: OrderItem) =>
-        row.exceptions.length === 0 ? (
+      // 行级异常列只反映待处理问题：RESOLVED/IGNORED 不再展示（历史在
+      // 「异常」Tab 中保留）。
+      render: (_: unknown, row: OrderItem) => {
+        const open = row.exceptions.filter((exception) => exception.status === 'OPEN');
+        return open.length === 0 ? (
           '—'
         ) : (
           <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
-            {row.exceptions.map((exception) => (
+            {open.map((exception) => (
               <StatusBadge
                 key={exception.exceptionNo}
-                tone={exception.status === 'OPEN' ? 'danger' : 'neutral'}
+                tone="danger"
                 label={exception.exceptionType}
               />
             ))}
           </span>
-        ),
+        );
+      },
     },
     {
       title: '操作',
@@ -1269,7 +1273,13 @@ export function OrdersPage() {
                 },
                 {
                   key: 'exceptions',
-                  label: `异常 (${detail.items.reduce((sum, item) => sum + item.exceptions.length, 0) + detail.interceptions.length})`,
+                  label: `异常 (${
+                    detail.items.reduce(
+                      (sum, item) =>
+                        sum + item.exceptions.filter((e) => e.status === 'OPEN').length,
+                      0,
+                    ) + detail.interceptions.length
+                  })`,
                   children:
                     detail.items.every((item) => item.exceptions.length === 0) &&
                     detail.interceptions.length === 0 ? (
@@ -1293,7 +1303,11 @@ export function OrdersPage() {
                                       <StatusBadge
                                         key={exception.exceptionNo}
                                         tone={exception.status === 'OPEN' ? 'danger' : 'neutral'}
-                                        label={exception.exceptionType}
+                                        label={
+                                          exception.status === 'OPEN'
+                                            ? exception.exceptionType
+                                            : `${exception.exceptionType}（已解决）`
+                                        }
                                       />
                                     ))}
                                   </span>

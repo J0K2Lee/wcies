@@ -369,7 +369,20 @@ export class OrderIngestionService {
     });
 
     const fresh = (await this.itemRepo.findById(item.id)) as OrderItemEntity;
-    const outcome = await this.allocateMappedItem(order, fresh, operator);
+    let outcome: { reserved: boolean; reservationId: string | null };
+    try {
+      outcome = await this.allocateMappedItem(order, fresh, operator);
+    } catch (error: unknown) {
+      // 映射已修复：无论分配是否成功，rollup 必须重算——否则订单头会永远
+      // 停留在 EXCEPTION，与「异常已解决」的行事实自相矛盾（分配错误本身
+      // 照常抛给调用方）。
+      await this.statusService.recomputeOrderStatus(
+        order.id,
+        operator,
+        `第 ${item.lineNo} 行映射修复后重试分配失败`,
+      );
+      throw error;
+    }
 
     if (!outcome.reserved) {
       // The line entered this path as FAILED (i.e. never allocated), so a
