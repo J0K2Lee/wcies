@@ -100,8 +100,14 @@ BACKORDERED / PENDING
 重新尝试 reserveStock（同一幂等键 ORDER_RESERVE:<orderItemId>）
 ↓
 成功 → RESERVED，解决（RESOLVED）对应 OPEN 异常，订单状态重算
-失败 → 保持 BACKORDERED，不新建异常（已有未解决异常保留）
+失败 → 行转 BACKORDERED（原 BACKORDERED 保持），创建或保留
+       ORDER_OUT_OF_STOCK（createInTx 幂等，不产生重复异常），
+       订单汇总状态重算
 ```
+
+要点：**PENDING 行（映射修复后从未分配成功）分配失败同样必须落到
+BACKORDERED**——静默停在 PENDING 会让操作员看不到任何待办（与 §5.B.2
+同一原则）。
 
 ### B. 映射失败行（`FAILED`）— 决策 0012
 

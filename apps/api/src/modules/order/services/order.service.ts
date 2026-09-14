@@ -306,8 +306,7 @@ export class OrderService {
 
     const outcome = await this.ingestionService.allocateMappedItem(order, item, operator);
     if (outcome.reserved) {
-      // Success: close the OPEN out-of-stock exception (no new spam on
-      // failure - the OPEN row stays, task §24).
+      // Success: close the OPEN out-of-stock exception.
       await this.dataSource.transaction(async (runner) => {
         await this.exceptionService.resolveByReferenceInTx(runner, {
           exceptionType: 'ORDER_OUT_OF_STOCK',
@@ -319,6 +318,29 @@ export class OrderService {
         order.id,
         operator,
         `第 ${item.lineNo} 行重新分配成功`,
+      );
+    } else {
+      // 缺货（orders.md §5.A/§5.B.2）：PENDING 行必须落到 BACKORDERED 并
+      // 创建缺货异常——静默停在 PENDING 会让操作员看不到任何待办。对已是
+      // BACKORDERED 的行这是幂等重写；createInTx 幂等，不产生重复异常。
+      await this.dataSource.transaction(async (runner) => {
+        await this.itemRepo.updateFulfillment(runner, item.id, {
+          fulfillmentStatus: 'BACKORDERED',
+        });
+        await this.exceptionService.createInTx(runner, {
+          exceptionType: 'ORDER_OUT_OF_STOCK',
+          severity: 'MEDIUM',
+          referenceType: 'ORDER_ITEM',
+          referenceId: item.id,
+          storeId: order.storeId,
+          message: `订单 ${order.orderNo} 第 ${item.lineNo} 行重试分配后仍库存不足`,
+          details: { orderNo: order.orderNo, lineNo: item.lineNo },
+        });
+      });
+      await this.statusService.recomputeOrderStatus(
+        order.id,
+        operator,
+        `第 ${item.lineNo} 行重试分配仍库存不足`,
       );
     }
     const fresh = await this.itemRepo.findById(orderItemId);
