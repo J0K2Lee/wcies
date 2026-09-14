@@ -106,6 +106,25 @@ export function useApiQuery<
   });
 }
 
+/** Typed GET helper returning the unwrapped data or throwing (one-off fetches
+ *  outside React queries, e.g. deep-link handlers). */
+export async function apiGet<TData>(
+  path: QueryKey,
+  params: Record<string, unknown> = {},
+  pathParams?: Record<string, string>,
+): Promise<TData> {
+  const { data, error } = await apiClient.GET(path, {
+    params: {
+      query: params as never,
+      ...(pathParams === undefined ? {} : { path: pathParams as never }),
+    },
+  });
+  if (error !== undefined) {
+    throw toApiError(error.error);
+  }
+  return (data as { data: TData }).data;
+}
+
 /** Typed POST helper returning the unwrapped data or throwing. */
 export async function apiPost<TData>(
   path: QueryKey,

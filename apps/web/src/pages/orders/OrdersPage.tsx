@@ -13,8 +13,8 @@ import {
   Tooltip,
 } from 'antd';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link, useSearchParams } from 'react-router';
-import { apiPost, useApiQuery } from '../../api/hooks';
+import { Link, useNavigate, useSearchParams } from 'react-router';
+import { apiGet, apiPost, useApiQuery } from '../../api/hooks';
 import {
   ActionMenu,
   ContextAction,
@@ -209,6 +209,16 @@ function platformDivergent(platformStatus: string | null, erpStatus: string): bo
   return erpStatus !== 'SHIPPED' && erpStatus !== 'CANCELLED';
 }
 
+/** 强匹配标识：订单解析只认 platform_sku_id（决策 0016），其次 seller_sku /
+ *  offer_id——与映射工作台 keyword 搜索的字段一一对应。 */
+function mappingSearchKeyword(item: {
+  platformSkuId: string | null;
+  sellerSku: string | null;
+  offerId: string | null;
+}): string | null {
+  return item.platformSkuId ?? item.sellerSku ?? item.offerId;
+}
+
 /**
  * Shipment-deadline tiering (Sprint 7 task §8, orders.md §16): overdue /
  * <24h urgent (red), <3 days approaching (orange), otherwise neutral.
@@ -245,6 +255,7 @@ function deadlineBadge(deadline: string | null): {
 export function OrdersPage() {
   const { message, modal } = AntdApp.useApp();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState(() => searchParams.get('keyword') ?? '');
@@ -361,6 +372,24 @@ export function OrdersPage() {
     },
     onError: (error: Error) => message.error(`标记失败：${error.message}`),
   });
+
+  /** 跳转到 SKU 映射工作台并自动搜索该行的平台标识（快捷建档入口）。 */
+  const openMappingWorkbench = (item: {
+    platformSkuId: string | null;
+    sellerSku: string | null;
+    offerId: string | null;
+  }) => {
+    const keyword = mappingSearchKeyword(item);
+    if (keyword === null || keyword.trim() === '') {
+      message.warning(
+        '该订单行没有任何平台 SKU 标识（platformSkuId / sellerSku / offerId），无法自动搜索',
+      );
+      return;
+    }
+    void navigate(
+      `/platform-mappings?keyword=${encodeURIComponent(keyword.trim())}&mappingState=UNMAPPED`,
+    );
+  };
 
   const retryMutation = useMutation({
     mutationFn: (itemId: string) =>
@@ -526,14 +555,23 @@ export function OrdersPage() {
                     <span style={{ fontSize: 13, color: colors.textSecondary }}>
                       {item.platformSkuId ?? item.offerId ?? `第 ${item.lineNo} 行`}
                     </span>
-                    <Button
-                      size="small"
-                      loading={retryMutation.isPending}
-                      style={{ marginLeft: 'auto' }}
-                      onClick={() => retryMutation.mutate(item.id)}
-                    >
-                      重试映射
-                    </Button>
+                    <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
+                      <Button
+                        size="small"
+                        type="primary"
+                        ghost
+                        onClick={() => openMappingWorkbench(item)}
+                      >
+                        去建档
+                      </Button>
+                      <Button
+                        size="small"
+                        loading={retryMutation.isPending}
+                        onClick={() => retryMutation.mutate(item.id)}
+                      >
+                        重试映射
+                      </Button>
+                    </span>
                   </div>
                 ))}
               </div>
@@ -753,7 +791,7 @@ export function OrdersPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 130,
+      width: 180,
       render: (_: unknown, row: OrderItem) => {
         // FAILED lines are retryable too: the mapping may have been repaired
         // in the SKU workbench since ingestion, and the backend re-resolves
@@ -761,17 +799,26 @@ export function OrdersPage() {
         const retryable =
           (row.mappingStatus === 'MAPPED' || row.mappingStatus === 'FAILED') &&
           (row.fulfillmentStatus === 'BACKORDERED' || row.fulfillmentStatus === 'PENDING');
-        if (!retryable) {
+        if (row.mappingStatus !== 'FAILED' && !retryable) {
           return null;
         }
         return (
-          <Button
-            size="small"
-            loading={retryMutation.isPending}
-            onClick={() => retryMutation.mutate(row.id)}
-          >
-            重新尝试分配
-          </Button>
+          <span style={{ display: 'inline-flex', gap: 6 }}>
+            {row.mappingStatus === 'FAILED' && (
+              <Button size="small" type="primary" ghost onClick={() => openMappingWorkbench(row)}>
+                去建档
+              </Button>
+            )}
+            {retryable && (
+              <Button
+                size="small"
+                loading={retryMutation.isPending}
+                onClick={() => retryMutation.mutate(row.id)}
+              >
+                重新尝试分配
+              </Button>
+            )}
+          </span>
         );
       },
     },
@@ -1026,6 +1073,44 @@ export function OrdersPage() {
                                   cancelMutation.mutate(row.id);
                                 },
                               });
+                            },
+                          },
+                        ]
+                      : []),
+                    ...(row.mappingFailedCount > 0
+                      ? [
+                          {
+                            key: 'quick-onboard',
+                            label: `映射失败 ${row.mappingFailedCount} 行 · 去快捷建档`,
+                            onClick: async () => {
+                              // Identifiers live on the order lines: reuse the
+                              // cached detail when it belongs to this order,
+                              // otherwise fetch it once, then deep-link to the
+                              // mapping workbench pre-searched with the FIRST
+                              // failed line's platform identifier.
+                              let items = detail?.id === row.id ? detail.items : undefined;
+                              if (items === undefined) {
+                                try {
+                                  items = (
+                                    await apiGet<{ items: OrderItem[] }>(
+                                      '/api/v1/orders/{id}',
+                                      {},
+                                      { id: row.id },
+                                    )
+                                  ).items;
+                                } catch (error: unknown) {
+                                  message.error(
+                                    `读取订单行失败：${error instanceof Error ? error.message : String(error)}`,
+                                  );
+                                  return;
+                                }
+                              }
+                              const failed = items.find((item) => item.mappingStatus === 'FAILED');
+                              if (failed === undefined) {
+                                message.info('该订单已没有映射失败行（可能刚刚重试成功）');
+                                return;
+                              }
+                              openMappingWorkbench(failed);
                             },
                           },
                         ]
@@ -1406,14 +1491,12 @@ export function OrdersPage() {
         open={externalTarget !== null}
         onCancel={() => setExternalTarget(null)}
         onOk={() => {
-          void externalForm
-            .validateFields()
-            .then((values) =>
-              markExternalMutation.mutate({
-                id: (externalTarget as OrderListItem).id,
-                reason: values.reason,
-              }),
-            );
+          void externalForm.validateFields().then((values) =>
+            markExternalMutation.mutate({
+              id: (externalTarget as OrderListItem).id,
+              reason: values.reason,
+            }),
+          );
         }}
         okText="标记并关账"
         cancelText="取消"

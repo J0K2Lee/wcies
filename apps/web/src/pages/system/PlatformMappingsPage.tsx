@@ -61,7 +61,9 @@ export function PlatformMappingsPage() {
   const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState(() => searchParams.get('keyword') ?? '');
-  const [mappingState, setMappingState] = useState<string | undefined>();
+  const [mappingState, setMappingState] = useState<string | undefined>(
+    () => searchParams.get('mappingState') ?? undefined,
+  );
   const [platformId, setPlatformId] = useState<string | undefined>();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
