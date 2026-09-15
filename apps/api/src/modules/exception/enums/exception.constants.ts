@@ -23,6 +23,25 @@ export const EXCEPTION_TYPES = [
    * sync type of the store is healthy again.
    */
   'SYNC_FAILED',
+  /**
+   * Dual-axis T4 (2026-09-15, orders.md §16A): the platform logistics stage
+   * has been IN_TRANSIT for more than 3 days with no movement. Reference:
+   * ORDER/orderId. The stall clock anchors on the PLATFORM's own timestamp
+   * (orders.platform_stage_changed_at), never our receive time. Evaluated on
+   * EVERY fallback-rotation encounter (stalled orders are exactly the ones
+   * where nothing changes); auto-resolved when the stage reaches DELIVERED /
+   * CANCELLED - including via the pure re-read path (no webhook dependency).
+   */
+  'ORDER_TRACKING_STALLED',
+  /**
+   * Dual-axis T4 (2026-09-15, orders.md §15): the platform cancelled an
+   * order that WCIES had already SHIPPED. The cancel chain still runs (other
+   * lines release / intercept) but SHIPPED lines stay SHIPPED with stock
+   * untouched - recovery is a return/refund process, not an in-warehouse
+   * action. Reference: ORDER/orderId. Not auto-resolved: a human closes it
+   * after the return path completes.
+   */
+  'ORDER_CANCELLED_AFTER_SHIP',
 ] as const;
 export type ExceptionType = (typeof EXCEPTION_TYPES)[number];
 

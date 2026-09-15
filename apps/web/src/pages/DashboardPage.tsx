@@ -98,6 +98,8 @@ const EXCEPTION_TYPE_LABEL: Record<string, string> = {
   ORDER_INTERCEPTION_FAILED: '拦截失败',
   ORDER_SHIPMENT_DEADLINE_NEAR: '发货时限临近',
   SYNC_FAILED: '同步失败',
+  ORDER_TRACKING_STALLED: '物流停滞',
+  ORDER_CANCELLED_AFTER_SHIP: '已发货被平台取消',
 };
 
 /** Sync job type → label. */

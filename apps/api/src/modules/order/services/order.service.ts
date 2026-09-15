@@ -15,6 +15,7 @@ import { OrderStatusHistoryRepository } from '../repositories/order-status-histo
 import { PlatformStatusHistoryRepository } from '../repositories/platform-status-history.repository';
 import { OrderStatusService } from './order-status.service';
 import { OrderDeadlineExceptionService } from './order-deadline-exception.service';
+import { OrderTrackingStallService } from './order-tracking-stall.service';
 import { OrderIngestionService } from './order-ingestion.service';
 import { ErpOrderStatus, orderReleaseKey } from '../enums/order.constants';
 import {
@@ -47,6 +48,7 @@ export class OrderService {
     private readonly platformStatusHistoryRepo: PlatformStatusHistoryRepository,
     private readonly statusService: OrderStatusService,
     private readonly deadlineExceptionService: OrderDeadlineExceptionService,
+    private readonly stallService: OrderTrackingStallService,
     private readonly ingestionService: OrderIngestionService,
     private readonly reservationService: ReservationService,
     private readonly inventoryQuery: InventoryQueryService,
@@ -571,6 +573,10 @@ export class OrderService {
     // Repeated cancelled re-syncs hit cancel()'s idempotent early return and
     // the reservation release's ORDER_RELEASE:<orderItemId> idempotency key.
     if (input.platformCancelled && order.erpStatus !== 'CANCELLED') {
+      // Dual-axis T4: goods that already LEFT the warehouse cannot be
+      // recovered in-house - flag the shipped-line cancellation for the
+      // return/refund follow-up BEFORE the cancel chain closes the rest.
+      await this.flagCancelledAfterShip(order, input);
       await this.cancel(
         order.id,
         operator,
@@ -587,6 +593,22 @@ export class OrderService {
         shipmentDeadline: newDeadline ?? order.shipmentDeadline ?? null,
       });
     }
+    // Stall re-evaluation on EVERY encounter (dual-axis T4, orders.md §16A):
+    // a stalled order is precisely one where nothing changed, so gating on
+    // change would never catch it. The effective anchor mirrors the write
+    // semantics above: a fresh stage transition takes the mapper's platform
+    // timestamp (falling back to NOW); an unchanged stage keeps the stored
+    // anchor.
+    const effectiveStageAnchor = stageChanged
+      ? (toInstantOrNull(input.platformStageChangedAt) ?? new Date())
+      : order.platformStageChangedAt;
+    await this.stallService.evaluate({
+      id: order.id,
+      orderNo: order.orderNo,
+      storeId: order.storeId,
+      platformStage: newStage ?? order.platformStage,
+      platformStageChangedAt: effectiveStageAnchor,
+    });
     // Rotation cursor (dual-axis T2): every CONFIRMED re-read advances the
     // slot, changed or not - that is what makes the fallback pass fair.
     await this.dataSource.transaction(async (runner) => {
@@ -804,6 +826,38 @@ export class OrderService {
         referenceType: 'ORDER',
         referenceId: orderId,
       });
+    });
+  }
+
+  /**
+   * Dual-axis T4: a platform cancellation hitting an order that already
+   * SHIPPED (at least one SHIPPED line) raises ORDER_CANCELLED_AFTER_SHIP -
+   * the shipped lines stay SHIPPED, stock stays moved, and recovery belongs
+   * to the return/refund process. Created through the exception center
+   * (never bypassed, AGENTS.md §52/§53); (type, reference) OPEN dedup makes
+   * repeated cancelled re-syncs a no-op.
+   */
+  private async flagCancelledAfterShip(
+    order: OrderEntity,
+    input: OrderPlatformFactsInput,
+  ): Promise<void> {
+    const items = await this.itemRepo.findByOrderId(order.id);
+    const shippedLines = items.filter((item) => item.fulfillmentStatus === 'SHIPPED');
+    if (shippedLines.length === 0) {
+      return;
+    }
+    await this.exceptionService.create({
+      exceptionType: 'ORDER_CANCELLED_AFTER_SHIP',
+      severity: 'HIGH',
+      referenceType: 'ORDER',
+      referenceId: order.id,
+      storeId: order.storeId,
+      message: `订单 ${order.orderNo} 已被平台取消，但存在 ${shippedLines.length} 个已发货行（货已出库）——请走退货/退款流程处理，库存不会自动恢复`,
+      details: {
+        orderNo: order.orderNo,
+        platformOrderId: input.platformOrderId,
+        shippedLineNos: shippedLines.map((item) => item.lineNo),
+      },
     });
   }
 

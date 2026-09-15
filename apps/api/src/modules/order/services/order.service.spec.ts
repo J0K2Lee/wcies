@@ -6,6 +6,7 @@ import { OrderItemRepository } from '../repositories/order-item.repository';
 import { OrderStatusHistoryRepository } from '../repositories/order-status-history.repository';
 import { PlatformStatusHistoryRepository } from '../repositories/platform-status-history.repository';
 import { OrderStatusService } from './order-status.service';
+import { OrderTrackingStallService } from './order-tracking-stall.service';
 import { OrderDeadlineExceptionService } from './order-deadline-exception.service';
 import { OrderIngestionService } from './order-ingestion.service';
 import { ReservationService } from '../../inventory/services/reservation.service';
@@ -86,6 +87,7 @@ describe('OrderService.retryAllocation - mapped line without stock', () => {
       {} as PlatformStatusHistoryRepository,
       statusService,
       {} as OrderDeadlineExceptionService,
+      { evaluate: vi.fn().mockResolvedValue(undefined) } as unknown as OrderTrackingStallService,
       ingestionService,
       {} as ReservationService,
       {} as InventoryQueryService,

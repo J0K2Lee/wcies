@@ -552,7 +552,7 @@ Sprint 4 在此基础上增加三个原子业务命令（显式 QueryRunner + In
 
 `system_exceptions` 至少：exception_type / severity / status / reference_type / reference_id / store_id / message / details / created_at / resolved_at。
 
-- 类型：`ORDER_SKU_MAPPING_FAILED` / `ORDER_OUT_OF_STOCK` / `ORDER_INVALID_STATE` / `ORDER_INTERCEPTION_FAILED`（Sprint 4）/ `ORDER_SHIPMENT_DEADLINE_NEAR`（Sprint 7，见 §16）/ `SYNC_FAILED`（Sprint 9 T2，见 §15B）。
+- 类型：`ORDER_SKU_MAPPING_FAILED` / `ORDER_OUT_OF_STOCK` / `ORDER_INVALID_STATE` / `ORDER_INTERCEPTION_FAILED`（Sprint 4）/ `ORDER_SHIPMENT_DEADLINE_NEAR`（Sprint 7，见 §16）/ `SYNC_FAILED`（Sprint 9 T2，见 §15B）/ `ORDER_TRACKING_STALLED`（双轴 T4，见 §16A）/ `ORDER_CANCELLED_AFTER_SHIP`（双轴 T4，订单在 WCIES 已发货后被平台取消：订单仍走既有 `cancel()` 链路，SHIPPED 行保持、库存不动，找回走退货/退款流程；severity=HIGH，reference=ORDER/orderId，不自动解决，由人工在退货流程完成后收口）。
 - 状态：`OPEN / RESOLVED / IGNORED`；禁止物理删除历史异常。
 - severity 取值：`LOW / MEDIUM / HIGH`（技术必需的分级字段）。
 
@@ -588,6 +588,28 @@ Sprint 4 在此基础上增加三个原子业务命令（显式 QueryRunner + In
    随时间流逝变得紧急。因此每次 ORDER_SYNC 再遇该订单（无论字段是否
    变化）都重评估：剩余 < 24h / 已超时 → 创建（去重）；平台把时限推迟到
    ≥ 24h 后 → RESOLVE 既有 OPEN。重评估本身零写入（异常中心幂等保证）。
+
+---
+
+# 16A. 物流停滞（双轴任务 T4，2026-09-15 冻结）
+
+用户规则：**平台状态超 3 天未变即报**。适用范围 = `platform_stage='IN_TRANSIT'`
+（已交物流后的在途阶段）；未发货阶段的超时由「发货超时」（§17a
+`SHIPMENT_OVERDUE`）覆盖，不重复报。
+
+- **判定**：`platform_stage='IN_TRANSIT'` 且 `now() - platform_stage_changed_at >
+  3 天` → 创建 `ORDER_TRACKING_STALLED`（severity=MEDIUM，reference=ORDER/orderId）。
+- **时钟锚点**：平台自身时间戳（§2.4 / §7b）——回读取 `delivering_date`、
+  webhook 取 `changed_state_date`，缺失回退观察时间；禁止用「我们的接收时间」
+  当平台事实（投递延迟会造成误判）。
+- **评估时机**：ORDER_SYNC 兜底回读**每次相遇都评估**（无论事实是否变化——
+  停滞的定义恰恰是什么都没变，只评估变化会永远漏掉停滞单，与 §16 时限重评估
+  同理）。候选轮转（§7a.2）保证每个非终态单至少每个 fallback 窗口被观察一次。
+- **自动解决**：阶段进入 `DELIVERED` / `CANCELLED` 时自动 RESOLVED——**经纯
+  回读路径也能解决，不依赖 webhook 存活**（webhook 被平台自动暂停是真实风险，
+  ozon.md §6.5）。
+- 平台的送达日期事实（`client_delivery_date_end` / `delivery_date_begin/end`）
+  本期只随 raw_data 展示，不参与判定。
 
 ---
 

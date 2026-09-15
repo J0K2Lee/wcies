@@ -91,3 +91,11 @@ export const ORDER_GOODS_STATE_FILTERS = [
   'ABNORMAL',
 ] as const;
 export type OrderGoodsStateFilter = (typeof ORDER_GOODS_STATE_FILTERS)[number];
+
+/**
+ * Platform-logistics stall threshold (dual-axis §2.4, user-ruled): an order
+ * whose platform_stage has been IN_TRANSIT for longer than this raises
+ * ORDER_TRACKING_STALLED. The clock anchors on the platform's OWN timestamp
+ * (orders.platform_stage_changed_at), never our receive time.
+ */
+export const ORDER_TRACKING_STALL_DAYS = 3;

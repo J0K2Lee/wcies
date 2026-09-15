@@ -66,6 +66,8 @@ const EXCEPTION_TYPE_META: Record<string, { label: string; category: string }> =
   ORDER_INTERCEPTION_FAILED: { label: '拦截失败', category: '拦截' },
   ORDER_SHIPMENT_DEADLINE_NEAR: { label: '发货时限临近', category: '订单' },
   SYNC_FAILED: { label: '同步失败', category: '同步' },
+  ORDER_TRACKING_STALLED: { label: '物流停滞', category: '物流' },
+  ORDER_CANCELLED_AFTER_SHIP: { label: '已发货被平台取消', category: '退货/退款' },
 };
 
 const EXCEPTION_STATUS_META: Record<

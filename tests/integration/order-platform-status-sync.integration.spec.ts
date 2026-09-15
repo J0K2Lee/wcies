@@ -39,6 +39,8 @@ const API_KEY = 'it-test-api-key-s9';
 const CLIENT_ID = '333000333';
 /** ~29s fallback window (dual-axis T2): short enough to wait out once. */
 const FALLBACK_HOURS = '0.008';
+/** Wall-clock wait until the rotation window elapses (window + margin). */
+const FALLBACK_WINDOW_WAIT_MS = 32_000;
 
 interface MockPostingProduct {
   offer_id: string;
@@ -735,5 +737,131 @@ describe('mark external fulfillment (T6, decision 6 = A)', () => {
       { reason: 'should reject' },
     );
     expect(rejected.status).toBeGreaterThanOrEqual(400);
+  });
+});
+
+describe('platform logistics stall (dual-axis T4, orders.md §16A)', () => {
+  it('IN_TRANSIT anchored >3 days ago raises ORDER_TRACKING_STALLED; pure re-read resolves it', async () => {
+    await newMappedSkuWithStock('STL', 700000008, '6');
+    const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString();
+    script.postings.push({
+      posting_number: 'IT-S9-STL-1',
+      status: 'delivering',
+      in_process_at: new Date().toISOString(),
+      delivering_date: fourDaysAgo,
+      products: [
+        {
+          offer_id: 'STL',
+          sku: 700000008,
+          quantity: 1,
+          price: '100.00',
+          currency_code: 'RUB',
+        },
+      ],
+    });
+
+    // Pure ORDER_SYNC path (no webhook): window pass ingests IN_TRANSIT with
+    // the PLATFORM's 4-day-old delivering_date as the anchor, then the
+    // first rotation read evaluates the stall - the anchor, not our receive
+    // time, decides.
+    await syncOrders();
+    const order = await orderByPlatformId('IT-S9-STL-1');
+    expect(order.erpStatus).toBe('READY_TO_PICK');
+    const stalled = await exceptionsOf(order.id, 'ORDER_TRACKING_STALLED');
+    expect(stalled.some((e) => e.status === 'OPEN')).toBe(true);
+
+    // Platform finally delivers. The fallback rotation (window elapsed)
+    // re-reads the order with NO webhook involved and the stall resolves -
+    // acceptance §5: auto-resolution must not depend on webhook liveness.
+    const posting = script.postings.find((p) => p.posting_number === 'IT-S9-STL-1')!;
+    posting.status = 'delivered';
+    posting.fact_delivery_date = new Date().toISOString();
+    await new Promise((r) => setTimeout(r, FALLBACK_WINDOW_WAIT_MS));
+    const job = await syncOrders();
+    expect(job.status).toBe('SUCCESS');
+
+    const resolved = await exceptionsOf(order.id, 'ORDER_TRACKING_STALLED');
+    expect(resolved.every((e) => e.status !== 'OPEN')).toBe(true);
+    const after = await orderByPlatformId('IT-S9-STL-1');
+    expect(after.platformStatus).toBe('delivered');
+  }, 180_000);
+
+  it('a fresh IN_TRANSIT anchor does NOT raise the stall', async () => {
+    await newMappedSkuWithStock('FRS', 700000009, '6');
+    script.postings.push(
+      makePosting('IT-S9-FRS-1', [{ offerId: 'FRS', sku: 700000009, quantity: 1 }], {
+        minutesAgo: 0,
+        status: 'delivering',
+      }),
+    );
+    await syncOrders();
+    const order = await orderByPlatformId('IT-S9-FRS-1');
+    const stalled = await exceptionsOf(order.id, 'ORDER_TRACKING_STALLED');
+    expect(stalled).toHaveLength(0);
+  });
+});
+
+describe('shipped-line platform cancellation (dual-axis T4)', () => {
+  it('raises ORDER_CANCELLED_AFTER_SHIP; SHIPPED line stays, stock untouched', async () => {
+    const skuId = await newMappedSkuWithStock('CSH', 700000010, '5');
+    const barcode = `${PREFIX}-CSH-BAR`;
+    await client.post(`/api/v1/skus/${skuId}/barcodes`, {
+      barcode,
+      barcodeType: 'EAN',
+    });
+    script.postings.push(
+      makePosting('IT-S9-CSH-1', [{ offerId: 'CSH', sku: 700000010, quantity: 1 }], {
+        minutesAgo: 0,
+      }),
+    );
+    await syncOrders();
+
+    // Full in-house fulfillment: reserve -> pick -> pack -> ship.
+    const reserved = await orderByPlatformId('IT-S9-CSH-1');
+    const task = await client.post<{ tasks: Array<{ id: string }> }>('/api/v1/picking-tasks', {
+      orderId: reserved.id,
+    });
+    const taskId = task.body.data.tasks[0]!.id;
+    await client.post(`/api/v1/picking-tasks/${taskId}/start`, {});
+    await client.post(`/api/v1/picking-tasks/${taskId}/scan`, { barcode });
+    const shipmentCreated = await client.post<{ shipments: Array<{ id: string }> }>(
+      '/api/v1/shipments',
+      { orderId: reserved.id },
+    );
+    const shipmentId = shipmentCreated.body.data.shipments[0]!.id;
+    const packageCreated = await client.post<{ packageId: string }>(
+      `/api/v1/shipments/${shipmentId}/packages`,
+      {},
+    );
+    await client.post(`/api/v1/packages/${packageCreated.body.data.packageId}/items/scan`, {
+      barcode,
+    });
+    await client.post(`/api/v1/packages/${packageCreated.body.data.packageId}/seal`, {});
+    await client.post(`/api/v1/shipments/${shipmentId}/ship`, {});
+    const shipped = await orderByPlatformId('IT-S9-CSH-1');
+    expect(shipped.erpStatus).toBe('SHIPPED');
+    expect(shipped.items[0]?.fulfillmentStatus).toBe('SHIPPED');
+    const invShipped = await inventoryOf(skuId);
+    expect(Number(invShipped.onHandQty)).toBe(4);
+
+    // The platform cancels what we already shipped.
+    const posting = script.postings.find((p) => p.posting_number === 'IT-S9-CSH-1')!;
+    posting.status = 'cancelled';
+    await postWebhookEvent('TYPE_POSTING_CANCELLED', 'IT-S9-CSH-1', '2026-09-15T12:00:07.000Z');
+
+    const after = await orderByPlatformId('IT-S9-CSH-1');
+    expect(after.erpStatus).toBe('CANCELLED');
+    // The shipped line STAYS shipped: no in-warehouse interception is
+    // possible once goods left (orders.md §8) - recovery is a return flow.
+    expect(after.items[0]?.fulfillmentStatus).toBe('SHIPPED');
+    expect(after.interceptions).toHaveLength(0);
+    // Stock never moves back.
+    const invAfter = await inventoryOf(skuId);
+    expect(Number(invAfter.onHandQty)).toBe(4);
+    expect(Number(invAfter.reservedQty)).toBe(0);
+    expect(Number(invAfter.pickedQty)).toBe(0);
+    // The follow-up exception for the return/refund process is open.
+    const flagged = await exceptionsOf(after.id, 'ORDER_CANCELLED_AFTER_SHIP');
+    expect(flagged.some((e) => e.status === 'OPEN')).toBe(true);
   });
 });
