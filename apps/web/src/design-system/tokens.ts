@@ -66,6 +66,8 @@ export const radius = {
 
 export const typography = {
   fontFamily: "'PingFang SC', 'Microsoft YaHei', 'Segoe UI', system-ui, -apple-system, sans-serif",
+  /** Monospace for order numbers / platform IDs / UUID / raw payloads (UI spec §9). */
+  monoFamily: "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace",
   pageTitle: { size: 28, weight: 650, lineHeight: '36px' },
   sectionTitle: { size: 16, weight: 600, lineHeight: '24px' },
   cardTitle: { size: 14, weight: 600, lineHeight: '22px' },

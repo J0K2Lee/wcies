@@ -112,8 +112,16 @@ export function labelOf(map: Record<string, string>, value: string | null | unde
   return map[value] ?? value;
 }
 
+/** Shape every domain status META table shares (UI spec §5.1). */
+export interface StatusMeta {
+  tone: StatusTone;
+  label: string;
+  /** Optional longer explanation rendered as the badge tooltip. */
+  hint?: string;
+}
+
 /** ERP order status → badge tone + Chinese label (OrdersPage + Dashboard). */
-export const ERP_STATUS_META: Record<string, { tone: StatusTone; label: string }> = {
+export const ERP_STATUS_META: Record<string, StatusMeta> = {
   NEW: { tone: 'neutral', label: '待处理' },
   ALLOCATING: { tone: 'info', label: '分配中' },
   READY_TO_PICK: { tone: 'info', label: '待拣货' },
@@ -128,7 +136,7 @@ export const ERP_STATUS_META: Record<string, { tone: StatusTone; label: string }
 };
 
 /** Order item fulfillment status → tone + label (Orders detail, decision #15). */
-export const FULFILLMENT_STATUS_META: Record<string, { tone: StatusTone; label: string }> = {
+export const FULFILLMENT_STATUS_META: Record<string, StatusMeta> = {
   PENDING: { tone: 'neutral', label: '待处理' },
   RESERVED: { tone: 'info', label: '已占用' },
   BACKORDERED: { tone: 'warning', label: '缺货' },
@@ -137,7 +145,7 @@ export const FULFILLMENT_STATUS_META: Record<string, { tone: StatusTone; label: 
 };
 
 /** Picking task status → tone + label. */
-export const PICKING_STATUS_META: Record<string, { tone: StatusTone; label: string }> = {
+export const PICKING_STATUS_META: Record<string, StatusMeta> = {
   CREATED: { tone: 'neutral', label: '已创建' },
   IN_PROGRESS: { tone: 'info', label: '进行中' },
   COMPLETED: { tone: 'success', label: '已完成' },
@@ -145,20 +153,20 @@ export const PICKING_STATUS_META: Record<string, { tone: StatusTone; label: stri
 };
 
 /** Inventory row status → tone + label. */
-export const INVENTORY_STATUS_META: Record<string, { tone: StatusTone; label: string }> = {
+export const INVENTORY_STATUS_META: Record<string, StatusMeta> = {
   IN_STOCK: { tone: 'success', label: '有可售' },
   OUT_OF_STOCK: { tone: 'danger', label: '无可售' },
 };
 
 /** SKU status → tone + label. */
-export const SKU_STATUS_META: Record<string, { tone: StatusTone; label: string }> = {
+export const SKU_STATUS_META: Record<string, StatusMeta> = {
   ACTIVE: { tone: 'success', label: '启用' },
   INACTIVE: { tone: 'neutral', label: '停用' },
   DRAFT: { tone: 'neutral', label: '草稿' },
 };
 
 /** Sync job status → tone + label (Dashboard rail). */
-export const SYNC_STATUS_META: Record<string, { tone: StatusTone; label: string }> = {
+export const SYNC_STATUS_META: Record<string, StatusMeta> = {
   PENDING: { tone: 'neutral', label: '等待中' },
   RUNNING: { tone: 'info', label: '运行中' },
   SUCCESS: { tone: 'success', label: '成功' },
@@ -166,67 +174,107 @@ export const SYNC_STATUS_META: Record<string, { tone: StatusTone; label: string 
   FAILED: { tone: 'danger', label: '失败' },
 };
 
-/** Import job status → label (ImportPage). */
-export const IMPORT_STATUS_LABEL: Record<string, string> = {
-  VALIDATED: '已校验',
-  PENDING_IMPORT: '待导入',
-  IMPORTING: '导入中',
-  COMPLETED: '已完成',
-  FAILED: '失败',
+/** Import job status → tone + label (ImportPage, G3). */
+export const IMPORT_STATUS_META: Record<string, StatusMeta> = {
+  VALIDATED: { tone: 'info', label: '已校验', hint: '已解析并校验，等待确认导入' },
+  PENDING_IMPORT: { tone: 'warning', label: '待导入' },
+  IMPORTING: { tone: 'info', label: '导入中' },
+  COMPLETED: { tone: 'success', label: '已完成' },
+  FAILED: { tone: 'danger', label: '失败' },
 };
 
-/** Order interception status → label (Interceptions pages). */
-export const INTERCEPTION_STATUS_LABEL: Record<string, string> = {
-  CREATED: '已创建',
-  ASSIGNED: '已指派',
-  LOCATING: '查找中',
-  INTERCEPTED: '已拦截',
-  FAILED: '失败',
-  RETURNED_TO_STOCK: '已回库',
-  CLOSED: '已关闭',
+/** Import job type → label (ImportPage). */
+export const IMPORT_TYPE_LABEL: Record<string, string> = {
+  SKU: 'SKU（含条码/商品）',
+  BARCODE: '条码',
+  WAREHOUSE: '仓库',
+  BIN: '库位',
+  LISTING_MAPPING: 'Listing 映射',
+  INITIAL_INVENTORY: '库存初始化',
 };
 
-/** Shipment status → label (Shipments pages). */
-export const SHIPMENT_STATUS_LABEL: Record<string, string> = {
-  DRAFT: '草稿',
-  READY_TO_PACK: '待打包',
-  PACKING: '打包中',
-  READY_TO_SHIP: '待发货',
-  SHIPPED: '已发货',
-  CANCELLED: '已取消',
-  EXCEPTION: '异常',
+/** Order interception status → tone + label (Interceptions pages, G3). */
+export const INTERCEPTION_STATUS_META: Record<string, StatusMeta> = {
+  CREATED: { tone: 'info', label: '已创建' },
+  ASSIGNED: { tone: 'info', label: '已指派' },
+  LOCATING: { tone: 'info', label: '查找中', hint: '拦截人正在库内定位实物' },
+  INTERCEPTED: { tone: 'warning', label: '已拦截', hint: '实物已找到，等待扫码回库' },
+  FAILED: { tone: 'danger', label: '失败', hint: '未找到实物或回库失败' },
+  RETURNED_TO_STOCK: { tone: 'success', label: '已回库' },
+  CLOSED: { tone: 'neutral', label: '已关闭' },
 };
 
-/** Package status → label (Shipment detail / PackageWork). */
-export const PACKAGE_STATUS_LABEL: Record<string, string> = {
-  OPEN: '打开',
-  SEALED: '已封箱',
-  SHIPPED: '已发货',
-  CANCELLED: '已取消',
-  REPACK_REQUIRED: '需重新打包',
+/** Shipment status → tone + label (Shipments pages, G3). */
+export const SHIPMENT_STATUS_META: Record<string, StatusMeta> = {
+  DRAFT: { tone: 'neutral', label: '草稿' },
+  READY_TO_PACK: { tone: 'info', label: '待打包' },
+  PACKING: { tone: 'info', label: '打包中' },
+  READY_TO_SHIP: { tone: 'info', label: '待发货' },
+  SHIPPED: { tone: 'success', label: '已发货' },
+  CANCELLED: { tone: 'neutral', label: '已取消' },
+  EXCEPTION: { tone: 'danger', label: '异常' },
 };
 
-/** Reservation (库存占用) status → label (decision #15). */
-export const RESERVATION_STATUS_LABEL: Record<string, string> = {
-  ACTIVE: '已占用',
-  PICKED: '已拣货',
-  RELEASED: '已释放',
-  CONSUMED: '已出库',
-  CANCELLED: '已取消',
+/** Package status → tone + label (Shipment detail / PackageWork, G3). */
+export const PACKAGE_STATUS_META: Record<string, StatusMeta> = {
+  OPEN: { tone: 'info', label: '待打包', hint: '包裹已创建，等待扫码打包' },
+  SEALED: { tone: 'success', label: '已封箱' },
+  SHIPPED: { tone: 'success', label: '已发货' },
+  CANCELLED: { tone: 'neutral', label: '已取消' },
+  REPACK_REQUIRED: { tone: 'warning', label: '需重新打包', hint: '拦截/作废后需拆箱重打' },
 };
 
-/** Inventory transaction type → label (库存流水). */
-export const TRANSACTION_TYPE_LABEL: Record<string, string> = {
-  INITIAL_STOCK: '期初建账',
-  RECEIVE: '入库',
-  RESERVE: '占用',
-  RELEASE: '释放占用',
-  PICK: '拣货',
-  UNPICK: '取消拣货',
-  SHIP: '出库',
-  RETURN_PICKED: '拦截回库',
-  MOVE_BIN: '移库',
-  MANUAL_ADJUSTMENT: '人工调整',
+/** Reservation (库存占用) status → tone + label (G3, page-local table removed). */
+export const RESERVATION_STATUS_META: Record<string, StatusMeta> = {
+  ACTIVE: { tone: 'info', label: '已占用' },
+  PICKED: { tone: 'info', label: '已拣货', hint: '实物已离开库位，等待出库' },
+  RELEASED: { tone: 'neutral', label: '已释放' },
+  CONSUMED: { tone: 'success', label: '已出库' },
+  CANCELLED: { tone: 'neutral', label: '已取消' },
+};
+
+/** Inventory transaction type → tone + label (库存流水, G3). */
+export const TRANSACTION_TYPE_META: Record<string, StatusMeta> = {
+  INITIAL_STOCK: { tone: 'neutral', label: '期初建账' },
+  RECEIVE: { tone: 'success', label: '入库' },
+  RESERVE: { tone: 'info', label: '占用' },
+  RELEASE: { tone: 'neutral', label: '释放占用' },
+  PICK: { tone: 'info', label: '拣货' },
+  UNPICK: { tone: 'neutral', label: '取消拣货' },
+  SHIP: { tone: 'info', label: '出库' },
+  RETURN_PICKED: { tone: 'success', label: '拦截回库' },
+  MOVE_BIN: { tone: 'neutral', label: '移库' },
+  MANUAL_ADJUSTMENT: { tone: 'warning', label: '人工调整' },
+};
+
+/** Return batch status → tone + label (ReturnsPage, migrated per G3). */
+export const RETURN_BATCH_STATUS_META: Record<string, StatusMeta> = {
+  DRAFT: { tone: 'neutral', label: '草稿' },
+  RECEIVED: { tone: 'info', label: '已收货', hint: '实物已到仓，可逐行检验' },
+  COMPLETED: { tone: 'success', label: '已完成' },
+  CANCELLED: { tone: 'neutral', label: '已取消' },
+};
+
+/** Return line inspection condition → tone + label (ReturnsPage, G3). */
+export const RETURN_CONDITION_META: Record<string, StatusMeta> = {
+  PENDING: { tone: 'info', label: '待检验' },
+  SELLABLE: { tone: 'success', label: '合格回库' },
+  DEFECTIVE: { tone: 'danger', label: '不合格（隔离）' },
+  LOST: { tone: 'warning', label: '缺失' },
+};
+
+/** Notification delivery status → tone + label (Bell + NotificationsPage, G3). */
+export const NOTIFICATION_STATUS_META: Record<string, StatusMeta> = {
+  PENDING: { tone: 'info', label: '投递中' },
+  SENT: { tone: 'success', label: '已送达' },
+  FAILED: { tone: 'danger', label: '投递失败' },
+  CANCELLED: { tone: 'neutral', label: '已取消' },
+};
+
+/** Notification event type → tone + label (Bell + NotificationsPage, G3). */
+export const NOTIFICATION_TYPE_META: Record<string, StatusMeta> = {
+  ORDER_INTERCEPTION_REQUIRED: { tone: 'warning', label: '需要拦截' },
+  ORDER_INTERCEPTION_FAILED: { tone: 'danger', label: '拦截失败' },
 };
 
 /**
@@ -338,3 +386,37 @@ export const ACTIVE_STATUS_LABEL: Record<string, string> = {
   INACTIVE: '停用',
   DISABLED: '停用',
 };
+
+// ---- Legacy label-only views (derived from the META tables, Phase 3 G3) ----
+// One source of truth: these are pure projections so they cannot drift. They
+// exist only while pages migrate to the META tables; removed in Phase 3 T7.
+
+/** @deprecated use IMPORT_STATUS_META */
+export const IMPORT_STATUS_LABEL: Record<string, string> = Object.fromEntries(
+  Object.entries(IMPORT_STATUS_META).map(([key, meta]) => [key, meta.label]),
+);
+
+/** @deprecated use INTERCEPTION_STATUS_META */
+export const INTERCEPTION_STATUS_LABEL: Record<string, string> = Object.fromEntries(
+  Object.entries(INTERCEPTION_STATUS_META).map(([key, meta]) => [key, meta.label]),
+);
+
+/** @deprecated use SHIPMENT_STATUS_META */
+export const SHIPMENT_STATUS_LABEL: Record<string, string> = Object.fromEntries(
+  Object.entries(SHIPMENT_STATUS_META).map(([key, meta]) => [key, meta.label]),
+);
+
+/** @deprecated use PACKAGE_STATUS_META */
+export const PACKAGE_STATUS_LABEL: Record<string, string> = Object.fromEntries(
+  Object.entries(PACKAGE_STATUS_META).map(([key, meta]) => [key, meta.label]),
+);
+
+/** @deprecated use RESERVATION_STATUS_META */
+export const RESERVATION_STATUS_LABEL: Record<string, string> = Object.fromEntries(
+  Object.entries(RESERVATION_STATUS_META).map(([key, meta]) => [key, meta.label]),
+);
+
+/** @deprecated use TRANSACTION_TYPE_META */
+export const TRANSACTION_TYPE_LABEL: Record<string, string> = Object.fromEntries(
+  Object.entries(TRANSACTION_TYPE_META).map(([key, meta]) => [key, meta.label]),
+);
