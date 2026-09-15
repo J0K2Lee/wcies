@@ -311,7 +311,7 @@ export function AppLayout() {
                 maxWidth: '40vw',
                 height: 34,
                 padding: '0 10px 0 12px',
-                background: '#FAFBFC',
+                background: colors.canvas,
                 border: `1px solid ${colors.border}`,
                 borderRadius: 8,
                 cursor: 'pointer',
@@ -332,7 +332,7 @@ export function AppLayout() {
                   borderRadius: 4,
                   padding: '0 5px',
                   lineHeight: '18px',
-                  background: '#FFFFFF',
+                  background: colors.container,
                 }}
               >
                 Ctrl K

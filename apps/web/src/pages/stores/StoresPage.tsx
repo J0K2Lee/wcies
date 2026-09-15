@@ -1131,7 +1131,11 @@ function StoreDetailBody({
   return (
     <Space orientation="vertical" size="large" style={{ width: '100%' }}>
       <section>
-        <SectionTitle>基础信息</SectionTitle>
+        <div
+          style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary, marginBottom: 10 }}
+        >
+          基础信息
+        </div>
         <InfoGrid
           columns={2}
           items={[
@@ -1164,15 +1168,23 @@ function StoreDetailBody({
       </section>
 
       <section>
-        <SectionTitle
-          action={
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 10,
+          }}
+        >
+          <span style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary }}>
+            Connection / 凭证
+          </span>
+          {
             <Button size="small" type="primary" onClick={onConfigure}>
               配置 MAIN_API 凭证
             </Button>
           }
-        >
-          Connection / 凭证
-        </SectionTitle>
+        </div>
         <DataTable<CredentialRow>
           rowKey="id"
           size="small"
@@ -1278,7 +1290,11 @@ function StoreDetailBody({
       </section>
 
       <section>
-        <SectionTitle>同步状态</SectionTitle>
+        <div
+          style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary, marginBottom: 10 }}
+        >
+          同步状态
+        </div>
         <InfoGrid
           columns={2}
           items={[
@@ -1361,7 +1377,11 @@ function StoreDetailBody({
       </section>
 
       <section>
-        <SectionTitle>自动同步（定时轮询）</SectionTitle>
+        <div
+          style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary, marginBottom: 10 }}
+        >
+          自动同步（定时轮询）
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', rowGap: 12 }}>
           <div
             style={{
@@ -1409,7 +1429,11 @@ function StoreDetailBody({
       </section>
 
       <section>
-        <SectionTitle>仓库绑定</SectionTitle>
+        <div
+          style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary, marginBottom: 10 }}
+        >
+          仓库绑定
+        </div>
         <DataTable<BindingRow>
           rowKey="id"
           size="small"
@@ -1439,27 +1463,5 @@ function StoreDetailBody({
         />
       </section>
     </Space>
-  );
-}
-
-function SectionTitle({
-  children,
-  action,
-}: {
-  children: React.ReactNode;
-  action?: React.ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 10,
-      }}
-    >
-      <span style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary }}>{children}</span>
-      {action}
-    </div>
   );
 }

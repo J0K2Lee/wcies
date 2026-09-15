@@ -574,7 +574,16 @@ export function ExceptionsPage() {
         {detailRow !== null ? (
           <Space orientation="vertical" size="large" style={{ width: '100%' }}>
             <section>
-              <DrawerSectionTitle>基础信息</DrawerSectionTitle>
+              <div
+                style={{
+                  fontSize: 14.5,
+                  fontWeight: 600,
+                  color: colors.textPrimary,
+                  marginBottom: 10,
+                }}
+              >
+                基础信息
+              </div>
               <InfoGrid
                 columns={2}
                 items={[
@@ -627,7 +636,16 @@ export function ExceptionsPage() {
             </section>
 
             <section>
-              <DrawerSectionTitle>错误说明</DrawerSectionTitle>
+              <div
+                style={{
+                  fontSize: 14.5,
+                  fontWeight: 600,
+                  color: colors.textPrimary,
+                  marginBottom: 10,
+                }}
+              >
+                错误说明
+              </div>
               <div
                 style={{
                   border: `1px solid ${detailRow.status === 'OPEN' ? colors.dangerBorder : colors.border}`,
@@ -645,7 +663,16 @@ export function ExceptionsPage() {
 
             {detailRow.details !== null && Object.keys(detailRow.details).length > 0 && (
               <section>
-                <DrawerSectionTitle>上下文数据</DrawerSectionTitle>
+                <div
+                  style={{
+                    fontSize: 14.5,
+                    fontWeight: 600,
+                    color: colors.textPrimary,
+                    marginBottom: 10,
+                  }}
+                >
+                  上下文数据
+                </div>
                 <RawDataBlock data={detailRow.details} maxHeight={320} />
               </section>
             )}
@@ -686,14 +713,6 @@ export function ExceptionsPage() {
           maxLength={200}
         />
       </Modal>
-    </div>
-  );
-}
-
-function DrawerSectionTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary, marginBottom: 10 }}>
-      {children}
     </div>
   );
 }

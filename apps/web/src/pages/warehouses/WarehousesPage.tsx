@@ -481,7 +481,16 @@ export function WarehousesPage() {
         {detailRow !== null && (
           <Space orientation="vertical" size="large" style={{ width: '100%' }}>
             <section>
-              <SectionTitle>基本信息</SectionTitle>
+              <div
+                style={{
+                  fontSize: 14.5,
+                  fontWeight: 600,
+                  color: colors.textPrimary,
+                  marginBottom: 10,
+                }}
+              >
+                基本信息
+              </div>
               <InfoGrid
                 columns={2}
                 items={[
@@ -516,8 +525,18 @@ export function WarehousesPage() {
             </section>
 
             <section>
-              <SectionTitle
-                action={
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: 10,
+                }}
+              >
+                <span style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary }}>
+                  库位（{warehouse?.binCount ?? bins.data?.meta.total ?? 0}）
+                </span>
+                {
                   <Space>
                     <Select
                       size="small"
@@ -542,9 +561,7 @@ export function WarehousesPage() {
                     </Button>
                   </Space>
                 }
-              >
-                库位（{warehouse?.binCount ?? bins.data?.meta.total ?? 0}）
-              </SectionTitle>
+              </div>
               <DataTable<BinRow>
                 rowKey="id"
                 size="small"
@@ -591,8 +608,18 @@ export function WarehousesPage() {
             </section>
 
             <section>
-              <SectionTitle
-                action={
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: 10,
+                }}
+              >
+                <span style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary }}>
+                  绑定店铺
+                </span>
+                {
                   <Button
                     size="small"
                     onClick={() => {
@@ -602,9 +629,7 @@ export function WarehousesPage() {
                     管理绑定
                   </Button>
                 }
-              >
-                绑定店铺
-              </SectionTitle>
+              </div>
               <DataTable<BindingRow>
                 rowKey="storeCode"
                 size="small"
@@ -661,28 +686,6 @@ export function WarehousesPage() {
         zIndex={1100}
         onClose={() => setBatchOpen(false)}
       />
-    </div>
-  );
-}
-
-function SectionTitle({
-  children,
-  action,
-}: {
-  children: React.ReactNode;
-  action?: React.ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 10,
-      }}
-    >
-      <span style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary }}>{children}</span>
-      {action}
     </div>
   );
 }

@@ -699,7 +699,16 @@ export function SyncCenterPage() {
         {detailJob !== null ? (
           <Space orientation="vertical" size="large" style={{ width: '100%' }}>
             <section>
-              <DrawerSectionTitle>任务概要</DrawerSectionTitle>
+              <div
+                style={{
+                  fontSize: 14.5,
+                  fontWeight: 600,
+                  color: colors.textPrimary,
+                  marginBottom: 10,
+                }}
+              >
+                任务概要
+              </div>
               <InfoGrid
                 columns={2}
                 items={[
@@ -744,7 +753,16 @@ export function SyncCenterPage() {
             </section>
 
             <section>
-              <DrawerSectionTitle>处理统计</DrawerSectionTitle>
+              <div
+                style={{
+                  fontSize: 14.5,
+                  fontWeight: 600,
+                  color: colors.textPrimary,
+                  marginBottom: 10,
+                }}
+              >
+                处理统计
+              </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
                 <StatTile
                   label="总数"
@@ -763,7 +781,16 @@ export function SyncCenterPage() {
             </section>
 
             <section>
-              <DrawerSectionTitle>错误</DrawerSectionTitle>
+              <div
+                style={{
+                  fontSize: 14.5,
+                  fontWeight: 600,
+                  color: colors.textPrimary,
+                  marginBottom: 10,
+                }}
+              >
+                错误
+              </div>
               {detailJob.errorCode === null ? (
                 <div style={{ fontSize: 13, color: colors.textTertiary }}>本任务无错误记录</div>
               ) : (
@@ -794,7 +821,16 @@ export function SyncCenterPage() {
             </section>
 
             <section>
-              <DrawerSectionTitle>游标（Cursor）</DrawerSectionTitle>
+              <div
+                style={{
+                  fontSize: 14.5,
+                  fontWeight: 600,
+                  color: colors.textPrimary,
+                  marginBottom: 10,
+                }}
+              >
+                游标（Cursor）
+              </div>
               <Space orientation="vertical" size={6} style={{ width: '100%' }}>
                 <CursorField label="执行前游标" value={detailJob.cursorBefore} />
                 <CursorField label="执行后游标" value={detailJob.cursorAfter} />
@@ -863,7 +899,16 @@ export function SyncCenterPage() {
               ]}
             />
             <section>
-              <DrawerSectionTitle>原始报文</DrawerSectionTitle>
+              <div
+                style={{
+                  fontSize: 14.5,
+                  fontWeight: 600,
+                  color: colors.textPrimary,
+                  marginBottom: 10,
+                }}
+              >
+                原始报文
+              </div>
               <RawDataBlock data={eventDetail.payload} />
             </section>
           </Space>
@@ -918,14 +963,6 @@ export function SyncCenterPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
-  );
-}
-
-function DrawerSectionTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary, marginBottom: 10 }}>
-      {children}
     </div>
   );
 }

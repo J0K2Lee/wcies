@@ -476,7 +476,8 @@ export function InventoryPage() {
         <Input.Search
           placeholder="搜索 SKU 编码 / 名称"
           allowClear
-          defaultValue={searchParams.get('keyword') ?? ''}
+          value={keyword}
+          onChange={(event) => setKeyword(event.target.value)}
           onSearch={(value) => {
             setPage(1);
             setKeyword(value);
