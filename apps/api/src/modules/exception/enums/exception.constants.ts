@@ -42,6 +42,14 @@ export const EXCEPTION_TYPES = [
    * after the return path completes.
    */
   'ORDER_CANCELLED_AFTER_SHIP',
+  /**
+   * Dual-axis T5 (returns.md §2.2/§3.5): a platform return record cannot be
+   * linked to any WCIES order (HIGH, reference PLATFORM_RETURN), or a return
+   * batch item was inspected DEFECTIVE/LOST while linked to a platform
+   * record (MEDIUM, reference RETURN_BATCH_ITEM - claim/appeal follow-up).
+   */
+  'RETURN_ORDER_NOT_FOUND',
+  'RETURN_DIFFERENCE',
 ] as const;
 export type ExceptionType = (typeof EXCEPTION_TYPES)[number];
 
@@ -59,5 +67,9 @@ export const EXCEPTION_REFERENCE_TYPES = [
   'ORDER_ITEM',
   'ORDER_INTERCEPTION',
   'STORE',
+  /** A platform return record (dual-axis T5). */
+  'PLATFORM_RETURN',
+  /** One line of a return batch (dual-axis T5). */
+  'RETURN_BATCH_ITEM',
 ] as const;
 export type ExceptionReferenceType = (typeof EXCEPTION_REFERENCE_TYPES)[number];

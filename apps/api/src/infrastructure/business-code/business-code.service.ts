@@ -31,6 +31,8 @@ const SCOPE_PRODUCT = 'product';
 const SCOPE_SUPPLIER = 'supplier';
 const SCOPE_PURCHASE_ORDER = 'purchase_order';
 const SCOPE_PURCHASE_RECEIPT = 'purchase_receipt';
+/** Return batch numbering RT%06d (dual-axis T5, returns.md §3.1). */
+const SCOPE_RETURN_BATCH = 'return_batch';
 
 export function warehouseScope(warehouseType: WarehouseCodeType): string {
   return `warehouse:${warehouseType}`;
@@ -178,6 +180,12 @@ export class BusinessCodeService {
   /** Purchase receipt number PR%06d (Sprint 7). */
   async nextPurchaseReceiptNo(): Promise<string> {
     return formatPurchaseReceiptNo(await this.next(SCOPE_PURCHASE_RECEIPT));
+  }
+
+  /** Return batch number RT%06d (dual-axis T5). */
+  async nextReturnBatchNo(): Promise<string> {
+    const seq = await this.next(SCOPE_RETURN_BATCH);
+    return `RT${String(seq).padStart(6, '0')}`;
   }
 
   async nextCategoryCode(): Promise<string> {

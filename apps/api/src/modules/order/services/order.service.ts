@@ -903,6 +903,20 @@ export class OrderService {
   // Internals
   // --------------------------------------------------------------------------
 
+  /**
+   * Cross-module read (returns T5): resolve an order id by the business key
+   * (storeId + platformOrderId). Store-scoped by construction (AGENTS.md
+   * §26/§35). Null when the platform order id is unknown in WCIES - callers
+   * decide what that means (e.g. RETURN_ORDER_NOT_FOUND).
+   */
+  async findIdByStoreAndPlatformOrder(
+    storeId: string,
+    platformOrderId: string,
+  ): Promise<string | null> {
+    const order = await this.orderRepo.findByStoreAndPlatformOrder(storeId, platformOrderId);
+    return order?.id ?? null;
+  }
+
   async getOrderOrThrow(id: string): Promise<OrderEntity> {
     const order = await this.orderRepo.findById(id);
     if (order === null) {

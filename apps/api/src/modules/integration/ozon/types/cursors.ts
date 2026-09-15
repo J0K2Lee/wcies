@@ -77,3 +77,18 @@ export function isOzonPostingNumbersCursor(value: unknown): value is OzonPosting
     (value as { numbers: unknown[] }).numbers.every((n) => typeof n === 'string')
   );
 }
+
+/** Cursor of /v2/returns/rfbs/list pages (dual-axis T5): last return_id. */
+export interface OzonReturnCursor {
+  readonly kind: 'OZON_RETURN';
+  readonly lastReturnId: number;
+}
+
+export function isOzonReturnCursor(value: unknown): value is OzonReturnCursor {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'lastReturnId' in value &&
+    typeof value.lastReturnId === 'number'
+  );
+}

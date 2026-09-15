@@ -100,6 +100,8 @@ const EXCEPTION_TYPE_LABEL: Record<string, string> = {
   SYNC_FAILED: '同步失败',
   ORDER_TRACKING_STALLED: '物流停滞',
   ORDER_CANCELLED_AFTER_SHIP: '已发货被平台取消',
+  RETURN_ORDER_NOT_FOUND: '退货订单未找到',
+  RETURN_DIFFERENCE: '退货差异',
 };
 
 /** Sync job type → label. */

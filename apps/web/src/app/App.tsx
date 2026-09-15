@@ -22,6 +22,7 @@ import { ShipmentsPage } from '../pages/shipments/ShipmentsPage';
 import { ShipmentDetailPage } from '../pages/shipments/ShipmentDetailPage';
 import { PackageWorkPage } from '../pages/shipments/PackageWorkPage';
 import { InterceptionsPage } from '../pages/interceptions/InterceptionsPage';
+import { ReturnsPage } from '../pages/returns/ReturnsPage';
 import { InterceptionDetailPage } from '../pages/interceptions/InterceptionDetailPage';
 import { NotificationsPage } from '../pages/notifications/NotificationsPage';
 import { SyncCenterPage } from '../pages/sync/SyncCenterPage';
@@ -59,6 +60,7 @@ export function App() {
           <Route path="/packages/:id" element={<PackageWorkPage />} />
           <Route path="/interceptions" element={<InterceptionsPage />} />
           <Route path="/interceptions/:id" element={<InterceptionDetailPage />} />
+          <Route path="/returns" element={<ReturnsPage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/sync" element={<SyncCenterPage />} />
           <Route path="/exceptions" element={<ExceptionsPage />} />

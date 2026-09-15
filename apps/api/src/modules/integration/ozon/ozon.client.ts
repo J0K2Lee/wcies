@@ -6,6 +6,7 @@ import {
   OzonProductAttributesResponse,
   OzonProductInfoListResponse,
   OzonProductListResponse,
+  OzonRfbsReturnListResponse,
 } from './types/api.types';
 import { PlatformErrorDetail } from '@wcies/platform-contracts';
 import { PlatformApiError, PlatformMalformedResponseError } from '../platform-error';
@@ -145,6 +146,23 @@ export class OzonClient {
       endpoint: '/v3/posting/fbs/get',
       storeId,
       body: { posting_number: postingNumber, with: {} },
+    });
+  }
+
+  /**
+   * rFBS return requests (dual-axis T5, verified against the v3 spec
+   * 2026-09-15). Cursor = last `return_id` of the previous page; a full page
+   * means there may be more (no has_more flag in the response schema).
+   */
+  async rfbsReturnsList(
+    auth: OzonAuth,
+    storeId: string,
+    input: { lastId: number; limit: number },
+  ): Promise<OzonRfbsReturnListResponse> {
+    return this.request<OzonRfbsReturnListResponse>(auth, {
+      endpoint: '/v2/returns/rfbs/list',
+      storeId,
+      body: { filter: {}, last_id: input.lastId, limit: input.limit },
     });
   }
 

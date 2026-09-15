@@ -170,6 +170,35 @@ export interface PlatformOrderRaw {
 }
 
 // ---------------------------------------------------------------------------
+// Returns (dual-axis T5, 2026-09-15)
+// ---------------------------------------------------------------------------
+
+/**
+ * A platform-side return record in platform-neutral shape (returns.md §2).
+ * Read-only FACT pulled from the platform (OZON /v2/returns/rfbs/list);
+ * it never drives stock by itself - physical goods flow through a
+ * ReturnBatch whose inspection is the only stock write-back path.
+ */
+export interface PlatformReturnRaw {
+  /** Business key: UNIQUE(storeId, platformReturnId) in WCIES. */
+  readonly platformReturnId: string;
+  /** The platform order/shipment id the return refers to (posting number). */
+  readonly platformOrderId: string | null;
+  /** Platform return state string, stored verbatim as a fact. */
+  readonly state: string | null;
+  /** Platform refund-state string (display-only fact, returns.md §4). */
+  readonly refundState: string | null;
+  /** Platform SKU id of the returned item (line resolution key). */
+  readonly platformSkuId: string | null;
+  readonly offerId: string | null;
+  /** Quantity on the platform record (rFBS returns are per-unit: 1). */
+  readonly quantity: string;
+  /** Platform-side creation time of the return request. */
+  readonly createdAt: Date | null;
+  readonly rawData: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
 // Webhooks
 // ---------------------------------------------------------------------------
 
@@ -244,4 +273,14 @@ export interface PlatformAdapter {
     context: StoreContext,
     platformOrderIds: readonly string[],
   ): Promise<readonly PlatformOrderRaw[]>;
+
+  /**
+   * One page of platform return records (dual-axis T5, read-only). Cursor is
+   * opaque/platform-specific; undefined starts from the beginning. Optional -
+   * platforms without a return API do not implement it.
+   */
+  fetchReturns?(
+    context: StoreContext,
+    cursor?: unknown,
+  ): Promise<PaginatedResult<PlatformReturnRaw>>;
 }

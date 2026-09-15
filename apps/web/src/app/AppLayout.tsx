@@ -87,6 +87,7 @@ const MENU_ITEMS = [
       { key: '/picking', label: '拣货' },
       { key: '/shipments', label: '发货' },
       { key: '/interceptions', label: '拦截' },
+      { key: '/returns', label: '退货' },
       { key: '/warehouses', label: '仓库管理' },
       { key: '/bins', label: '库位管理' },
     ],

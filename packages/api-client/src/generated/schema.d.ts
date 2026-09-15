@@ -2306,6 +2306,126 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/returns/platform": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 平台退货记录列表（只读事实，支持待收货对账视图） */
+        get: operations["ReturnsController_listPlatformReturns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/returns/platform/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 手动拉取店铺平台退货记录（OZON /v2/returns/rfbs/list，只读；不写库存） */
+        post: operations["ReturnsController_syncPlatformReturns"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/returns/batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 退货批次列表 */
+        get: operations["ReturnsController_listBatches"];
+        put?: never;
+        /** 创建退货批次（DRAFT：登记批次与预期行） */
+        post: operations["ReturnsController_createBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/returns/batches/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 退货批次详情（含行与检验结论） */
+        get: operations["ReturnsController_getBatch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/returns/batches/{id}/receive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 确认收货（实物已到退货仓并清点；此后行不可增删） */
+        post: operations["ReturnsController_receiveBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/returns/batches/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 取消批次（仅 DRAFT：实物未到、未入账） */
+        post: operations["ReturnsController_cancelBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/returns/items/{itemId}/inspect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 检验退货行（一次性结论：SELLABLE/DEFECTIVE 经库存模块回库，LOST 不动库存；关联平台记录的差异行创建 RETURN_DIFFERENCE） */
+        post: operations["ReturnsController_inspectItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sync/orders": {
         parameters: {
             query?: never;
@@ -3998,7 +4118,7 @@ export interface components {
             pickedChange?: Record<string, never> | null;
             pickedAfter?: Record<string, never> | null;
             /** @enum {string} */
-            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT";
+            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT" | "RETURN_RECEIPT";
             referenceId: string;
             operatorId?: Record<string, never> | null;
             operatorName?: Record<string, never> | null;
@@ -4051,7 +4171,7 @@ export interface components {
             /** @description SN 管理商品必填：与数量一致的 SN 列表；非 SN 商品禁止提供 */
             serialNumbers?: string[];
             /** @enum {string} */
-            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT";
+            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT" | "RETURN_RECEIPT";
             referenceId: string;
             remark?: string;
             /** @example INIT:PRD-VK87:2026-09-08 */
@@ -4075,7 +4195,7 @@ export interface components {
             /** @description SN 管理商品必填：与数量一致的 SN 列表；非 SN 商品禁止提供 */
             serialNumbers?: string[];
             /** @enum {string} */
-            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT";
+            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT" | "RETURN_RECEIPT";
             referenceId: string;
             remark?: string;
             /** @example INIT:PRD-VK87:2026-09-08 */
@@ -4128,7 +4248,7 @@ export interface components {
             /** @example 4 */
             quantity: string;
             /** @enum {string} */
-            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT";
+            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT" | "RETURN_RECEIPT";
             referenceId: string;
             remark?: string;
             idempotencyKey: string;
@@ -4226,7 +4346,7 @@ export interface components {
             /** @example EXC00000001 */
             exceptionNo: string;
             /** @enum {string} */
-            exceptionType: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR" | "SYNC_FAILED";
+            exceptionType: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR" | "SYNC_FAILED" | "ORDER_TRACKING_STALLED" | "ORDER_CANCELLED_AFTER_SHIP" | "RETURN_ORDER_NOT_FOUND" | "RETURN_DIFFERENCE";
             /** @enum {string} */
             severity: "LOW" | "MEDIUM" | "HIGH";
             /** @enum {string} */
@@ -5289,6 +5409,99 @@ export interface components {
         SealPackageRequestDto: {
             /** @description 封箱时录入重量/尺寸 */
             dimensions?: components["schemas"]["PackageDimensionsDto"];
+        };
+        PlatformReturnDto: {
+            id: string;
+            storeId: string;
+            /** @example R900001 */
+            platformReturnId: string;
+            platformOrderId: string | null;
+            orderId: string | null;
+            state: string | null;
+            refundState: string | null;
+            platformSkuId: string | null;
+            offerId: string | null;
+            /** @example 1 */
+            quantity: string;
+            /** Format: date-time */
+            platformCreatedAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        PlatformReturnSyncResultDto: {
+            created: number;
+            updated: number;
+            /** @description 无法关联订单的平台退货记录数（已创建 RETURN_ORDER_NOT_FOUND） */
+            unlinkable: number;
+        };
+        PlatformReturnSyncDto: {
+            storeId: string;
+            note?: string;
+        };
+        ReturnBatchDto: {
+            id: string;
+            /** @example RT000001 */
+            batchNo: string;
+            warehouseId: string;
+            /** @enum {string} */
+            status: "DRAFT" | "RECEIVED" | "COMPLETED" | "CANCELLED";
+            sourceNote: string | null;
+            itemCount: number;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        ReturnBatchItemDto: {
+            id: string;
+            batchId: string;
+            platformReturnId: string | null;
+            platformReturnNo: string | null;
+            skuId: string;
+            /** @example 1.000 */
+            quantity: string;
+            /** @enum {string} */
+            condition: "PENDING" | "SELLABLE" | "DEFECTIVE" | "LOST";
+            binId: string | null;
+            remark: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        ReturnBatchDetailDto: {
+            id: string;
+            /** @example RT000001 */
+            batchNo: string;
+            warehouseId: string;
+            /** @enum {string} */
+            status: "DRAFT" | "RECEIVED" | "COMPLETED" | "CANCELLED";
+            sourceNote: string | null;
+            itemCount: number;
+            /** Format: date-time */
+            createdAt: string;
+            items: components["schemas"]["ReturnBatchItemDto"][];
+        };
+        ReturnBatchItemInputDto: {
+            /** @description 人工行必须指定内部 SKU */
+            skuId?: string;
+            /** @description 关联平台退货记录（对账锚点） */
+            platformReturnId?: string;
+            /** @example 1 */
+            quantity: string;
+            remark?: string;
+        };
+        ReturnBatchCreateDto: {
+            warehouseId: string;
+            /** @example Amol 仓 9-15 批次 */
+            sourceNote?: string;
+            remark?: string;
+            items: components["schemas"]["ReturnBatchItemInputDto"][];
+        };
+        ReturnItemInspectDto: {
+            /**
+             * @description 检验结论（一次性写定）：SELLABLE/DEFECTIVE 回库（DEFECTIVE 入隔离库存）；LOST 不动库存
+             * @enum {string}
+             */
+            condition: "SELLABLE" | "DEFECTIVE" | "LOST";
+            /** @description 回库目标库位；空则自动落到该仓 STAGING 库位 */
+            binId?: string;
         };
         SyncJobDto: {
             id: string;
@@ -8192,7 +8405,7 @@ export interface operations {
                 warehouseId?: string;
                 binId?: string;
                 transactionType?: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "RETURN_PICKED" | "MOVE_BIN" | "MANUAL_ADJUSTMENT";
-                referenceType?: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT";
+                referenceType?: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT" | "RETURN_RECEIPT";
                 referenceId?: string;
                 createdFrom?: string;
                 createdTo?: string;
@@ -8596,7 +8809,7 @@ export interface operations {
     ExceptionController_list: {
         parameters: {
             query?: {
-                exceptionType?: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR" | "SYNC_FAILED";
+                exceptionType?: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR" | "SYNC_FAILED" | "ORDER_TRACKING_STALLED" | "ORDER_CANCELLED_AFTER_SHIP" | "RETURN_ORDER_NOT_FOUND" | "RETURN_DIFFERENCE";
                 status?: "OPEN" | "RESOLVED" | "IGNORED";
                 referenceType?: string;
                 referenceId?: string;
@@ -10174,6 +10387,228 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["SealPackageResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    ReturnsController_listPlatformReturns: {
+        parameters: {
+            query?: {
+                storeId?: string;
+                orderId?: string;
+                /** @description linked=false：待收货对账视图（尚无退货批次行关联的平台退货记录） */
+                linked?: "true" | "false";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PlatformReturnDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    ReturnsController_syncPlatformReturns: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformReturnSyncDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PlatformReturnSyncResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    ReturnsController_listBatches: {
+        parameters: {
+            query?: {
+                status?: "DRAFT" | "RECEIVED" | "COMPLETED" | "CANCELLED";
+                warehouseId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ReturnBatchDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    ReturnsController_createBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReturnBatchCreateDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ReturnBatchDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    ReturnsController_getBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ReturnBatchDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    ReturnsController_receiveBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ReturnBatchDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    ReturnsController_cancelBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ReturnBatchDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    ReturnsController_inspectItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                itemId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReturnItemInspectDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ReturnBatchItemDto"];
                     };
                 };
             };

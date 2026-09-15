@@ -429,7 +429,33 @@ TYPE_ORDER_STATE_CHANGED / TYPE_POSTING_CANCELLED / TYPE_STATE_CHANGED
 | `posting_number` | 发货单号（履约单位，稳定） | `orders.platform_order_id` 业务唯一键 |
 | `seller_id` | 卖家账号 ID = Client-Id | Webhook 身份校验 |
 
-## 8. 类目树与商品属性 API（Sprint 8.5 冒烟已验证，尚未接入同步）
+## 8. 退货 API（双轴 T5，已接入只读）
+
+### POST /v2/returns/rfbs/list（2026-09-15 规范核对，已实现）
+
+Request：`{filter: {}, last_id: <return_id 游标>, limit}`；Response：`{returns: [...]}`。
+
+- rFBS（=卖家 FBS）退货单，**一单一件**（schema 无数量字段）；
+- 关键字段：`return_number`（业务键）、`return_id`（分页游标）、`posting_number`
+  （= 我们 `orders.platform_order_id`，订单关联键）、`state{state,
+  money_return_state_name}`（退款状态仅展示，returns.md §4）、
+  `product{sku, offer_id, price}`、`created_at`；
+- **响应无 has_more 标志**：页满即可能还有下一页（同 product/list 模式）；
+- 映射 `mapRfbsReturn` 容错：除 `return_number` 外字段缺失→null，不抛错（§49）；
+- 落库 `platform_returns`（只读事实，`UNIQUE(store_id, platform_return_id)`），
+  永不直接驱动库存——实物经退货批次检验回库（returns.md §1/§3）。
+
+### POST /v1/returns/list（记录事实，暂不接入）
+
+FBS/FBO 统一退货（旧接口）：`id`/`posting_number`/`exemplars[]`（件列表）/
+`visual`（外观状态）/`place`（当前位置）/`type`（Cancellation=发货前取消 等）。
+规范已确认存在；待真实需求出现再接（AGENTS §88）。
+
+### POST /v1/returns/rfbs/action/set —— **不做**
+
+真实平台写操作（接受/拒绝退货），AGENTS §92 需专项确认，本期明确排除。
+
+## 9. 类目树与商品属性 API（Sprint 8.5 冒烟已验证，尚未接入同步）
 
 ### POST /v1/description-category/tree（2026-09-14 真实冒烟）
 
@@ -471,7 +497,7 @@ Request：`{filter: {product_id[] | offer_id[] | sku[]}, limit ≤ 1000}`（**fi
 ⚠ **图片字段为单元素 JSON 数组**：真实数据中 `primary_image`/`color_image` 形如
 `["https://…"]`（规范声明为 string，又一处规范≠真实；T8 走查发现，读取需兼容两种形态）。
 
-## 9. 已知限制 / 坑
+## 10. 已知限制 / 坑
 
 1. `ON CONFLICT` 部分唯一索引 + TypeORM `TableIndex({unique,where})` 会**静默丢 UNIQUE**（本 Sprint 踩过，已改 raw SQL；见 20260911_002/004）。
 2. pg 驱动 `UPDATE ... RETURNING` 经 TypeORM `query()` 返回 `[rows, rowCount]` 二元组（与 INSERT 不同），判断行数必须归一化。
@@ -480,7 +506,7 @@ Request：`{filter: {product_id[] | offer_id[] | sku[]}, limit ≤ 1000}`（**fi
 5. OZON 文档站点 antibot 较强，抓取验证需搜索缓存/开源实现交叉核对，禁止凭记忆写字段。
 6. FBO/FBP 订单、价格/库存推送、平台发货写操作：本 Sprint 明确禁止（Read-first）。
 
-## 10. 环境变量
+## 11. 环境变量
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
@@ -492,7 +518,7 @@ Request：`{filter: {product_id[] | offer_id[] | sku[]}, limit ≤ 1000}`（**fi
 | `LISTING_SYNC_INTERVAL_SECONDS` | 0（关） | Listing 同步频率（≥300s；需店铺 opt-in） |
 | `ORDER_STATE_FALLBACK_HOURS` | 24 | 兜底回读轮转窗口（小时，允许小数；超时未确认的平台事实订单才进入回读候选，双轴 T2） |
 
-## 11. Real Smoke Test
+## 12. Real Smoke Test
 
 **已执行（2026-09-09，单店 OZON-SMOKE1，只读）** —— 范围：Credential Validation + Fetch Listings + Fetch Orders + Manual Listing/Order Sync + 同窗口幂等复测。未执行任何平台写操作、未开启轮询、未配置 Webhook。
 

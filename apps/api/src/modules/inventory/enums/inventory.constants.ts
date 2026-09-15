@@ -82,6 +82,12 @@ export const INVENTORY_REFERENCE_TYPES = [
   'ORDER',
   'IMPORT',
   'PURCHASE_RECEIPT',
+  /**
+   * Return-batch inspection write-back (returns.md §3.3): SELLABLE/DEFECTIVE
+   * goods physically returned through a return batch re-enter the ledger via
+   * receiveStockInTx with this reference (referenceId = return batch item).
+   */
+  'RETURN_RECEIPT',
 ] as const;
 export type InventoryReferenceType = (typeof INVENTORY_REFERENCE_TYPES)[number];
 

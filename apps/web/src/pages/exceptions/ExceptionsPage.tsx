@@ -68,6 +68,8 @@ const EXCEPTION_TYPE_META: Record<string, { label: string; category: string }> =
   SYNC_FAILED: { label: '同步失败', category: '同步' },
   ORDER_TRACKING_STALLED: { label: '物流停滞', category: '物流' },
   ORDER_CANCELLED_AFTER_SHIP: { label: '已发货被平台取消', category: '退货/退款' },
+  RETURN_ORDER_NOT_FOUND: { label: '退货订单未找到', category: '退货/退款' },
+  RETURN_DIFFERENCE: { label: '退货差异', category: '退货/退款' },
 };
 
 const EXCEPTION_STATUS_META: Record<

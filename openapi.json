@@ -4886,7 +4886,7 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT"]
+              "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT", "RETURN_RECEIPT"]
             }
           },
           {
@@ -5633,7 +5633,11 @@
                 "ORDER_INVALID_STATE",
                 "ORDER_INTERCEPTION_FAILED",
                 "ORDER_SHIPMENT_DEADLINE_NEAR",
-                "SYNC_FAILED"
+                "SYNC_FAILED",
+                "ORDER_TRACKING_STALLED",
+                "ORDER_CANCELLED_AFTER_SHIP",
+                "RETURN_ORDER_NOT_FOUND",
+                "RETURN_DIFFERENCE"
               ]
             }
           },
@@ -8477,6 +8481,397 @@
         },
         "summary": "封箱（OPEN/REPACK_REQUIRED → SEALED；齐全后发货单 READY_TO_SHIP）",
         "tags": ["packages"]
+      }
+    },
+    "/api/v1/returns/platform": {
+      "get": {
+        "operationId": "ReturnsController_listPlatformReturns",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "orderId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "linked",
+            "required": false,
+            "in": "query",
+            "description": "linked=false：待收货对账视图（尚无退货批次行关联的平台退货记录）",
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data", "meta"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PlatformReturnDto"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": ["page", "pageSize", "total"],
+                      "properties": {
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "pageSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "平台退货记录列表（只读事实，支持待收货对账视图）",
+        "tags": ["returns"]
+      }
+    },
+    "/api/v1/returns/platform/sync": {
+      "post": {
+        "operationId": "ReturnsController_syncPlatformReturns",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlatformReturnSyncDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PlatformReturnSyncResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "手动拉取店铺平台退货记录（OZON /v2/returns/rfbs/list，只读；不写库存）",
+        "tags": ["returns"]
+      }
+    },
+    "/api/v1/returns/batches": {
+      "get": {
+        "operationId": "ReturnsController_listBatches",
+        "parameters": [
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["DRAFT", "RECEIVED", "COMPLETED", "CANCELLED"]
+            }
+          },
+          {
+            "name": "warehouseId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data", "meta"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ReturnBatchDto"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": ["page", "pageSize", "total"],
+                      "properties": {
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "pageSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "退货批次列表",
+        "tags": ["returns"]
+      },
+      "post": {
+        "operationId": "ReturnsController_createBatch",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReturnBatchCreateDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ReturnBatchDetailDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "创建退货批次（DRAFT：登记批次与预期行）",
+        "tags": ["returns"]
+      }
+    },
+    "/api/v1/returns/batches/{id}": {
+      "get": {
+        "operationId": "ReturnsController_getBatch",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ReturnBatchDetailDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "退货批次详情（含行与检验结论）",
+        "tags": ["returns"]
+      }
+    },
+    "/api/v1/returns/batches/{id}/receive": {
+      "post": {
+        "operationId": "ReturnsController_receiveBatch",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ReturnBatchDetailDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "确认收货（实物已到退货仓并清点；此后行不可增删）",
+        "tags": ["returns"]
+      }
+    },
+    "/api/v1/returns/batches/{id}/cancel": {
+      "post": {
+        "operationId": "ReturnsController_cancelBatch",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ReturnBatchDetailDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "取消批次（仅 DRAFT：实物未到、未入账）",
+        "tags": ["returns"]
+      }
+    },
+    "/api/v1/returns/items/{itemId}/inspect": {
+      "post": {
+        "operationId": "ReturnsController_inspectItem",
+        "parameters": [
+          {
+            "name": "itemId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReturnItemInspectDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ReturnBatchItemDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "检验退货行（一次性结论：SELLABLE/DEFECTIVE 经库存模块回库，LOST 不动库存；关联平台记录的差异行创建 RETURN_DIFFERENCE）",
+        "tags": ["returns"]
       }
     },
     "/api/v1/sync/orders": {
@@ -12660,7 +13055,7 @@
           },
           "referenceType": {
             "type": "string",
-            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT"]
+            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT", "RETURN_RECEIPT"]
           },
           "referenceId": {
             "type": "string"
@@ -12801,7 +13196,7 @@
           },
           "referenceType": {
             "type": "string",
-            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT"]
+            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT", "RETURN_RECEIPT"]
           },
           "referenceId": {
             "type": "string"
@@ -12855,7 +13250,7 @@
           },
           "referenceType": {
             "type": "string",
-            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT"]
+            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT", "RETURN_RECEIPT"]
           },
           "referenceId": {
             "type": "string"
@@ -12975,7 +13370,7 @@
           },
           "referenceType": {
             "type": "string",
-            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT"]
+            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT", "RETURN_RECEIPT"]
           },
           "referenceId": {
             "type": "string"
@@ -13293,7 +13688,11 @@
               "ORDER_INVALID_STATE",
               "ORDER_INTERCEPTION_FAILED",
               "ORDER_SHIPMENT_DEADLINE_NEAR",
-              "SYNC_FAILED"
+              "SYNC_FAILED",
+              "ORDER_TRACKING_STALLED",
+              "ORDER_CANCELLED_AFTER_SHIP",
+              "RETURN_ORDER_NOT_FOUND",
+              "RETURN_DIFFERENCE"
             ]
           },
           "severity": {
@@ -16406,6 +16805,298 @@
             ]
           }
         }
+      },
+      "PlatformReturnDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "storeId": {
+            "type": "string"
+          },
+          "platformReturnId": {
+            "type": "string",
+            "example": "R900001"
+          },
+          "platformOrderId": {
+            "type": "string",
+            "nullable": true
+          },
+          "orderId": {
+            "type": "string",
+            "nullable": true
+          },
+          "state": {
+            "type": "string",
+            "nullable": true
+          },
+          "refundState": {
+            "type": "string",
+            "nullable": true
+          },
+          "platformSkuId": {
+            "type": "string",
+            "nullable": true
+          },
+          "offerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "quantity": {
+            "type": "string",
+            "example": "1"
+          },
+          "platformCreatedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "storeId",
+          "platformReturnId",
+          "platformOrderId",
+          "orderId",
+          "state",
+          "refundState",
+          "platformSkuId",
+          "offerId",
+          "quantity",
+          "createdAt"
+        ]
+      },
+      "PlatformReturnSyncResultDto": {
+        "type": "object",
+        "properties": {
+          "created": {
+            "type": "number"
+          },
+          "updated": {
+            "type": "number"
+          },
+          "unlinkable": {
+            "type": "number",
+            "description": "无法关联订单的平台退货记录数（已创建 RETURN_ORDER_NOT_FOUND）"
+          }
+        },
+        "required": ["created", "updated", "unlinkable"]
+      },
+      "PlatformReturnSyncDto": {
+        "type": "object",
+        "properties": {
+          "storeId": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 100
+          }
+        },
+        "required": ["storeId"]
+      },
+      "ReturnBatchDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "batchNo": {
+            "type": "string",
+            "example": "RT000001"
+          },
+          "warehouseId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["DRAFT", "RECEIVED", "COMPLETED", "CANCELLED"]
+          },
+          "sourceNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "itemCount": {
+            "type": "number"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "batchNo",
+          "warehouseId",
+          "status",
+          "sourceNote",
+          "itemCount",
+          "createdAt"
+        ]
+      },
+      "ReturnBatchItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "batchId": {
+            "type": "string"
+          },
+          "platformReturnId": {
+            "type": "string",
+            "nullable": true
+          },
+          "platformReturnNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "skuId": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "string",
+            "example": "1.000"
+          },
+          "condition": {
+            "type": "string",
+            "enum": ["PENDING", "SELLABLE", "DEFECTIVE", "LOST"]
+          },
+          "binId": {
+            "type": "string",
+            "nullable": true
+          },
+          "remark": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "batchId",
+          "platformReturnId",
+          "platformReturnNo",
+          "skuId",
+          "quantity",
+          "condition",
+          "binId",
+          "remark",
+          "createdAt"
+        ]
+      },
+      "ReturnBatchDetailDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "batchNo": {
+            "type": "string",
+            "example": "RT000001"
+          },
+          "warehouseId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["DRAFT", "RECEIVED", "COMPLETED", "CANCELLED"]
+          },
+          "sourceNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "itemCount": {
+            "type": "number"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReturnBatchItemDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "batchNo",
+          "warehouseId",
+          "status",
+          "sourceNote",
+          "itemCount",
+          "createdAt",
+          "items"
+        ]
+      },
+      "ReturnBatchItemInputDto": {
+        "type": "object",
+        "properties": {
+          "skuId": {
+            "type": "string",
+            "description": "人工行必须指定内部 SKU"
+          },
+          "platformReturnId": {
+            "type": "string",
+            "description": "关联平台退货记录（对账锚点）"
+          },
+          "quantity": {
+            "type": "string",
+            "example": "1"
+          },
+          "remark": {
+            "type": "string"
+          }
+        },
+        "required": ["quantity"]
+      },
+      "ReturnBatchCreateDto": {
+        "type": "object",
+        "properties": {
+          "warehouseId": {
+            "type": "string"
+          },
+          "sourceNote": {
+            "type": "string",
+            "example": "Amol 仓 9-15 批次"
+          },
+          "remark": {
+            "type": "string"
+          },
+          "items": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReturnBatchItemInputDto"
+            }
+          }
+        },
+        "required": ["warehouseId", "items"]
+      },
+      "ReturnItemInspectDto": {
+        "type": "object",
+        "properties": {
+          "condition": {
+            "type": "string",
+            "enum": ["SELLABLE", "DEFECTIVE", "LOST"],
+            "description": "检验结论（一次性写定）：SELLABLE/DEFECTIVE 回库（DEFECTIVE 入隔离库存）；LOST 不动库存"
+          },
+          "binId": {
+            "type": "string",
+            "description": "回库目标库位；空则自动落到该仓 STAGING 库位"
+          }
+        },
+        "required": ["condition"]
       },
       "SyncJobDto": {
         "type": "object",

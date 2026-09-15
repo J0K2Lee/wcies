@@ -5,16 +5,23 @@ import {
   PlatformCredentialContext,
   PlatformListingRaw,
   PlatformOrderRaw,
+  PlatformReturnRaw,
   PlatformWebhookEvent,
   StoreContext,
 } from '@wcies/platform-contracts';
 import { OzonClient, OzonAuth } from './ozon.client';
-import { mapPostingToOrder, mapProductToListing, mapWebhookPayload } from './ozon.mapper';
+import {
+  mapPostingToOrder,
+  mapProductToListing,
+  mapRfbsReturn,
+  mapWebhookPayload,
+} from './ozon.mapper';
 import { StoreCredentialMalformedError } from '../integration.errors';
 import {
   OzonProductAttributesResponse,
   OzonProductInfoItem,
   OzonProductListItem,
+  OzonRfbsReturn,
 } from './types/api.types';
 import { PlatformApiError } from '../platform-error';
 import {
@@ -24,6 +31,7 @@ import {
   isOzonOrderResumeCursor,
   isOzonOrderWindowCursor,
   isOzonPostingNumbersCursor,
+  isOzonReturnCursor,
   OzonListingCursor,
   OzonOrderWindowCursor,
 } from './types/cursors';
@@ -31,6 +39,8 @@ import {
 /** Page sizes (spec: /v3/product/list limit <= 1000; postings <= 1000). */
 const LISTING_PAGE_SIZE = 200;
 const ORDER_PAGE_SIZE = 200;
+/** Page size for /v2/returns/rfbs/list (dual-axis T5). */
+const RETURN_PAGE_SIZE = 200;
 /** Batch size for /v3/product/info/list detail enrichment (conservative). */
 const PRODUCT_INFO_BATCH = 100;
 
@@ -152,6 +162,34 @@ export class OzonAdapter implements PlatformAdapter {
     const auth = parseAuth(context.credential, context.storeId);
     const page = await this.fetchPostingsByNumber(auth, context.storeId, platformOrderIds);
     return page.items;
+  }
+
+  /**
+   * rFBS return records, one page (dual-axis T5). Cursor: { lastReturnId } -
+   * the last return_id of the previous page. A full page means there may be
+   * more; no has_more flag exists on this endpoint (spec, 2026-09-15).
+   */
+  async fetchReturns(
+    context: StoreContext,
+    cursor?: unknown,
+  ): Promise<PaginatedResult<PlatformReturnRaw>> {
+    const auth = parseAuth(context.credential, context.storeId);
+    const lastReturnId = isOzonReturnCursor(cursor) ? cursor.lastReturnId : 0;
+    const response = await this.client.rfbsReturnsList(auth, context.storeId, {
+      lastId: lastReturnId,
+      limit: RETURN_PAGE_SIZE,
+    });
+    const rows: ReadonlyArray<OzonRfbsReturn> = Array.isArray(response?.returns)
+      ? response.returns
+      : [];
+    const items = rows.map(mapRfbsReturn);
+    const hasMore = rows.length >= RETURN_PAGE_SIZE;
+    const last = rows[rows.length - 1];
+    return {
+      items,
+      nextCursor: hasMore && last !== undefined ? { lastReturnId: last.return_id } : null,
+      hasMore,
+    };
   }
 
   // -----------------------------------------------------------------------

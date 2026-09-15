@@ -4,6 +4,7 @@ import {
   PlatformOrderItemRaw,
   PlatformOrderRaw,
   PlatformOrderStage,
+  PlatformReturnRaw,
   PlatformWebhookEvent,
   PlatformWebhookEventType,
 } from '@wcies/platform-contracts';
@@ -12,6 +13,7 @@ import {
   OzonPostingProduct,
   OzonProductInfoItem,
   OzonProductListItem,
+  OzonRfbsReturn,
 } from './types/api.types';
 import { DomainError } from '../../../common/errors/domain.error';
 
@@ -166,6 +168,36 @@ export function mapPostingToOrder(posting: OzonFbsPosting): PlatformOrderRaw {
     currency,
     items,
     rawData: { ...posting },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Returns (dual-axis T5)
+// ---------------------------------------------------------------------------
+
+/**
+ * OZON rFBS return -> normalized PlatformReturnRaw (returns.md §2). Tolerant
+ * mapping: only return_number is mandatory (the business key); everything
+ * else degrades to null - one bad record must not fail the whole page
+ * (AGENTS.md §49). The push of platform facts never writes stock: the
+ * physical batch owns that.
+ */
+export function mapRfbsReturn(item: OzonRfbsReturn): PlatformReturnRaw {
+  if (typeof item.return_number !== 'string' || item.return_number === '') {
+    throw malformed('rfbs return', 'return_number missing');
+  }
+  const sku = item.product?.sku;
+  return {
+    platformReturnId: item.return_number,
+    platformOrderId: readString(item.posting_number),
+    state: readString(item.state?.state ?? null) ?? readString(item.state?.group_state ?? null),
+    refundState: readString(item.state?.money_return_state_name ?? null),
+    platformSkuId: typeof sku === 'number' && sku > 0 ? String(sku) : null,
+    offerId: readString(item.product?.offer_id ?? null),
+    // rFBS return requests are per-unit (spec schema has no quantity field).
+    quantity: '1',
+    createdAt: parseIsoDateTolerant(item.created_at),
+    rawData: { ...item },
   };
 }
 

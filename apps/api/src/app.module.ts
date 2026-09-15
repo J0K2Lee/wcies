@@ -25,6 +25,7 @@ import { ImportModule } from './modules/import/import.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { ExceptionModule } from './modules/exception/exception.module';
 import { OrderModule } from './modules/order/order.module';
+import { ReturnsModule } from './modules/returns/returns.module';
 import { PickingModule } from './modules/picking/picking.module';
 import { ShipmentModule } from './modules/shipment/shipment.module';
 import { InterceptionModule } from './modules/interception/interception.module';
@@ -62,6 +63,7 @@ import { SyncModule } from './modules/sync/sync.module';
     InventoryModule,
     ExceptionModule,
     OrderModule,
+    ReturnsModule,
     PickingModule,
     ShipmentModule,
     InterceptionModule,

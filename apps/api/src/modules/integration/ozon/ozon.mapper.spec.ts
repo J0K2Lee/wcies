@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   mapPostingToOrder,
   mapProductToListing,
+  mapRfbsReturn,
   mapWebhookPayload,
   webhookSellerId,
   buildPushAck,
@@ -12,6 +13,7 @@ import {
   OzonPostingProduct,
   OzonProductInfoItem,
   OzonProductListItem,
+  OzonRfbsReturn,
 } from './types/api.types';
 
 /**
@@ -249,6 +251,58 @@ describe('mapPostingToOrder', () => {
       delivery_date_begin: '2026-09-18T00:00:00Z',
       delivery_date_end: '2026-09-20T00:00:00Z',
     });
+  });
+});
+
+describe('mapRfbsReturn (dual-axis T5)', () => {
+  const RFBS_RETURN = {
+    return_id: 900001,
+    return_number: 'R900001',
+    posting_number: '00077059-0001-1',
+    order_number: '77059',
+    client_name: 'Ivan',
+    created_at: '2026-09-14T09:00:00.000Z',
+    state: {
+      state: 'return_in_progress',
+      state_name: 'Возврат в процессе',
+      group_state: 'In_work',
+      money_return_state_name: 'Оплачено',
+    },
+    product: { sku: 987654321, offer_id: 'VK87-BLK', name: 'VK87', price: 4590 },
+  };
+
+  it('maps an rFBS return into the normalized fact shape', () => {
+    const result = mapRfbsReturn(RFBS_RETURN);
+    expect(result.platformReturnId).toBe('R900001');
+    expect(result.platformOrderId).toBe('00077059-0001-1');
+    expect(result.state).toBe('return_in_progress');
+    expect(result.refundState).toBe('Оплачено');
+    expect(result.platformSkuId).toBe('987654321');
+    expect(result.offerId).toBe('VK87-BLK');
+    // rFBS return requests are per-unit (no quantity field in the schema).
+    expect(result.quantity).toBe('1');
+    expect(result.createdAt?.toISOString()).toBe('2026-09-14T09:00:00.000Z');
+    expect(result.rawData).toEqual(RFBS_RETURN);
+  });
+
+  it('degrades missing optional facts to null instead of throwing (§49)', () => {
+    const result = mapRfbsReturn({ return_number: 'R2' } as OzonRfbsReturn);
+    expect(result.platformOrderId).toBeNull();
+    expect(result.state).toBeNull();
+    expect(result.refundState).toBeNull();
+    expect(result.platformSkuId).toBeNull();
+    expect(result.createdAt).toBeNull();
+  });
+
+  it('treats a non-positive product sku as absent (same guard as orders)', () => {
+    const result = mapRfbsReturn({ ...RFBS_RETURN, product: { sku: 0 } });
+    expect(result.platformSkuId).toBeNull();
+  });
+
+  it('rejects a record without return_number (business key)', () => {
+    expect(() => mapRfbsReturn({ return_id: 1 } as unknown as OzonRfbsReturn)).toThrow(
+      OzonMappingError,
+    );
   });
 });
 

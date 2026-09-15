@@ -126,6 +126,40 @@ export interface OzonFbsPostingListResponse {
 }
 
 // ---------------------------------------------------------------------------
+// POST /v2/returns/rfbs/list (dual-axis T5; verified 2026-09-15)
+// ---------------------------------------------------------------------------
+
+/** One rFBS return request (per unit). */
+export interface OzonRfbsReturn {
+  /** Return request identifier (cursor value for pagination). */
+  readonly return_id: number;
+  readonly return_number: string;
+  /** Shipment number - matches our orders.platform_order_id. */
+  readonly posting_number?: string | null;
+  readonly order_number?: string | null;
+  readonly client_name?: string | null;
+  readonly created_at?: string | null;
+  readonly state?: {
+    readonly state?: string | null;
+    readonly state_name?: string | null;
+    readonly group_state?: string | null;
+    readonly money_return_state_name?: string | null;
+  } | null;
+  readonly product?: {
+    readonly sku?: number | null;
+    readonly offer_id?: string | null;
+    readonly name?: string | null;
+    readonly price?: number | null;
+    readonly currency_code?: string | null;
+  } | null;
+  readonly [key: string]: unknown;
+}
+
+export interface OzonRfbsReturnListResponse {
+  readonly returns?: readonly OzonRfbsReturn[];
+}
+
+// ---------------------------------------------------------------------------
 // POST /v3/posting/fbs/get
 // ---------------------------------------------------------------------------
 
