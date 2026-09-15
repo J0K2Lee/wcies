@@ -62,6 +62,10 @@ interface OrderListItem {
   itemsCount: number;
   reservedCount: number;
   backorderedCount: number;
+  /** Backordered lines whose live purchase order is registered (dual-axis §2.3). */
+  backorderedOrderedCount: number;
+  /** Backordered lines whose purchase already fully arrived (dual-axis §2.3). */
+  backorderedArrivedCount: number;
   pickedCount: number;
   mappingFailedCount: number;
   openExceptionsCount: number;
@@ -144,14 +148,73 @@ interface OrderDetail {
 
 type Envelope<T> = { data: T; meta: { total: number } };
 
-/** Status tabs (task §39) — ERP status mapping per tab. */
-const STATUS_TABS: Array<{ key: string; label: string; erpStatus?: string; risk?: boolean }> = [
+/**
+ * Axis 1 - order logistics stage tabs (dual-axis §2.1, orders.md §17a).
+ * Default view is 待处理: everything not yet shipped/cancelled, so
+ * backordered and divergent orders are front and center. The stage semantics
+ * live on the BACKEND (`stage` query param); the tab only maps to its value.
+ */
+const STAGE_TABS: Array<{ key: string; label: string; stage?: string }> = [
   { key: 'all', label: '全部' },
-  { key: 'pending', label: '待处理', erpStatus: 'NEW' },
-  { key: 'picking', label: '拣货中', erpStatus: 'PICKING' },
-  { key: 'ready', label: '待发货', erpStatus: 'READY_TO_PICK' },
-  { key: 'shipped', label: '已发货', erpStatus: 'SHIPPED' },
-  { key: 'exception', label: '异常', erpStatus: 'EXCEPTION' },
+  { key: 'pending', label: '待处理', stage: 'PENDING' },
+  { key: 'inTransit', label: '待收货', stage: 'IN_TRANSIT' },
+  { key: 'completed', label: '已完成', stage: 'COMPLETED' },
+];
+
+/**
+ * Axis 2 - line-level goods-state chips (dual-axis §2.2, orders.md §17b).
+ * Single-select on top of the stage tab; the predicates run on the backend
+ * (`goodsState` query param) so chips catch orders whose rollup status hides
+ * a line problem (e.g. PARTIALLY_SHIPPED + one BACKORDERED line).
+ */
+const GOODS_STATE_CHIPS: Array<{
+  key: string;
+  label: string;
+  flow: boolean;
+  tooltip: string;
+}> = [
+  {
+    key: 'TO_PICK',
+    label: '待拣货',
+    flow: true,
+    tooltip: '存在已占用待拣货（RESERVED）的订单行',
+  },
+  {
+    key: 'PICKING',
+    label: '拣货中',
+    flow: true,
+    tooltip: '订单存在未完成的拣货任务（可同时命中「待拣货」）',
+  },
+  {
+    key: 'TO_SHIP',
+    label: '待发货',
+    flow: true,
+    tooltip: '存在已拣货待出库（PICKED）的订单行',
+  },
+  {
+    key: 'BACKORDERED',
+    label: '缺货',
+    flow: false,
+    tooltip: '存在库存不足（BACKORDERED）的订单行；行内可见「已采购 / 已到货」',
+  },
+  {
+    key: 'MAPPING_FAILED',
+    label: '映射失败',
+    flow: false,
+    tooltip: '存在无法映射内部 SKU 的订单行（不知道是什么 SKU，去 SKU 映射补齐后重试）',
+  },
+  {
+    key: 'SHIPMENT_OVERDUE',
+    label: '发货超时',
+    flow: false,
+    tooltip: '已过平台发货时限且订单未发完（含部分发货剩余行未出）',
+  },
+  {
+    key: 'ABNORMAL',
+    label: '异常',
+    flow: false,
+    tooltip: '缺货 ∪ 映射失败 ∪ 发货超时 ∪ 物流停滞（在途超 3 天未动）任一命中',
+  },
 ];
 
 /** 固定 JSON Fixtures（task §66 Case A–F 的单店可复用形态） */
@@ -261,10 +324,12 @@ export function OrdersPage() {
   const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState(() => searchParams.get('keyword') ?? '');
-  const [activeTab, setActiveTab] = useState('all');
+  // Dual-axis default view: 待处理 (§2.1) - backordered orders are the norm,
+  // not an edge case, so they open front and center.
+  const [activeTab, setActiveTab] = useState('pending');
+  const [goodsState, setGoodsState] = useState<string | undefined>();
   const [storeId, setStoreId] = useState<string | undefined>();
   const [platformFilter, setPlatformFilter] = useState<string | undefined>();
-  const [pendingProcurement, setPendingProcurement] = useState(false);
   const [registerItem, setRegisterItem] = useState<OrderItem | null>(null);
   const [registerForm] = Form.useForm<{
     sourceNote?: string;
@@ -295,30 +360,49 @@ export function OrdersPage() {
     }
   }, [searchParams]);
 
-  const tabErpStatus = STATUS_TABS.find((tab) => tab.key === activeTab)?.erpStatus;
+  const stageOfActiveTab = STAGE_TABS.find((tab) => tab.key === activeTab)?.stage;
   const query = useApiQuery<Envelope<OrderListItem[]>>(
     '/api/v1/orders',
     {
       page,
       pageSize: 20,
       ...(keyword ? { keyword } : {}),
-      ...(tabErpStatus ? { erpStatus: tabErpStatus } : {}),
+      ...(stageOfActiveTab ? { stage: stageOfActiveTab } : {}),
+      ...(goodsState ? { goodsState } : {}),
       ...(storeId ? { storeId } : {}),
-      ...(pendingProcurement ? { pendingProcurement: 'true' } : {}),
     },
-    ['orders', page, keyword, tabErpStatus, storeId, pendingProcurement],
+    ['orders', page, keyword, stageOfActiveTab, goodsState, storeId],
   );
 
-  // Tab counts: light meta.total queries for the headline tabs (task §39).
+  // Tab counts: light meta.total queries, one per stage tab, ALL carrying the
+  // current store/keyword filters so the counts and the list never disagree
+  // (acceptance §2; the old counters ignored every filter).
+  const countFilters = {
+    page: 1,
+    pageSize: 1,
+    ...(keyword ? { keyword } : {}),
+    ...(storeId ? { storeId } : {}),
+  } as Record<string, unknown>;
+  const allCount = useApiQuery<Envelope<OrderListItem[]>>('/api/v1/orders', countFilters, [
+    'orders-count',
+    'ALL',
+    keyword,
+    storeId,
+  ]);
   const pendingCount = useApiQuery<Envelope<OrderListItem[]>>(
     '/api/v1/orders',
-    { page: 1, pageSize: 1, erpStatus: 'NEW' },
-    ['orders-count-pending'],
+    { ...countFilters, stage: 'PENDING' },
+    ['orders-count', 'PENDING', keyword, storeId],
   );
-  const exceptionCount = useApiQuery<Envelope<OrderListItem[]>>(
+  const inTransitCount = useApiQuery<Envelope<OrderListItem[]>>(
     '/api/v1/orders',
-    { page: 1, pageSize: 1, erpStatus: 'EXCEPTION' },
-    ['orders-count-exception'],
+    { ...countFilters, stage: 'IN_TRANSIT' },
+    ['orders-count', 'IN_TRANSIT', keyword, storeId],
+  );
+  const completedCount = useApiQuery<Envelope<OrderListItem[]>>(
+    '/api/v1/orders',
+    { ...countFilters, stage: 'COMPLETED' },
+    ['orders-count', 'COMPLETED', keyword, storeId],
   );
 
   const storesQuery = useApiQuery<
@@ -484,11 +568,9 @@ export function OrdersPage() {
         children: (
           <ContextSection title="订单概览">
             <ContextMetric label="当前筛选" value={`${query.data?.meta.total ?? 0} 单`} />
-            <ContextMetric label="待处理（NEW）" value={pendingCount.data?.meta.total ?? 0} />
-            <ContextMetric
-              label={<span style={{ color: colors.danger }}>异常（EXCEPTION）</span>}
-              value={exceptionCount.data?.meta.total ?? 0}
-            />
+            <ContextMetric label="待处理" value={pendingCount.data?.meta.total ?? 0} />
+            <ContextMetric label="待收货" value={inTransitCount.data?.meta.total ?? 0} />
+            <ContextMetric label="已完成" value={completedCount.data?.meta.total ?? 0} />
             <span
               style={{
                 fontSize: 12.5,
@@ -497,7 +579,7 @@ export function OrdersPage() {
                 paddingTop: 8,
               }}
             >
-              点击订单行快速预览风险与状态；异常订单可直接在右栏重试分配。
+              点击订单行快速预览风险与状态；缺货订单可在右栏重试分配或登记采购。
             </span>
           </ContextSection>
         ),
@@ -703,7 +785,15 @@ export function OrdersPage() {
         </>
       ),
     };
-  }, [selectedRow, railDetail, retryMutation, query.data, pendingCount.data, exceptionCount.data]);
+  }, [
+    selectedRow,
+    railDetail,
+    retryMutation,
+    query.data,
+    pendingCount.data,
+    inTransitCount.data,
+    completedCount.data,
+  ]);
   useContextRail(railContent);
 
   const itemColumns = [
@@ -847,17 +937,17 @@ export function OrdersPage() {
     },
   ];
 
-  const tabLabel = (tab: (typeof STATUS_TABS)[number]): string => {
-    if (tab.key === 'all') {
-      return `全部 (${query.data?.meta.total ?? 0})`;
+  const stageCountOf = (tabKey: string): number => {
+    if (tabKey === 'all') {
+      return allCount.data?.meta.total ?? 0;
     }
-    if (tab.key === 'pending') {
-      return `待处理 (${pendingCount.data?.meta.total ?? 0})`;
+    if (tabKey === 'pending') {
+      return pendingCount.data?.meta.total ?? 0;
     }
-    if (tab.key === 'exception') {
-      return `异常 (${exceptionCount.data?.meta.total ?? 0})`;
+    if (tabKey === 'inTransit') {
+      return inTransitCount.data?.meta.total ?? 0;
     }
-    return tab.label;
+    return completedCount.data?.meta.total ?? 0;
   };
 
   return (
@@ -877,7 +967,10 @@ export function OrdersPage() {
               setPage(1);
               setActiveTab(key);
             }}
-            items={STATUS_TABS.map((tab) => ({ key: tab.key, label: tabLabel(tab) }))}
+            items={STAGE_TABS.map((tab) => ({
+              key: tab.key,
+              label: `${tab.label} (${stageCountOf(tab.key)})`,
+            }))}
           />
         }
       />
@@ -894,17 +987,6 @@ export function OrdersPage() {
           style={{ width: 240 }}
           aria-label="搜索订单"
         />
-        <Button
-          type={pendingProcurement ? 'primary' : 'default'}
-          danger={!pendingProcurement}
-          ghost={pendingProcurement}
-          onClick={() => {
-            setPage(1);
-            setPendingProcurement((value) => !value);
-          }}
-        >
-          待采购
-        </Button>
         <Select
           allowClear
           placeholder="店铺"
@@ -943,6 +1025,49 @@ export function OrdersPage() {
           }}
         />
       </FilterBar>
+
+      {/* Axis 2: line-level goods-state chips (§2.2) - single select on top of
+          the stage tab. Flow chips describe healthy progress; risk chips need
+          human attention. Tooltips state the exact backend predicate. */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+        <Tooltip title="不按货物状态筛选（仅一级物流阶段）">
+          <Button
+            size="small"
+            type={goodsState === undefined ? 'primary' : 'text'}
+            ghost={goodsState === undefined}
+            onClick={() => {
+              setPage(1);
+              setGoodsState(undefined);
+            }}
+          >
+            全部
+          </Button>
+        </Tooltip>
+        {GOODS_STATE_CHIPS.map((chip) => (
+          <span key={chip.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {!chip.flow && chip.key === 'BACKORDERED' && <span style={{ opacity: 0.35 }}>｜</span>}
+            <Tooltip title={chip.tooltip}>
+              <Button
+                size="small"
+                danger={!chip.flow && goodsState === chip.key}
+                type={goodsState === chip.key ? 'primary' : 'text'}
+                ghost={goodsState === chip.key}
+                onClick={() => {
+                  setPage(1);
+                  setGoodsState(goodsState === chip.key ? undefined : chip.key);
+                }}
+                style={
+                  !chip.flow && goodsState !== chip.key
+                    ? { color: colors.danger, borderColor: colors.danger }
+                    : undefined
+                }
+              >
+                {chip.label}
+              </Button>
+            </Tooltip>
+          </span>
+        ))}
+      </div>
 
       <SectionCard flush>
         <DataTable<OrderListItem>
@@ -989,10 +1114,39 @@ export function OrdersPage() {
                   );
                 }
                 return (
-                  <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      gap: 6,
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                    }}
+                  >
                     <span>{row.itemsCount} 行</span>
                     {row.backorderedCount > 0 && (
                       <StatusBadge tone="warning" label={`缺货 ${row.backorderedCount}`} />
+                    )}
+                    {row.backorderedOrderedCount > 0 && (
+                      <Tooltip
+                        title={`缺货行中已登记采购 ${row.backorderedOrderedCount} 行（采购未到货）`}
+                      >
+                        <StatusBadge
+                          tone="info"
+                          label={`已采购 ${row.backorderedOrderedCount}`}
+                          showDot={false}
+                        />
+                      </Tooltip>
+                    )}
+                    {row.backorderedArrivedCount > 0 && (
+                      <Tooltip
+                        title={`缺货行中采购已到货 ${row.backorderedArrivedCount} 行，可「重新尝试分配」`}
+                      >
+                        <StatusBadge
+                          tone="success"
+                          label={`已到货 ${row.backorderedArrivedCount}`}
+                          showDot={false}
+                        />
+                      </Tooltip>
                     )}
                     {row.reservedCount > 0 && (
                       <StatusBadge
@@ -1019,9 +1173,13 @@ export function OrdersPage() {
                     showDot={false}
                   />
                   {row.openExceptionsCount > 0 && (
-                    <span style={{ fontSize: 12, color: colors.danger, fontWeight: 600 }}>
-                      ×{row.openExceptionsCount}
-                    </span>
+                    <Tooltip
+                      title={`未处理异常 ${row.openExceptionsCount} 条（含缺货 ORDER_OUT_OF_STOCK、映射失败等行级异常；处理入口在异常中心或行内操作）`}
+                    >
+                      <span style={{ fontSize: 12, color: colors.danger, fontWeight: 600 }}>
+                        ×{row.openExceptionsCount}
+                      </span>
+                    </Tooltip>
                   )}
                   {platformDivergent(row.platformStatus, value) && (
                     <Tooltip

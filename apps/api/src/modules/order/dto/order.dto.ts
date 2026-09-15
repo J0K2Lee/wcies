@@ -18,9 +18,11 @@ import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
 import { PLATFORM_ORDER_STAGES } from '@wcies/platform-contracts';
 import {
   ERP_ORDER_STATUSES,
+  ORDER_GOODS_STATE_FILTERS,
   ORDER_INTERCEPTION_STATUSES,
   ORDER_ITEM_FULFILLMENT_STATUSES,
   ORDER_ITEM_MAPPING_STATUSES,
+  ORDER_STAGE_FILTERS,
 } from '../enums/order.constants';
 
 const POSITIVE_QTY_PATTERN = /^\d{1,15}(\.\d{1,3})?$/;
@@ -157,6 +159,27 @@ export class OrderListQueryDto extends PaginationQueryDto {
   @IsIn(ERP_ORDER_STATUSES)
   erpStatus?: string;
 
+  @ApiPropertyOptional({
+    enum: ORDER_STAGE_FILTERS,
+    description:
+      '一级 · 物流阶段（双轴 §2.1）：PENDING=erp_status 非 SHIPPED/CANCELLED（缺货/分歧单均在内）；' +
+      'IN_TRANSIT=已发货且平台未妥投（platform_stage 非 DELIVERED，含未同步）；COMPLETED=已发货且平台已妥投',
+  })
+  @IsOptional()
+  @IsIn(ORDER_STAGE_FILTERS)
+  stage?: string;
+
+  @ApiPropertyOptional({
+    enum: ORDER_GOODS_STATE_FILTERS,
+    description:
+      '二级 · 行级货物状态（双轴 §2.2，单选）：TO_PICK=存在 RESERVED 行；PICKING=erp_status PICKING；' +
+      'TO_SHIP=存在 PICKED 行；BACKORDERED=存在缺货行；MAPPING_FAILED=存在映射失败行；' +
+      'SHIPMENT_OVERDUE=已过发货时限未发完；ABNORMAL=缺货∪映射失败∪发货超时∪物流停滞（OPEN ORDER_TRACKING_STALLED）',
+  })
+  @IsOptional()
+  @IsIn(ORDER_GOODS_STATE_FILTERS)
+  goodsState?: string;
+
   @ApiPropertyOptional() @IsOptional() @IsUUID() storeId?: string;
 
   @ApiPropertyOptional({
@@ -197,6 +220,14 @@ export class OrderListItemDto {
   @ApiProperty() pickedCount!: number;
   @ApiProperty() mappingFailedCount!: number;
   @ApiProperty() openExceptionsCount!: number;
+  @ApiPropertyOptional({
+    description: '缺货行中已登记采购（ORDERED，purchase.md §3.5 派生）的行数（双轴 §2.3）',
+  })
+  backorderedOrderedCount!: number;
+  @ApiPropertyOptional({
+    description: '缺货行中采购已到货（ARRIVED，purchase.md §3.5 派生）的行数（双轴 §2.3）',
+  })
+  backorderedArrivedCount!: number;
 }
 
 export class OrderReservationLineDto {

@@ -772,3 +772,231 @@ describe('shipment deadline (Sprint 7 task §8)', () => {
     ).toBe(false);
   });
 });
+
+describe('dual-axis list contract: stage + goodsState filters (T3)', () => {
+  interface ListItem {
+    id: string;
+    erpStatus: string;
+    backorderedOrderedCount: number;
+    backorderedArrivedCount: number;
+  }
+
+  /** List with the dual-axis filters, scoped to one order via keyword. */
+  async function listOne(orderId: string, query: string): Promise<{ hit: boolean }> {
+    const detail = await orderDetail(orderId);
+    const list = await client.get<ListItem[]>(
+      `/api/v1/orders?keyword=${encodeURIComponent(detail.platformOrderId)}&${query}&pageSize=10`,
+    );
+    return { hit: list.body.data.some((row) => row.id === orderId) };
+  }
+
+  async function ingestWith(options: {
+    items: Array<{ platformSkuId: string; quantity: string }>;
+    shipmentDeadline?: string;
+  }) {
+    const result = await client.post<IngestResult>('/api/v1/orders/ingest', {
+      storeId: storeA,
+      platformOrderId: `PO-${randomUUID()}`,
+      platformStatus: 'awaiting_packaging',
+      fulfillmentMode: 'FBS',
+      orderedAt: new Date().toISOString(),
+      currency: 'RUB',
+      ...(options.shipmentDeadline !== undefined
+        ? { shipmentDeadline: options.shipmentDeadline }
+        : {}),
+      items: options.items,
+    });
+    expect(result.status, JSON.stringify(result.body.error ?? {})).toBe(200);
+    return result.body.data;
+  }
+
+  it('stage=PENDING covers reserved / backordered / mapping-failed orders; shipped leaves it', async () => {
+    // Reserved order.
+    const skuR = await newSku('AXR');
+    await initialize({ skuId: skuR, binId: binA01, quantity: '5' });
+    await mapSku(skuR, `${PREFIX}-AXR-1`);
+    const reserved = await ingestWith({
+      items: [{ platformSkuId: `${PREFIX}-AXR-1`, quantity: '1' }],
+    });
+
+    // Backordered order.
+    const skuB = await newSku('AXB');
+    await mapSku(skuB, `${PREFIX}-AXB-1`);
+    const backordered = await ingestWith({
+      items: [{ platformSkuId: `${PREFIX}-AXB-1`, quantity: '1' }],
+    });
+
+    // Mapping-failed order.
+    const mappedFail = await ingestWith({
+      items: [{ platformSkuId: `${PREFIX}-NO-SUCH-MAPPING`, quantity: '1' }],
+    });
+
+    expect((await listOne(reserved.orderId, 'stage=PENDING')).hit).toBe(true);
+    expect((await listOne(backordered.orderId, 'stage=PENDING')).hit).toBe(true);
+    expect((await listOne(mappedFail.orderId, 'stage=PENDING')).hit).toBe(true);
+
+    // Externally fulfilled -> erp SHIPPED, platform stage NULL -> NOT pending,
+    // and stage=IN_TRANSIT catches it (NULL stage counts as not delivered).
+    const closed = await client.post(
+      `/api/v1/orders/${backordered.orderId}/mark-external-fulfillment`,
+      { reason: '双轴测试：外部履约' },
+    );
+    expect(closed.status).toBe(200);
+    expect((await listOne(backordered.orderId, 'stage=PENDING')).hit).toBe(false);
+    expect((await listOne(backordered.orderId, 'stage=IN_TRANSIT')).hit).toBe(true);
+    expect((await listOne(reserved.orderId, 'stage=IN_TRANSIT')).hit).toBe(false);
+    expect((await listOne(reserved.orderId, 'stage=COMPLETED')).hit).toBe(false);
+  });
+
+  it('goodsState chips resolve line-level facts hidden by the rollup status', async () => {
+    const skuT = await newSku('AXT');
+    await addBarcode(skuT, `${PREFIX}-AXT-BAR`);
+    await initialize({ skuId: skuT, binId: binA01, quantity: '5' });
+    await mapSku(skuT, `${PREFIX}-AXT-1`);
+    const skuU = await newSku('AXU');
+    await addBarcode(skuU, `${PREFIX}-AXU-BAR`);
+    await initialize({ skuId: skuU, binId: binA01, quantity: '5' });
+    await mapSku(skuU, `${PREFIX}-AXU-1`);
+    const toPick = await ingestWith({
+      items: [
+        { platformSkuId: `${PREFIX}-AXT-1`, quantity: '1' },
+        { platformSkuId: `${PREFIX}-AXU-1`, quantity: '1' },
+      ],
+    });
+    expect((await listOne(toPick.orderId, 'goodsState=TO_PICK')).hit).toBe(true);
+
+    const failed = await ingestWith({
+      items: [{ platformSkuId: `${PREFIX}-NO-SUCH-2`, quantity: '1' }],
+    });
+    expect((await listOne(failed.orderId, 'goodsState=MAPPING_FAILED')).hit).toBe(true);
+    expect((await listOne(failed.orderId, 'goodsState=ABNORMAL')).hit).toBe(true);
+
+    const skuD = await newSku('AXD');
+    await mapSku(skuD, `${PREFIX}-AXD-1`);
+    const overdue = await ingestWith({
+      items: [{ platformSkuId: `${PREFIX}-AXD-1`, quantity: '1' }],
+      shipmentDeadline: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    });
+    expect((await listOne(overdue.orderId, 'goodsState=BACKORDERED')).hit).toBe(true);
+    expect((await listOne(overdue.orderId, 'goodsState=SHIPMENT_OVERDUE')).hit).toBe(true);
+    expect((await listOne(overdue.orderId, 'goodsState=ABNORMAL')).hit).toBe(true);
+    expect((await listOne(toPick.orderId, 'goodsState=BACKORDERED')).hit).toBe(false);
+
+    // PICKING: completing line 1 while line 2 is still being picked rolls the
+    // order up to PICKING (orders.md §7 rule 3 - derived from OPEN picking
+    // items at recompute time). Line 2 stays RESERVED, so TO_PICK may hit
+    // simultaneously - by design (orders.md §17b).
+    const task = await client.post<{ tasks: Array<{ id: string }> }>('/api/v1/picking-tasks', {
+      orderId: toPick.orderId,
+    });
+    expect([200, 201]).toContain(task.status);
+    const taskId = task.body.data.tasks[0]!.id;
+    await client.post(`/api/v1/picking-tasks/${taskId}/start`, {});
+    const firstScan = await client.post(`/api/v1/picking-tasks/${taskId}/scan`, {
+      barcode: `${PREFIX}-AXT-BAR`,
+    });
+    expect(firstScan.status, JSON.stringify(firstScan.body.error ?? {})).toBe(200);
+    expect((await listOne(toPick.orderId, 'goodsState=PICKING')).hit).toBe(true);
+    expect((await listOne(toPick.orderId, 'goodsState=TO_PICK')).hit).toBe(true);
+
+    // Complete line 2 -> all lines PICKED -> TO_SHIP, no longer PICKING.
+    await client.post(`/api/v1/picking-tasks/${taskId}/scan`, {
+      barcode: `${PREFIX}-AXU-BAR`,
+    });
+    expect((await listOne(toPick.orderId, 'goodsState=TO_SHIP')).hit).toBe(true);
+    expect((await listOne(toPick.orderId, 'goodsState=PICKING')).hit).toBe(false);
+  });
+
+  it('SHIPMENT_OVERDUE hits a PARTIALLY_SHIPPED order with an unshipped remainder', async () => {
+    // Two lines: line 1 stocked (picked + shipped), line 2 backordered. The
+    // rollup becomes PARTIALLY_SHIPPED while the overdue deadline still
+    // applies - exactly the case a single status filter can never express.
+    const skuS = await newSku('AXS');
+    await addBarcode(skuS, `${PREFIX}-AXS-BAR`);
+    await initialize({ skuId: skuS, binId: binA01, quantity: '5' });
+    await mapSku(skuS, `${PREFIX}-AXS-1`);
+    const skuR = await newSku('AXR2');
+    await mapSku(skuR, `${PREFIX}-AXR2-1`);
+
+    const order = await ingestWith({
+      items: [
+        { platformSkuId: `${PREFIX}-AXS-1`, quantity: '1' },
+        { platformSkuId: `${PREFIX}-AXR2-1`, quantity: '1' },
+      ],
+      shipmentDeadline: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+    });
+    expect(order.erpStatus).toBe('PARTIALLY_BACKORDERED');
+
+    // Pick + pack + ship ONLY line 1 (line 2 has no stock, never reserved).
+    const pickTask = await client.post<{ tasks: Array<{ id: string }> }>('/api/v1/picking-tasks', {
+      orderId: order.orderId,
+    });
+    const taskId = pickTask.body.data.tasks[0]!.id;
+    await client.post(`/api/v1/picking-tasks/${taskId}/start`, {});
+    await client.post(`/api/v1/picking-tasks/${taskId}/scan`, { barcode: `${PREFIX}-AXS-BAR` });
+
+    const shipmentCreated = await client.post<{ shipments: Array<{ id: string }> }>(
+      '/api/v1/shipments',
+      { orderId: order.orderId },
+    );
+    const shipmentId = shipmentCreated.body.data.shipments[0]!.id;
+    const packageCreated = await client.post<{ packageId: string }>(
+      `/api/v1/shipments/${shipmentId}/packages`,
+      {},
+    );
+    await client.post(`/api/v1/packages/${packageCreated.body.data.packageId}/items/scan`, {
+      barcode: `${PREFIX}-AXS-BAR`,
+    });
+    await client.post(`/api/v1/packages/${packageCreated.body.data.packageId}/seal`, {});
+    const ship = await client.post(`/api/v1/shipments/${shipmentId}/ship`, {});
+    expect(ship.status, JSON.stringify(ship.body.error ?? {})).toBe(200);
+
+    const detail = await orderDetail(order.orderId);
+    expect(detail.erpStatus).toBe('PARTIALLY_SHIPPED');
+    expect((await listOne(order.orderId, 'goodsState=SHIPMENT_OVERDUE')).hit).toBe(true);
+    expect((await listOne(order.orderId, 'goodsState=BACKORDERED')).hit).toBe(true);
+    expect((await listOne(order.orderId, 'stage=PENDING')).hit).toBe(true);
+  });
+
+  it('backorderedOrderedCount / backorderedArrivedCount follow the purchase lifecycle', async () => {
+    const skuP = await newSku('AXP');
+    await mapSku(skuP, `${PREFIX}-AXP-1`);
+    const order = await ingestWith({
+      items: [{ platformSkuId: `${PREFIX}-AXP-1`, quantity: '2' }],
+    });
+    expect(order.erpStatus).toBe('BACKORDERED');
+
+    const detail = await orderDetail(order.orderId);
+    const listBefore = await client.get<ListItem[]>(
+      `/api/v1/orders?keyword=${encodeURIComponent(detail.platformOrderId)}&pageSize=10`,
+    );
+    expect(listBefore.body.data[0]?.backorderedOrderedCount).toBe(0);
+    expect(listBefore.body.data[0]?.backorderedArrivedCount).toBe(0);
+
+    const po = await client.post<{ id: string }>('/api/v1/purchase-orders', {
+      sourceNote: '双轴测试 采购登记',
+      items: [{ skuId: skuP, orderItemId: order.itemResults[0]!.orderItemId, quantity: '2' }],
+    });
+    expect(po.status, JSON.stringify(po.body.error ?? {})).toBe(200);
+
+    const listOrdered = await client.get<ListItem[]>(
+      `/api/v1/orders?keyword=${encodeURIComponent(detail.platformOrderId)}&pageSize=10`,
+    );
+    expect(listOrdered.body.data[0]?.backorderedOrderedCount).toBe(1);
+    expect(listOrdered.body.data[0]?.backorderedArrivedCount).toBe(0);
+
+    const receipt = await client.post<{ id: string }>(
+      `/api/v1/purchase-receipts/from-po/${po.body.data.id}`,
+      { warehouseId, defaultBinId: binA01 },
+    );
+    expect(receipt.status, JSON.stringify(receipt.body.error ?? {})).toBe(200);
+    const confirm = await client.post(`/api/v1/purchase-receipts/${receipt.body.data.id}/confirm`);
+    expect(confirm.status, JSON.stringify(confirm.body.error ?? {})).toBe(200);
+
+    const listArrived = await client.get<ListItem[]>(
+      `/api/v1/orders?keyword=${encodeURIComponent(detail.platformOrderId)}&pageSize=10`,
+    );
+    expect(listArrived.body.data[0]?.backorderedOrderedCount).toBe(0);
+    expect(listArrived.body.data[0]?.backorderedArrivedCount).toBe(1);
+  });
+});

@@ -85,8 +85,28 @@ export class OrderService {
       page.pageSize,
       (page.page - 1) * page.pageSize,
     );
-    return {
-      items: rows.map((row) => ({
+    // Dual-axis §2.3 in-line markers: for the page's BACKORDERED lines, the
+    // derived procurement states (purchase.md §3.5) come through the port -
+    // one round-trip for the whole page, never per-line queries and never a
+    // cross-module SQL (AGENTS.md §9).
+    const backorderedIdsByOrder = await this.orderRepo.findBackorderedItemIdsByOrderIds(
+      rows.map((row) => row.order.id),
+    );
+    const allBackorderedIds = [...backorderedIdsByOrder.values()].flat();
+    const procurementStates =
+      await this.procurementPort.getProcurementStatesByOrderItemIds(allBackorderedIds);
+    const items: OrderListItemDto[] = rows.map((row) => {
+      let ordered = 0;
+      let arrived = 0;
+      for (const itemId of backorderedIdsByOrder.get(row.order.id) ?? []) {
+        const state = procurementStates[itemId];
+        if (state === 'ORDERED') {
+          ordered += 1;
+        } else if (state === 'ARRIVED') {
+          arrived += 1;
+        }
+      }
+      return {
         id: row.order.id,
         orderNo: row.order.orderNo,
         storeId: row.order.storeId,
@@ -107,9 +127,11 @@ export class OrderService {
         pickedCount: row.pickedCount,
         mappingFailedCount: row.mappingFailedCount,
         openExceptionsCount: row.openExceptionsCount,
-      })),
-      meta: { page: page.page, pageSize: page.pageSize, total },
-    };
+        backorderedOrderedCount: ordered,
+        backorderedArrivedCount: arrived,
+      };
+    });
+    return { items, meta: { page: page.page, pageSize: page.pageSize, total } };
   }
 
   async getDetail(id: string): Promise<OrderDetailDto> {

@@ -134,10 +134,13 @@ export function DashboardPage() {
   const navigate = useNavigate();
 
   // ---- Data: real list APIs only (queryKey[0] = entity, shared prefix) ----
+  // 待处理 uses the dual-axis stage filter (orders.md §17a): everything not
+  // yet SHIPPED/CANCELLED - backordered and divergent orders included. The
+  // old erpStatus=NEW count was always 0 (NEW never survives ingestion).
   const pendingOrdersCount = useApiQuery<Envelope<OrderListItem[]>>(
     '/api/v1/orders',
-    { page: 1, pageSize: 1, erpStatus: 'NEW' },
-    ['orders', 'count', 'NEW'],
+    { page: 1, pageSize: 1, stage: 'PENDING' },
+    ['orders', 'count', 'PENDING'],
   );
   const recentOrders = useApiQuery<Envelope<OrderListItem[]>>(
     '/api/v1/orders',

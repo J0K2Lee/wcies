@@ -320,13 +320,15 @@ afterAll(async () => {
 describe('webhook-driven platform facts (T2)', () => {
   it('TYPE_STATE_CHANGED on an UNKNOWN posting fully ingests (catch-up semantics) and lands PROCESSED', async () => {
     await newMappedSkuWithStock('WHB', 710000001, '5');
-    postings.push(makePosting('IT-ROT-WH-1', [{ offerId: 'WHB', sku: 710000001, quantity: 1 }]));
+    postings.push(
+      makePosting(`${PREFIX}-ROT-WH-1`, [{ offerId: 'WHB', sku: 710000001, quantity: 1 }]),
+    );
 
     const changedStateDate = '2026-09-15T08:00:00.000Z';
     const { events } = await postWebhookAndWait(
       {
         message_type: 'TYPE_STATE_CHANGED',
-        posting_number: 'IT-ROT-WH-1',
+        posting_number: `${PREFIX}-ROT-WH-1`,
         // Push-model vocabulary on purpose (§6.2): it must NOT be trusted.
         new_state: 'posting_delivered',
         changed_state_date: changedStateDate,
@@ -339,21 +341,21 @@ describe('webhook-driven platform facts (T2)', () => {
 
     // The order was created from the re-read, with the re-read's facts - not
     // the push payload's `posting_delivered`.
-    const order = await orderByPlatformId('IT-ROT-WH-1');
+    const order = await orderByPlatformId(`${PREFIX}-ROT-WH-1`);
     expect(order.erpStatus).toBe('READY_TO_PICK');
     expect(order.platformStatus).toBe('awaiting_packaging');
   });
 
   it('a later state event updates facts via re-read and records the platform-side time', async () => {
     const changedStateDate = '2026-09-15T09:30:00.000Z';
-    const posting = postings.find((p) => p.posting_number === 'IT-ROT-WH-1')!;
+    const posting = postings.find((p) => p.posting_number === `${PREFIX}-ROT-WH-1`)!;
     posting.status = 'delivering';
     posting.delivering_date = changedStateDate;
 
     await postWebhookAndWait(
       {
         message_type: 'TYPE_STATE_CHANGED',
-        posting_number: 'IT-ROT-WH-1',
+        posting_number: `${PREFIX}-ROT-WH-1`,
         new_state: 'posting_on_way_to_city',
         changed_state_date: changedStateDate,
         seller_id: Number(CLIENT_ID),
@@ -361,7 +363,7 @@ describe('webhook-driven platform facts (T2)', () => {
       'PROCESSED',
     );
 
-    const order = await orderByPlatformId('IT-ROT-WH-1');
+    const order = await orderByPlatformId(`${PREFIX}-ROT-WH-1`);
     // Re-read answer wins; the stage normalized from the Seller API status.
     const transitions = order.platformStatusHistory ?? [];
     const last = transitions[transitions.length - 1];
@@ -374,7 +376,7 @@ describe('webhook-driven platform facts (T2)', () => {
   it('duplicate delivery dedups by payload hash: one raw event, no second processing', async () => {
     const payload = {
       message_type: 'TYPE_STATE_CHANGED',
-      posting_number: 'IT-ROT-WH-1',
+      posting_number: `${PREFIX}-ROT-WH-1`,
       new_state: 'posting_on_way_to_city',
       changed_state_date: '2026-09-15T11:00:00.000Z',
       seller_id: Number(CLIENT_ID),
@@ -403,13 +405,17 @@ describe('fair fallback rotation + SHIPPED candidates (T2, fix A3)', () => {
     // AWAITING_SHIPMENT).
     await newMappedSkuWithStock('ROA', 710000002, '5');
     await newMappedSkuWithStock('ROB', 710000003, '0.001');
-    postings.push(makePosting('IT-ROT-A', [{ offerId: 'ROA', sku: 710000002, quantity: 1 }]));
-    postings.push(makePosting('IT-ROT-B', [{ offerId: 'ROB', sku: 710000003, quantity: 1 }]));
+    postings.push(
+      makePosting(`${PREFIX}-ROT-A`, [{ offerId: 'ROA', sku: 710000002, quantity: 1 }]),
+    );
+    postings.push(
+      makePosting(`${PREFIX}-ROT-B`, [{ offerId: 'ROB', sku: 710000003, quantity: 1 }]),
+    );
 
     const job1 = await syncOrders();
     expect(job1.status).toBe('SUCCESS');
-    const orderA = await orderByPlatformId('IT-ROT-A');
-    const orderB = await orderByPlatformId('IT-ROT-B');
+    const orderA = await orderByPlatformId(`${PREFIX}-ROT-A`);
+    const orderB = await orderByPlatformId(`${PREFIX}-ROT-B`);
     expect(orderA.erpStatus).toBe('READY_TO_PICK');
     expect(orderB.erpStatus).toBe('BACKORDERED');
     const closed = await client.post(`/api/v1/orders/${orderB.id}/mark-external-fulfillment`, {
@@ -420,8 +426,8 @@ describe('fair fallback rotation + SHIPPED candidates (T2, fix A3)', () => {
 
     // Run 1 already ingested AND first-read both orders (checked-at NULL ->
     // immediate candidates). Snapshot the counters after that.
-    const hitsA1 = getHits.get('IT-ROT-A') ?? 0;
-    const hitsB1 = getHits.get('IT-ROT-B') ?? 0;
+    const hitsA1 = getHits.get(`${PREFIX}-ROT-A`) ?? 0;
+    const hitsB1 = getHits.get(`${PREFIX}-ROT-B`) ?? 0;
     expect(hitsA1).toBeGreaterThan(0);
     expect(hitsB1).toBeGreaterThan(0);
 
@@ -429,17 +435,18 @@ describe('fair fallback rotation + SHIPPED candidates (T2, fix A3)', () => {
     // additional targeted reads (fair rotation, no budget monopolization).
     const job2 = await syncOrders();
     expect(job2.status).toBe('SUCCESS');
-    expect(getHits.get('IT-ROT-A') ?? 0).toBe(hitsA1);
-    expect(getHits.get('IT-ROT-B') ?? 0).toBe(hitsB1);
+    expect(getHits.get(`${PREFIX}-ROT-A`) ?? 0).toBe(hitsA1);
+    expect(getHits.get(`${PREFIX}-ROT-B`) ?? 0).toBe(hitsB1);
 
-    // Platform-side movement while we wait out the window: B goes in
-    // transit, A gets delivered.
-    const postingA = postings.find((p) => p.posting_number === 'IT-ROT-A')!;
-    const postingB = postings.find((p) => p.posting_number === 'IT-ROT-B')!;
-    postingA.status = 'delivered';
-    postingA.fact_delivery_date = '2026-09-15T10:00:00.000Z';
-    postingB.status = 'delivering';
-    postingB.delivering_date = '2026-09-15T10:00:00.000Z';
+    // Platform-side movement while we wait out the window: A goes in
+    // transit (erp still unshipped -> stage stays PENDING), B is delivered
+    // (erp SHIPPED -> stage COMPLETED).
+    const postingA = postings.find((p) => p.posting_number === `${PREFIX}-ROT-A`)!;
+    const postingB = postings.find((p) => p.posting_number === `${PREFIX}-ROT-B`)!;
+    postingA.status = 'delivering';
+    postingA.delivering_date = '2026-09-15T10:00:00.000Z';
+    postingB.status = 'delivered';
+    postingB.fact_delivery_date = '2026-09-15T10:30:00.000Z';
 
     await new Promise((r) => setTimeout(r, FALLBACK_WAIT_MS));
     const job3 = await syncOrders();
@@ -447,17 +454,26 @@ describe('fair fallback rotation + SHIPPED candidates (T2, fix A3)', () => {
 
     // Both re-read after the window: A (erp READY_TO_PICK) and B (erp
     // SHIPPED - STILL a candidate, A3) each gained exactly one read.
-    expect((getHits.get('IT-ROT-A') ?? 0) - hitsA1).toBe(1);
-    expect((getHits.get('IT-ROT-B') ?? 0) - hitsB1).toBe(1);
+    expect((getHits.get(`${PREFIX}-ROT-A`) ?? 0) - hitsA1).toBe(1);
+    expect((getHits.get(`${PREFIX}-ROT-B`) ?? 0) - hitsB1).toBe(1);
 
-    const afterA = await orderByPlatformId('IT-ROT-A');
-    expect(afterA.platformStatus).toBe('delivered');
-    const afterB = await orderByPlatformId('IT-ROT-B');
-    expect(afterB.platformStatus).toBe('delivering');
+    const afterA = await orderByPlatformId(`${PREFIX}-ROT-A`);
+    expect(afterA.platformStatus).toBe('delivering');
+    const afterB = await orderByPlatformId(`${PREFIX}-ROT-B`);
+    expect(afterB.platformStatus).toBe('delivered');
 
-    // Platform-terminal orders leave the rotation: after this final read A
-    // is platform-DELIVERED, so the next (still-open) window skips it even
-    // though erp never shipped - while B (IN_TRANSIT, erp SHIPPED) returns
-    // once its window re-opens. Verified via stage facts above.
+    // Axis-1 stage view (orders.md §17a): B = SHIPPED + platform DELIVERED
+    // -> COMPLETED (and no longer IN_TRANSIT); A = unshipped -> PENDING,
+    // not IN_TRANSIT even though the platform side is delivering.
+    const stageOf = async (platformOrderId: string, stage: string): Promise<boolean> => {
+      const list = await client.get<Array<{ id: string }>>(
+        `/api/v1/orders?keyword=${encodeURIComponent(platformOrderId)}&stage=${stage}&pageSize=10`,
+      );
+      return list.body.data.length > 0;
+    };
+    expect(await stageOf(`${PREFIX}-ROT-B`, 'COMPLETED')).toBe(true);
+    expect(await stageOf(`${PREFIX}-ROT-B`, 'IN_TRANSIT')).toBe(false);
+    expect(await stageOf(`${PREFIX}-ROT-A`, 'PENDING')).toBe(true);
+    expect(await stageOf(`${PREFIX}-ROT-A`, 'IN_TRANSIT')).toBe(false);
   }, 180_000);
 });

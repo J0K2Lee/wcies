@@ -17,6 +17,7 @@ import { ok, okPage } from '../../../common/dto/api-response';
 import { ApiOkEnvelope, ApiOkPagedEnvelope } from '../../../common/swagger/api-envelope';
 import { OrderService } from '../services/order.service';
 import { OrderIngestionService } from '../services/order-ingestion.service';
+import { OrderGoodsStateFilter, OrderStageFilter } from '../enums/order.constants';
 import {
   NormalizedOrderInputDto,
   OrderCancelRequestDto,
@@ -46,6 +47,8 @@ export class OrderController {
       {
         keyword: query.keyword?.trim() || undefined,
         erpStatus: query.erpStatus,
+        stage: query.stage as OrderStageFilter | undefined,
+        goodsState: query.goodsState as OrderGoodsStateFilter | undefined,
         storeId: query.storeId,
         pendingProcurement: query.pendingProcurement === 'true',
       },

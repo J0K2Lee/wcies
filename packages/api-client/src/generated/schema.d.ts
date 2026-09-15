@@ -4280,6 +4280,10 @@ export interface components {
             pickedCount: number;
             mappingFailedCount: number;
             openExceptionsCount: number;
+            /** @description 缺货行中已登记采购（ORDERED，purchase.md §3.5 派生）的行数（双轴 §2.3） */
+            backorderedOrderedCount?: number;
+            /** @description 缺货行中采购已到货（ARRIVED，purchase.md §3.5 派生）的行数（双轴 §2.3） */
+            backorderedArrivedCount?: number;
         };
         OrderItemExceptionDto: {
             id: string;
@@ -4342,6 +4346,11 @@ export interface components {
             toStatus: string;
             /** @example ORDER_SYNC */
             source: string | null;
+            /**
+             * Format: date-time
+             * @description 平台侧的迁移时间（webhook changed_state_date / 回读阶段锚点）；缺失时以 createdAt 为准（双轴 T2）
+             */
+            platformChangedAt?: string | null;
             operatorName: string | null;
             /** Format: date-time */
             createdAt: string;
@@ -4442,6 +4451,16 @@ export interface components {
             platformOrderId: string;
             /** @example awaiting_packaging */
             platformStatus?: string;
+            /**
+             * @description 归一化平台物流阶段（平台事实，非 ERP 状态）；未归类/未同步为 null（双轴 T1）
+             * @enum {string|null}
+             */
+            platformStage?: "AWAITING_SHIPMENT" | "IN_TRANSIT" | "DELIVERED" | "CANCELLED" | null;
+            /**
+             * Format: date-time
+             * @description 平台自身记录的进入该阶段时间（停滞时钟锚点）；缺失为 null
+             */
+            platformStageChangedAt?: string | null;
             /** @example FBS */
             fulfillmentMode?: string;
             /** Format: date-time */
@@ -8697,6 +8716,10 @@ export interface operations {
                 /** @description 订单号 / 平台订单号模糊搜索 */
                 keyword?: string;
                 erpStatus?: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+                /** @description 一级 · 物流阶段（双轴 §2.1）：PENDING=erp_status 非 SHIPPED/CANCELLED（缺货/分歧单均在内）；IN_TRANSIT=已发货且平台未妥投（platform_stage 非 DELIVERED，含未同步）；COMPLETED=已发货且平台已妥投 */
+                stage?: "PENDING" | "IN_TRANSIT" | "COMPLETED";
+                /** @description 二级 · 行级货物状态（双轴 §2.2，单选）：TO_PICK=存在 RESERVED 行；PICKING=erp_status PICKING；TO_SHIP=存在 PICKED 行；BACKORDERED=存在缺货行；MAPPING_FAILED=存在映射失败行；SHIPMENT_OVERDUE=已过发货时限未发完；ABNORMAL=缺货∪映射失败∪发货超时∪物流停滞（OPEN ORDER_TRACKING_STALLED） */
+                goodsState?: "TO_PICK" | "PICKING" | "TO_SHIP" | "BACKORDERED" | "MAPPING_FAILED" | "SHIPMENT_OVERDUE" | "ABNORMAL";
                 storeId?: string;
                 /** @description 待采购视图：存在 MAPPED+BACKORDERED 且无未取消采购单覆盖的订单行 */
                 pendingProcurement?: "true";
@@ -10395,7 +10418,16 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result: boolean;
+                        /** @example 2.0 */
+                        version: string;
+                        /** @example WCIES */
+                        name: string;
+                        /**
+                         * Format: date-time
+                         * @description 开始处理该通知的时间（UTC）
+                         * @example 2026-09-14T15:30:00Z
+                         */
+                        time: string;
                     };
                 };
             };

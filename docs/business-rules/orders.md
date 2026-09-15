@@ -600,6 +600,48 @@ Sprint 4 在此基础上增加三个原子业务命令（显式 QueryRunner + In
 
 ---
 
+# 17a. 订单列表双轴标签口径（双轴任务 T3，2026-09-15 冻结）
+
+订单列表是**两级标签体系**：一级是订单的物流阶段（横向），二级是行级货物
+状态（纵向）；一张订单可同时属于一级标签与多个二级 chip。
+
+## 一级 · 物流阶段（Tabs，默认「待处理」）
+
+| 标签 | 查询 `stage` | 判定 |
+|---|---|---|
+| 全部 | —（无筛选） | 含已取消 |
+| 待处理 | `PENDING` | `erp_status NOT IN ('SHIPPED','CANCELLED')`；含「平台已妥投但系统未发货」的分歧单（保留 ⚠ 提示人工收口）；缺货单天然落在其中 |
+| 待收货 | `IN_TRANSIT` | `erp_status='SHIPPED'` 且 `platform_stage ≠ 'DELIVERED'`（含 `platform_stage IS NULL` 的未同步单） |
+| 已完成 | `COMPLETED` | `erp_status='SHIPPED'` 且 `platform_stage='DELIVERED'` |
+
+- 已取消只在「全部」可见（不算物流阶段，也不属于异常）。
+- 标签计数必须与同筛选条件（含当前店铺/关键词）的列表 `total` 一致。
+
+## 二级 · 行级货物状态（chips，单选，与行内徽标同源）
+
+| chip | 查询 `goodsState` | 判定 |
+|---|---|---|
+| 待拣货 | `TO_PICK` | 存在行 `fulfillment_status='RESERVED'` |
+| 拣货中 | `PICKING` | `erp_status='PICKING'`（该状态由「存在未完成拣货任务」汇总产生，§7） |
+| 待发货 | `TO_SHIP` | 存在行 `fulfillment_status='PICKED'` |
+| 缺货 | `BACKORDERED` | 存在行 `fulfillment_status='BACKORDERED'` |
+| 映射失败 | `MAPPING_FAILED` | 存在行 `mapping_status='FAILED'` |
+| 发货超时 | `SHIPMENT_OVERDUE` | `shipment_deadline < now()` 且 `erp_status NOT IN ('SHIPPED','CANCELLED')`（`PARTIALLY_SHIPPED` 剩余行未出且已过时限也算） |
+| 异常（聚合） | `ABNORMAL` | 缺货 ∪ 映射失败 ∪ 发货超时 ∪ 存在 OPEN `ORDER_TRACKING_STALLED`（§16A；退货模块落地后并入「已发货退款」） |
+
+- 行级口径**不能用订单 ERP 状态表达**：映射失败行不占状态位（§7），
+  「部分已发货 + 一行映射失败」的订单状态是 `PARTIALLY_SHIPPED` 但仍需人工。
+- `拣货中` 与 `待拣货` 允许同时命中（拣货中的订单仍有未拣的 RESERVED 行）。
+- 全部二级判定由后端 EXISTS 子查询执行（前端只展示）。
+
+## 行内标记（非筛选）
+
+`缺货 N`、`已采购 N`、`已到货 N`、`映射失败 N`。已采购/已到货取缺货行的
+派生采购状态（`ORDERED` / `ARRIVED`，purchase.md §3.5），与行内徽标同源；
+列表响应字段 `backorderedOrderedCount` / `backorderedArrivedCount`。
+
+---
+
 # 15B. SYNC_FAILED 异常（Sprint 9 T2，决策 3）
 
 店铺定时同步持续失败进入异常中心：

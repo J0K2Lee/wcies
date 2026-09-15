@@ -5890,6 +5890,34 @@
             }
           },
           {
+            "name": "stage",
+            "required": false,
+            "in": "query",
+            "description": "一级 · 物流阶段（双轴 §2.1）：PENDING=erp_status 非 SHIPPED/CANCELLED（缺货/分歧单均在内）；IN_TRANSIT=已发货且平台未妥投（platform_stage 非 DELIVERED，含未同步）；COMPLETED=已发货且平台已妥投",
+            "schema": {
+              "type": "string",
+              "enum": ["PENDING", "IN_TRANSIT", "COMPLETED"]
+            }
+          },
+          {
+            "name": "goodsState",
+            "required": false,
+            "in": "query",
+            "description": "二级 · 行级货物状态（双轴 §2.2，单选）：TO_PICK=存在 RESERVED 行；PICKING=erp_status PICKING；TO_SHIP=存在 PICKED 行；BACKORDERED=存在缺货行；MAPPING_FAILED=存在映射失败行；SHIPMENT_OVERDUE=已过发货时限未发完；ABNORMAL=缺货∪映射失败∪发货超时∪物流停滞（OPEN ORDER_TRACKING_STALLED）",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "TO_PICK",
+                "PICKING",
+                "TO_SHIP",
+                "BACKORDERED",
+                "MAPPING_FAILED",
+                "SHIPMENT_OVERDUE",
+                "ABNORMAL"
+              ]
+            }
+          },
+          {
             "name": "storeId",
             "required": false,
             "in": "query",
@@ -13418,6 +13446,14 @@
           },
           "openExceptionsCount": {
             "type": "number"
+          },
+          "backorderedOrderedCount": {
+            "type": "number",
+            "description": "缺货行中已登记采购（ORDERED，purchase.md §3.5 派生）的行数（双轴 §2.3）"
+          },
+          "backorderedArrivedCount": {
+            "type": "number",
+            "description": "缺货行中采购已到货（ARRIVED，purchase.md §3.5 派生）的行数（双轴 §2.3）"
           }
         },
         "required": [
@@ -13629,6 +13665,12 @@
             "type": "string",
             "nullable": true,
             "example": "ORDER_SYNC"
+          },
+          "platformChangedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "平台侧的迁移时间（webhook changed_state_date / 回读阶段锚点）；缺失时以 createdAt 为准（双轴 T2）"
           },
           "operatorName": {
             "type": "string",
@@ -13978,6 +14020,18 @@
           "platformStatus": {
             "type": "string",
             "example": "awaiting_packaging"
+          },
+          "platformStage": {
+            "type": "string",
+            "enum": ["AWAITING_SHIPMENT", "IN_TRANSIT", "DELIVERED", "CANCELLED"],
+            "nullable": true,
+            "description": "归一化平台物流阶段（平台事实，非 ERP 状态）；未归类/未同步为 null（双轴 T1）"
+          },
+          "platformStageChangedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "平台自身记录的进入该阶段时间（停滞时钟锚点）；缺失为 null"
           },
           "fulfillmentMode": {
             "type": "string",

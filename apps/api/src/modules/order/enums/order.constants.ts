@@ -63,3 +63,31 @@ export const ORDER_RESERVATION_REFERENCE_TYPE = 'ORDER' as const;
 export const orderReserveKey = (orderItemId: string): string => `ORDER_RESERVE:${orderItemId}`;
 /** Idempotency key of an order line's cancel-release. */
 export const orderReleaseKey = (orderItemId: string): string => `ORDER_RELEASE:${orderItemId}`;
+
+/**
+ * Dual-axis list filters (2026-09-15, docs/business-rules/orders.md §17a).
+ * Axis 1 - logistics stage of the ORDER header:
+ *   PENDING    erp_status NOT IN (SHIPPED, CANCELLED) - includes divergent
+ *              orders (platform delivered but ERP not shipped)
+ *   IN_TRANSIT erp_status = SHIPPED and platform stage not DELIVERED
+ *              (platform_stage NULL counts as not delivered - unsynced)
+ *   COMPLETED  erp_status = SHIPPED and platform_stage = DELIVERED
+ */
+export const ORDER_STAGE_FILTERS = ['PENDING', 'IN_TRANSIT', 'COMPLETED'] as const;
+export type OrderStageFilter = (typeof ORDER_STAGE_FILTERS)[number];
+
+/**
+ * Axis 2 - goods state chips (line-level facts, orders.md §17b). A chip is
+ * answered by EXISTS subqueries so orders whose rollup status hides a line
+ * problem (e.g. PARTIALLY_SHIPPED + one BACKORDERED line) stay findable.
+ */
+export const ORDER_GOODS_STATE_FILTERS = [
+  'TO_PICK',
+  'PICKING',
+  'TO_SHIP',
+  'BACKORDERED',
+  'MAPPING_FAILED',
+  'SHIPMENT_OVERDUE',
+  'ABNORMAL',
+] as const;
+export type OrderGoodsStateFilter = (typeof ORDER_GOODS_STATE_FILTERS)[number];

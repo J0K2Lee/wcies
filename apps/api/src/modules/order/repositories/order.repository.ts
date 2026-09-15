@@ -2,12 +2,16 @@ import { Injectable } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { OrderEntity } from '../entities/order.entity';
 import { OrderItemEntity } from '../entities/order-item.entity';
-import { ErpOrderStatus } from '../enums/order.constants';
+import { ErpOrderStatus, OrderGoodsStateFilter, OrderStageFilter } from '../enums/order.constants';
 import { rawStr } from '../../../common/utils/raw';
 
 export interface OrderListFilters {
   keyword?: string;
   erpStatus?: string;
+  /** Axis-1 logistics stage filter (dual-axis §2.1). */
+  stage?: OrderStageFilter;
+  /** Axis-2 line-level goods-state filter (dual-axis §2.2). */
+  goodsState?: OrderGoodsStateFilter;
   storeId?: string;
   /** Hard restriction to these order ids (待采购 filter pipeline, T3). */
   orderIds?: string[];
@@ -258,6 +262,12 @@ export class OrderRepository {
     if (filters.erpStatus !== undefined) {
       qb.andWhere('o.erp_status = :erpStatus', { erpStatus: filters.erpStatus });
     }
+    if (filters.stage !== undefined) {
+      qb.andWhere(stagePredicate(filters.stage));
+    }
+    if (filters.goodsState !== undefined) {
+      qb.andWhere(goodsStatePredicate(filters.goodsState));
+    }
     if (filters.storeId !== undefined) {
       qb.andWhere('o.store_id = :storeId', { storeId: filters.storeId });
     }
@@ -287,5 +297,83 @@ export class OrderRepository {
       })),
       total,
     };
+  }
+
+  /** BACKORDERED line ids of the given orders (dual-axis §2.3 procurement
+   *  counters: the service derives ORDERED/ARRIVED per line through the
+   *  purchase port and rolls the counts up per order). */
+  async findBackorderedItemIdsByOrderIds(
+    orderIds: readonly string[],
+  ): Promise<Map<string, string[]>> {
+    const result = new Map<string, string[]>();
+    if (orderIds.length === 0) {
+      return result;
+    }
+    const rows = await this.dataSource.query<Array<{ order_id: string; id: string }>>(
+      `SELECT i.order_id, i.id
+       FROM order_items i
+       WHERE i.fulfillment_status = 'BACKORDERED'
+         AND i.order_id = ANY($1::uuid[])`,
+      [[...orderIds]],
+    );
+    for (const row of rows) {
+      const list = result.get(row.order_id) ?? [];
+      list.push(row.id);
+      result.set(row.order_id, list);
+    }
+    return result;
+  }
+}
+
+/**
+ * Axis-1 predicates (dual-axis §2.1). PENDING keeps divergent orders (platform
+ * delivered, ERP not shipped) visible for human follow-up (mark external
+ * fulfillment / cancel); IN_TRANSIT treats a NULL platform stage as
+ * "not delivered yet" - the order simply has not been re-read since its
+ * platform side moved on.
+ */
+function stagePredicate(stage: OrderStageFilter): string {
+  switch (stage) {
+    case 'PENDING':
+      return `o.erp_status NOT IN ('SHIPPED', 'CANCELLED')`;
+    case 'IN_TRANSIT':
+      return `o.erp_status = 'SHIPPED' AND (o.platform_stage IS NULL OR o.platform_stage <> 'DELIVERED')`;
+    case 'COMPLETED':
+      return `o.erp_status = 'SHIPPED' AND o.platform_stage = 'DELIVERED'`;
+  }
+}
+
+/**
+ * Axis-2 predicates (dual-axis §2.2). Line-level chips use EXISTS over
+ * order_items so orders whose rollup status hides a line problem stay
+ * findable. PICKING keys on the rollup because it is DERIVED from open
+ * picking tasks (order-status.service), not from line fulfillment states.
+ * ABNORMAL is the union chip: BACKORDERED ∪ MAPPING_FAILED ∪ SHIPMENT_OVERDUE
+ * ∪ an OPEN ORDER_TRACKING_STALLED exception on the order (T4; the type is a
+ * data value here - the exception module owns the enum).
+ */
+function goodsStatePredicate(state: OrderGoodsStateFilter): string {
+  switch (state) {
+    case 'TO_PICK':
+      return `EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND i.fulfillment_status = 'RESERVED')`;
+    case 'PICKING':
+      return `o.erp_status = 'PICKING'`;
+    case 'TO_SHIP':
+      return `EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND i.fulfillment_status = 'PICKED')`;
+    case 'BACKORDERED':
+      return `EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND i.fulfillment_status = 'BACKORDERED')`;
+    case 'MAPPING_FAILED':
+      return `EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND i.mapping_status = 'FAILED')`;
+    case 'SHIPMENT_OVERDUE':
+      return `o.shipment_deadline IS NOT NULL AND o.shipment_deadline < now() AND o.erp_status NOT IN ('SHIPPED', 'CANCELLED')`;
+    case 'ABNORMAL':
+      return `(
+        EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND i.fulfillment_status = 'BACKORDERED')
+        OR EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND i.mapping_status = 'FAILED')
+        OR (o.shipment_deadline IS NOT NULL AND o.shipment_deadline < now() AND o.erp_status NOT IN ('SHIPPED', 'CANCELLED'))
+        OR EXISTS (SELECT 1 FROM system_exceptions e
+              WHERE e.status = 'OPEN' AND e.exception_type = 'ORDER_TRACKING_STALLED'
+                AND e.reference_type = 'ORDER' AND e.reference_id = o.id)
+      )`;
   }
 }
