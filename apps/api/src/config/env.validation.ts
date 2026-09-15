@@ -37,6 +37,16 @@ export const envValidationSchema = Joi.object({
 
   LOG_LEVEL: Joi.string().valid('fatal', 'error', 'warn', 'info', 'debug', 'trace').optional(),
 
+  // Public base URL for INBOUND platform callbacks (OZON webhooks). The URL
+  // configured in the OZON cabinet is built from this value; every store
+  // shares the host and differs only by the storeCode path segment. Optional
+  // so local development without a tunnel keeps booting. https-only - an
+  // http callback URL could never be registered with the platform.
+  // See docs/integrations/ozon-webhook-tunnel.md.
+  PUBLIC_BASE_URL: Joi.string()
+    .uri({ scheme: ['https'] })
+    .optional(),
+
   // Optional Feishu webhook (Sprint 4): absent = FEISHU channel stays a
   // provider boundary only; never guessed (task §49).
   FEISHU_WEBHOOK_URL: Joi.string()

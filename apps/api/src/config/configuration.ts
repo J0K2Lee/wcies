@@ -42,6 +42,12 @@ export const appConfig = registerAs('app', () => {
      * only SYSTEM notifications are created. No default URL is ever guessed.
      */
     feishuWebhookUrl: process.env.FEISHU_WEBHOOK_URL ?? null,
+    /**
+     * Public base URL for INBOUND platform callbacks (OZON webhooks, see
+     * docs/integrations/ozon-webhook-tunnel.md). Null when unset - callers
+     * must NOT fall back to localhost, that URL is unreachable from OZON.
+     */
+    publicBaseUrl: process.env.PUBLIC_BASE_URL ?? null,
   };
 });
 

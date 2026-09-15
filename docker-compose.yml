@@ -161,6 +161,30 @@ services:
     networks:
       - wcies-network
 
+  # OZON webhook 内网穿透（docs/integrations/ozon-webhook-tunnel.md）。
+  # 出站长连接：本机零入站端口、不改路由器、不需要公网 IP。
+  # ingress 只放行 webhook 路径，其余一律 404 —— webhook 端点无签名且是
+  # @Public()，绝不能让 dev API 整口暴露到公网。
+  #
+  # 默认不启动（profile 未启用）：日常开发用 curl 直投本地 + replay 脚本，
+  # 只有要接真实 OZON 投递时才 `pnpm tunnel:up`，缩小暴露窗口。
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: wcies-tunnel
+    profiles: ['tunnel']
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      # credentials.json 是本地凭据，已在 .gitignore 中排除
+      - ./docker/cloudflared:/etc/cloudflared:ro
+    # 同 web-dev/api-dev：宿主代理 DNS 会间歇返回不可路由假 IP，
+    # 而 cloudflared 必须解析 Cloudflare 边缘域名才能建连。
+    dns: ['223.5.5.5', '119.29.29.29']
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    networks:
+      - wcies-network
+
 volumes:
   postgres_data:
   minio_data:

@@ -8861,10 +8861,21 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["result"],
+                  "required": ["version", "name", "time"],
                   "properties": {
-                    "result": {
-                      "type": "boolean"
+                    "version": {
+                      "type": "string",
+                      "example": "2.0"
+                    },
+                    "name": {
+                      "type": "string",
+                      "example": "WCIES"
+                    },
+                    "time": {
+                      "type": "string",
+                      "format": "date-time",
+                      "example": "2026-09-14T15:30:00Z",
+                      "description": "开始处理该通知的时间（UTC）"
                     }
                   }
                 }

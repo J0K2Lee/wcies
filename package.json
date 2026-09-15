@@ -30,6 +30,8 @@
     "docker:down": "docker compose down",
     "docker:dev": "docker compose --profile dev up -d",
     "docker:dev:rebuild": "docker compose --profile dev build && docker compose --profile dev down && docker volume rm -f wcies_web_node_modules wcies_web_nm_web wcies_web_nm_api wcies_web_nm_shared wcies_web_nm_client wcies_web_nm_contracts wcies_api_node_modules wcies_api_nm_api wcies_api_nm_web wcies_api_nm_shared wcies_api_nm_client wcies_api_nm_contracts && docker compose --profile dev up -d",
+    "tunnel:up": "docker compose --profile tunnel up -d tunnel",
+    "tunnel:down": "docker compose --profile tunnel stop tunnel",
     "seed:dev": "pnpm --filter @wcies/api seed:dev",
     "seed:sprint1": "pnpm --filter @wcies/api seed:sprint1",
     "openapi:export": "pnpm --filter @wcies/api openapi:export",

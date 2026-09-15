@@ -601,7 +601,13 @@ describe('order sync (task §21-§25, §38, §45-§52)', () => {
       warehouse_id: 1,
     });
     expect(webhook.status).toBe(200);
-    expect(webhook.body).toEqual({ result: true });
+    // Ack must match the platform template {version, name, time}: the legacy
+    // {result:true} body is rejected with WRONG_RESULT_TIME_FIELD (2026-09-14,
+    // docs/integrations/ozon.md §6.4).
+    const ack = webhook.body as unknown as { version: string; name: string; time: string };
+    expect(Object.keys(ack).sort()).toEqual(['name', 'time', 'version']);
+    expect(ack.name).toBe('WCIES');
+    expect(ack.time).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
 
     // webhook processing is async - wait for the order to exist
     const deadline = Date.now() + 30_000;

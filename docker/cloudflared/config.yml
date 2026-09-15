@@ -1,0 +1,33 @@
+# OZON webhook 内网穿透 —— cloudflared 出站长连接（本机零入站端口）
+#
+# 方案、约束推导与验证清单：docs/integrations/ozon-webhook-tunnel.md
+# 凭据文件 docker/cloudflared/credentials.json 不入库（见 .gitignore）。
+#
+# 核心约束：只放行 webhook 路径。webhook 端点是无签名的 @Public() 路由，
+# 若整口暴露 3000，等于把 dev API 全量（含 Swagger 与其它 /api/v1/*）放上公网。
+
+tunnel: 9274ae8c-1c6e-461a-897a-7168bf40107f
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  # OZON 卖家后台要填的就是这条 URL —— storeCode 在路径里，
+  # 因此一个域名覆盖所有店铺，只需这一条规则：
+  #   https://ozon-hook.wulaoula.cn/api/v1/webhooks/ozon/stores/{storeCode}
+  - hostname: ozon-hook.wulaoula.cn
+    # ⚠ path 是【正则】(cloudflared 用 Go regexp 解析)，不是 glob/前缀。
+    # 写成 /api/v1/webhooks/ozon/* 会只匹配 "ozon" 后跟若干个 / —— 即漏掉
+    # /stores/{storeCode}。这里用锚定前缀 + .*$，在「子串搜索」与「整体匹配」
+    # 两种语义下都成立，不依赖对 cloudflared 匹配方式的猜测。
+    path: ^/api/v1/webhooks/ozon/.*$
+    # API 跑在宿主机（pnpm dev:api）或 dev 容器都能命中：
+    # dev 容器已把 3000 发布到宿主，host-gateway 保证可达。
+    service: http://host.docker.internal:3000
+
+  # 手机/外部浏览器访问 Web 前端（整个 dev 系统靠登录保护，无路径白名单）。
+  # 前置：apps/web/vite.config.ts 的 server.allowedHosts 已显式放行该主机名。
+  - hostname: wcies.wulaoula.cn
+    # web dev 容器已把 5173 发布到宿主，host-gateway 保证可达。
+    service: http://host.docker.internal:5173
+
+  # 兜底：两个主机名下未命中的请求 → 404（无 service 即不转发）
+  - service: http_status:404

@@ -9,6 +9,11 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
+    // Vite 6+ blocks requests whose Host header is not localhost/an IP.
+    // Phones reach the dev app through the Cloudflare tunnel as
+    // wcies.wulaoula.cn (docs/integrations/ozon-webhook-tunnel.md) - allow
+    // that host explicitly instead of `true` (which would accept any Host).
+    allowedHosts: ['wcies.wulaoula.cn'],
     proxy: {
       // Same-origin calls from the generated api-client hit the dev proxy.
       '/api': { target: proxyTarget, changeOrigin: true },

@@ -44,3 +44,6 @@ gui-*-screenshots/
 
 # DB backups (local only, never commit)
 backups/
+
+# Cloudflare Tunnel credentials (local only, never commit)
+docker/cloudflared/credentials.json
