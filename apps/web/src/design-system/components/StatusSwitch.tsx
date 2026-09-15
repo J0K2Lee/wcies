@@ -41,7 +41,12 @@ export function StatusSwitch({
       <span style={{ fontSize: 13, color: colors.textSecondary, flexShrink: 0 }}>状态</span>
       <Popconfirm
         open={confirmOpen}
-        onOpenChange={setConfirmOpen}
+        onOpenChange={(open) => {
+          // Opening must come only from the disable branch in onClick below;
+          // otherwise antd opens the popover on any child click (including
+          // enable, which already ran) and cancelling looks like it failed.
+          if (!open) setConfirmOpen(false);
+        }}
         title={`确认停用该${entityName}？`}
         description={disableHint}
         okText="停用"

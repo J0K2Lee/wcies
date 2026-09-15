@@ -15,9 +15,7 @@ import { isAuthError } from '../api/hooks';
  * because it is a mutation handled inside LoginPage).
  */
 function handleAuthExpiry(): void {
-  const redirect = encodeURIComponent(
-    window.location.pathname + window.location.search,
-  );
+  const redirect = encodeURIComponent(window.location.pathname + window.location.search);
   window.location.assign(`/login?reason=expired&redirect=${redirect}`);
 }
 
@@ -53,7 +51,8 @@ export function AppProviders({ children }: { children: ReactNode }) {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <ConfigProvider locale={zhCN} theme={wciesTheme}>
+        {/* autoInsertSpace=false：双字按钮文案（如「登录」）禁止自动加空格（UI 规范 §3.4）。 */}
+        <ConfigProvider locale={zhCN} theme={wciesTheme} button={{ autoInsertSpace: false }}>
           <AntdApp>
             <BrowserRouter>{children}</BrowserRouter>
           </AntdApp>
