@@ -101,6 +101,22 @@ export interface PlatformListingRaw {
 // Orders
 // ---------------------------------------------------------------------------
 
+/**
+ * Normalized platform LOGISTICS stage of an order (2026-09-15 dual-axis task
+ * T1). Derived by each platform MAPPER from its own status vocabulary - the
+ * core never interprets platform status strings (AGENTS.md §31/§33). Stages
+ * are facts, never ERP states: AWAITING_SHIPMENT/IN_TRANSIT/DELIVERED describe
+ * where the GOODS are on the platform side, while erp_status describes WCIES
+ * fulfillment progress.
+ */
+export const PLATFORM_ORDER_STAGES = [
+  'AWAITING_SHIPMENT',
+  'IN_TRANSIT',
+  'DELIVERED',
+  'CANCELLED',
+] as const;
+export type PlatformOrderStage = (typeof PLATFORM_ORDER_STAGES)[number];
+
 /** One order line as returned by the platform. */
 export interface PlatformOrderItemRaw {
   readonly platformProductId: string | null;
@@ -137,6 +153,20 @@ export interface PlatformOrderRaw {
    * platform_status strings itself (Sprint 9 T1).
    */
   readonly platformCancelled?: boolean;
+  /**
+   * Normalized logistics stage (see PLATFORM_ORDER_STAGES). Null when the
+   * mapper's status vocabulary value is not yet classified (e.g. OZON
+   * `arbitration`) - unclassified values must be documented, never guessed
+   * (AGENTS.md §88).
+   */
+  readonly platformStage?: PlatformOrderStage | null;
+  /**
+   * Platform's OWN timestamp for entering `platformStage` (OZON:
+   * delivering_date for IN_TRANSIT, fact_delivery_date for DELIVERED).
+   * Null when the stage carries no platform timestamp or the value is
+   * missing/unparseable - callers fall back to their observation time.
+   */
+  readonly platformStageChangedAt?: Date | null;
 }
 
 // ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@ import {
   PlatformListingSkuRaw,
   PlatformOrderItemRaw,
   PlatformOrderRaw,
+  PlatformOrderStage,
   PlatformWebhookEvent,
   PlatformWebhookEventType,
 } from '@wcies/platform-contracts';
@@ -78,6 +79,25 @@ export function mapProductToListing(
  */
 const OZON_POSTING_STATUS_CANCELLED = 'cancelled';
 
+/**
+ * Seller API `status` -> normalized logistics stage (dual-axis task T1,
+ * 2026-09-15; vocabulary cross-checked word-by-word against the v3 English
+ * spec's v3FbsPostingDetail.status description - see docs/integrations/ozon.md
+ * §平台阶段映射). Unclassified values map to null: guessing a stage for
+ * arbitration-like statuses would be a business-rule invention (AGENTS.md §88).
+ */
+const OZON_POSTING_STATUS_STAGE: Readonly<Record<string, PlatformOrderStage>> = {
+  awaiting_approve: 'AWAITING_SHIPMENT',
+  awaiting_packaging: 'AWAITING_SHIPMENT',
+  awaiting_registration: 'AWAITING_SHIPMENT',
+  awaiting_deliver: 'AWAITING_SHIPMENT',
+  delivering: 'IN_TRANSIT',
+  driver_pickup: 'IN_TRANSIT',
+  acceptance_in_progress: 'IN_TRANSIT',
+  delivered: 'DELIVERED',
+  cancelled: 'CANCELLED',
+};
+
 export function mapPostingToOrder(posting: OzonFbsPosting): PlatformOrderRaw {
   if (typeof posting.posting_number !== 'string' || posting.posting_number === '') {
     throw malformed('posting', 'posting_number missing');
@@ -96,6 +116,16 @@ export function mapPostingToOrder(posting: OzonFbsPosting): PlatformOrderRaw {
   // whole posting sync (AGENTS.md §49) - so unlike orderedAt this parse is
   // TOLERANT: missing or unparseable becomes null.
   const shipmentDeadline = parseIsoDateTolerant(posting.shipment_date);
+  // Normalized logistics stage + the platform's OWN timestamp for entering it
+  // (dual-axis task T1). Anchors per docs §2.4: IN_TRANSIT -> delivering_date,
+  // DELIVERED -> fact_delivery_date, otherwise null. Both parses tolerant.
+  const platformStage = OZON_POSTING_STATUS_STAGE[posting.status] ?? null;
+  const platformStageChangedAt =
+    platformStage === 'IN_TRANSIT'
+      ? parseIsoDateTolerant(posting.delivering_date)
+      : platformStage === 'DELIVERED'
+        ? parseIsoDateTolerant(posting.fact_delivery_date)
+        : null;
 
   const items: PlatformOrderItemRaw[] = posting.products.map(
     (product: OzonPostingProduct, index: number) => {
@@ -128,6 +158,8 @@ export function mapPostingToOrder(posting: OzonFbsPosting): PlatformOrderRaw {
     platformOrderId: posting.posting_number,
     platformStatus: posting.status,
     platformCancelled: posting.status === OZON_POSTING_STATUS_CANCELLED,
+    platformStage,
+    platformStageChangedAt,
     fulfillmentMode: 'FBS',
     orderedAt,
     shipmentDeadline,
@@ -196,6 +228,45 @@ export function webhookSellerId(payload: unknown): string | null {
     return null;
   }
   return readNumber((payload as Record<string, unknown>).seller_id);
+}
+
+// ---------------------------------------------------------------------------
+// Push notification acknowledgement
+// ---------------------------------------------------------------------------
+
+/**
+ * OZON push notification acknowledgement body.
+ *
+ * Verified 2026-09-14 against the seller cabinet's "添加地址" check: the legacy
+ * `{result: true}` body is REJECTED with WRONG_RESULT_TIME_FIELD. The platform
+ * requires `{version, name, time}` on HTTP 200; errors must answer 4xx/5xx.
+ * Source: official OpenAPI spec v2.1, section "Запрос для проверки соединения"
+ * (docs/ozon-seller-openapi.json) - see docs/integrations/ozon.md §6.4.
+ */
+export interface OzonPushAck {
+  version: string;
+  name: string;
+  time: string;
+}
+
+/** Service identity reported to OZON - free-form strings per the spec. */
+const PUSH_ACK_NAME = 'WCIES';
+const PUSH_ACK_VERSION = '2.0';
+
+/**
+ * Builds the acknowledgement for a push notification.
+ *
+ * `time` is the moment the notification STARTED being processed (spec:
+ * "дата и время начала обработки уведомления"), not when the response is
+ * serialised - hence the caller stamps it on entry. Fractional seconds are
+ * dropped to match the documented template `2019-08-24T14:15:22Z`.
+ */
+export function buildPushAck(startedAt: Date): OzonPushAck {
+  return {
+    version: PUSH_ACK_VERSION,
+    name: PUSH_ACK_NAME,
+    time: startedAt.toISOString().replace(/\.\d{3}Z$/, 'Z'),
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -25,6 +25,8 @@ import { OrderItemEntity } from './order-item.entity';
 @Index('idx_orders_store', ['storeId'])
 @Index('idx_orders_ordered_at', ['orderedAt'])
 @Index('idx_orders_store_ordered', ['storeId', 'orderedAt'])
+@Index('idx_orders_store_stage', ['storeId', 'platformStage'])
+@Index('idx_orders_erp_status_stage', ['erpStatus', 'platformStage'])
 export class OrderEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -40,6 +42,32 @@ export class OrderEntity {
 
   @Column({ type: 'varchar', length: 64, name: 'platform_status', nullable: true })
   platformStatus!: string | null;
+
+  /**
+   * Normalized platform logistics stage (dual-axis task T1, 2026-09-15):
+   * AWAITING_SHIPMENT / IN_TRANSIT / DELIVERED / CANCELLED, or null when the
+   * platform vocabulary value is unclassified or not yet synced. A platform
+   * FACT about where the goods are - never copied into erp_status (§38).
+   */
+  @Column({ type: 'varchar', length: 30, name: 'platform_stage', nullable: true })
+  platformStage!: string | null;
+
+  /**
+   * Platform's OWN timestamp for entering `platformStage` (OZON
+   * delivering_date / fact_delivery_date; webhook changed_state_date). The
+   * stall clock anchors HERE, not on our receive time (docs §2.4) - falls
+   * back to the migration-row observation time when the platform omits it.
+   */
+  @Column({ type: 'timestamptz', name: 'platform_stage_changed_at', nullable: true })
+  platformStageChangedAt!: Date | null;
+
+  /**
+   * Last time the fallback re-read pass CONFIRMED this order's platform facts
+   * (whether or not anything changed). Drives the fair round-robin candidate
+   * rotation (docs §3 T2) - NOT a business fact, purely a scheduling cursor.
+   */
+  @Column({ type: 'timestamptz', name: 'platform_facts_checked_at', nullable: true })
+  platformFactsCheckedAt!: Date | null;
 
   @Column({ type: 'varchar', length: 40, name: 'erp_status' })
   erpStatus!: ErpOrderStatus;

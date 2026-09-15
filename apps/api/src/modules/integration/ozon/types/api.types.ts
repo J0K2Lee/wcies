@@ -89,7 +89,32 @@ export interface OzonFbsPosting {
    */
   readonly shipment_date?: string | null;
   readonly tracking_number?: string | null;
+  /**
+   * Date when the shipment was transferred for delivery (v3 spec schema,
+   * verified 2026-09-15) - the platform's OWN timestamp for entering the
+   * in-transit stage.
+   */
+  readonly delivering_date?: string | null;
+  /** Actual delivery timestamp (v3 spec schema, verified 2026-09-15). */
+  readonly fact_delivery_date?: string | null;
+  /** Delivery-window / expected-delivery display facts (verified 2026-09-15). */
+  readonly analytics_data?: OzonFbsPostingAnalyticsData | null;
   readonly products: readonly OzonPostingProduct[];
+  readonly [key: string]: unknown;
+}
+
+/**
+ * Nested analytics block of an FBS posting (v3 spec `v3FbsPostingAnalyticsData`,
+ * verified 2026-09-15). Carries the delivery-window display facts; the posting
+ * response schema puts these HERE, not on the top-level posting object.
+ */
+export interface OzonFbsPostingAnalyticsData {
+  /** Expected date by which the order is delivered (Ozon Delivery only). */
+  readonly client_delivery_date_end?: string | null;
+  /** Delivery window start (expected). */
+  readonly delivery_date_begin?: string | null;
+  /** Delivery window end (expected). */
+  readonly delivery_date_end?: string | null;
   readonly [key: string]: unknown;
 }
 

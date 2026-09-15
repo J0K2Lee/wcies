@@ -496,6 +496,12 @@ export class OrderService {
     // platform_status IS NULL keep their value until the platform actually
     // delivers one (planning §1.3 point 4).
     const statusChanged = newStatus !== null && newStatus !== oldStatus;
+    // Stage facts (dual-axis T1): same null-keeps-stored rule. The stage is
+    // rewritten ONLY on a real transition; its anchor takes the mapper's
+    // platform timestamp and falls back to NOW when the platform omitted it
+    // (docs §2.4) - never the other way around.
+    const newStage = input.platformStage ?? null;
+    const stageChanged = newStage !== null && newStage !== order.platformStage;
     const newDeadline = toInstantOrNull(input.shipmentDeadline);
     const deadlineChanged = !sameInstant(newDeadline, order.shipmentDeadline ?? null);
     // Key-order-insensitive comparison: PG jsonb normalizes key order on the
@@ -505,7 +511,7 @@ export class OrderService {
       canonicalJson(input.rawData ?? null) !== canonicalJson(order.rawData ?? null);
 
     let cancelled = false;
-    if (statusChanged || deadlineChanged || rawChanged) {
+    if (statusChanged || deadlineChanged || rawChanged || stageChanged) {
       const effectiveDeadline = newDeadline ?? order.shipmentDeadline ?? null;
       const effectiveRawData = input.rawData ?? order.rawData ?? null;
       await this.dataSource.transaction(async (runner) => {
@@ -513,6 +519,12 @@ export class OrderService {
           platformStatus: newStatus ?? oldStatus,
           shipmentDeadline: effectiveDeadline,
           rawData: effectiveRawData,
+          ...(stageChanged
+            ? {
+                platformStage: newStage,
+                platformStageChangedAt: toInstantOrNull(input.platformStageChangedAt),
+              }
+            : {}),
         });
         if (statusChanged) {
           await this.platformStatusHistoryRepo.insert(runner, {
@@ -546,7 +558,16 @@ export class OrderService {
         shipmentDeadline: newDeadline ?? order.shipmentDeadline ?? null,
       });
     }
-    return { applied: true, changed: statusChanged || deadlineChanged || rawChanged, cancelled };
+    // Rotation cursor (dual-axis T2): every CONFIRMED re-read advances the
+    // slot, changed or not - that is what makes the fallback pass fair.
+    await this.dataSource.transaction(async (runner) => {
+      await this.orderRepo.markPlatformFactsChecked(runner, order.id);
+    });
+    return {
+      applied: true,
+      changed: statusChanged || deadlineChanged || rawChanged || stageChanged,
+      cancelled,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -822,6 +843,13 @@ export interface OrderPlatformFactsInput {
   platformStatus: string | null;
   /** Mapper-derived flag - platform vocabulary never leaks into core (§31). */
   platformCancelled: boolean;
+  /**
+   * Normalized platform logistics stage (dual-axis T1); null = unclassified
+   * or not delivered - the stored stage is kept.
+   */
+  platformStage: string | null;
+  /** Platform's own timestamp for entering the stage; null = observation now. */
+  platformStageChangedAt: Date | string | null;
   shipmentDeadline: Date | string | null;
   rawData: Record<string, unknown> | null;
   /** Channel that delivered the facts (ORDER_SYNC / WEBHOOK / ...). */

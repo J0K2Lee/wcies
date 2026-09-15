@@ -3,9 +3,11 @@
 > 状态：**Sprint 5 已实现**（Read-only：Credential Validation + Fetch Listings + Fetch Orders + Webhook）。
 >
 > 事实来源：
-> 1. 官方 Seller API OpenAPI 规范 `docs/ozon-seller-openapi.json`（版本 2.1，用户提供，2026-09-09）；
-> 2. 官方文档站点 docs.ozon.ru（Push notifications 章节；站点有 antibot，内容经搜索缓存与开源客户端实现交叉验证）；
-> 3. 真实 API 冒烟测试：**尚未执行**（需用户批准，见「Smoke Test」章节）。
+> 1. 官方 Seller API OpenAPI 规范 `docs/ozon-seller-openapi.json`（版本 2.1 / 俄文，用户提供，2026-09-09）；
+> 2. 官方 Seller API OpenAPI 规范 `docs/ozon-seller-api-eng-version-3.json`（**OpenAPI 3.0.0 / 英文，用户提供，2026-09-14**；
+>    比前者多出 2026-08-04 新增的 8 种通知类型文档，Push/Notification 章节以此为准）；
+> 3. 官方文档站点 docs.ozon.ru（Push notifications 章节；站点有 antibot，内容经搜索缓存与开源客户端实现交叉验证）；
+> 4. 真实 API 冒烟测试：**尚未执行**（需用户批准，见「Smoke Test」章节）。
 >
 > 未验证项一律明确标注，不得进入生产假设。
 
@@ -16,6 +18,13 @@
 | Endpoint / Request / Response 字段 | 官方 OpenAPI 规范 json 逐字段核对 | 2026-09-09 |
 | Webhook 事件类型与消息结构 | 官方规范（/v1/notification/* 枚举）+ 开源客户端结构（diphantxm/ozon-api-client）交叉 | 2026-09-09 |
 | Webhook 订阅类型完整清单（14 种）、各事件 payload、push 模型状态词表、`{version,name,time}` 应答格式 | 官方规范 v2.1 内嵌文档段逐项核对（`notification.v1.*` 枚举 + 描述文本）；**真实投递未验证**（从未配置真实 webhook） | 2026-09-13 |
+| **Webhook 应答体格式（§6.4 冲突定论）** | **真实平台实测**：卖家后台「添加地址」现场校验，旧 `{result:true}` 被判 `WRONG_RESULT_TIME_FIELD`；修正为 `{version,name,time}` 后本地+公网复验通过 | **2026-09-14** |
+| `TYPE_PING` 请求体形状 | 同上实测（`{message_type, time}`）；平台周期性发送，无需订阅 | 2026-09-14 |
+| 卖家后台可选订阅类型清单（**22 种**，与 §6.1 规范枚举清单不符） | 卖家后台「添加地址」勾选框逐项抄录，见 §6.1b | 2026-09-14 |
+| `TYPE_ORDER_*` / `TYPE_FBO_*` 等新增通知的载荷文档 | v3 英文规范逐字段核对（§6.1d）；这批类型 2026-08-04 加入，v2.1 规范未收录 | 2026-09-14 |
+| 投递重试与自动停用规则（含 **5 秒处理上限**） | v3 英文规范 push_resending / push_monitoring 章节（§6.5） | 2026-09-14 |
+| 首批真实投递（STATE_CHANGED / PING / WRONG_PUSH） | 订阅后 `external_raw_events` 实录（§6.6） | 2026-09-14 |
+| 开发环境 webhook 公网入口 | Cloudflare Tunnel 落地 + 全链路 E2E（见 `ozon-webhook-tunnel.md`） | 2026-09-14 |
 | Webhook 无签名机制 | 官方文档与所有已知开源实现均无验签 API | 2026-09-09 |
 | 真实凭证实测 | 真实 Smoke Test（只读：凭证验证 + Listing + 订单拉取 + 手动同步 + 幂等复测），单店 | 2026-09-09 |
 | `/v1/description-category/tree`（ZH_HANS + RU） | 真实 API 冒烟（只读），单店（Sprint 8.5 T0） | 2026-09-14 |
@@ -110,6 +119,33 @@ Request：`{posting_number: string, with:{}}`；Response：`{result: <posting>}`
 - `fulfillmentMode` 固定 `FBS`（本 Sprint 只接 FBS 订单；FBO/FBP 未来 Sprint）。
 - 订单取消/状态回写：**本 Sprint 不做**（Read-first，§4 禁止写操作）。
 
+### 平台阶段映射（双轴任务 T1，2026-09-15 冻结）
+
+`status` → 归一化 `platformStage`（`orders.platform_stage`，平台事实，绝不写
+`erp_status`，AGENTS.md §38）。词表与 v3 英文规范 `v3FbsPostingDetail.status`
+描述段**逐词核对**（2026-09-15）：
+
+| Seller API `status` | `platformStage` | `platformStageChangedAt` 锚点 |
+|---|---|---|
+| `awaiting_approve` / `awaiting_packaging` / `awaiting_registration` / `awaiting_deliver` | `AWAITING_SHIPMENT` | null |
+| `delivering` / `driver_pickup` / `acceptance_in_progress` | `IN_TRANSIT` | `delivering_date` |
+| `delivered` | `DELIVERED` | `fact_delivery_date` |
+| `cancelled` | `CANCELLED` | null |
+
+**未归类（→ null，仅记录，不猜）**：`arbitration`、`client_arbitration`、
+`not_accepted`（任务书 §8 待确认项 3）；`awaiting_verification`（"created"）、
+`cancelled_from_split_pending`（拆单取消）——后两个是 2026-09-15 规范复核时
+发现任务书词表未覆盖的规范值，同样保守置 null 待业务归类。
+
+⚠ **A8 坑（2026-09-15 规范 schema 逐项核对）**：`/v3/posting/fbs/get` 响应对象
+（`v3FbsPostingDetail`，43 属性）**不含** `changed_state_date` /
+`last_changed_status_date`——`last_changed_status_date` 只作为 `/v3,/v4
+posting/fbs/list` 的请求过滤器存在，`changed_state_date` 只在 webhook 载荷中。
+回读路径的阶段时钟锚点只能用 `delivering_date` / `fact_delivery_date`。
+另外 `client_delivery_date_end` / `delivery_date_begin/end` 在响应的
+**`analytics_data` 嵌套对象**里（不是 posting 顶层）；这些送达日期事实本期仅
+随 raw_data 展示，不参与停滞/妥投判定。
+
 ## 4. 限流（Rate Limit）
 
 - 官方文档未给出每个方法的精确配额（**未验证**）。
@@ -148,7 +184,10 @@ Request：`{posting_number: string, with:{}}`；Response：`{result: <posting>}`
   POST {PUBLIC_BASE}/api/v1/webhooks/ozon/stores/{storeCode}
   ```
 
-  （每店铺一个 URL 段；本机开发需公网可达，如内网穿透。）
+  （每店铺一个 URL 段；本机开发需公网可达 —— 穿透方案与落地状态见
+  [ozon-webhook-tunnel.md](./ozon-webhook-tunnel.md)。开发环境回调地址：
+  `https://ozon-hook.wulaoula.cn/api/v1/webhooks/ozon/stores/{storeCode}`，
+  公网域名由 `PUBLIC_BASE_URL` 配置提供。）
 
 ### 6.1 订阅类型完整清单（规范 v2.1 `notification.v1.*.Type.Enum`，2026-09-13 逐项核对）
 
@@ -174,6 +213,88 @@ Request：`{posting_number: string, with:{}}`；Response：`{result: <posting>}`
 
 **`TYPE_PING` 不在订阅枚举中**：它是平台在初次接入及此后**周期性**发送的连通性检查
 （`{message_type:'TYPE_PING', time}`），无需订阅、不可关闭。
+
+### 6.1b 卖家后台实际可选类型（2026-09-14 实测，22 种）
+
+配置入口「设置 → 集成 → Push 通知 → 添加地址」勾选框的实际清单（按字母序）：
+
+```text
+TYPE_CHAT_CLOSED                       聊天已关闭
+TYPE_CREATE_ITEM                       商品创建或商品创建错误
+TYPE_CREATE_OR_UPDATE_ITEM             商品创建和更新，或在此过程中发生的错误
+TYPE_CUTOFF_DATE_CHANGED               货件发运日期更改
+TYPE_DELIVERY_DATE_CHANGED             货件配送日期更改
+TYPE_DESCRIPTION_CATEGORY_TREE_CHANGED 类目树更改
+TYPE_FBO_POSTING_CANCELLED             FBO货件取消
+TYPE_FBO_POSTING_DELIVERY_DATE_CHANGED FBO货物送达时间变更
+TYPE_FBO_POSTING_NEW                   FBO新货件
+TYPE_FBO_POSTING_STATE_CHANGED         FBO货件状态变更
+TYPE_FBO_STOCKS_CHANGED                FBO库存变更
+TYPE_MESSAGE_READ                      您的消息已被买家或客服阅读
+TYPE_NEW_MESSAGE                       新的聊天消息
+TYPE_NEW_POSTING                       新的货件
+TYPE_ORDER_CANCELLED                   取消订单
+TYPE_ORDER_NEW                         新订单
+TYPE_ORDER_STATE_CHANGED               订单状态变更
+TYPE_POSTING_CANCELLED                 货件取消
+TYPE_STATE_CHANGED                     货件状态更改
+TYPE_STOCKS_CHANGED                    卖家仓库库存变化
+TYPE_UPDATE_ITEM                       商品更新或更新错误
+TYPE_UPDATE_MESSAGE                    聊天消息更改
+```
+
+> ⚠ **与 §6.1 的规范枚举清单存在差异（2026-09-14 已定论）**：
+> - 后台多出的 9 种（`TYPE_ORDER_*` ×3、`TYPE_DESCRIPTION_CATEGORY_TREE_CHANGED`、
+>   `TYPE_FBO_*` ×5）是 OZON **2026-08-04 新增**的通知类型（v3 英文规范新闻段），
+>   v2.1 俄文规范未收录，故 §6.1 清单里没有。载荷文档见 §6.1d。
+> - `TYPE_POSTING_SHIPPED`：后台没有、v3 规范也是 0 次——**§6.1 把它列进去是错的**，
+>   订阅时不可选，勿再引用。
+> - 后台另有实测出现的 **`TYPE_WRONG_PUSH`**（仅 `{time, message_type}` 两字段），
+>   两份规范均为 0 次，无文档；观察到的语义是"此前某次投递/校验失败"的补送标记
+>   （见 §6.5），订阅时不出现、无法选择。
+
+### 6.1d 订单级事件载荷（v3 英文规范「New order / Order cancellation / Order status change」）
+
+三种 `TYPE_ORDER_*` 共有的字段：`order_number`（string）、`order_id`（int64）、
+**`uuid`（string，唯一事件标识——posting 系列没有这个字段）**、`seller_id`（int64）。
+各自的差异字段：
+
+| 类型 | 独有字段 | 示例值 |
+|---|---|---|
+| `TYPE_ORDER_NEW` | `created_at`（date-time） | `order_number: "24219509-0020-1"` |
+| `TYPE_ORDER_CANCELLED` | `cancelled_at`（date-time） | `order_id: 35452597966` |
+| `TYPE_ORDER_STATE_CHANGED` | `old_state` / `new_state`（如 `order_in_delivery` → `order_done`）、`updated_at` | — |
+
+与 posting 系列的关键区别（当前事实，未做更多推断）：
+
+1. **不带 `products`、不带 `warehouse_id`、不带发货信息**——订单级事件没有履约明细，
+   无法直接驱动入库/库存动作；`TYPE_NEW_POSTING` 才带 `products[]` + `posting_number`。
+2. **带 `uuid`**：`TYPE_ORDER_*` 是有事件 ID 的，若未来要处理它们，幂等键可直接用
+   `uuid`（posting 系列无事件 ID，只能按 payload 哈希去重）。
+3. v3 规范在 `TYPE_ORDER_NEW` 章节附警告：**该通知可能延迟**，
+   要及时数据仍应轮询 `POST /v3/posting/fbs/unfulfilled/list`。
+4. `order_number` 的样例格式与 posting_number 同形（`24219509-0020-1`），
+   它与我们 `orders.platform_order_id`（= posting_number）的关系**未验证**，
+   需真实样本比对后再下结论。
+
+> 平台已订阅这三种（2026-09-14，见 §6.6），样本会以 `UNKNOWN` 落进
+> `external_raw_events`，届时回填本节。
+
+### 6.1c WCIES 对各类型的实际处理（按代码，非意图）
+
+`WebhookProcessService` 目前**只对 `NEW_POSTING` 采取真实动作**（定向回读 posting →
+`OrderIngestionService` 入库）。其余类型一律「记录为事实 → 标记 `SKIPPED`」，不产生业务效果：
+
+| 订阅类型 | 分类 | 当前行为 |
+|---|---|---|
+| `TYPE_NEW_POSTING` | `NEW_POSTING` | ✅ 定向回读 + 订单入库 |
+| `TYPE_POSTING_CANCELLED` | `POSTING_CANCELLED` | 仅落库（订单状态由轮询同步覆盖） |
+| `TYPE_STATE_CHANGED` | `POSTING_STATE_CHANGED` | 仅落库（同上） |
+| `TYPE_CREATE_ITEM` / `TYPE_UPDATE_ITEM` / `TYPE_CREATE_OR_UPDATE_ITEM` | `ITEM_CHANGED` | 仅落库（Listing 变更走手动同步） |
+| `TYPE_PING` | `PING` | 仅落库 |
+| 其余（含 `TYPE_ORDER_*`、`TYPE_FBO_*`） | `UNKNOWN` | 仅落库 |
+
+→ 订阅更多类型的意义是**积累真实样本、为后续 Sprint 铺路**，不会立刻改变行为。
 
 ### 6.2 两套状态词表（STATE_CHANGED / CANCELLED 的 `new_state` 用 push 模型，非 Seller API 词表）
 
@@ -201,15 +322,92 @@ Request：`{posting_number: string, with:{}}`；Response：`{result: <posting>}`
 - 幂等：无事件 ID → 按 `(store, sha256(canonical payload))` 去重（`external_raw_events` 唯一索引）。
 - 处理流：校验形状 → 存 raw event（PENDING）→ 入 `wcies.webhook` 队列 → 立即 200。HTTP 请求内**不**建单、**不**锁库存、**不**调用平台 API。
 
-### 6.4 ⚠️ 响应格式存在文档冲突（未定论，待真实订阅时验证）
+### 6.4 ✅ 响应格式（2026-09-14 实测定论，冲突已解决）
 
-- 现实现与本文旧版：`{"result": true}`（来自 docs.ozon.ru 传统 Webhook API 章节）。
-- 规范 v2.1 push-notification 文档段：成功应答 **`{version, name, time}`**，错误为
-  4xx/5xx `{error:{code,message,details}}`；且 `/v1/notification/check` 的错误枚举含
-  `WRONG_RESULT_FIELD`、`WRONG_RESULT_TIME_FIELD`——**暗示新体系会校验应答体形状**。
-- 两处冲突未在真实环境验证（我们从未配置过真实 webhook）。HTTP 200 + 任意 body 大概率
-  可被旧体系接受；但若经新版 beta 方法配置并用 `/check` 验证，`{result:true}` 可能被判
-  `WRONG_RESULT_FIELD`。**接入前必须实测一次**，以实测结果为准修订本节与控制器。
+**结论：新版校验确实存在，`{result:true}` 已被淘汰，必须回 `{version, name, time}`。**
+
+实测过程：卖家后台「设置 → 集成 → Push 通知 → 添加地址」提交
+`https://ozon-hook.wulaoula.cn/api/v1/webhooks/ozon/stores/ON-001`，
+平台现场发起连通性检查，返回：
+
+```text
+⚠️ 响应体中的"time"字段无效        WRONG_RESULT_TIME_FIELD
+   网址不可用：请修正错误后重新添加
+```
+
+即当时实现的 `{"result": true}` 被判不合格。规范 v2.1
+「Запрос для проверки соединения」章节给出的模板（`docs/ozon-seller-openapi.json`）：
+
+**成功（HTTP 200）**：
+
+```json5
+{
+  "version": "string",              // Версия приложения — 应用版本
+  "name": "string",                 // Название приложения — 应用名称
+  "time": "2019-08-24T14:15:22Z"    // 开始处理该通知的时间（UTC date-time）
+}
+```
+
+**失败（4xx/5xx）**：`{"error": {"code": "ERROR_UNKNOWN", "message": "…", "details": null}}`
+
+两个易错点：
+
+1. **`time` 是「开始处理通知」的时刻**，不是返回响应体的时刻——实现里在处理器入口
+   取一次 `startedAt`，而不是出口处 `new Date()`。
+2. 分数秒：模板示例无毫秒（`…T14:15:22Z`），实现按此格式去掉 `.000`，
+   避免格式校验挑剔。
+
+WCIES 实现：`buildPushAck()`（`apps/api/src/modules/integration/ozon/ozon.mapper.ts`），
+控制器 `OzonWebhookController.receive()` 在**所有软成功路径**（ACCEPTED / DUPLICATE /
+REJECTED / 未知瞬时错误）统一返回该应答体；`PLATFORM_BAD_RESPONSE`（400）与
+`STORE_NOT_FOUND`（404）仍按规范走 4xx。
+
+`TYPE_PING` 的请求体形状也已实测确认：`{"message_type": "TYPE_PING", "time": "…"}`。
+
+> 注：v3 规范内部也是新旧两段并存——`service_response` tag 的描述段仍写 `{"result": true}`，
+> 而「Your service response」章节写 `{version, name, time}`。后台现场校验执行的是后者
+> （见上），**以实测为准**；读文档时不要被 tag 描述段带偏。
+
+### 6.5 投递重试与自动停用（v3 英文规范 push_resending / push_monitoring 章节，2026-09-14 收录）
+
+- **重试**：投递失败后数秒内重试若干次，间隔逐步增大；达到上限 **10 分钟**后，
+  再每 10 分钟补投 5 次。
+- **自动暂停**（满足任一条即暂停**全部**通知）：
+  1. 服务不可用；
+  2. 最近 24 小时内持续返回错误；
+  3. 200 响应占比不足一半；
+  4. **单条通知处理时间超过 5 秒**。
+- **恢复**：需在后台重新确认服务 URL，或调 `/v1/notification/enable`，
+  系统在下个检查周期复测。若是 support 侧停用并给出原因，卖家不能自行启用，
+  只能删旧 URL、换新 URL 重接。
+
+对 WCIES 的直接约束：
+
+1. **HTTP 入口必须 5 秒内返回**——当前实现（校验形状 → 落库 → 入队 → 200）满足，
+   任何慢操作必须留在 worker（§28 的既有约束），这是平台侧的硬性红线而不只是风格。
+2. **订阅期间开发机/隧道必须保持可用**。机器关一晚 → 通知被自动暂停 →
+   第二天要人工去后台重新确认 URL。要长期停用就先在后台删地址，不要"挂着订阅关隧道"。
+3. 平台会补送历史失败事件：实测订阅成功后立刻收到了**当天早些时候失败校验**的
+   补送（见 §6.6），幂等去重必须按"同 payload 可能重复到达"设计（已是如此）。
+
+### 6.6 订阅状态与首批真实投递（2026-09-14）
+
+已订阅（卖家后台，店铺 ON-001）：
+
+```text
+TYPE_NEW_POSTING / TYPE_ORDER_NEW / TYPE_ORDER_CANCELLED /
+TYPE_ORDER_STATE_CHANGED / TYPE_POSTING_CANCELLED / TYPE_STATE_CHANGED
+```
+
+订阅后 ~1 小时内的真实到达记录（`external_raw_events`）：
+
+| message_type | 分类 | 处理结果 | 备注 |
+|---|---|---|---|
+| `TYPE_STATE_CHANGED` | `POSTING_STATE_CHANGED` | SKIPPED | **首条真实业务事件**：`posting_on_way_to_city`，posting `62081919-0389-1`，载荷与 §6.1 文档一致 |
+| `TYPE_PING` ×多 | `PING` | SKIPPED | 观察到约每 5–15 分钟一条（混有历史补送，精确周期未定） |
+| `TYPE_WRONG_PUSH` ×2 | `UNKNOWN` | SKIPPED | 无文档类型，仅 `{time, message_type}`；time 对应当天早些时候的失败校验，属补送 |
+
+`TYPE_NEW_POSTING` / `TYPE_ORDER_*` 尚无真实样本（等新订单），到达后回填 §6.1d。
 
 ## 7. 平台 ID 语义（关键）
 
@@ -247,7 +445,10 @@ Request：`{filter: {product_id[] | offer_id[] | sku[]}, limit ≤ 1000}`（**fi
   `result.items` 信封不一致（与 `/v3/product/info/list` 同类的「规范 ≠ 真实」坑，实现按真实结构解析）。
 - Item 关键字段（实测）：`id`（=product_id）、`offer_id`、`name`、`height/depth/width` +
   `dimension_unit`（实测 `"mm"`）、`weight` + `weight_unit`（实测 `"g"`）、
-  `description_category_id`、`type_id`、`primary_image`、`images[]`、`barcode`、`attributes[]`。
+  `description_category_id`、`type_id`、`primary_image`、`images[]`、`barcodes[]`、`attributes[]`。
+  （更正 2026-09-15：字段名是 **`barcodes` 数组**，早前笔记误记为单数 `barcode`；
+  本店 1299 个商品实测**全部为空数组**——卖家从未在 OZON 侧填写条码，
+  因此「从平台数据批量取条码」当前没有任何原料，见 §6 平台条码相关讨论。）
 - 审核未通过（declined）/ 新建（new）商品同样返回属性数据（4/4 实测）。
 - filter 三种 id 形式均可用；字符串/数字 product_id 均被接受。
 - 已知限制：未观察到分页游标（result 即全量），按 ≤1000 分批请求即可。

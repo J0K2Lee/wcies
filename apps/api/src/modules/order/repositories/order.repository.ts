@@ -81,6 +81,8 @@ export class OrderRepository {
       storeId: string;
       platformOrderId: string;
       platformStatus: string | null;
+      platformStage: string | null;
+      platformStageChangedAt: Date | null;
       erpStatus: ErpOrderStatus;
       fulfillmentMode: string | null;
       currency: string | null;
@@ -131,10 +133,13 @@ export class OrderRepository {
   }
 
   /**
-   * Platform FACT patch (Sprint 9 T1): platform_status / shipment_deadline /
-   * raw_data only - never erp_status (AGENTS.md §38). Callers keep the stored
-   * value for fields the platform did not deliver (null input), so a NULL
-   * historical platform_status is never wiped by an empty fact set.
+   * Platform FACT patch (Sprint 9 T1 + dual-axis T1): platform_status /
+   * shipment_deadline / raw_data / platform_stage fields only - never
+   * erp_status (AGENTS.md §38). Callers keep the stored value for fields the
+   * platform did not deliver (null input), so a NULL historical
+   * platform_status is never wiped by an empty fact set. The stage columns
+   * are only rewritten on an actual stage transition; stageChangedAt = null
+   * falls back to the observation time (docs §2.4 anchor rule).
    */
   async updatePlatformFacts(
     manager: EntityManager,
@@ -143,14 +148,31 @@ export class OrderRepository {
       platformStatus: string | null;
       shipmentDeadline: Date | null;
       rawData: Record<string, unknown> | null;
+      platformStage?: string | null;
+      platformStageChangedAt?: Date | null;
     },
   ): Promise<void> {
-    await manager.getRepository(OrderEntity).update({ id }, {
+    const update: Record<string, unknown> = {
       platformStatus: patch.platformStatus,
       shipmentDeadline: patch.shipmentDeadline,
       rawData: patch.rawData,
       updatedAt: new Date(),
-    } as never);
+    };
+    if (patch.platformStage !== undefined) {
+      update.platformStage = patch.platformStage;
+      update.platformStageChangedAt = patch.platformStageChangedAt ?? new Date();
+    }
+    await manager.getRepository(OrderEntity).update({ id }, update);
+  }
+
+  /**
+   * Fallback re-read rotation cursor (dual-axis T2): stamped after every
+   * confirmed re-read, whether or not any fact changed. Written in its own
+   * tiny UPDATE so an unchanged order still advances its rotation slot
+   * without touching updatedAt churn beyond this column.
+   */
+  async markPlatformFactsChecked(manager: EntityManager, id: string): Promise<void> {
+    await manager.getRepository(OrderEntity).update({ id }, { platformFactsCheckedAt: new Date() });
   }
 
   /**

@@ -4,6 +4,7 @@ import {
   mapProductToListing,
   mapWebhookPayload,
   webhookSellerId,
+  buildPushAck,
   OzonMappingError,
 } from './ozon.mapper';
 import {
@@ -165,6 +166,90 @@ describe('mapPostingToOrder', () => {
       mapPostingToOrder({ ...POSTING, shipment_date: 'not-a-date' }).shipmentDeadline,
     ).toBeNull();
   });
+
+  // Dual-axis T1 (2026-09-15): normalized platform logistics stage. The
+  // vocabulary was cross-checked word-by-word against the v3 English spec's
+  // v3FbsPostingDetail.status description - see docs/integrations/ozon.md.
+  it.each([
+    ['awaiting_approve', 'AWAITING_SHIPMENT'],
+    ['awaiting_packaging', 'AWAITING_SHIPMENT'],
+    ['awaiting_registration', 'AWAITING_SHIPMENT'],
+    ['awaiting_deliver', 'AWAITING_SHIPMENT'],
+    ['delivering', 'IN_TRANSIT'],
+    ['driver_pickup', 'IN_TRANSIT'],
+    ['acceptance_in_progress', 'IN_TRANSIT'],
+    ['delivered', 'DELIVERED'],
+    ['cancelled', 'CANCELLED'],
+  ])('maps Seller API status %s to stage %s', (status, stage) => {
+    expect(mapPostingToOrder({ ...POSTING, status }).platformStage).toBe(stage);
+  });
+
+  it.each([
+    ['arbitration'],
+    ['client_arbitration'],
+    ['not_accepted'],
+    // Present in the v3 spec vocabulary but not yet classified by the frozen
+    // mapping table - they stay null until a documented decision exists.
+    ['awaiting_verification'],
+    ['cancelled_from_split_pending'],
+  ])('maps unclassified status %s to platformStage = null (no guessing)', (status) => {
+    expect(mapPostingToOrder({ ...POSTING, status }).platformStage).toBeNull();
+  });
+
+  it('anchors IN_TRANSIT on the platform delivering_date', () => {
+    const order = mapPostingToOrder({
+      ...POSTING,
+      status: 'delivering',
+      delivering_date: '2026-09-14T08:00:00.000Z',
+    });
+    expect(order.platformStage).toBe('IN_TRANSIT');
+    expect(order.platformStageChangedAt?.toISOString()).toBe('2026-09-14T08:00:00.000Z');
+  });
+
+  it('anchors DELIVERED on the platform fact_delivery_date', () => {
+    const order = mapPostingToOrder({
+      ...POSTING,
+      status: 'delivered',
+      fact_delivery_date: '2026-09-16T12:30:00.000Z',
+    });
+    expect(order.platformStage).toBe('DELIVERED');
+    expect(order.platformStageChangedAt?.toISOString()).toBe('2026-09-16T12:30:00.000Z');
+  });
+
+  it('non-transit stages carry platformStageChangedAt = null', () => {
+    const order = mapPostingToOrder({ ...POSTING, status: 'awaiting_deliver' });
+    expect(order.platformStage).toBe('AWAITING_SHIPMENT');
+    expect(order.platformStageChangedAt).toBeNull();
+  });
+
+  it('a missing or invalid delivering_date degrades to null without throwing', () => {
+    const missing = mapPostingToOrder({ ...POSTING, status: 'delivering' });
+    expect(missing.platformStage).toBe('IN_TRANSIT');
+    expect(missing.platformStageChangedAt).toBeNull();
+    const invalid = mapPostingToOrder({
+      ...POSTING,
+      status: 'delivering',
+      delivering_date: 'not-a-date',
+    });
+    expect(invalid.platformStageChangedAt).toBeNull();
+  });
+
+  it('keeps the raw analytics_data delivery window verbatim in rawData', () => {
+    const order = mapPostingToOrder({
+      ...POSTING,
+      status: 'delivering',
+      analytics_data: {
+        client_delivery_date_end: '2026-09-20T00:00:00Z',
+        delivery_date_begin: '2026-09-18T00:00:00Z',
+        delivery_date_end: '2026-09-20T00:00:00Z',
+      },
+    });
+    expect(order.rawData['analytics_data']).toEqual({
+      client_delivery_date_end: '2026-09-20T00:00:00Z',
+      delivery_date_begin: '2026-09-18T00:00:00Z',
+      delivery_date_end: '2026-09-20T00:00:00Z',
+    });
+  });
 });
 
 describe('mapWebhookPayload', () => {
@@ -201,5 +286,29 @@ describe('mapWebhookPayload', () => {
     expect(webhookSellerId({ seller_id: 111222333 })).toBe('111222333');
     expect(webhookSellerId({ seller_id: '111222333' })).toBe('111222333');
     expect(webhookSellerId({})).toBeNull();
+  });
+});
+
+describe('buildPushAck', () => {
+  it('answers exactly the template the platform validates', () => {
+    // {result:true} was rejected with WRONG_RESULT_TIME_FIELD (2026-09-14).
+    const ack = buildPushAck(new Date('2026-09-14T15:30:00.000Z'));
+    expect(ack).toEqual({
+      version: '2.0',
+      name: 'WCIES',
+      time: '2026-09-14T15:30:00Z',
+    });
+    // Extra keys would risk WRONG_RESULT_FIELD - the body is the template.
+    expect(Object.keys(ack).sort()).toEqual(['name', 'time', 'version']);
+  });
+
+  it('formats time without fractional seconds, matching the documented example', () => {
+    expect(buildPushAck(new Date('2019-08-24T14:15:22.123Z')).time).toBe('2019-08-24T14:15:22Z');
+  });
+
+  it('reports processing start time in UTC, not local time', () => {
+    const startedAt = new Date('2026-09-14T23:59:59.000Z');
+    expect(buildPushAck(startedAt).time.endsWith('Z')).toBe(true);
+    expect(new Date(buildPushAck(startedAt).time).getTime()).toBe(startedAt.getTime());
   });
 });

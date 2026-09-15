@@ -251,6 +251,37 @@ ORDER_SYNC 再遇到已存在的订单（窗口重叠再投递，或定向回读
 
 ---
 
+# 7b. 平台物流阶段（双轴任务 T1，2026-09-15）
+
+订单头新增三个**平台事实列**（绝不写 `erp_status`，§1/§38 不变）：
+
+```text
+orders.platform_stage             归一化平台物流阶段（AWAITING_SHIPMENT /
+                                  IN_TRANSIT / DELIVERED / CANCELLED，可空）
+orders.platform_stage_changed_at  进入该阶段的平台自身时间戳（停滞时钟锚点）
+orders.platform_facts_checked_at  最近一次兜底回读确认时间（调度游标，非事实）
+```
+
+规则：
+
+1. **归一化在 Mapper 完成**（AGENTS.md §31/§33）：OZON 词表 → 阶段的映射
+   表冻结于 `docs/integrations/ozon.md` §平台阶段映射；未归类状态
+   （`arbitration` 等）→ NULL，禁止猜测（AGENTS.md §88）。
+2. **锚点取平台自身时间**（§2.4 口径）：`IN_TRANSIT` → `delivering_date`、
+   `DELIVERED` → `fact_delivery_date`（OZON GET 响应**没有**
+   `changed_state_date`，该字段仅 webhook 载荷有）；阶段迁移时若平台
+   时间缺失/非法，回退**本次观察时间**，不得用「我们的接收时间」当
+   平台事实。
+3. **NULL 输入保留库内值**：与 §7a.1 同语义——未归类/未同步不得清空
+   已有阶段。
+4. **`platform_facts_checked_at` 只是轮转游标**：每次兜底回读确认后刷新
+   （无论事实是否变化），服务于 T2 的公平轮转（见 §7a.2），不参与业务
+   判定。
+5. 停滞判定（`platform_stage='IN_TRANSIT'` 且超 3 天未变）见 §16A；
+   列表「待收货 / 已完成」标签以 `platform_stage` 为准（§17a）。
+
+---
+
 # 8. 取消订单
 
 内部 `cancelOrder()`：人工 / API 触发，或**平台取消自动传导**（Sprint 9 T1，

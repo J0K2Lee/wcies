@@ -99,6 +99,8 @@ export class OrderIngestionService {
             storeId: input.storeId,
             platformOrderId: input.platformOrderId,
             platformStatus: input.platformStatus ?? null,
+            platformStage: input.platformStage ?? null,
+            platformStageChangedAt: input.platformStageChangedAt ?? null,
             erpStatus: 'NEW',
             fulfillmentMode: input.fulfillmentMode ?? null,
             currency: input.currency ?? null,

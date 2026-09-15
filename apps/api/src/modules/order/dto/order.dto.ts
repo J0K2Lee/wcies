@@ -15,6 +15,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
+import { PLATFORM_ORDER_STAGES } from '@wcies/platform-contracts';
 import {
   ERP_ORDER_STATUSES,
   ORDER_INTERCEPTION_STATUSES,
@@ -65,6 +66,23 @@ export class NormalizedOrderInputDto {
   @IsString()
   @MaxLength(64)
   platformStatus?: string;
+  @ApiPropertyOptional({
+    enum: PLATFORM_ORDER_STAGES,
+    nullable: true,
+    description: '归一化平台物流阶段（平台事实，非 ERP 状态）；未归类/未同步为 null（双轴 T1）',
+  })
+  @IsOptional()
+  @IsIn(PLATFORM_ORDER_STAGES)
+  platformStage?: string | null;
+  @ApiPropertyOptional({
+    nullable: true,
+    type: String,
+    format: 'date-time',
+    description: '平台自身记录的进入该阶段时间（停滞时钟锚点）；缺失为 null',
+  })
+  @IsOptional()
+  @IsDateString()
+  platformStageChangedAt?: Date | null;
   @ApiPropertyOptional({ example: 'FBS' })
   @IsOptional()
   @IsString()
