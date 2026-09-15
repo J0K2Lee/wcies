@@ -1,28 +1,29 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-  App,
-  Button,
-  Form,
-  Input,
-  InputNumber,
-  Modal,
-  Popconfirm,
-  Select,
-  Space,
-  Switch,
-  Table,
-  Tag,
-  Tooltip,
-} from 'antd';
-import { useState } from 'react';
+import { App, Button, Form, Input, InputNumber, Modal, Select, Space, Switch, Tooltip } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { apiDelete, apiPost, useApiQuery } from '../../api/hooks';
 import {
+  ContextAction,
+  ContextMetric,
+  ContextRailContent,
+  ContextSection,
+  DataTable,
+  DeleteConfirmModal,
+  EntitySummary,
+  FilterBar,
   FULFILLMENT_CATEGORY_LABEL,
   FULFILLMENT_MODE_META,
+  PageHeader,
   PlatformTag,
+  RailHint,
+  SectionCard,
+  StatusBadge,
+  StatusSwitch,
+  colors,
+  useContextRail,
 } from '../../design-system';
-import { colors } from '../../design-system/tokens';
 
 interface BindingRow {
   id: string;
@@ -71,12 +72,14 @@ export function StoreBindingsPage() {
   const [storeId, setStoreId] = useState<string | undefined>(
     () => searchParams.get('storeId') ?? undefined,
   );
-  const [createOpen, setCreateOpen] = useState(false);
-  const [form] = Form.useForm();
-
   const [warehouseId, setWarehouseId] = useState<string | undefined>(
     () => searchParams.get('warehouseId') ?? undefined,
   );
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [deleting, setDeleting] = useState<BindingRow | null>(null);
+  const [form] = Form.useForm();
+
   const list = useApiQuery<{ data: BindingRow[]; meta: { total: number } }>(
     '/api/v1/warehouse-bindings',
     { page, pageSize: 50, storeId, warehouseId },
@@ -123,6 +126,8 @@ export function StoreBindingsPage() {
       apiDelete('/api/v1/stores/{storeId}/warehouse-bindings/{id}', { storeId: sid, id }),
     onSuccess: () => {
       void message.success('绑定已删除');
+      setDeleting(null);
+      setSelectedId(null);
       void queryClient.invalidateQueries({ queryKey: ['bindings'] });
     },
     onError: (error: Error) => void message.error(error.message),
@@ -157,15 +162,104 @@ export function StoreBindingsPage() {
     onError: (error: Error) => void message.error(error.message),
   });
 
+  const rows = list.data?.data ?? [];
+  const selectedRow = useMemo(
+    () => rows.find((row) => row.id === selectedId) ?? null,
+    [rows, selectedId],
+  );
+
+  const railContent = useMemo<ContextRailContent>(() => {
+    if (selectedRow === null) {
+      return {
+        defaultCollapsed: true,
+        children: (
+          <ContextSection title="绑定概览">
+            <ContextMetric label="当前筛选" value={`${list.data?.meta.total ?? 0} 条绑定`} />
+            <RailHint>点击绑定行查看详情；启停与删除在右栏操作。</RailHint>
+          </ContextSection>
+        ),
+      };
+    }
+    const modeMeta = FULFILLMENT_MODE_META[selectedRow.fulfillmentMode];
+    return {
+      defaultCollapsed: true,
+      header: (
+        <EntitySummary
+          title={`${selectedRow.storeCode} · ${selectedRow.warehouseCode}`}
+          subtitle={`${selectedRow.storeName} → ${selectedRow.warehouseName}`}
+          badge={
+            <StatusBadge
+              tone={selectedRow.status === 'ACTIVE' ? 'success' : 'neutral'}
+              label={selectedRow.status === 'ACTIVE' ? '启用' : '停用'}
+              hint={selectedRow.status}
+            />
+          }
+          meta={<PlatformTag code={selectedRow.platformCode} />}
+        />
+      ),
+      children: (
+        <>
+          <ContextSection title="绑定信息">
+            <ContextMetric
+              label="履约模式"
+              value={
+                modeMeta === undefined
+                  ? selectedRow.fulfillmentMode
+                  : `${FULFILLMENT_CATEGORY_LABEL[modeMeta.category] ?? modeMeta.category} · ${modeMeta.label}`
+              }
+            />
+            <ContextMetric label="平台仓ID" value={selectedRow.platformWarehouseId ?? '—'} />
+            <ContextMetric label="库存来源" value={selectedRow.isInventorySource ? '是' : '否'} />
+            <ContextMetric
+              label="库存推送"
+              value={selectedRow.isInventoryPushEnabled ? '开' : '关'}
+            />
+            <ContextMetric label="优先级" value={selectedRow.priority} />
+            <StatusSwitch
+              active={selectedRow.status === 'ACTIVE'}
+              entityName="店仓绑定"
+              disableHint="停用后该店铺不再从此仓库履约/推送库存"
+              loading={statusMutation.isPending}
+              onChange={(next) =>
+                statusMutation.mutate({
+                  storeId: selectedRow.storeId,
+                  id: selectedRow.id,
+                  action: next ? 'enable' : 'disable',
+                })
+              }
+            />
+          </ContextSection>
+          <ContextAction>
+            <Button block danger onClick={() => setDeleting(selectedRow)}>
+              删除
+            </Button>
+          </ContextAction>
+        </>
+      ),
+    };
+  }, [selectedRow, list.data, statusMutation.isPending, statusMutation.mutate]);
+  useContextRail(railContent);
+
   return (
-    <Space orientation="vertical" style={{ width: '100%' }} size="middle">
-      <Space wrap>
+    <div>
+      <PageHeader
+        title="店仓绑定"
+        description="把店铺与履约仓库按平台履约模式绑定；同一仓库可被多个店铺共享"
+        primary={
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+            新建绑定
+          </Button>
+        }
+      />
+
+      <FilterBar>
         <Select
           allowClear
           placeholder="筛选店铺"
           showSearch
           optionFilterProp="label"
           style={{ width: 220 }}
+          value={storeId}
           onChange={(value) => {
             setPage(1);
             setStoreId(value);
@@ -191,120 +285,108 @@ export function StoreBindingsPage() {
             label: `${warehouse.warehouseCode} ${warehouse.name}`,
           }))}
         />
-        <Button type="primary" onClick={() => setCreateOpen(true)}>
-          新建绑定
-        </Button>
-      </Space>
+      </FilterBar>
 
-      <Table<BindingRow>
-        rowKey="id"
-        loading={list.isLoading}
-        dataSource={list.data?.data ?? []}
-        pagination={{
-          current: page,
-          pageSize: 50,
-          total: list.data?.meta.total ?? 0,
-          onChange: setPage,
-          showSizeChanger: false,
-        }}
-        scroll={{ x: 1100 }}
-        columns={[
-          {
-            title: '平台',
-            dataIndex: 'platformCode',
-            width: 110,
-            render: (value: string) => <PlatformTag code={value} />,
-          },
-          { title: '店铺', dataIndex: 'storeCode' },
-          { title: '仓库', dataIndex: 'warehouseCode' },
-          { title: '仓库名称', dataIndex: 'warehouseName' },
-          {
-            title: '履约模式',
-            dataIndex: 'fulfillmentMode',
-            render: (value: string) => {
-              const meta = FULFILLMENT_MODE_META[value];
-              if (meta === undefined) {
-                return value;
-              }
-              return (
-                <Tooltip title={`${meta.label} — ${meta.hint}`}>
-                  <span>
-                    {FULFILLMENT_CATEGORY_LABEL[meta.category] ?? meta.category}
-                    <span style={{ color: colors.textTertiary, marginLeft: 6, fontSize: 12 }}>
-                      {meta.label}
-                    </span>
-                  </span>
-                </Tooltip>
-              );
+      <SectionCard flush>
+        <DataTable<BindingRow>
+          rowKey="id"
+          loading={list.isLoading}
+          dataSource={rows}
+          pagination={{
+            current: page,
+            pageSize: 50,
+            total: list.data?.meta.total ?? 0,
+            onChange: setPage,
+            showSizeChanger: false,
+            showTotal: (total) => `共 ${total} 条绑定`,
+          }}
+          scroll={{ x: 1100 }}
+          emptyTitle="暂无店仓绑定"
+          emptyDescription="新建绑定后，店铺订单同步将按绑定仓库履约。"
+          onRow={(record) => ({
+            onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+            style: {
+              cursor: 'pointer',
+              background: record.id === selectedId ? colors.primarySoft : undefined,
             },
-          },
-          { title: '平台仓ID', dataIndex: 'platformWarehouseId' },
-          {
-            title: '库存来源',
-            dataIndex: 'isInventorySource',
-            render: (v: boolean) => (v ? '是' : '否'),
-            width: 90,
-          },
-          {
-            title: '库存推送',
-            dataIndex: 'isInventoryPushEnabled',
-            render: (v: boolean) => (v ? <Tag color="blue">开</Tag> : '关'),
-            width: 90,
-          },
-          { title: '优先级', dataIndex: 'priority', width: 80 },
-          {
-            title: '状态',
-            dataIndex: 'status',
-            width: 80,
-            render: (value: string) => (
-              <Tag color={value === 'ACTIVE' ? 'green' : 'default'}>
-                {value === 'ACTIVE' ? '启用' : '停用'}
-              </Tag>
-            ),
-          },
-          {
-            title: '操作',
-            key: 'actions',
-            width: 170,
-            render: (_: unknown, row: BindingRow) => (
-              <Space>
-                {row.status === 'ACTIVE' ? (
-                  <Popconfirm
-                    title="确认停用该绑定？"
-                    onConfirm={() =>
-                      statusMutation.mutate({ storeId: row.storeId, id: row.id, action: 'disable' })
-                    }
-                  >
-                    <Button size="small">停用</Button>
-                  </Popconfirm>
-                ) : (
-                  <Button
-                    size="small"
-                    onClick={() =>
-                      statusMutation.mutate({ storeId: row.storeId, id: row.id, action: 'enable' })
-                    }
-                  >
-                    启用
-                  </Button>
-                )}
-                <Popconfirm
-                  title="确认删除该绑定？"
-                  onConfirm={() => deleteMutation.mutate({ storeId: row.storeId, id: row.id })}
-                >
-                  <Button size="small" danger>
-                    删除
-                  </Button>
-                </Popconfirm>
-              </Space>
-            ),
-          },
-        ]}
-      />
+          })}
+          columns={[
+            {
+              title: '平台',
+              dataIndex: 'platformCode',
+              width: 110,
+              render: (value: string) => <PlatformTag code={value} />,
+            },
+            { title: '店铺', dataIndex: 'storeCode' },
+            { title: '仓库', dataIndex: 'warehouseCode' },
+            { title: '仓库名称', dataIndex: 'warehouseName' },
+            {
+              title: '履约模式',
+              dataIndex: 'fulfillmentMode',
+              render: (value: string) => {
+                const meta = FULFILLMENT_MODE_META[value];
+                if (meta === undefined) {
+                  return value;
+                }
+                return (
+                  <Tooltip title={`${meta.label} — ${meta.hint}`}>
+                    <span>
+                      {FULFILLMENT_CATEGORY_LABEL[meta.category] ?? meta.category}
+                      <span style={{ color: colors.textTertiary, marginLeft: 6, fontSize: 12 }}>
+                        {meta.label}
+                      </span>
+                    </span>
+                  </Tooltip>
+                );
+              },
+            },
+            {
+              title: '平台仓ID',
+              dataIndex: 'platformWarehouseId',
+              render: (v: string | null) => v ?? '—',
+            },
+            {
+              title: '库存来源',
+              dataIndex: 'isInventorySource',
+              render: (v: boolean) => (v ? '是' : '否'),
+              width: 90,
+            },
+            {
+              title: '库存推送',
+              dataIndex: 'isInventoryPushEnabled',
+              width: 90,
+              render: (v: boolean) => (
+                <StatusBadge
+                  tone={v ? 'info' : 'neutral'}
+                  label={v ? '推送' : '不推送'}
+                  showDot={false}
+                />
+              ),
+            },
+            { title: '优先级', dataIndex: 'priority', width: 80 },
+            {
+              title: '状态',
+              dataIndex: 'status',
+              width: 90,
+              render: (value: string) => (
+                <StatusBadge
+                  tone={value === 'ACTIVE' ? 'success' : 'neutral'}
+                  label={value === 'ACTIVE' ? '启用' : '停用'}
+                  hint={value}
+                  showDot={false}
+                />
+              ),
+            },
+          ]}
+        />
+      </SectionCard>
 
       <Modal
         title="新建店仓绑定"
         open={createOpen}
         onCancel={() => setCreateOpen(false)}
+        okText="创建"
+        cancelText="取消"
         onOk={() => void form.validateFields().then((values) => createMutation.mutate(values))}
         confirmLoading={createMutation.isPending}
       >
@@ -363,6 +445,19 @@ export function StoreBindingsPage() {
           </p>
         </Form>
       </Modal>
-    </Space>
+
+      <DeleteConfirmModal
+        open={deleting !== null}
+        title={`删除绑定 ${deleting?.storeCode ?? ''} · ${deleting?.warehouseCode ?? ''}？`}
+        description="删除后该店铺将不能从此仓库履约；已被订单引用的历史不受影响。"
+        confirmLoading={deleteMutation.isPending}
+        onConfirm={() => {
+          if (deleting !== null) {
+            deleteMutation.mutate({ storeId: deleting.storeId, id: deleting.id });
+          }
+        }}
+        onCancel={() => setDeleting(null)}
+      />
+    </div>
   );
 }

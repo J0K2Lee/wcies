@@ -6,8 +6,8 @@ import { apiPost, useApiQuery } from '../../api/hooks';
 import { apiClient } from '../../api/client';
 import { fmtDateTime } from '../../utils/format';
 import {
-  ActionMenu,
   colors,
+  ContextAction,
   ContextMetric,
   ContextRailContent,
   ContextSection,
@@ -15,6 +15,7 @@ import {
   EntitySummary,
   FilterBar,
   PageHeader,
+  RailHint,
   SectionCard,
   StatusBadge,
   useContextRail,
@@ -121,7 +122,7 @@ export function PurchaseReceiptsPage() {
     '/api/v1/purchase-receipts',
     {
       page,
-      pageSize: 20,
+      pageSize: 50,
       ...(keyword ? { keyword } : {}),
       ...(status ? { status } : {}),
     },
@@ -138,12 +139,15 @@ export function PurchaseReceiptsPage() {
     ['pos-for-receipt'],
   );
 
+  // One cached detail query shared by the rail (edit entry) and the drawer,
+  // keyed on whichever receipt is focused (Phase 2 task §68 pattern).
+  const focusId = selectedId ?? detailId;
   const detail = useApiQuery<{ data: ReceiptDetail }>(
     '/api/v1/purchase-receipts/{id}',
     {},
-    ['purchase-receipt-detail', detailId],
-    { id: detailId ?? '' },
-    detailId !== null,
+    ['purchase-receipt-detail', focusId],
+    { id: focusId ?? '' },
+    focusId !== null,
   );
 
   const rows = list.data?.data ?? [];
@@ -151,7 +155,9 @@ export function PurchaseReceiptsPage() {
     () => rows.find((row) => row.id === selectedId) ?? null,
     [rows, selectedId],
   );
-  const detailRow = detail.data?.data ?? null;
+  // The drawer renders only the receipt it was opened for, never the merely
+  // selected one (focusId also feeds the rail's edit entry).
+  const detailRow = detailId !== null ? (detail.data?.data ?? null) : null;
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['purchase-receipts'] });
@@ -276,16 +282,7 @@ export function PurchaseReceiptsPage() {
         children: (
           <ContextSection title="收货概览">
             <ContextMetric label="当前筛选" value={`${list.data?.meta.total ?? 0} 单`} />
-            <span
-              style={{
-                fontSize: 12.5,
-                color: colors.textTertiary,
-                display: 'block',
-                paddingTop: 8,
-              }}
-            >
-              收货单确认后才写库存；已确认的收货不可改数量，修正走库存调整。
-            </span>
+            <RailHint>收货单确认后才写库存；已确认的收货不可改数量，修正走库存调整。</RailHint>
           </ContextSection>
         ),
       };
@@ -304,28 +301,115 @@ export function PurchaseReceiptsPage() {
         />
       ),
       children: (
-        <ContextSection title="基本信息">
-          <ContextMetric label="来源采购单" value={selectedRow.purchaseOrderNo ?? '—'} />
-          <ContextMetric
-            label="供应商/货源"
-            value={selectedRow.supplierName ?? selectedRow.sourceNote ?? '—'}
-          />
-          <ContextMetric
-            label="仓库"
-            value={selectedRow.warehouseCode ?? selectedRow.warehouseId}
-          />
-          <ContextMetric
-            label="明细"
-            value={`${selectedRow.itemCount} 行 / 共 ${Number(selectedRow.totalQuantity)} 件`}
-          />
-          <ContextMetric
-            label="收货时间"
-            value={selectedRow.receivedAt === null ? '未确认' : fmtDateTime(selectedRow.receivedAt)}
-          />
-        </ContextSection>
+        <>
+          <ContextSection title="基本信息">
+            <ContextMetric label="来源采购单" value={selectedRow.purchaseOrderNo ?? '—'} />
+            <ContextMetric
+              label="供应商/货源"
+              value={selectedRow.supplierName ?? selectedRow.sourceNote ?? '—'}
+            />
+            <ContextMetric
+              label="仓库"
+              value={selectedRow.warehouseCode ?? selectedRow.warehouseId}
+            />
+            <ContextMetric
+              label="明细"
+              value={`${selectedRow.itemCount} 行 / 共 ${Number(selectedRow.totalQuantity)} 件`}
+            />
+            <ContextMetric
+              label="收货时间"
+              value={
+                selectedRow.receivedAt === null ? '未确认' : fmtDateTime(selectedRow.receivedAt)
+              }
+            />
+          </ContextSection>
+          <ContextAction>
+            <Button block onClick={() => setDetailId(selectedRow.id)}>
+              查看详情
+            </Button>
+            {selectedRow.status === 'DRAFT' && (
+              <>
+                <Button
+                  type="primary"
+                  block
+                  style={{ marginTop: 8 }}
+                  loading={confirmMutation.isPending}
+                  onClick={() => {
+                    // 确认收货 = L2（UI 规范 §7）：modal.confirm + danger ok。
+                    modal.confirm({
+                      title: `确认收货 ${selectedRow.receiptNo}？`,
+                      content: '确认后库存立即入账且不可撤销。SN 商品的序列号将写入库存序列表。',
+                      okText: '确认收货',
+                      okButtonProps: { danger: true },
+                      cancelText: '返回',
+                      onOk: () => {
+                        confirmMutation.mutate(selectedRow.id);
+                      },
+                    });
+                  }}
+                >
+                  确认收货
+                </Button>
+                <Button
+                  block
+                  style={{ marginTop: 8 }}
+                  loading={detail.isLoading}
+                  onClick={() => {
+                    const detailData = detail.data?.data;
+                    if (detailData === null || detailData === undefined) {
+                      return;
+                    }
+                    setItems(
+                      detailData.items.map((item) => ({
+                        skuId: item.skuId,
+                        label: `${item.skuCode} · ${item.skuName}`,
+                        serialTracking: item.serialNumbers !== null,
+                        quantity: Number(item.quantity),
+                        unitCost: item.unitCost === null ? undefined : Number(item.unitCost),
+                        binId: item.binId ?? undefined,
+                        serialNumbersText: item.serialNumbers?.join('\n') ?? '',
+                        purchaseOrderItemId: item.purchaseOrderItemId ?? undefined,
+                      })),
+                    );
+                    setEditing(detailData);
+                  }}
+                >
+                  编辑明细
+                </Button>
+                <Button
+                  block
+                  danger
+                  style={{ marginTop: 8 }}
+                  onClick={() => {
+                    // 取消草稿 = L2：modal.confirm + danger ok。
+                    modal.confirm({
+                      title: `取消收货单 ${selectedRow.receiptNo}？`,
+                      content: '草稿取消不影响库存。',
+                      okText: '取消草稿',
+                      okButtonProps: { danger: true },
+                      cancelText: '返回',
+                      onOk: () => {
+                        cancelMutation.mutate(selectedRow.id);
+                      },
+                    });
+                  }}
+                >
+                  取消草稿
+                </Button>
+              </>
+            )}
+          </ContextAction>
+        </>
       ),
     };
-  }, [selectedRow, list.data]);
+  }, [
+    selectedRow,
+    list.data,
+    detail.data,
+    confirmMutation.isPending,
+    cancelMutation.mutate,
+    modal,
+  ]);
   useContextRail(railContent);
 
   const warehouseOptions = (warehouses.data?.data ?? []).map((warehouse) => ({
@@ -350,28 +434,28 @@ export function PurchaseReceiptsPage() {
       <PageHeader
         title="收货单"
         description="真实收货动作：扫码加明细、选库位（可建暂存位），确认后经库存核心入账"
+        secondary={
+          <Button
+            onClick={() => {
+              fromPoForm.resetFields();
+              setFromPoOpen(true);
+            }}
+          >
+            从采购单生成
+          </Button>
+        }
         primary={
-          <span style={{ display: 'inline-flex', gap: 8 }}>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => {
-                form.resetFields();
-                setItems([]);
-                setCreateOpen(true);
-              }}
-            >
-              新建收货单
-            </Button>
-            <Button
-              onClick={() => {
-                fromPoForm.resetFields();
-                setFromPoOpen(true);
-              }}
-            >
-              从采购单生成
-            </Button>
-          </span>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              form.resetFields();
+              setItems([]);
+              setCreateOpen(true);
+            }}
+          >
+            新建收货单
+          </Button>
         }
       />
 
@@ -409,13 +493,14 @@ export function PurchaseReceiptsPage() {
           dataSource={rows}
           pagination={{
             current: page,
-            pageSize: 20,
+            pageSize: 50,
             total: list.data?.meta.total ?? 0,
             showTotal: (total) => `共 ${total} 单`,
             onChange: setPage,
           }}
           onRow={(record) => ({
             onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+            onDoubleClick: () => setDetailId(record.id),
             style: {
               cursor: 'pointer',
               background: record.id === selectedId ? colors.primarySoft : undefined,
@@ -463,43 +548,6 @@ export function PurchaseReceiptsPage() {
               width: 160,
               render: (value: string | null) => (value === null ? '—' : fmtDateTime(value)),
             },
-            {
-              title: '操作',
-              key: 'actions',
-              width: 150,
-              fixed: 'right',
-              render: (_: unknown, row: ReceiptRow) => (
-                <ActionMenu
-                  primary={
-                    <Button
-                      type="link"
-                      size="small"
-                      style={{ paddingInline: 4 }}
-                      onClick={() => setDetailId(row.id)}
-                    >
-                      {row.status === 'DRAFT' ? '预览确认' : '查看'}
-                    </Button>
-                  }
-                  items={[
-                    ...(row.status === 'DRAFT'
-                      ? [
-                          {
-                            key: 'cancel',
-                            label: '取消草稿',
-                            danger: true,
-                            onClick: () =>
-                              modal.confirm({
-                                title: `取消收货单 ${row.receiptNo}？`,
-                                content: '草稿取消不影响库存。',
-                                onOk: () => cancelMutation.mutate(row.id),
-                              }),
-                          },
-                        ]
-                      : []),
-                  ]}
-                />
-              ),
-            },
           ]}
         />
       </SectionCard>
@@ -507,7 +555,7 @@ export function PurchaseReceiptsPage() {
       <Drawer
         open={detailId !== null}
         onClose={() => setDetailId(null)}
-        size={860}
+        size={880}
         title={
           detailRow !== null && (
             <span style={{ fontSize: 16, fontWeight: 650 }}>
@@ -596,52 +644,6 @@ export function PurchaseReceiptsPage() {
                 ]}
               />
             </SectionCard>
-            {detailRow.status === 'DRAFT' && (
-              <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
-                <Button
-                  type="primary"
-                  loading={confirmMutation.isPending}
-                  onClick={() => {
-                    modal.confirm({
-                      title: `确认收货 ${detailRow.receiptNo}？`,
-                      content:
-                        '确认后库存立即入账且不可撤销；共 ' +
-                        detailRow.items.length +
-                        ' 行明细。SN 商品的序列号将写入库存序列表。',
-                      okText: '确认收货',
-                      cancelText: '返回',
-                      onOk: () => {
-                        confirmMutation.mutate(detailRow.id);
-                      },
-                    });
-                  }}
-                >
-                  确认收货
-                </Button>
-                <Button
-                  onClick={() => {
-                    setItems(
-                      detailRow.items.map((item) => ({
-                        skuId: item.skuId,
-                        label: `${item.skuCode} · ${item.skuName}`,
-                        serialTracking: item.serialNumbers !== null,
-                        quantity: Number(item.quantity),
-                        unitCost: item.unitCost === null ? undefined : Number(item.unitCost),
-                        binId: item.binId ?? undefined,
-                        serialNumbersText: item.serialNumbers?.join('\n') ?? '',
-                        purchaseOrderItemId: item.purchaseOrderItemId ?? undefined,
-                      })),
-                    );
-                    setEditing(detailRow);
-                  }}
-                >
-                  编辑明细
-                </Button>
-                <Button danger onClick={() => cancelMutation.mutate(detailRow.id)}>
-                  取消草稿
-                </Button>
-              </div>
-            )}
           </>
         )}
       </Drawer>
@@ -1025,7 +1027,7 @@ function ReceiptItemsEditor({
       )}
       {items.length > 0 &&
         items.some((item) => item.unitCost === undefined || item.unitCost === null) && (
-          <span style={{ fontSize: 12.5, color: '#d48806' }}>
+          <span style={{ fontSize: 12.5, color: colors.warning }}>
             ⚠ 有{' '}
             {items.filter((item) => item.unitCost === undefined || item.unitCost === null).length}{' '}
             行未填单位成本：留空合法（赠品/样品），但该行不会计入移动加权成本，且确认后无法补填。

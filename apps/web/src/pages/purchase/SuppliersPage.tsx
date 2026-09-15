@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { App as AntdApp, Button, Drawer, Form, Input, Modal, Select } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
 import { apiDelete, apiPatch, apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime } from '../../utils/format';
 import {
-  ActionMenu,
   colors,
+  ContextAction,
   ContextMetric,
   ContextRailContent,
   ContextSection,
@@ -13,9 +14,13 @@ import {
   DeleteConfirmModal,
   EntitySummary,
   FilterBar,
+  InfoGrid,
   PageHeader,
+  RailHint,
+  RelativeTime,
   SectionCard,
   StatusBadge,
+  StatusSwitch,
   useContextRail,
 } from '../../design-system';
 
@@ -67,7 +72,7 @@ export function SuppliersPage() {
     '/api/v1/suppliers',
     {
       page,
-      pageSize: 20,
+      pageSize: 50,
       ...(keyword ? { keyword } : {}),
       ...(status ? { status } : {}),
     },
@@ -150,16 +155,9 @@ export function SuppliersPage() {
         children: (
           <ContextSection title="供应商概览">
             <ContextMetric label="当前筛选" value={`${list.data?.meta.total ?? 0} 家`} />
-            <span
-              style={{
-                fontSize: 12.5,
-                color: colors.textTertiary,
-                display: 'block',
-                paddingTop: 8,
-              }}
-            >
+            <RailHint>
               只把可复用的固定供应商建档；一次性网购在采购单上用「货源说明」记录，不进主数据。
-            </span>
+            </RailHint>
           </ContextSection>
         ),
       };
@@ -180,15 +178,40 @@ export function SuppliersPage() {
         />
       ),
       children: (
-        <ContextSection title="基本信息">
-          <ContextMetric label="联系人" value={selectedRow.contactName ?? '—'} />
-          <ContextMetric label="联系电话" value={selectedRow.contactPhone ?? '—'} />
-          <ContextMetric label="备注" value={selectedRow.remark ?? '—'} />
-          <ContextMetric label="创建时间" value={fmtDateTime(selectedRow.createdAt)} />
-        </ContextSection>
+        <>
+          <ContextSection title="基本信息">
+            <ContextMetric label="联系人" value={selectedRow.contactName ?? '—'} />
+            <ContextMetric label="联系电话" value={selectedRow.contactPhone ?? '—'} />
+            <ContextMetric label="备注" value={selectedRow.remark ?? '—'} />
+            <ContextMetric label="创建时间" value={fmtDateTime(selectedRow.createdAt)} />
+            <StatusSwitch
+              active={selectedRow.status === 'ACTIVE'}
+              entityName="供应商"
+              disableHint="停用后不可在采购单/收货单中选用"
+              loading={statusMutation.isPending}
+              onChange={(next) =>
+                statusMutation.mutate({
+                  id: selectedRow.id,
+                  action: next ? 'activate' : 'deactivate',
+                })
+              }
+            />
+          </ContextSection>
+          <ContextAction>
+            <Button block onClick={() => setDetailId(selectedRow.id)}>
+              查看详情
+            </Button>
+            <Button block style={{ marginTop: 8 }} onClick={() => setEditing(selectedRow)}>
+              编辑
+            </Button>
+            <Button block danger style={{ marginTop: 8 }} onClick={() => setDeleting(selectedRow)}>
+              删除
+            </Button>
+          </ContextAction>
+        </>
       ),
     };
-  }, [selectedRow, list.data]);
+  }, [selectedRow, list.data, statusMutation.isPending, statusMutation.mutate]);
   useContextRail(railContent);
 
   // Shared fields; each dialog wraps them in its OWN form instance so the
@@ -231,6 +254,7 @@ export function SuppliersPage() {
         primary={
           <Button
             type="primary"
+            icon={<PlusOutlined />}
             onClick={() => {
               form.resetFields();
               setCreateOpen(true);
@@ -275,13 +299,14 @@ export function SuppliersPage() {
           dataSource={rows}
           pagination={{
             current: page,
-            pageSize: 20,
+            pageSize: 50,
             total: list.data?.meta.total ?? 0,
             showTotal: (total) => `共 ${total} 家`,
             onChange: setPage,
           }}
           onRow={(record) => ({
             onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+            onDoubleClick: () => setDetailId(record.id),
             style: {
               cursor: 'pointer',
               background: record.id === selectedId ? colors.primarySoft : undefined,
@@ -311,58 +336,8 @@ export function SuppliersPage() {
               title: '创建时间',
               dataIndex: 'createdAt',
               key: 'createdAt',
-              width: 160,
-              render: (value: string) => fmtDateTime(value),
-            },
-            {
-              title: '操作',
-              key: 'actions',
-              width: 120,
-              fixed: 'right',
-              render: (_: unknown, row: SupplierRow) => (
-                <ActionMenu
-                  primary={
-                    <Button
-                      type="link"
-                      size="small"
-                      style={{ paddingInline: 4 }}
-                      onClick={() => setDetailId(row.id)}
-                    >
-                      查看
-                    </Button>
-                  }
-                  items={[
-                    {
-                      key: 'edit',
-                      label: '编辑',
-                      onClick: () => setEditing(row),
-                    },
-                    ...(row.status === 'ACTIVE'
-                      ? [
-                          {
-                            key: 'deactivate',
-                            label: '停用',
-                            onClick: () =>
-                              statusMutation.mutate({ id: row.id, action: 'deactivate' }),
-                          },
-                        ]
-                      : [
-                          {
-                            key: 'activate',
-                            label: '启用',
-                            onClick: () =>
-                              statusMutation.mutate({ id: row.id, action: 'activate' }),
-                          },
-                        ]),
-                    {
-                      key: 'delete',
-                      label: '删除',
-                      danger: true,
-                      onClick: () => setDeleting(row),
-                    },
-                  ]}
-                />
-              ),
+              width: 130,
+              render: (value: string) => <RelativeTime value={value} />,
             },
           ]}
         />
@@ -371,7 +346,7 @@ export function SuppliersPage() {
       <Drawer
         open={detailId !== null}
         onClose={() => setDetailId(null)}
-        size={560}
+        size={640}
         title={
           detailRow !== null && (
             <span style={{ fontSize: 16, fontWeight: 650 }}>
@@ -392,15 +367,18 @@ export function SuppliersPage() {
         destroyOnHidden
       >
         {detailRow !== null && (
-          <ContextSection title="供应商信息">
-            <ContextMetric label="编码" value={detailRow.code} />
-            <ContextMetric label="名称" value={detailRow.name} />
-            <ContextMetric label="联系人" value={detailRow.contactName ?? '—'} />
-            <ContextMetric label="联系电话" value={detailRow.contactPhone ?? '—'} />
-            <ContextMetric label="备注" value={detailRow.remark ?? '—'} />
-            <ContextMetric label="创建时间" value={fmtDateTime(detailRow.createdAt)} />
-            <ContextMetric label="更新时间" value={fmtDateTime(detailRow.updatedAt)} />
-          </ContextSection>
+          <InfoGrid
+            columns={2}
+            items={[
+              { label: '编码', children: detailRow.code },
+              { label: '名称', children: detailRow.name },
+              { label: '联系人', children: detailRow.contactName ?? '—' },
+              { label: '联系电话', children: detailRow.contactPhone ?? '—' },
+              { label: '备注', children: detailRow.remark ?? '—', span: 2 },
+              { label: '创建时间', children: fmtDateTime(detailRow.createdAt) },
+              { label: '更新时间', children: fmtDateTime(detailRow.updatedAt) },
+            ]}
+          />
         )}
       </Drawer>
 

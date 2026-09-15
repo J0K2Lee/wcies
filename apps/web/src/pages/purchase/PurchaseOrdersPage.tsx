@@ -1,21 +1,21 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { App as AntdApp, Button, Drawer, Form, Input, InputNumber, Modal, Select } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime } from '../../utils/format';
 import {
-  ActionMenu,
   colors,
+  ContextAction,
   ContextMetric,
   ContextRailContent,
   ContextSection,
   DataTable,
-  DeleteConfirmModal,
   EntitySummary,
   FilterBar,
   PageHeader,
+  RailHint,
+  RelativeTime,
   SectionCard,
   StatusBadge,
   useContextRail,
@@ -84,7 +84,7 @@ const STATUS_META: Record<
 type Envelope<T> = { data: T; meta: { total: number } };
 
 export function PurchaseOrdersPage() {
-  const { message } = AntdApp.useApp();
+  const { message, modal } = AntdApp.useApp();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState('');
@@ -92,17 +92,13 @@ export function PurchaseOrdersPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
-  const [cancelling, setCancelling] = useState<PurchaseOrderRow | null>(null);
-  const [generateFor, setGenerateFor] = useState<PurchaseOrderRow | null>(null);
-  const [generateForm] = Form.useForm<{ warehouseId: string }>();
-  const navigate = useNavigate();
   const [form] = Form.useForm<PoFormValues>();
 
   const list = useApiQuery<Envelope<PurchaseOrderRow[]>>(
     '/api/v1/purchase-orders',
     {
       page,
-      pageSize: 20,
+      pageSize: 50,
       ...(keyword ? { keyword } : {}),
       ...(status ? { status } : {}),
     },
@@ -114,10 +110,6 @@ export function PurchaseOrdersPage() {
     { page: 1, pageSize: 100, status: 'ACTIVE' },
     ['suppliers-for-po'],
   );
-
-  const warehouses = useApiQuery<
-    Envelope<Array<{ id: string; warehouseCode: string; name: string }>>
-  >('/api/v1/warehouses', { page: 1, pageSize: 100 }, ['warehouses-for-po-generate']);
 
   const detail = useApiQuery<{ data: PurchaseOrderDetail }>(
     '/api/v1/purchase-orders/{id}',
@@ -167,25 +159,8 @@ export function PurchaseOrdersPage() {
       apiPost('/api/v1/purchase-orders/{id}/cancel', { reason: '人工取消' }, { id }),
     onSuccess: () => {
       void message.success('采购单已取消（未影响库存）');
-      setCancelling(null);
       void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       void queryClient.invalidateQueries({ queryKey: ['purchase-order-detail'] });
-    },
-    onError: (error: Error) => void message.error(error.message),
-  });
-
-  const generateMutation = useMutation({
-    mutationFn: ({ poId, warehouseId }: { poId: string; warehouseId: string }) =>
-      apiPost<{ id: string; receiptNo: string }>(
-        '/api/v1/purchase-receipts/from-po/{poId}',
-        { warehouseId },
-        { poId },
-      ),
-    onSuccess: (result) => {
-      void message.success(`已生成收货单 ${result.receiptNo}（草稿），前往确认`);
-      setGenerateFor(null);
-      void queryClient.invalidateQueries({ queryKey: ['purchase-receipts'] });
-      void navigate(`/purchase-receipts?focus=${result.id}`);
     },
     onError: (error: Error) => void message.error(error.message),
   });
@@ -198,16 +173,9 @@ export function PurchaseOrdersPage() {
         children: (
           <ContextSection title="采购概览">
             <ContextMetric label="当前筛选" value={`${list.data?.meta.total ?? 0} 单`} />
-            <span
-              style={{
-                fontSize: 12.5,
-                color: colors.textTertiary,
-                display: 'block',
-                paddingTop: 8,
-              }}
-            >
-              采购单登记「已下单」的意图，不碰库存；到货后从采购单生成收货单完成入库。
-            </span>
+            <RailHint>
+              采购单登记「已下单」的意图，不碰库存；到货后在收货单页「从采购单生成」完成入库。
+            </RailHint>
           </ContextSection>
         ),
       };
@@ -226,19 +194,49 @@ export function PurchaseOrdersPage() {
         />
       ),
       children: (
-        <ContextSection title="基本信息">
-          <ContextMetric label="供应商" value={selectedRow.supplierName ?? '—'} />
-          <ContextMetric label="货源说明" value={selectedRow.sourceNote ?? '—'} />
-          <ContextMetric
-            label="明细"
-            value={`${selectedRow.itemCount} 行 / 共 ${Number(selectedRow.totalQuantity)} 件`}
-          />
-          <ContextMetric label="下单时间" value={fmtDateTime(selectedRow.orderedAt)} />
-          <ContextMetric
-            label="预计到货"
-            value={selectedRow.expectedAt === null ? '—' : fmtDateTime(selectedRow.expectedAt)}
-          />
-        </ContextSection>
+        <>
+          <ContextSection title="基本信息">
+            <ContextMetric label="供应商" value={selectedRow.supplierName ?? '—'} />
+            <ContextMetric label="货源说明" value={selectedRow.sourceNote ?? '—'} />
+            <ContextMetric
+              label="明细"
+              value={`${selectedRow.itemCount} 行 / 共 ${Number(selectedRow.totalQuantity)} 件`}
+            />
+            <ContextMetric label="下单时间" value={fmtDateTime(selectedRow.orderedAt)} />
+            <ContextMetric
+              label="预计到货"
+              value={selectedRow.expectedAt === null ? '—' : fmtDateTime(selectedRow.expectedAt)}
+            />
+          </ContextSection>
+          <ContextAction>
+            <Button block onClick={() => setDetailId(selectedRow.id)}>
+              查看详情
+            </Button>
+            {selectedRow.status === 'ORDERED' && (
+              <Button
+                block
+                danger
+                style={{ marginTop: 8 }}
+                onClick={() => {
+                  // 取消单据类 = L2（UI 规范 §7）：modal.confirm + danger ok。
+                  modal.confirm({
+                    title: `取消采购单 ${selectedRow.poNo}？`,
+                    content:
+                      '取消的是采购意图，不影响任何库存；该订单行随后可重新登记采购。已发生收货的采购单不能取消。',
+                    okText: '取消采购单',
+                    okButtonProps: { danger: true },
+                    cancelText: '返回',
+                    onOk: () => {
+                      cancelMutation.mutate(selectedRow.id);
+                    },
+                  });
+                }}
+              >
+                取消采购单
+              </Button>
+            )}
+          </ContextAction>
+        </>
       ),
     };
   }, [selectedRow, list.data]);
@@ -298,13 +296,14 @@ export function PurchaseOrdersPage() {
           dataSource={rows}
           pagination={{
             current: page,
-            pageSize: 20,
+            pageSize: 50,
             total: list.data?.meta.total ?? 0,
             showTotal: (total) => `共 ${total} 单`,
             onChange: setPage,
           }}
           onRow={(record) => ({
             onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+            onDoubleClick: () => setDetailId(record.id),
             style: {
               cursor: 'pointer',
               background: record.id === selectedId ? colors.primarySoft : undefined,
@@ -341,40 +340,8 @@ export function PurchaseOrdersPage() {
               title: '下单时间',
               dataIndex: 'orderedAt',
               key: 'orderedAt',
-              width: 160,
-              render: (value: string) => fmtDateTime(value),
-            },
-            {
-              title: '操作',
-              key: 'actions',
-              width: 120,
-              fixed: 'right',
-              render: (_: unknown, row: PurchaseOrderRow) => (
-                <ActionMenu
-                  primary={
-                    <Button
-                      type="link"
-                      size="small"
-                      style={{ paddingInline: 4 }}
-                      onClick={() => setDetailId(row.id)}
-                    >
-                      查看
-                    </Button>
-                  }
-                  items={[
-                    ...(row.status === 'ORDERED'
-                      ? [
-                          {
-                            key: 'cancel',
-                            label: '取消采购单',
-                            danger: true,
-                            onClick: () => setCancelling(row),
-                          },
-                        ]
-                      : []),
-                  ]}
-                />
-              ),
+              width: 130,
+              render: (value: string) => <RelativeTime value={value} />,
             },
           ]}
         />
@@ -403,13 +370,6 @@ export function PurchaseOrdersPage() {
       >
         {detailRow !== null && (
           <>
-            {(detailRow.status === 'ORDERED' || detailRow.status === 'PARTIALLY_RECEIVED') && (
-              <div style={{ marginBottom: 16 }}>
-                <Button type="primary" onClick={() => setGenerateFor(detailRow)}>
-                  生成收货单
-                </Button>
-              </div>
-            )}
             <ContextSection title="采购单信息">
               <ContextMetric label="供应商" value={detailRow.supplierName ?? '—'} />
               <ContextMetric label="货源说明" value={detailRow.sourceNote ?? '—'} />
@@ -568,55 +528,6 @@ export function PurchaseOrdersPage() {
           </Form.List>
         </Form>
       </Modal>
-
-      <Modal
-        title={`从 ${generateFor?.poNo ?? ''} 生成收货单`}
-        open={generateFor !== null}
-        onCancel={() => setGenerateFor(null)}
-        onOk={() => {
-          void generateForm.validateFields().then((values) => {
-            if (generateFor !== null) {
-              generateMutation.mutate({ poId: generateFor.id, warehouseId: values.warehouseId });
-            }
-          });
-        }}
-        okText="生成草稿"
-        cancelText="取消"
-        confirmLoading={generateMutation.isPending}
-        destroyOnHidden
-      >
-        <Form form={generateForm} layout="vertical" preserve={false}>
-          <Form.Item
-            name="warehouseId"
-            label="收货仓库"
-            rules={[{ required: true, message: '请选择仓库' }]}
-          >
-            <Select
-              placeholder="选择仓库"
-              options={(warehouses.data?.data ?? []).map((warehouse) => ({
-                value: warehouse.id,
-                label: `${warehouse.warehouseCode} · ${warehouse.name}`,
-              }))}
-            />
-          </Form.Item>
-          <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
-            将按采购明细的未收数量预填草稿；生成后可调整库位与数量再确认。
-          </span>
-        </Form>
-      </Modal>
-
-      <DeleteConfirmModal
-        open={cancelling !== null}
-        title={`取消采购单 ${cancelling?.poNo ?? ''}？`}
-        description="取消的是采购意图，不影响任何库存；该订单行随后可重新登记采购。已发生收货的采购单不能取消。"
-        confirmLoading={cancelMutation.isPending}
-        onConfirm={() => {
-          if (cancelling !== null) {
-            cancelMutation.mutate(cancelling.id);
-          }
-        }}
-        onCancel={() => setCancelling(null)}
-      />
     </div>
   );
 }

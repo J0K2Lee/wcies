@@ -32,14 +32,20 @@ import {
   ContextRailContent,
   ContextSection,
   DataTable,
+  DeleteConfirmModal,
   EntitySummary,
+  EntityLink,
   ErrorState,
   FilterBar,
+  InfoGrid,
+  KpiRow,
   PageHeader,
   PlatformTag,
+  RailHint,
   RelativeTime,
   SectionCard,
   StatusBadge,
+  StatusSwitch,
   SyncStatusBadge,
   MetricCard,
   useContextRail,
@@ -164,7 +170,7 @@ function latestJobAt(latest: Map<string, SyncJobLite>, storeId: string): SyncJob
 }
 
 export function StoresPage() {
-  const { message, modal } = AntdApp.useApp();
+  const { message } = AntdApp.useApp();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -179,6 +185,7 @@ export function StoresPage() {
   // 后端契约一直支持（storeCode / platform 不可改）。
   const [editTarget, setEditTarget] = useState<StoreRow | null>(null);
   const [editForm] = Form.useForm<{ name: string }>();
+  const [deleting, setDeleting] = useState<StoreRow | null>(null);
   const [credentialOpen, setCredentialOpen] = useState(false);
   // Id snapshot taken when the credential modal opens: the drawer's onClose
   // may null out detailId while the modal is open - the submission must use
@@ -343,16 +350,6 @@ export function StoresPage() {
     },
     onError: (error: Error) => void message.error(error.message),
   });
-
-  const confirmDeleteCredential = (credential: CredentialRow) => {
-    modal.confirm({
-      title: '确认删除该凭证？',
-      content: '删除后需重新录入 Client ID 与 API Key 才能连接平台。密钥本身不会被导出或显示。',
-      okText: '删除',
-      okButtonProps: { danger: true },
-      onOk: () => credentialDeleteMutation.mutateAsync(credential.id).catch(() => undefined),
-    });
-  };
 
   const openCredentialModal = (storeId: string) => {
     setCredentialStoreId(storeId);
@@ -524,22 +521,9 @@ export function StoresPage() {
         children: (
           <ContextSection title="店铺概览">
             <ContextMetric label="当前筛选" value={`${list.data?.meta.total ?? 0} 家店铺`} />
-            <ContextMetric
-              label={<span style={{ color: colors.danger }}>同步异常</span>}
-              value={kpi.syncFailed}
-            />
-            <ContextMetric label="需要关注" value={kpi.needsAttention} />
-            <ContextMetric label="正常" value={kpi.healthy} />
-            <span
-              style={{
-                fontSize: 12.5,
-                color: colors.textTertiary,
-                display: 'block',
-                paddingTop: 8,
-              }}
-            >
-              点击店铺行查看连接与同步状态；可从右栏直接触发手动同步。
-            </span>
+            <RailHint>
+              店铺健康度见上方指标卡；点击店铺行查看连接与同步状态，可从右栏直接触发手动同步。
+            </RailHint>
           </ContextSection>
         ),
       };
@@ -554,7 +538,7 @@ export function StoresPage() {
           badge={
             <StatusBadge
               tone={selectedRow.status === 'ACTIVE' ? 'success' : 'neutral'}
-              label={selectedRow.status === 'ACTIVE' ? '正常' : '停用'}
+              label={selectedRow.status === 'ACTIVE' ? '启用' : '停用'}
               hint={selectedRow.status}
             />
           }
@@ -613,6 +597,29 @@ export function StoresPage() {
               />
             )}
           </ContextSection>
+          <ContextSection title="基本信息">
+            <StatusSwitch
+              active={selectedRow.status === 'ACTIVE'}
+              entityName="店铺"
+              disableHint="停用后不再同步订单与商品"
+              loading={statusMutation.isPending}
+              onChange={(next) =>
+                statusMutation.mutate({
+                  id: selectedRow.id,
+                  action: next ? 'activate' : 'deactivate',
+                })
+              }
+            />
+          </ContextSection>
+          {selectedRow.status !== 'CANCELLED' && (
+            <ContextSection title="关联操作">
+              <EntityLink
+                to={`/exceptions?storeId=${selectedRow.id}`}
+                icon={<WarningOutlined />}
+                primary="查看该店铺异常"
+              />
+            </ContextSection>
+          )}
           <ContextAction>
             <Space orientation="vertical" style={{ width: '100%' }} size={8}>
               <Button block onClick={() => setDetailId(selectedRow.id)}>
@@ -633,12 +640,33 @@ export function StoresPage() {
                   立即同步
                 </Button>
               </Dropdown>
+              <Button
+                block
+                onClick={() => {
+                  setEditTarget(selectedRow);
+                  editForm.setFieldsValue({ name: selectedRow.name });
+                }}
+              >
+                编辑
+              </Button>
+              <Button block danger onClick={() => setDeleting(selectedRow)}>
+                删除
+              </Button>
             </Space>
           </ContextAction>
         </>
       ),
     };
-  }, [selectedRow, overview, latest, kpi, list.data, syncMutation.isPending, syncMutation]);
+  }, [
+    selectedRow,
+    overview,
+    latest,
+    kpi,
+    list.data,
+    syncMutation.isPending,
+    statusMutation.isPending,
+    statusMutation.mutate,
+  ]);
   useContextRail(railContent);
 
   const columns = [
@@ -672,6 +700,7 @@ export function StoresPage() {
           tone={value === 'ACTIVE' ? 'success' : 'neutral'}
           label={value === 'ACTIVE' ? '启用' : '停用'}
           hint={value}
+          showDot={false}
         />
       ),
     },
@@ -722,67 +751,6 @@ export function StoresPage() {
         return <RelativeTime value={job?.finishedAt ?? job?.createdAt} />;
       },
     },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 92,
-      render: (_: unknown, row: StoreRow) => (
-        <ActionMenu
-          primary={
-            <Button
-              type="link"
-              size="small"
-              style={{ padding: 0 }}
-              onClick={() => setDetailId(row.id)}
-            >
-              详情
-            </Button>
-          }
-          items={[
-            {
-              key: 'sync-orders',
-              label: '同步订单',
-              icon: <CloudSyncOutlined />,
-              onClick: () => triggerFor(row.id, 'orders'),
-            },
-            {
-              key: 'sync-listings',
-              label: '同步商品（Listing）',
-              icon: <CloudSyncOutlined />,
-              onClick: () => triggerFor(row.id, 'listings'),
-            },
-            {
-              key: 'exceptions',
-              label: '查看异常',
-              icon: <WarningOutlined />,
-              onClick: () => {
-                setSelectedId(null);
-                void navigate(`/exceptions?storeId=${row.id}`);
-              },
-            },
-            {
-              key: 'edit',
-              label: '编辑店铺',
-              onClick: () => {
-                setEditTarget(row);
-                editForm.setFieldsValue({ name: row.name });
-              },
-            },
-            { type: 'divider' },
-            {
-              key: 'toggle',
-              danger: row.status === 'ACTIVE',
-              label: row.status === 'ACTIVE' ? '停用店铺' : '启用店铺',
-              onClick: () =>
-                statusMutation.mutate({
-                  id: row.id,
-                  action: row.status === 'ACTIVE' ? 'deactivate' : 'activate',
-                }),
-            },
-          ]}
-        />
-      ),
-    },
   ];
 
   return (
@@ -805,19 +773,12 @@ export function StoresPage() {
         }
         primary={
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-            添加店铺
+            新建店铺
           </Button>
         }
       />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
-          gap: 16,
-          marginBottom: 16,
-        }}
-      >
+      <KpiRow>
         <MetricCard
           icon={<ShopOutlined />}
           title="全部店铺"
@@ -842,13 +803,27 @@ export function StoresPage() {
           value={fmtNumber(kpi.syncFailed)}
           aux="最近任务失败"
         />
-      </div>
+      </KpiRow>
 
       <FilterBar>
+        <Input.Search
+          placeholder="搜索店铺编码 / 名称"
+          allowClear
+          value={keyword}
+          onChange={(event) => setKeyword(event.target.value)}
+          onSearch={(value) => {
+            setPage(1);
+            setKeyword(value);
+          }}
+          style={{ width: 260 }}
+          aria-label="搜索店铺"
+        />
         <Select
           allowClear
           placeholder="平台"
           style={{ width: 140 }}
+          showSearch
+          optionFilterProp="label"
           value={platformId}
           onChange={(value) => {
             setPage(1);
@@ -872,16 +847,6 @@ export function StoresPage() {
             { value: 'ACTIVE', label: '启用' },
             { value: 'INACTIVE', label: '停用' },
           ]}
-        />
-        <Input.Search
-          placeholder="搜索店铺编码 / 名称"
-          allowClear
-          defaultValue={effectiveKeyword}
-          onSearch={(value) => {
-            setPage(1);
-            setKeyword(value);
-          }}
-          style={{ width: 260 }}
         />
       </FilterBar>
 
@@ -908,7 +873,8 @@ export function StoresPage() {
               showSizeChanger: false,
             }}
             onRow={(record) => ({
-              onClick: () => setSelectedId(record.id),
+              onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+              onDoubleClick: () => setDetailId(record.id),
               style: {
                 cursor: 'pointer',
                 background: record.id === selectedId ? colors.primarySoft : undefined,
@@ -936,15 +902,9 @@ export function StoresPage() {
               >
                 管理绑定
               </Button>
-              <Popconfirm
-                title="确认删除该店铺？"
-                description="仅零引用（无凭证/绑定/Listing/订单/同步记录）的店铺可删除；被引用时会返回具体原因。"
-                onConfirm={() => deleteMutation.mutate(detailRow.id)}
-              >
-                <Button size="small" danger>
-                  删除
-                </Button>
-              </Popconfirm>
+              <Button size="small" danger onClick={() => setDeleting(detailRow)}>
+                删除
+              </Button>
             </Space>
           )
         }
@@ -963,28 +923,33 @@ export function StoresPage() {
               detailRow !== null && openEditCredentialModal(detailRow.id, id)
             }
             onToggleCredential={(id, action) => credentialStatusMutation.mutate({ id, action })}
-            onDeleteCredential={(credential) => confirmDeleteCredential(credential)}
+            onDeleteCredential={(credential) => credentialDeleteMutation.mutate(credential.id)}
             onConfigure={() => detailRow !== null && openCredentialModal(detailRow.id)}
-            onSync={(type) => triggerFor(detailRow.id, type)}
-            syncing={syncMutation.isPending}
             onToggleSyncSetting={(patch) =>
               syncSettingsMutation.mutate({ store: detailRow, patch })
             }
             syncSettingsSaving={syncSettingsMutation.isPending}
-            onToggle={() =>
-              statusMutation.mutate({
-                id: detailRow.id,
-                action: detailRow.status === 'ACTIVE' ? 'deactivate' : 'activate',
-              })
-            }
-            toggling={statusMutation.isPending}
           />
         )}
       </Drawer>
 
+      {/* ---- Delete store (L2, shared DS modal) ---- */}
+      <DeleteConfirmModal
+        open={deleting !== null}
+        title={`删除店铺 ${deleting?.name ?? ''}？`}
+        description="仅零引用（无凭证/绑定/Listing/订单/同步记录）的店铺可删除；被引用时会返回具体原因。"
+        confirmLoading={deleteMutation.isPending}
+        onConfirm={() => {
+          if (deleting !== null) {
+            deleteMutation.mutate(deleting.id);
+          }
+        }}
+        onCancel={() => setDeleting(null)}
+      />
+
       {/* ---- Create store modal (existing business flow) ---- */}
       <Modal
-        title="添加店铺"
+        title="新建店铺"
         open={createOpen}
         zIndex={1100}
         afterOpenChange={(open) => {
@@ -994,6 +959,8 @@ export function StoresPage() {
         }}
         onCancel={() => setCreateOpen(false)}
         onOk={() => void form.validateFields().then((values) => createMutation.mutate(values))}
+        okText="创建"
+        cancelText="取消"
         confirmLoading={createMutation.isPending}
       >
         <Form form={form} layout="vertical">
@@ -1082,14 +1049,12 @@ export function StoresPage() {
         open={editTarget !== null}
         onCancel={() => setEditTarget(null)}
         onOk={() => {
-          void editForm
-            .validateFields()
-            .then((values) =>
-              renameStoreMutation.mutate({
-                id: (editTarget as StoreRow).id,
-                name: values.name.trim(),
-              }),
-            );
+          void editForm.validateFields().then((values) =>
+            renameStoreMutation.mutate({
+              id: (editTarget as StoreRow).id,
+              name: values.name.trim(),
+            }),
+          );
         }}
         okText="保存"
         cancelText="取消"
@@ -1135,12 +1100,8 @@ function StoreDetailBody({
   onToggleCredential,
   onDeleteCredential,
   onConfigure,
-  onSync,
-  syncing,
   onToggleSyncSetting,
   syncSettingsSaving,
-  onToggle,
-  toggling,
 }: {
   store: StoreRow;
   overview: SyncOverview | undefined;
@@ -1154,14 +1115,10 @@ function StoreDetailBody({
   onToggleCredential: (credentialId: string, action: 'enable' | 'disable') => void;
   onDeleteCredential: (credential: CredentialRow) => void;
   onConfigure: () => void;
-  onSync: (type: 'orders' | 'listings') => void;
-  syncing: boolean;
   onToggleSyncSetting: (
     patch: Partial<{ orderSyncEnabled: boolean; listingSyncEnabled: boolean }>,
   ) => void;
   syncSettingsSaving: boolean;
-  onToggle: () => void;
-  toggling: boolean;
 }) {
   const syncSettings = readSyncSettings(store.settings);
   // Sprint 9 T2 freshness: automatic polling is ON but the last successful
@@ -1175,31 +1132,35 @@ function StoreDetailBody({
     <Space orientation="vertical" size="large" style={{ width: '100%' }}>
       <section>
         <SectionTitle>基础信息</SectionTitle>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', rowGap: 0 }}>
-          <InfoField label="店铺名称" value={store.name} />
-          <InfoField label="店铺编码" value={store.storeCode} />
-          <InfoField
-            label="平台"
-            value={<PlatformTag code={store.platformCode} suffix={store.platformName} />}
-          />
-          <InfoField
-            label="Store ID"
-            value={<span style={{ fontSize: 12, fontFamily: 'monospace' }}>{store.id}</span>}
-          />
-          <InfoField
-            label="状态"
-            value={
-              <StatusBadge
-                tone={store.status === 'ACTIVE' ? 'success' : 'neutral'}
-                label={store.status === 'ACTIVE' ? '启用' : '停用'}
-                hint={store.status}
-              />
-            }
-          />
-          <InfoField label="创建时间" value={fmtDateTime(store.createdAt)} />
-          <InfoField label="Seller ID" value={store.sellerId ?? '—'} />
-          <InfoField label="币种" value={store.defaultCurrency ?? '—'} />
-        </div>
+        <InfoGrid
+          columns={2}
+          items={[
+            { label: '店铺名称', children: store.name },
+            { label: '店铺编码', children: store.storeCode },
+            {
+              label: '平台',
+              children: <PlatformTag code={store.platformCode} suffix={store.platformName} />,
+            },
+            {
+              label: 'Store ID',
+              children: <span style={{ fontSize: 12, fontFamily: 'monospace' }}>{store.id}</span>,
+            },
+            {
+              label: '状态',
+              children: (
+                <StatusBadge
+                  tone={store.status === 'ACTIVE' ? 'success' : 'neutral'}
+                  label={store.status === 'ACTIVE' ? '启用' : '停用'}
+                  hint={store.status}
+                  showDot={false}
+                />
+              ),
+            },
+            { label: '创建时间', children: fmtDateTime(store.createdAt) },
+            { label: 'Seller ID', children: store.sellerId ?? '—' },
+            { label: '币种', children: store.defaultCurrency ?? '—' },
+          ]}
+        />
       </section>
 
       <section>
@@ -1262,7 +1223,7 @@ function StoreDetailBody({
             {
               title: '操作',
               key: 'actions',
-              width: 190,
+              width: 210,
               render: (_: unknown, row: CredentialRow) => (
                 <Space size={4}>
                   <Button
@@ -1291,14 +1252,21 @@ function StoreDetailBody({
                             label: '启用',
                             onClick: () => onToggleCredential(row.id, 'enable'),
                           },
-                      {
-                        key: 'delete',
-                        label: '删除',
-                        danger: true,
-                        onClick: () => onDeleteCredential(row),
-                      },
                     ]}
                   />
+                  {/* 子资源行删除 = small danger + Popconfirm（UI 规范 §7）。 */}
+                  <Popconfirm
+                    title="确认删除该凭证？"
+                    description="删除后需重新录入 Client ID 与 API Key 才能连接平台。"
+                    okText="删除"
+                    okButtonProps={{ danger: true }}
+                    cancelText="取消"
+                    onConfirm={() => onDeleteCredential(row)}
+                  >
+                    <Button size="small" danger>
+                      删除
+                    </Button>
+                  </Popconfirm>
                 </Space>
               ),
             },
@@ -1311,11 +1279,12 @@ function StoreDetailBody({
 
       <section>
         <SectionTitle>同步状态</SectionTitle>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', rowGap: 0 }}>
-          <InfoField
-            label="订单同步（最近）"
-            value={
-              overview?.lastOrderSync ? (
+        <InfoGrid
+          columns={2}
+          items={[
+            {
+              label: '订单同步（最近）',
+              children: overview?.lastOrderSync ? (
                 <Space size={6}>
                   <SyncStatusBadge status={overview.lastOrderSync.status} />
                   <span
@@ -1328,13 +1297,11 @@ function StoreDetailBody({
                 '加载中…'
               ) : (
                 '从未同步'
-              )
-            }
-          />
-          <InfoField
-            label="商品同步（最近）"
-            value={
-              overview?.lastListingSync ? (
+              ),
+            },
+            {
+              label: '商品同步（最近）',
+              children: overview?.lastListingSync ? (
                 <Space size={6}>
                   <SyncStatusBadge status={overview.lastListingSync.status} />
                   <RelativeTime value={overview.lastListingSync.finishedAt} />
@@ -1343,95 +1310,101 @@ function StoreDetailBody({
                 '加载中…'
               ) : (
                 '从未同步'
-              )
-            }
-          />
-          <InfoField
-            label="类目树（最近）"
-            value={
-              overview?.lastCategoryTreeSync ? (
+              ),
+            },
+            {
+              label: '类目树（最近）',
+              children: overview?.lastCategoryTreeSync ? (
                 <Space size={6}>
                   <SyncStatusBadge status={overview.lastCategoryTreeSync.status} />
                   <RelativeTime value={overview.lastCategoryTreeSync.finishedAt} />
                 </Space>
               ) : (
                 '从未同步'
-              )
-            }
-          />
-          <InfoField
-            label="商品属性增强（最近）"
-            value={
-              overview?.lastProductEnrichmentSync ? (
+              ),
+            },
+            {
+              label: '商品属性增强（最近）',
+              children: overview?.lastProductEnrichmentSync ? (
                 <Space size={6}>
                   <SyncStatusBadge status={overview.lastProductEnrichmentSync.status} />
                   <RelativeTime value={overview.lastProductEnrichmentSync.finishedAt} />
                 </Space>
               ) : (
                 '从未同步'
-              )
-            }
-          />
-          <InfoField
-            label="连续失败"
-            value={
-              overview !== undefined && overview.consecutiveFailures > 0 ? (
-                <span style={{ color: colors.danger }}>{overview.consecutiveFailures} 次</span>
-              ) : (
-                '0 次'
-              )
-            }
-          />
-          <InfoField
-            label="运行中任务"
-            value={
-              overview?.activeJobId !== undefined && overview.activeJobId !== null ? '有' : '无'
-            }
-          />
-        </div>
+              ),
+            },
+            {
+              label: '连续失败',
+              children:
+                overview !== undefined && overview.consecutiveFailures > 0 ? (
+                  <span style={{ color: colors.danger }}>{overview.consecutiveFailures} 次</span>
+                ) : (
+                  '0 次'
+                ),
+            },
+            {
+              label: '运行中任务',
+              children:
+                overview?.activeJobId !== undefined && overview.activeJobId !== null ? '有' : '无',
+            },
+          ]}
+        />
         {orderSyncStale && (
           <p style={{ fontSize: 12.5, color: colors.danger, margin: '8px 0 0' }}>
             订单自动同步已开启，但超过 15 分钟没有成功记录——请检查同步任务或凭证。
           </p>
         )}
-        <Space style={{ marginTop: 12 }}>
-          <Button type="primary" loading={syncing} onClick={() => onSync('orders')}>
-            手动同步订单
-          </Button>
-          <Button loading={syncing} onClick={() => onSync('listings')}>
-            手动同步商品（Listing）
-          </Button>
-        </Space>
+        <p style={{ fontSize: 12.5, color: colors.textTertiary, margin: '8px 0 0' }}>
+          手动同步入口在列表页选中店铺后的右侧栏「立即同步」。
+        </p>
       </section>
 
       <section>
         <SectionTitle>自动同步（定时轮询）</SectionTitle>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', rowGap: 12 }}>
-          <InfoField
-            label="订单自动同步（约 5 分钟一次）"
-            value={
-              <Switch
-                checked={syncSettings.orderSyncEnabled}
-                loading={syncSettingsSaving}
-                disabled={store.status !== 'ACTIVE'}
-                onChange={(checked) => onToggleSyncSetting({ orderSyncEnabled: checked })}
-              />
-            }
-          />
-          <InfoField
-            label="商品（Listing）自动同步"
-            value={
-              <Switch
-                checked={syncSettings.listingSyncEnabled}
-                loading={syncSettingsSaving}
-                disabled={store.status !== 'ACTIVE'}
-                onChange={(checked) => onToggleSyncSetting({ listingSyncEnabled: checked })}
-              />
-            }
-          />
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 3,
+              padding: '9px 16px 9px 0',
+              borderBottom: `1px solid ${colors.borderSoft}`,
+            }}
+          >
+            <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+              订单自动同步（约 5 分钟一次）
+            </span>
+            <Switch
+              checked={syncSettings.orderSyncEnabled}
+              loading={syncSettingsSaving}
+              disabled={store.status !== 'ACTIVE'}
+              onChange={(checked) => onToggleSyncSetting({ orderSyncEnabled: checked })}
+            />
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 3,
+              padding: '9px 16px 9px 0',
+              borderBottom: `1px solid ${colors.borderSoft}`,
+            }}
+          >
+            <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+              商品（Listing）自动同步
+            </span>
+            <Switch
+              checked={syncSettings.listingSyncEnabled}
+              loading={syncSettingsSaving}
+              disabled={store.status !== 'ACTIVE'}
+              onChange={(checked) => onToggleSyncSetting({ listingSyncEnabled: checked })}
+            />
+          </div>
         </div>
         <p style={{ fontSize: 12.5, color: colors.textTertiary, margin: '8px 0 0' }}>
-          开关只影响调度器的自动轮询；手动同步始终可用。商品同步默认仅手动（Sprint 9 决策 2）。
+          开关只影响调度器的自动轮询；手动同步始终可用（入口在列表页右栏）。商品同步默认仅手动（Sprint
+          9 决策 2）。
         </p>
       </section>
 
@@ -1456,25 +1429,14 @@ function StoreDetailBody({
               render: (value: string) => (
                 <StatusBadge
                   tone={value === 'ACTIVE' ? 'success' : 'neutral'}
-                  label={value === 'ACTIVE' ? '启用' : value}
+                  label={value === 'ACTIVE' ? '启用' : '停用'}
                   hint={value}
+                  showDot={false}
                 />
               ),
             },
           ]}
         />
-      </section>
-
-      <section>
-        {store.status === 'ACTIVE' ? (
-          <Button danger loading={toggling} onClick={onToggle}>
-            停用店铺
-          </Button>
-        ) : (
-          <Button type="primary" loading={toggling} onClick={onToggle}>
-            启用店铺
-          </Button>
-        )}
       </section>
     </Space>
   );
@@ -1498,32 +1460,6 @@ function SectionTitle({
     >
       <span style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary }}>{children}</span>
       {action}
-    </div>
-  );
-}
-
-function InfoField({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 3,
-        padding: '9px 16px 9px 0',
-        borderBottom: `1px solid ${colors.borderSoft}`,
-      }}
-    >
-      <span style={{ fontSize: 12.5, color: colors.textTertiary }}>{label}</span>
-      <span
-        style={{
-          fontSize: 13.5,
-          color: colors.textPrimary,
-          wordBreak: 'break-word',
-          fontVariantNumeric: 'tabular-nums',
-        }}
-      >
-        {value}
-      </span>
     </div>
   );
 }

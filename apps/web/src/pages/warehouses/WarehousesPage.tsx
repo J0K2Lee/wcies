@@ -1,21 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-  App as AntdApp,
-  Button,
-  Drawer,
-  Form,
-  Input,
-  InputNumber,
-  Modal,
-  Popconfirm,
-  Select,
-  Space,
-} from 'antd';
+import { App as AntdApp, Button, Drawer, Form, Input, Modal, Select, Space } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { apiDelete, apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime } from '../../utils/format';
+import { BinBatchCreateModal } from '../../components/BinBatchCreateModal';
 import {
   colors,
   ContextAction,
@@ -23,13 +13,17 @@ import {
   ContextRailContent,
   ContextSection,
   DataTable,
+  DeleteConfirmModal,
   EntitySummary,
   ErrorState,
   FilterBar,
+  InfoGrid,
   PageHeader,
+  RailHint,
   SectionCard,
   FULFILLMENT_MODE_LABEL,
   StatusBadge,
+  StatusSwitch,
   useContextRail,
 } from '../../design-system';
 
@@ -82,43 +76,6 @@ const TYPE_LABEL: Record<string, string> = {
   RETURN_TEMP: '退货暂存仓',
 };
 
-/** Layout intent the server turns into bin codes (server owns the format). */
-interface BatchFormValues {
-  zone?: string;
-  rackStart: number;
-  rackCount: number;
-  levelsPerRack: number;
-}
-
-/**
- * Mirrors the server's code rule so the dialog can preview exactly what will
- * be created: rack numbers pad to at least two digits, levels stay plain.
- */
-function previewBinCodes(
-  warehouseCode: string,
-  values: Partial<BatchFormValues>,
-): { first: string; last: string; total: number } | null {
-  const { rackStart, rackCount, levelsPerRack } = values;
-  if (
-    rackStart === undefined ||
-    rackCount === undefined ||
-    levelsPerRack === undefined ||
-    rackCount < 1 ||
-    levelsPerRack < 1
-  ) {
-    return null;
-  }
-  const zone = values.zone?.trim() ?? '';
-  const lastRack = rackStart + rackCount - 1;
-  const width = Math.max(2, String(lastRack).length);
-  const pad = (value: number): string => String(value).padStart(width, '0');
-  return {
-    first: `${warehouseCode}-${zone}${pad(rackStart)}-1`,
-    last: `${warehouseCode}-${zone}${pad(lastRack)}-${levelsPerRack}`,
-    total: rackCount * levelsPerRack,
-  };
-}
-
 type Envelope<T> = { data: T; meta: { total: number } };
 
 export function WarehousesPage() {
@@ -132,15 +89,12 @@ export function WarehousesPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
-  // Id snapshot taken when the batch modal opens: the drawer's onClose may
-  // null out detailId while the modal is still open (decision: modal chain
-  // fix) - submissions must never send an empty path parameter.
-  const [batchWarehouseId, setBatchWarehouseId] = useState<string | null>(null);
+  // Snapshot taken when the batch modal opens so a closing drawer can't blank
+  // the path parameter (modal chain fix); the shared modal keeps it too.
+  const [batchWarehouse, setBatchWarehouse] = useState<{ id: string; code: string } | null>(null);
+  const [deleting, setDeleting] = useState<WarehouseRow | null>(null);
   const [binZone, setBinZone] = useState<string | undefined>();
   const [form] = Form.useForm();
-  const [batchForm] = Form.useForm();
-  // Live values drive the modal's "what will be created" preview.
-  const batchValues = Form.useWatch([], batchForm) as Partial<BatchFormValues> | undefined;
 
   const list = useApiQuery<Envelope<WarehouseRow[]>>(
     '/api/v1/warehouses',
@@ -175,13 +129,6 @@ export function WarehousesPage() {
     ['bin-zones', detailId],
     { warehouseId: detailId ?? '' },
     detailId !== null,
-  );
-  const batchPreview = useMemo(
-    () =>
-      warehouse === undefined || batchValues === undefined
-        ? null
-        : previewBinCodes(warehouse.warehouseCode, batchValues),
-    [warehouse, batchValues],
   );
   const bindings = useApiQuery<Envelope<BindingRow[]>>(
     '/api/v1/warehouse-bindings',
@@ -224,6 +171,7 @@ export function WarehousesPage() {
     mutationFn: (id: string) => apiDelete('/api/v1/warehouses/{id}', { id }),
     onSuccess: (_data, id) => {
       void message.success('仓库已删除');
+      setDeleting(null);
       if (detailId === id) {
         setDetailId(null);
       }
@@ -235,40 +183,9 @@ export function WarehousesPage() {
     onError: (error: Error) => void message.error(error.message),
   });
 
-  const batchMutation = useMutation({
-    // warehouseId travels in the path only: the DTO has no such property and
-    // forbidNonWhitelisted rejects the request body outright when it appears.
-    mutationFn: ({ warehouseId, ...body }: BatchFormValues & { warehouseId: string }) =>
-      apiPost<{ createdCount: number; bins: BinRow[] }>(
-        '/api/v1/warehouses/{warehouseId}/bins/batch',
-        body,
-        { warehouseId },
-      ),
-    onSuccess: (data: { createdCount: number }) => {
-      void message.success(`已批量创建 ${data.createdCount} 个库位`);
-      setBatchOpen(false);
-      batchForm.resetFields();
-      void queryClient.invalidateQueries({ queryKey: ['warehouse-bins', batchWarehouseId] });
-      void queryClient.invalidateQueries({ queryKey: ['bin-zones', batchWarehouseId] });
-      void queryClient.invalidateQueries({ queryKey: ['warehouses'] });
-    },
-    onError: (error: Error) => void message.error(error.message),
-  });
-
-  const openBatchModal = (warehouseId: string) => {
-    setBatchWarehouseId(warehouseId);
-    batchForm.resetFields();
+  const openBatchModal = (warehouseId: string, warehouseCode: string) => {
+    setBatchWarehouse({ id: warehouseId, code: warehouseCode });
     setBatchOpen(true);
-  };
-
-  const submitBatch = () => {
-    if (batchWarehouseId === null) {
-      void message.error('仓库上下文丢失，请重新打开后重试');
-      return;
-    }
-    void batchForm
-      .validateFields()
-      .then((values) => batchMutation.mutate({ ...values, warehouseId: batchWarehouseId }));
   };
 
   // ---- Context rail (task §27): 基本信息 + 库存摘要 ----
@@ -283,16 +200,7 @@ export function WarehousesPage() {
               label="库位总数（本页）"
               value={rows.reduce((sum, row) => sum + row.binCount, 0)}
             />
-            <span
-              style={{
-                fontSize: 12.5,
-                color: colors.textTertiary,
-                display: 'block',
-                paddingTop: 8,
-              }}
-            >
-              点击仓库行查看库位、绑定店铺等信息。
-            </span>
+            <RailHint>点击仓库行查看库位、绑定店铺等信息；双击打开详情。</RailHint>
           </ContextSection>
         ),
       };
@@ -328,6 +236,18 @@ export function WarehousesPage() {
             />
             <ContextMetric label="国家" value={selectedRow.countryCode ?? '—'} />
             <ContextMetric label="城市" value={selectedRow.city ?? '—'} />
+            <StatusSwitch
+              active={selectedRow.status === 'ACTIVE'}
+              entityName="仓库"
+              disableHint="停用后不可被店铺绑定与收货选用"
+              loading={statusMutation.isPending}
+              onChange={(next) =>
+                statusMutation.mutate({
+                  id: selectedRow.id,
+                  action: next ? 'activate' : 'deactivate',
+                })
+              }
+            />
           </ContextSection>
           <ContextSection title="库存摘要">
             <ContextMetric label="库位数量" value={selectedRow.binCount} strong />
@@ -341,7 +261,7 @@ export function WarehousesPage() {
         </>
       ),
     };
-  }, [selectedRow, list.data, rows]);
+  }, [selectedRow, list.data, rows, statusMutation.isPending, statusMutation.mutate]);
   useContextRail(railContent);
 
   return (
@@ -365,6 +285,16 @@ export function WarehousesPage() {
       />
 
       <FilterBar>
+        <Input.Search
+          placeholder="搜索仓库编码 / 名称 / 城市"
+          allowClear
+          onSearch={(value) => {
+            setPage(1);
+            setKeyword(value);
+          }}
+          style={{ width: 260 }}
+          aria-label="搜索仓库"
+        />
         <Select
           allowClear
           placeholder="类型"
@@ -375,15 +305,6 @@ export function WarehousesPage() {
             setWarehouseType(value);
           }}
           options={Object.entries(TYPE_LABEL).map(([value, label]) => ({ value, label }))}
-        />
-        <Input.Search
-          placeholder="搜索仓库编码 / 名称 / 城市"
-          allowClear
-          onSearch={(value) => {
-            setPage(1);
-            setKeyword(value);
-          }}
-          style={{ width: 260 }}
         />
       </FilterBar>
 
@@ -409,7 +330,8 @@ export function WarehousesPage() {
               showSizeChanger: false,
             }}
             onRow={(record) => ({
-              onClick: () => setSelectedId(record.id),
+              onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+              onDoubleClick: () => setDetailId(record.id),
               style: {
                 cursor: 'pointer',
                 background: record.id === selectedId ? colors.primarySoft : undefined,
@@ -473,25 +395,8 @@ export function WarehousesPage() {
                     tone={value === 'ACTIVE' ? 'success' : 'neutral'}
                     label={value === 'ACTIVE' ? '启用' : '停用'}
                     hint={value}
+                    showDot={false}
                   />
-                ),
-              },
-              {
-                title: '操作',
-                key: 'actions',
-                width: 76,
-                render: (_: unknown, row: WarehouseRow) => (
-                  <Button
-                    type="link"
-                    size="small"
-                    style={{ padding: 0 }}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setDetailId(row.id);
-                    }}
-                  >
-                    详情
-                  </Button>
                 ),
               },
             ]}
@@ -511,6 +416,8 @@ export function WarehousesPage() {
         }}
         onCancel={() => setCreateOpen(false)}
         onOk={() => void form.validateFields().then((values) => createMutation.mutate(values))}
+        okText="创建"
+        cancelText="取消"
         confirmLoading={createMutation.isPending}
       >
         <Form form={form} layout="vertical">
@@ -559,38 +466,15 @@ export function WarehousesPage() {
       {/* ---- Warehouse detail drawer (task §27) ---- */}
       <Drawer
         title={detailRow !== null ? `${detailRow.name}（${detailRow.warehouseCode}）` : '仓库详情'}
-        size={720}
+        size={760}
         open={detailId !== null}
         onClose={() => setDetailId(null)}
         destroyOnHidden
         extra={
           detailRow !== null && (
-            <Space>
-              {detailRow.status !== 'ACTIVE' ? (
-                <Button
-                  type="primary"
-                  onClick={() => statusMutation.mutate({ id: detailRow.id, action: 'activate' })}
-                >
-                  启用
-                </Button>
-              ) : (
-                <Popconfirm
-                  title="确认停用该仓库？"
-                  onConfirm={() =>
-                    statusMutation.mutate({ id: detailRow.id, action: 'deactivate' })
-                  }
-                >
-                  <Button danger>停用</Button>
-                </Popconfirm>
-              )}
-              <Popconfirm
-                title="确认删除该仓库？"
-                description="仅零引用（无库位/绑定/库存）的仓库可删除；被引用时会返回具体原因。"
-                onConfirm={() => deleteMutation.mutate(detailRow.id)}
-              >
-                <Button danger>删除</Button>
-              </Popconfirm>
-            </Space>
+            <Button size="small" danger onClick={() => setDeleting(detailRow)}>
+              删除
+            </Button>
           )
         }
       >
@@ -598,33 +482,37 @@ export function WarehousesPage() {
           <Space orientation="vertical" size="large" style={{ width: '100%' }}>
             <section>
               <SectionTitle>基本信息</SectionTitle>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-                <Field label="仓库编码" value={detailRow.warehouseCode} />
-                <Field label="名称" value={detailRow.name} />
-                <Field
-                  label="类型"
-                  value={TYPE_LABEL[detailRow.warehouseType] ?? detailRow.warehouseType}
-                />
-                <Field
-                  label="状态"
-                  value={
-                    <StatusBadge
-                      tone={detailRow.status === 'ACTIVE' ? 'success' : 'neutral'}
-                      label={detailRow.status === 'ACTIVE' ? '启用' : '停用'}
-                      hint={detailRow.status}
-                    />
-                  }
-                />
-                <Field
-                  label="国家 / 城市"
-                  value={`${detailRow.countryCode ?? '—'} / ${detailRow.city ?? '—'}`}
-                />
-                <Field label="联系人" value={detailRow.contactName ?? '—'} />
-                <Field label="联系电话" value={detailRow.contactPhone ?? '—'} />
-                <Field label="创建时间" value={fmtDateTime(detailRow.createdAt)} />
-                <Field label="库位数量" value={`${detailRow.binCount}`} />
-                <Field label="绑定店铺" value={`${detailRow.boundStoreCount} 家`} />
-              </div>
+              <InfoGrid
+                columns={2}
+                items={[
+                  { label: '仓库编码', children: detailRow.warehouseCode },
+                  { label: '名称', children: detailRow.name },
+                  {
+                    label: '类型',
+                    children: TYPE_LABEL[detailRow.warehouseType] ?? detailRow.warehouseType,
+                  },
+                  {
+                    label: '状态',
+                    children: (
+                      <StatusBadge
+                        tone={detailRow.status === 'ACTIVE' ? 'success' : 'neutral'}
+                        label={detailRow.status === 'ACTIVE' ? '启用' : '停用'}
+                        hint={detailRow.status}
+                        showDot={false}
+                      />
+                    ),
+                  },
+                  {
+                    label: '国家 / 城市',
+                    children: `${detailRow.countryCode ?? '—'} / ${detailRow.city ?? '—'}`,
+                  },
+                  { label: '联系人', children: detailRow.contactName ?? '—' },
+                  { label: '联系电话', children: detailRow.contactPhone ?? '—' },
+                  { label: '创建时间', children: fmtDateTime(detailRow.createdAt) },
+                  { label: '库位数量', children: `${detailRow.binCount}` },
+                  { label: '绑定店铺', children: `${detailRow.boundStoreCount} 家` },
+                ]}
+              />
             </section>
 
             <section>
@@ -646,7 +534,9 @@ export function WarehousesPage() {
                     <Button
                       size="small"
                       type="primary"
-                      onClick={() => detailRow !== null && openBatchModal(detailRow.id)}
+                      onClick={() =>
+                        detailRow !== null && openBatchModal(detailRow.id, detailRow.warehouseCode)
+                      }
                     >
                       批量创建库位
                     </Button>
@@ -690,8 +580,9 @@ export function WarehousesPage() {
                     render: (value: string) => (
                       <StatusBadge
                         tone={value === 'ACTIVE' ? 'success' : 'neutral'}
-                        label={value === 'ACTIVE' ? '启用' : value}
+                        label={value === 'ACTIVE' ? '启用' : '停用'}
                         hint={value}
+                        showDot={false}
                       />
                     ),
                   },
@@ -735,8 +626,9 @@ export function WarehousesPage() {
                     render: (value: string) => (
                       <StatusBadge
                         tone={value === 'ACTIVE' ? 'success' : 'neutral'}
-                        label={value === 'ACTIVE' ? '启用' : value}
+                        label={value === 'ACTIVE' ? '启用' : '停用'}
                         hint={value}
+                        showDot={false}
                       />
                     ),
                   },
@@ -747,89 +639,28 @@ export function WarehousesPage() {
         )}
       </Drawer>
 
-      {/* ---- Batch create bins modal: layout intent in, codes out ---- */}
-      <Modal
-        title={`批量创建库位 — ${detailRow?.warehouseCode ?? ''}`}
-        open={batchOpen}
-        zIndex={1100}
-        afterOpenChange={(open) => {
-          if (!open) {
-            batchForm.resetFields();
+      {/* ---- Delete confirm (L2, shared DS modal) ---- */}
+      <DeleteConfirmModal
+        open={deleting !== null}
+        title={`删除仓库 ${deleting?.name ?? ''}？`}
+        description="仅零引用（无库位/绑定/库存）的仓库可删除；被引用时会返回具体原因。"
+        confirmLoading={deleteMutation.isPending}
+        onConfirm={() => {
+          if (deleting !== null) {
+            deleteMutation.mutate(deleting.id);
           }
         }}
-        onCancel={() => setBatchOpen(false)}
-        onOk={submitBatch}
-        confirmLoading={batchMutation.isPending}
-      >
-        <Form form={batchForm} layout="vertical">
-          <Space wrap>
-            <Form.Item
-              name="zone"
-              label="库区"
-              rules={[{ max: 20, message: '库区最多 20 个字符' }]}
-            >
-              <Input placeholder="如 A（留空则不分区）" style={{ width: 170 }} />
-            </Form.Item>
-            <Form.Item
-              name="rackStart"
-              label="起始货架号"
-              rules={[{ required: true, message: '请输入起始货架号' }]}
-              initialValue={1}
-            >
-              <InputNumber min={1} max={9999} precision={0} style={{ width: 110 }} />
-            </Form.Item>
-            <Form.Item
-              name="rackCount"
-              label="货架数量"
-              rules={[{ required: true, message: '请输入货架数量' }]}
-              initialValue={5}
-            >
-              <InputNumber min={1} max={2000} precision={0} style={{ width: 110 }} />
-            </Form.Item>
-            <Form.Item
-              name="levelsPerRack"
-              label="每架层数"
-              rules={[{ required: true, message: '请输入每架层数' }]}
-              initialValue={4}
-            >
-              <InputNumber min={1} max={999} precision={0} style={{ width: 110 }} />
-            </Form.Item>
-          </Space>
-          {batchPreview === null ? (
-            <p style={{ color: colors.textTertiary, fontSize: 12.5, marginBottom: 0 }}>
-              库位编码由系统生成，格式为 仓库-货架-层（如
-              ZG-01-A05-1）。同一仓库内重复编码会被拒绝。
-            </p>
-          ) : (
-            <div
-              style={{
-                background: colors.canvas,
-                border: `1px solid ${colors.borderSoft}`,
-                borderRadius: 6,
-                padding: '10px 12px',
-              }}
-            >
-              <div style={{ fontSize: 13, color: colors.textPrimary }}>
-                将创建 <strong>{batchPreview.total}</strong> 个库位：
-                <span style={{ marginLeft: 6, fontFamily: 'monospace' }}>{batchPreview.first}</span>
-                {batchPreview.total > 1 && (
-                  <>
-                    <span style={{ margin: '0 6px', color: colors.textTertiary }}>…</span>
-                    <span style={{ fontFamily: 'monospace' }}>{batchPreview.last}</span>
-                  </>
-                )}
-              </div>
-              <div style={{ fontSize: 12.5, color: colors.textTertiary, marginTop: 6 }}>
-                货架从第 {batchForm.getFieldValue('rackStart') as number} 号开始
-                {batchForm.getFieldValue('zone')
-                  ? `（区 ${String(batchForm.getFieldValue('zone'))}）`
-                  : ''}
-                ；每架 {batchForm.getFieldValue('levelsPerRack') as number} 层。条码与编码相同。
-              </div>
-            </div>
-          )}
-        </Form>
-      </Modal>
+        onCancel={() => setDeleting(null)}
+      />
+
+      {/* ---- Batch create bins: shared dialog (G9) ---- */}
+      <BinBatchCreateModal
+        open={batchOpen}
+        warehouseId={batchWarehouse?.id ?? null}
+        warehouseCode={batchWarehouse?.code ?? ''}
+        zIndex={1100}
+        onClose={() => setBatchOpen(false)}
+      />
     </div>
   );
 }
@@ -852,25 +683,6 @@ function SectionTitle({
     >
       <span style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary }}>{children}</span>
       {action}
-    </div>
-  );
-}
-
-function Field({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 3,
-        padding: '9px 16px 9px 0',
-        borderBottom: `1px solid ${colors.borderSoft}`,
-      }}
-    >
-      <span style={{ fontSize: 12.5, color: colors.textTertiary }}>{label}</span>
-      <span style={{ fontSize: 13.5, color: colors.textPrimary, wordBreak: 'break-word' }}>
-        {value}
-      </span>
     </div>
   );
 }
