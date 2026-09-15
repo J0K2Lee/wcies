@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { App as AntdApp, Button, Select } from 'antd';
+import { App as AntdApp, Button, Popconfirm, Select } from 'antd';
 import { BellOutlined, CloseCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import { apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime, fmtNumber } from '../../utils/format';
@@ -12,8 +12,12 @@ import {
   DataTable,
   ErrorState,
   FilterBar,
+  KpiRow,
   MetricCard,
+  NOTIFICATION_STATUS_META,
+  NOTIFICATION_TYPE_META,
   PageHeader,
+  RailHint,
   RelativeTime,
   SectionCard,
   StatusBadge,
@@ -42,21 +46,6 @@ interface NotificationItem {
   failedAt: string | null;
   createdAt: string;
 }
-
-const TYPE_LABEL: Record<string, string> = {
-  ORDER_INTERCEPTION_REQUIRED: '需要拦截',
-  ORDER_INTERCEPTION_FAILED: '拦截失败',
-};
-
-const STATUS_META: Record<
-  string,
-  { tone: 'info' | 'success' | 'danger' | 'neutral'; label: string }
-> = {
-  PENDING: { tone: 'info', label: '投递中' },
-  SENT: { tone: 'success', label: '已送达' },
-  FAILED: { tone: 'danger', label: '投递失败' },
-  CANCELLED: { tone: 'neutral', label: '已取消' },
-};
 
 type Envelope<T> = { data: T; meta: { total: number } };
 
@@ -101,24 +90,11 @@ export function NotificationsPage() {
       children: (
         <ContextSection title="通知概况">
           <ContextMetric label="当前筛选" value={`${query.data?.meta.total ?? 0} 条`} />
-          <ContextMetric
-            label={<span style={{ color: colors.danger }}>投递失败</span>}
-            value={fmtNumber(failedCount.data?.meta.total ?? 0)}
-          />
-          <span
-            style={{
-              fontSize: 12.5,
-              color: colors.textTertiary,
-              display: 'block',
-              paddingTop: 8,
-            }}
-          >
-            通知是事件流；需要处理的问题请前往异常中心。
-          </span>
+          <RailHint>通知是事件流；需要处理的问题请前往异常中心。</RailHint>
         </ContextSection>
       ),
     }),
-    [query.data, failedCount.data],
+    [query.data],
   );
   useContextRail(railContent);
 
@@ -137,14 +113,7 @@ export function NotificationsPage() {
         }
       />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(2, 1fr)',
-          gap: 16,
-          marginBottom: 16,
-        }}
-      >
+      <KpiRow>
         <MetricCard
           icon={<BellOutlined />}
           title="通知总数（当前筛选）"
@@ -156,19 +125,22 @@ export function NotificationsPage() {
           value={fmtNumber(failedCount.data?.meta.total ?? 0)}
           aux="可重试（飞书渠道）"
         />
-      </div>
+      </KpiRow>
 
       <FilterBar>
         <Select
           allowClear
           placeholder="类型"
-          style={{ width: 200 }}
+          style={{ width: 120 }}
           value={type}
           onChange={(value) => {
             setPage(1);
             setType(value);
           }}
-          options={Object.entries(TYPE_LABEL).map(([value, label]) => ({ value, label }))}
+          options={Object.entries(NOTIFICATION_TYPE_META).map(([value, meta]) => ({
+            value,
+            label: meta.label,
+          }))}
         />
         <Select
           allowClear
@@ -179,7 +151,7 @@ export function NotificationsPage() {
             setPage(1);
             setStatus(value);
           }}
-          options={Object.entries(STATUS_META).map(([value, meta]) => ({
+          options={Object.entries(NOTIFICATION_STATUS_META).map(([value, meta]) => ({
             value,
             label: meta.label,
           }))}
@@ -214,7 +186,7 @@ export function NotificationsPage() {
                 render: (_: unknown, row: NotificationItem) => (
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 550 }}>
-                      {TYPE_LABEL[row.type] ?? row.type}
+                      {NOTIFICATION_TYPE_META[row.type]?.label ?? row.type}
                       <span style={{ fontSize: 12.5, color: colors.textSecondary, marginLeft: 8 }}>
                         {row.title}
                       </span>
@@ -255,8 +227,8 @@ export function NotificationsPage() {
                 width: 96,
                 render: (value: string) => (
                   <StatusBadge
-                    tone={STATUS_META[value]?.tone ?? 'neutral'}
-                    label={STATUS_META[value]?.label ?? value}
+                    tone={NOTIFICATION_STATUS_META[value]?.tone ?? 'neutral'}
+                    label={NOTIFICATION_STATUS_META[value]?.label ?? value}
                     hint={value}
                   />
                 ),
@@ -272,18 +244,20 @@ export function NotificationsPage() {
                 title: '操作',
                 key: 'actions',
                 width: 76,
+                // 该页唯一行内按钮（概览型右栏例外）；L1 轻确认。
                 render: (_: unknown, row: NotificationItem) =>
                   row.channel === 'FEISHU' && row.status === 'FAILED' ? (
-                    <Button
-                      size="small"
-                      loading={retryMutation.isPending}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        retryMutation.mutate(row.id);
-                      }}
+                    <Popconfirm
+                      title="重新投递该通知？"
+                      description="将重新入队飞书投递。"
+                      okText="重试"
+                      cancelText="取消"
+                      onConfirm={() => retryMutation.mutate(row.id)}
                     >
-                      重试
-                    </Button>
+                      <Button size="small" loading={retryMutation.isPending}>
+                        重试
+                      </Button>
+                    </Popconfirm>
                   ) : null,
               },
             ]}

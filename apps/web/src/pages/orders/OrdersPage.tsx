@@ -13,23 +13,26 @@ import {
   Tooltip,
 } from 'antd';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ExportOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { apiPost, useApiQuery } from '../../api/hooks';
 import {
-  ActionMenu,
   ContextAction,
   ContextMetric,
   ContextSection,
   DataTable,
-  EntityLink,
   EntitySummary,
   ERP_STATUS_META,
+  FilterChips,
   FULFILLMENT_STATUS_META,
   FilterBar,
   InfoGrid,
   PageHeader,
+  PICKING_STATUS_META,
   PlatformTag,
+  RailHint,
+  RawDataBlock,
+  RelativeTime,
+  INTERCEPTION_STATUS_META,
   SectionCard,
   StatusBadge,
   colors,
@@ -166,6 +169,8 @@ const STAGE_TABS: Array<{ key: string; label: string; stage?: string }> = [
  * Single-select on top of the stage tab; the predicates run on the backend
  * (`goodsState` query param) so chips catch orders whose rollup status hides
  * a line problem (e.g. PARTIALLY_SHIPPED + one BACKORDERED line).
+ * Rendered via DS FilterChips (Phase 3 T3): flow chips default tone, risk
+ * chips danger tone, grouped with a divider.
  */
 const GOODS_STATE_CHIPS: Array<{
   key: string;
@@ -173,6 +178,7 @@ const GOODS_STATE_CHIPS: Array<{
   flow: boolean;
   tooltip: string;
 }> = [
+  { key: 'ALL', label: '全部', flow: true, tooltip: '不按货物状态筛选（仅一级物流阶段）' },
   {
     key: 'TO_PICK',
     label: '待拣货',
@@ -571,16 +577,7 @@ export function OrdersPage() {
             <ContextMetric label="待处理" value={pendingCount.data?.meta.total ?? 0} />
             <ContextMetric label="待收货" value={inTransitCount.data?.meta.total ?? 0} />
             <ContextMetric label="已完成" value={completedCount.data?.meta.total ?? 0} />
-            <span
-              style={{
-                fontSize: 12.5,
-                color: colors.textTertiary,
-                display: 'block',
-                paddingTop: 8,
-              }}
-            >
-              点击订单行快速预览风险与状态；缺货订单可在右栏重试分配或登记采购。
-            </span>
+            <RailHint>点击订单行快速预览风险与状态；缺货订单可在右栏重试分配或登记采购。</RailHint>
           </ContextSection>
         ),
       };
@@ -661,23 +658,6 @@ export function OrdersPage() {
               </div>
             </ContextSection>
           )}
-          {selectedRow.mappingFailedCount > 0 &&
-            failedMappingItems.length > 0 &&
-            mappingSearchKeyword(failedMappingItems[0]!) !== null && (
-              // 与异常中心一致的「关联操作」入口: EntityLink 深链到映射工作台
-              <ContextSection title="关联操作">
-                {/* 目标是 /listings「SKU映射」工作台（快速建档所在），与异常中心
-                    「前往 SKU 映射」同一深链格式；/platform-mappings 是映射总览。 */}
-                <EntityLink
-                  to={`/listings?keyword=${encodeURIComponent(
-                    mappingSearchKeyword(failedMappingItems[0]!) ?? '',
-                  )}`}
-                  icon={<ExportOutlined />}
-                  primary="映射失败行 · 去快捷建档"
-                  secondary={`自动搜索 ${mappingSearchKeyword(failedMappingItems[0]!)}`}
-                />
-              </ContextSection>
-            )}
           {selectedRow.mappingFailedCount === 0 && selectedRow.backorderedCount > 0 && (
             <ContextSection title="风险">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -779,8 +759,42 @@ export function OrdersPage() {
           )}
           <ContextAction>
             <Button block onClick={() => setDetailId(selectedRow.id)}>
-              查看完整订单
+              查看详情
             </Button>
+            {selectedRow.erpStatus !== 'SHIPPED' && selectedRow.erpStatus !== 'CANCELLED' && (
+              <Button
+                block
+                style={{ marginTop: 8 }}
+                onClick={() => {
+                  setExternalTarget(selectedRow);
+                  externalForm.setFieldsValue({ reason: '' });
+                }}
+              >
+                标记外部履约
+              </Button>
+            )}
+            {selectedRow.erpStatus !== 'CANCELLED' && (
+              <Button
+                block
+                danger
+                style={{ marginTop: 8 }}
+                onClick={() => {
+                  // 取消订单 = L2：modal.confirm + danger ok。
+                  modal.confirm({
+                    title: `取消订单 ${selectedRow.orderNo}？`,
+                    content: 'Reserved 行将释放库存；Picked 行将创建拦截任务（不自动恢复库存）。',
+                    okText: '取消订单',
+                    okButtonProps: { danger: true },
+                    cancelText: '返回',
+                    onOk: () => {
+                      cancelMutation.mutate(selectedRow.id);
+                    },
+                  });
+                }}
+              >
+                取消订单
+              </Button>
+            )}
           </ContextAction>
         </>
       ),
@@ -788,11 +802,13 @@ export function OrdersPage() {
   }, [
     selectedRow,
     railDetail,
-    retryMutation,
+    retryMutation.isPending,
     query.data,
     pendingCount.data,
     inTransitCount.data,
     completedCount.data,
+    cancelMutation.mutate,
+    modal,
   ]);
   useContextRail(railContent);
 
@@ -901,40 +917,6 @@ export function OrdersPage() {
         );
       },
     },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 180,
-      render: (_: unknown, row: OrderItem) => {
-        // FAILED lines are retryable too: the mapping may have been repaired
-        // in the SKU workbench since ingestion, and the backend re-resolves
-        // the line on retry (a FAILED line has no other way out).
-        const retryable =
-          (row.mappingStatus === 'MAPPED' || row.mappingStatus === 'FAILED') &&
-          (row.fulfillmentStatus === 'BACKORDERED' || row.fulfillmentStatus === 'PENDING');
-        if (row.mappingStatus !== 'FAILED' && !retryable) {
-          return null;
-        }
-        return (
-          <span style={{ display: 'inline-flex', gap: 6 }}>
-            {row.mappingStatus === 'FAILED' && (
-              <Button size="small" type="primary" ghost onClick={() => openMappingWorkbench(row)}>
-                去建档
-              </Button>
-            )}
-            {retryable && (
-              <Button
-                size="small"
-                loading={retryMutation.isPending}
-                onClick={() => retryMutation.mutate(row.id)}
-              >
-                重新尝试分配
-              </Button>
-            )}
-          </span>
-        );
-      },
-    },
   ];
 
   const stageCountOf = (tabKey: string): number => {
@@ -955,11 +937,7 @@ export function OrdersPage() {
       <PageHeader
         title="订单管理"
         description="统一管理各平台订单及内部履约状态"
-        primary={
-          <Button type="primary" onClick={() => setIngestOpen(true)}>
-            摄入测试订单
-          </Button>
-        }
+        secondary={<Button onClick={() => setIngestOpen(true)}>摄入测试订单</Button>}
         extra={
           <Tabs
             activeKey={activeTab}
@@ -979,7 +957,8 @@ export function OrdersPage() {
         <Input.Search
           placeholder="订单号 / 平台订单号"
           allowClear
-          defaultValue={keyword}
+          value={keyword}
+          onChange={(event) => setKeyword(event.target.value)}
           onSearch={(value) => {
             setPage(1);
             setKeyword(value);
@@ -1029,44 +1008,21 @@ export function OrdersPage() {
       {/* Axis 2: line-level goods-state chips (§2.2) - single select on top of
           the stage tab. Flow chips describe healthy progress; risk chips need
           human attention. Tooltips state the exact backend predicate. */}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-        <Tooltip title="不按货物状态筛选（仅一级物流阶段）">
-          <Button
-            size="small"
-            type={goodsState === undefined ? 'primary' : 'text'}
-            ghost={goodsState === undefined}
-            onClick={() => {
-              setPage(1);
-              setGoodsState(undefined);
-            }}
-          >
-            全部
-          </Button>
-        </Tooltip>
-        {GOODS_STATE_CHIPS.map((chip) => (
-          <span key={chip.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            {!chip.flow && chip.key === 'BACKORDERED' && <span style={{ opacity: 0.35 }}>｜</span>}
-            <Tooltip title={chip.tooltip}>
-              <Button
-                size="small"
-                danger={!chip.flow && goodsState === chip.key}
-                type={goodsState === chip.key ? 'primary' : 'text'}
-                ghost={goodsState === chip.key}
-                onClick={() => {
-                  setPage(1);
-                  setGoodsState(goodsState === chip.key ? undefined : chip.key);
-                }}
-                style={
-                  !chip.flow && goodsState !== chip.key
-                    ? { color: colors.danger, borderColor: colors.danger }
-                    : undefined
-                }
-              >
-                {chip.label}
-              </Button>
-            </Tooltip>
-          </span>
-        ))}
+      <div style={{ marginBottom: 12 }}>
+        <FilterChips
+          chips={GOODS_STATE_CHIPS.map((chip) => ({
+            key: chip.key,
+            label: chip.label,
+            tooltip: chip.tooltip,
+            tone: chip.flow ? 'default' : 'risk',
+            group: chip.flow ? 'flow' : 'risk',
+          }))}
+          value={goodsState ?? 'ALL'}
+          onChange={(key) => {
+            setPage(1);
+            setGoodsState(key === undefined || key === 'ALL' ? undefined : key);
+          }}
+        />
       </div>
 
       <SectionCard flush>
@@ -1083,6 +1039,7 @@ export function OrdersPage() {
           }}
           onRow={(record) => ({
             onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+            onDoubleClick: () => setDetailId(record.id),
             style: {
               cursor: 'pointer',
               background: record.id === selectedId ? colors.primarySoft : undefined,
@@ -1211,68 +1168,8 @@ export function OrdersPage() {
               title: '下单时间',
               dataIndex: 'orderedAt',
               key: 'orderedAt',
-              width: 150,
-              render: (value: string) => fmtDateTime(value),
-            },
-            {
-              title: '操作',
-              key: 'actions',
-              width: 120,
-              fixed: 'right',
-              render: (_: unknown, row: OrderListItem) => (
-                <ActionMenu
-                  primary={
-                    <Button
-                      type="link"
-                      size="small"
-                      style={{ paddingInline: 4 }}
-                      onClick={() => setDetailId(row.id)}
-                    >
-                      查看
-                    </Button>
-                  }
-                  items={[
-                    {
-                      key: 'view',
-                      label: '查看详情',
-                      onClick: () => setDetailId(row.id),
-                    },
-                    ...(row.erpStatus !== 'CANCELLED'
-                      ? [
-                          {
-                            key: 'cancel',
-                            label: '取消订单',
-                            danger: true,
-                            onClick: () => {
-                              modal.confirm({
-                                title: `取消订单 ${row.orderNo}？`,
-                                content:
-                                  'Reserved 行将释放库存；Picked 行将创建拦截任务（不自动恢复库存）。',
-                                okText: '取消订单',
-                                cancelText: '返回',
-                                onOk: () => {
-                                  cancelMutation.mutate(row.id);
-                                },
-                              });
-                            },
-                          },
-                        ]
-                      : []),
-                    ...(row.erpStatus !== 'CANCELLED' && row.erpStatus !== 'SHIPPED'
-                      ? [
-                          {
-                            key: 'mark-external',
-                            label: '标记外部履约',
-                            onClick: () => {
-                              setExternalTarget(row);
-                              externalForm.setFieldsValue({ reason: '' });
-                            },
-                          },
-                        ]
-                      : []),
-                  ]}
-                />
-              ),
+              width: 130,
+              render: (value: string) => <RelativeTime value={value} />,
             },
           ]}
         />
@@ -1408,7 +1305,19 @@ export function OrdersPage() {
                         pagination={false}
                         columns={[
                           { title: '拣货单号', dataIndex: 'pickingNo' },
-                          { title: '状态', dataIndex: 'status', width: 110 },
+                          {
+                            title: '状态',
+                            dataIndex: 'status',
+                            width: 110,
+                            render: (value: string) => (
+                              <StatusBadge
+                                tone={PICKING_STATUS_META[value]?.tone ?? 'neutral'}
+                                label={PICKING_STATUS_META[value]?.label ?? value}
+                                hint={value}
+                                showDot={false}
+                              />
+                            ),
+                          },
                           {
                             title: '进度',
                             width: 100,
@@ -1491,7 +1400,19 @@ export function OrdersPage() {
                             pagination={false}
                             columns={[
                               { title: '拦截单号', dataIndex: 'interceptionNo' },
-                              { title: '状态', dataIndex: 'status', width: 110 },
+                              {
+                                title: '状态',
+                                dataIndex: 'status',
+                                width: 110,
+                                render: (value: string) => (
+                                  <StatusBadge
+                                    tone={INTERCEPTION_STATUS_META[value]?.tone ?? 'neutral'}
+                                    label={INTERCEPTION_STATUS_META[value]?.label ?? value}
+                                    hint={value}
+                                    showDot={false}
+                                  />
+                                ),
+                              },
                               { title: '原因', dataIndex: 'reason' },
                               {
                                 title: '创建时间',
@@ -1567,18 +1488,7 @@ export function OrdersPage() {
                     detail.rawData === null ? (
                       <span style={{ color: colors.textTertiary }}>无平台原始数据</span>
                     ) : (
-                      <pre
-                        style={{
-                          maxHeight: 420,
-                          overflow: 'auto',
-                          fontSize: 12,
-                          background: '#F8F9FB',
-                          padding: 12,
-                          borderRadius: 8,
-                        }}
-                      >
-                        {JSON.stringify(detail.rawData, null, 2)}
-                      </pre>
+                      <RawDataBlock data={detail.rawData} />
                     ),
                 },
               ]}

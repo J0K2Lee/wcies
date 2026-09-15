@@ -23,9 +23,13 @@ import {
   EntitySummary,
   ErrorState,
   FilterBar,
+  InfoGrid,
+  KpiRow,
   MetricCard,
   PageHeader,
   PlatformTag,
+  RailHint,
+  RawDataBlock,
   RelativeTime,
   riskAccentColor,
   RiskIndicator,
@@ -127,7 +131,9 @@ export function ExceptionsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [statusTab, setStatusTab] = useState('OPEN');
-  const [typeFilter, setTypeFilter] = useState<string | undefined>();
+  const [typeFilter, setTypeFilter] = useState<string | undefined>(
+    () => searchParams.get('exceptionType') ?? undefined,
+  );
   const [storeId, setStoreId] = useState<string | undefined>(
     () => searchParams.get('storeId') ?? undefined,
   );
@@ -236,22 +242,8 @@ export function ExceptionsPage() {
         defaultCollapsed: true,
         children: (
           <ContextSection title="异常概览">
-            <ContextMetric label="待处理" value={fmtNumber(openCount.data?.meta.total ?? 0)} />
-            <ContextMetric
-              label={<span style={{ color: colors.danger }}>高风险（近 100 条）</span>}
-              value={fmtNumber(highRiskCount)}
-            />
-            <ContextMetric label="已解决" value={fmtNumber(resolvedCount.data?.meta.total ?? 0)} />
-            <span
-              style={{
-                fontSize: 12.5,
-                color: colors.textTertiary,
-                display: 'block',
-                paddingTop: 8,
-              }}
-            >
-              点击异常行查看详情；可在右栏直接解决、忽略或跳转关联对象。
-            </span>
+            <ContextMetric label="当前筛选" value={`${list.data?.meta.total ?? 0} 条`} />
+            <RailHint>异常分布见上方指标卡；点击异常行可在右栏解决、忽略或跳转关联对象。</RailHint>
           </ContextSection>
         ),
       };
@@ -327,7 +319,7 @@ export function ExceptionsPage() {
           <ContextAction>
             <Space orientation="vertical" style={{ width: '100%' }} size={8}>
               <Button block onClick={() => setDetailId(selectedRow.id)}>
-                查看完整详情
+                查看详情
               </Button>
               {selectedRow.status === 'OPEN' && (
                 <Space style={{ width: '100%' }}>
@@ -353,7 +345,7 @@ export function ExceptionsPage() {
         </>
       ),
     };
-  }, [selectedRow, openCount.data, highRiskCount, resolvedCount.data, storeMap]);
+  }, [selectedRow, list.data, storeMap]);
   useContextRail(railContent);
 
   const columns = [
@@ -441,16 +433,25 @@ export function ExceptionsPage() {
             刷新
           </Button>
         }
+        extra={
+          <Tabs
+            activeKey={statusTab}
+            onChange={(key) => {
+              setPage(1);
+              setStatusTab(key);
+            }}
+            items={STATUS_TABS.map((tab) => ({
+              key: tab.key,
+              label:
+                tab.key === 'OPEN'
+                  ? `${tab.label} (${openCount.data?.meta.total ?? 0})`
+                  : tab.label,
+            }))}
+          />
+        }
       />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
-          gap: 16,
-          marginBottom: 16,
-        }}
-      >
+      <KpiRow>
         <MetricCard
           icon={<WarningOutlined />}
           title="待处理"
@@ -475,17 +476,27 @@ export function ExceptionsPage() {
           value={fmtNumber(ignoredCount.data?.meta.total ?? 0)}
           aux="IGNORED"
         />
-      </div>
+      </KpiRow>
 
       <FilterBar>
         <Select
           allowClear
           placeholder="异常类型"
-          style={{ width: 160 }}
+          style={{ width: 180 }}
+          showSearch
+          optionFilterProp="label"
           value={typeFilter}
           onChange={(value) => {
             setPage(1);
             setTypeFilter(value);
+            // 与店铺筛选一致，类型也写入 URL（深链可分享，Phase 3 T3.6）。
+            const next = new URLSearchParams(searchParams);
+            if (value === undefined) {
+              next.delete('exceptionType');
+            } else {
+              next.set('exceptionType', value);
+            }
+            setSearchParams(next, { replace: true });
           }}
           options={Object.entries(EXCEPTION_TYPE_META).map(([value, meta]) => ({
             value,
@@ -495,7 +506,7 @@ export function ExceptionsPage() {
         <Select
           allowClear
           placeholder="店铺"
-          style={{ width: 200 }}
+          style={{ width: 220 }}
           value={storeId}
           onChange={(value) => {
             setPage(1);
@@ -512,23 +523,10 @@ export function ExceptionsPage() {
           optionFilterProp="label"
           options={(stores.data?.data ?? []).map((store) => ({
             value: store.id,
-            label: `${store.platformCode} / ${store.storeCode}`,
+            label: `${store.storeCode} · ${store.name}`,
           }))}
         />
       </FilterBar>
-
-      <Tabs
-        activeKey={statusTab}
-        onChange={(key) => {
-          setPage(1);
-          setStatusTab(key);
-        }}
-        items={STATUS_TABS.map((tab) => ({
-          key: tab.key,
-          label:
-            tab.key === 'OPEN' ? `${tab.label} (${openCount.data?.meta.total ?? 0})` : tab.label,
-        }))}
-      />
 
       <SectionCard flush>
         {list.isError ? (
@@ -553,7 +551,8 @@ export function ExceptionsPage() {
               showSizeChanger: false,
             }}
             onRow={(record) => ({
-              onClick: () => setSelectedId(record.id),
+              onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+              onDoubleClick: () => setDetailId(record.id),
               style: {
                 cursor: 'pointer',
                 background: record.id === selectedId ? colors.primarySoft : undefined,
@@ -564,7 +563,7 @@ export function ExceptionsPage() {
         )}
       </SectionCard>
 
-      {/* ---- Detail drawer ---- */}
+      {/* ---- Detail drawer: read-only (actions live in the rail, Phase 3 T3) ---- */}
       <Drawer
         title={detailRow !== null ? `异常详情 · ${detailRow.exceptionNo}` : '异常详情'}
         size={640}
@@ -576,48 +575,55 @@ export function ExceptionsPage() {
           <Space orientation="vertical" size="large" style={{ width: '100%' }}>
             <section>
               <DrawerSectionTitle>基础信息</DrawerSectionTitle>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-                <DrawerField
-                  label="状态"
-                  value={
-                    <StatusBadge
-                      tone={EXCEPTION_STATUS_META[detailRow.status]?.tone ?? 'neutral'}
-                      label={EXCEPTION_STATUS_META[detailRow.status]?.label ?? detailRow.status}
-                      hint={detailRow.status}
-                    />
-                  }
-                />
-                <DrawerField
-                  label="风险等级"
-                  value={<RiskIndicator severity={detailRow.severity} />}
-                />
-                <DrawerField
-                  label="异常类型"
-                  value={`${typeLabel(detailRow.exceptionType)}（${detailRow.exceptionType}）`}
-                />
-                <DrawerField label="异常编号" value={detailRow.exceptionNo} />
-                <DrawerField label="发生时间" value={fmtDateTime(detailRow.createdAt)} />
-                <DrawerField
-                  label="处理时间"
-                  value={detailRow.resolvedAt === null ? '—' : fmtDateTime(detailRow.resolvedAt)}
-                />
-                <DrawerField
-                  label="关联对象"
-                  value={
-                    <span style={{ fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                      {detailRow.referenceType} · {detailRow.referenceId}
-                    </span>
-                  }
-                />
-                <DrawerField
-                  label="店铺"
-                  value={
-                    detailRow.storeId === null
-                      ? '—'
-                      : (storeMap.get(detailRow.storeId)?.storeCode ?? detailRow.storeId)
-                  }
-                />
-              </div>
+              <InfoGrid
+                columns={2}
+                items={[
+                  {
+                    label: '状态',
+                    children: (
+                      <StatusBadge
+                        tone={EXCEPTION_STATUS_META[detailRow.status]?.tone ?? 'neutral'}
+                        label={EXCEPTION_STATUS_META[detailRow.status]?.label ?? detailRow.status}
+                        hint={detailRow.status}
+                        showDot={false}
+                      />
+                    ),
+                  },
+                  {
+                    label: '风险等级',
+                    children: <RiskIndicator severity={detailRow.severity} />,
+                  },
+                  {
+                    label: '异常类型',
+                    children: `${typeLabel(detailRow.exceptionType)}（${detailRow.exceptionType}）`,
+                  },
+                  { label: '异常编号', children: detailRow.exceptionNo },
+                  { label: '发生时间', children: fmtDateTime(detailRow.createdAt) },
+                  {
+                    label: '处理时间',
+                    children:
+                      detailRow.resolvedAt === null ? '—' : fmtDateTime(detailRow.resolvedAt),
+                  },
+                  {
+                    label: '关联对象',
+                    span: 2,
+                    children: (
+                      <span
+                        style={{ fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}
+                      >
+                        {detailRow.referenceType} · {detailRow.referenceId}
+                      </span>
+                    ),
+                  },
+                  {
+                    label: '店铺',
+                    children:
+                      detailRow.storeId === null
+                        ? '—'
+                        : (storeMap.get(detailRow.storeId)?.storeCode ?? detailRow.storeId),
+                  },
+                ]}
+              />
             </section>
 
             <section>
@@ -640,54 +646,8 @@ export function ExceptionsPage() {
             {detailRow.details !== null && Object.keys(detailRow.details).length > 0 && (
               <section>
                 <DrawerSectionTitle>上下文数据</DrawerSectionTitle>
-                <pre
-                  style={{
-                    fontSize: 12,
-                    background: '#F6F7F9',
-                    border: `1px solid ${colors.border}`,
-                    borderRadius: 8,
-                    padding: 12,
-                    maxHeight: 320,
-                    overflow: 'auto',
-                  }}
-                >
-                  {JSON.stringify(detailRow.details, null, 2)}
-                </pre>
+                <RawDataBlock data={detailRow.details} maxHeight={320} />
               </section>
-            )}
-
-            {buildEntityActions(detailRow).length > 0 && (
-              <section>
-                <DrawerSectionTitle>关联操作</DrawerSectionTitle>
-                <Space orientation="vertical" size={8} style={{ alignItems: 'flex-start' }}>
-                  {buildEntityActions(detailRow).map((action) => (
-                    <EntityLink
-                      key={action.key}
-                      to={action.to}
-                      icon={<ExportOutlined />}
-                      primary={action.label}
-                    />
-                  ))}
-                </Space>
-              </section>
-            )}
-
-            {detailRow.status === 'OPEN' && (
-              <Space>
-                <Button
-                  type="primary"
-                  icon={<CheckCircleOutlined />}
-                  onClick={() => setCloseTarget({ id: detailRow.id, action: 'resolve' })}
-                >
-                  标记解决
-                </Button>
-                <Button
-                  icon={<MinusCircleOutlined />}
-                  onClick={() => setCloseTarget({ id: detailRow.id, action: 'ignore' })}
-                >
-                  忽略
-                </Button>
-              </Space>
             )}
           </Space>
         ) : (
@@ -734,25 +694,6 @@ function DrawerSectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary, marginBottom: 10 }}>
       {children}
-    </div>
-  );
-}
-
-function DrawerField({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 3,
-        padding: '9px 16px 9px 0',
-        borderBottom: `1px solid ${colors.borderSoft}`,
-      }}
-    >
-      <span style={{ fontSize: 12.5, color: colors.textTertiary }}>{label}</span>
-      <span style={{ fontSize: 13.5, color: colors.textPrimary, wordBreak: 'break-word' }}>
-        {value}
-      </span>
     </div>
   );
 }
