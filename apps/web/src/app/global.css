@@ -51,3 +51,8 @@ table,
     transform: rotate(360deg);
   }
 }
+
+/* System hub entry tiles: CSS hover (no JS onMouseEnter, UI spec §10). */
+.wcies-entry-tile:hover {
+  background: #ecf1f6;
+}

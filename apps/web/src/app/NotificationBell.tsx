@@ -2,12 +2,19 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { Badge, Button, Popover, Tooltip } from 'antd';
 import { useApiQuery } from '../api/hooks';
-import { colors, RelativeTime, StatusBadge } from '../design-system';
+import {
+  colors,
+  NOTIFICATION_STATUS_META,
+  NOTIFICATION_TYPE_META,
+  RelativeTime,
+  StatusBadge,
+} from '../design-system';
 
 /**
  * Topbar notification popover (Phase 2 task §35-§36): recent event stream
  * (Title / Description / Time) with a dot when delivery failures exist.
- * Clicking the bell shows the popover; items link to the notification center.
+ * Clicking the bell shows the popover; items link to the notification center
+ * (pre-filtered by the item's type).
  */
 
 interface NotificationItem {
@@ -19,18 +26,6 @@ interface NotificationItem {
   status: string;
   createdAt: string;
 }
-
-const TYPE_LABEL: Record<string, string> = {
-  ORDER_INTERCEPTION_REQUIRED: '需要拦截',
-  ORDER_INTERCEPTION_FAILED: '拦截失败',
-};
-
-const STATUS_TONE: Record<string, 'info' | 'success' | 'danger' | 'neutral'> = {
-  PENDING: 'info',
-  SENT: 'success',
-  FAILED: 'danger',
-  CANCELLED: 'neutral',
-};
 
 export function NotificationBell() {
   const navigate = useNavigate();
@@ -85,7 +80,7 @@ export function NotificationBell() {
             <button
               key={item.id}
               type="button"
-              onClick={() => void navigate('/notifications')}
+              onClick={() => void navigate(`/notifications?type=${encodeURIComponent(item.type)}`)}
               style={{
                 display: 'flex',
                 flexDirection: 'column',
@@ -116,19 +111,11 @@ export function NotificationBell() {
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {TYPE_LABEL[item.type] ?? item.type} · {item.title}
+                  {NOTIFICATION_TYPE_META[item.type]?.label ?? item.type} · {item.title}
                 </span>
                 <StatusBadge
-                  tone={STATUS_TONE[item.status] ?? 'neutral'}
-                  label={
-                    item.status === 'SENT'
-                      ? '已送达'
-                      : item.status === 'FAILED'
-                        ? '失败'
-                        : item.status === 'PENDING'
-                          ? '投递中'
-                          : item.status
-                  }
+                  tone={NOTIFICATION_STATUS_META[item.status]?.tone ?? 'neutral'}
+                  label={NOTIFICATION_STATUS_META[item.status]?.label ?? item.status}
                   showDot={false}
                 />
               </span>
@@ -177,7 +164,13 @@ export function NotificationBell() {
           type="text"
           aria-label="通知中心"
           icon={
-            <Badge dot color={hasFailed ? '#C4433C' : '#496F96'} offset={[-2, 2]}>
+            /* 仅存在 FAILED 时显示红点（Phase 3 T6）；颜色走 danger token。 */
+            <Badge
+              dot
+              color={hasFailed ? colors.danger : undefined}
+              offset={[-2, 2]}
+              style={{ display: hasFailed ? undefined : 'none' }}
+            >
               <BellGlyph />
             </Badge>
           }

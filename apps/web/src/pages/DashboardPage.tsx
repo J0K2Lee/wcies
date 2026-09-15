@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
-import { Link, useNavigate } from 'react-router';
-import { Skeleton } from 'antd';
+import { useNavigate } from 'react-router';
+import { Button, Skeleton } from 'antd';
 import {
   AlertOutlined,
   CloudSyncOutlined,
@@ -13,6 +13,7 @@ import {
   ContextRailContent,
   ContextSection,
   DataTable,
+  KpiRow,
   MetricCard,
   PageHeader,
   PlatformTag,
@@ -230,6 +231,7 @@ export function DashboardPage() {
   // the KPI row; both sections rest on the real queries above) ----
   const railContent = useMemo<ContextRailContent>(
     () => ({
+      defaultCollapsed: true,
       children: (
         <>
           <ContextSection
@@ -244,23 +246,26 @@ export function DashboardPage() {
               </span>
             ) : (
               abnormalJobs.slice(0, 5).map((job) => (
-                <div
+                <ContextMetric
                   key={job.id}
-                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}
-                >
-                  <StatusBadge
-                    tone={SYNC_STATUS_META[job.status]?.tone ?? 'neutral'}
-                    label={job.storeCode}
-                    hint={job.status}
-                    showDot={false}
-                  />
-                  <span style={{ fontSize: 12.5, color: colors.textSecondary }}>
-                    {SYNC_TYPE_LABEL[job.syncType] ?? job.syncType}
-                  </span>
-                  <span style={{ marginLeft: 'auto', fontSize: 12, color: colors.textTertiary }}>
-                    <RelativeTime value={job.finishedAt ?? job.createdAt} />
-                  </span>
-                </div>
+                  label={
+                    <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                      {job.storeName}
+                      <StatusBadge
+                        tone={SYNC_STATUS_META[job.status]?.tone ?? 'neutral'}
+                        label={SYNC_STATUS_META[job.status]?.label ?? job.status}
+                        hint={job.status}
+                        showDot={false}
+                      />
+                    </span>
+                  }
+                  value={
+                    <span style={{ fontSize: 12, color: colors.textTertiary }}>
+                      <RelativeTime value={job.finishedAt ?? job.createdAt} />
+                    </span>
+                  }
+                  onClick={() => void navigate('/sync')}
+                />
               ))
             )}
           </ContextSection>
@@ -314,21 +319,14 @@ export function DashboardPage() {
         title="运营看板"
         description={`今天是 ${fmtDate(new Date())} · 待处理订单 ${fmtNumber(pendingCount)} · 待处理异常 ${fmtNumber(openExceptionTotal)} · 同步失败 ${fmtNumber(failedJobCount)}`}
         secondary={
-          <Link to="/sync" style={{ fontSize: 13.5, color: colors.primary }}>
+          <Button icon={<CloudSyncOutlined />} onClick={() => void navigate('/sync')}>
             同步中心
-          </Link>
+          </Button>
         }
       />
 
       {/* ---- 1. KPI row (real meta.total / row counts only) ---- */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
-          gap: 16,
-          marginBottom: 16,
-        }}
-      >
+      <KpiRow>
         <MetricCard
           icon={<TransactionOutlined />}
           title="待处理订单"
@@ -375,7 +373,7 @@ export function DashboardPage() {
           }
           onClick={() => void navigate('/stores')}
         />
-      </div>
+      </KpiRow>
 
       {/* ---- 2. 运营待办: OPEN exceptions + active stores without credentials ---- */}
       <SectionCard
@@ -551,9 +549,9 @@ export function DashboardPage() {
         title="同步异常流"
         flush
         extra={
-          <Link to="/sync" style={{ fontSize: 13, color: colors.primary }}>
-            同步中心
-          </Link>
+          <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+            统计口径：最近 100 个任务
+          </span>
         }
       >
         <DataTable<SyncJobItem>

@@ -56,7 +56,7 @@ export function SkuCreateModal({ open, onClose, fixedProduct, onCreated }: SkuCr
         productId: fixedProduct?.id ?? values.productId,
       }),
     onSuccess: () => {
-      void message.success('SKU已创建');
+      void message.success('SKU 已创建');
       onClose();
       form.resetFields();
       void queryClient.invalidateQueries({ queryKey: ['skus'] });

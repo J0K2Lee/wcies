@@ -18,6 +18,7 @@ import {
   ContextMetric,
   ErrorState,
   PageHeader,
+  RailHint,
   SectionCard,
   StatusBadge,
   useContextRail,
@@ -100,42 +101,17 @@ export function SystemPage() {
     () => ({
       defaultCollapsed: true,
       children: (
+        // 服务状态只在正文卡展示（规范 §2：同一数字/状态只出现一次）。
         <>
-          <ContextSection title="服务状态">
-            <ContextMetric
-              label="API"
-              value={
-                <StatusBadge
-                  tone={health.data?.data?.status === 'ok' ? 'success' : 'danger'}
-                  label={
-                    health.isLoading
-                      ? '检测中'
-                      : health.data?.data?.status === 'ok'
-                        ? '正常'
-                        : '异常'
-                  }
-                />
-              }
-            />
-            <ContextMetric
-              label="PostgreSQL"
-              value={
-                health.data?.data?.checks.postgres === 'up' ? '正常' : health.data ? '异常' : '—'
-              }
-            />
-            <ContextMetric
-              label="Redis"
-              value={health.data?.data?.checks.redis === 'up' ? '正常' : health.data ? '异常' : '—'}
-            />
-          </ContextSection>
           <ContextSection title="当前账号">
             <ContextMetric label="用户" value={me.data?.data?.username ?? '—'} />
             <ContextMetric label="角色" value={me.data?.data?.role ?? '—'} />
+            <RailHint>服务运行状态见页面「系统状态」卡片。</RailHint>
           </ContextSection>
         </>
       ),
     }),
-    [health.data, health.isLoading, me.data],
+    [me.data],
   );
   useContextRail(railContent);
 
@@ -150,6 +126,7 @@ export function SystemPage() {
               <Link
                 key={entry.to}
                 to={entry.to}
+                className="wcies-entry-tile"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -158,12 +135,6 @@ export function SystemPage() {
                   borderRadius: 8,
                   color: 'inherit',
                   textDecoration: 'none',
-                }}
-                onMouseEnter={(event) => {
-                  event.currentTarget.style.background = colors.primarySoft;
-                }}
-                onMouseLeave={(event) => {
-                  event.currentTarget.style.background = 'transparent';
                 }}
               >
                 <span
@@ -270,14 +241,7 @@ export function SystemPage() {
         </div>
       </div>
 
-      <SectionCard
-        title="平台参数"
-        extra={
-          <Link to="/stores" style={{ fontSize: 13, color: colors.primary }}>
-            管理店铺 →
-          </Link>
-        }
-      >
+      <SectionCard title="平台参数">
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {(platforms.data?.data ?? []).map((platform) => (
             <div

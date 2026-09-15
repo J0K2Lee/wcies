@@ -32,6 +32,12 @@ export function HealthTestPage() {
     <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}>
       <Card style={{ width: 640 }}>
         <Typography.Title level={3}>Health Check 测试</Typography.Title>
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          title="该页面仅用于开发联调，生产环境不暴露业务数据。"
+        />
 
         <Card type="inner" title="GET /health/live" style={{ marginBottom: 16 }}>
           {liveness.isPending ? <Spin /> : null}

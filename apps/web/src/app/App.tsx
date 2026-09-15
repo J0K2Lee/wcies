@@ -1,4 +1,6 @@
 import { Route, Routes } from 'react-router';
+import { useNavigate } from 'react-router';
+import { Button } from 'antd';
 import { HealthTestPage } from '../pages/HealthTestPage';
 import { DashboardPage } from '../pages/DashboardPage';
 import { LoginPage } from '../pages/LoginPage';
@@ -32,6 +34,7 @@ import { PurchaseOrdersPage } from '../pages/purchase/PurchaseOrdersPage';
 import { PurchaseReceiptsPage } from '../pages/purchase/PurchaseReceiptsPage';
 import { SystemPage } from '../pages/system/SystemPage';
 import { PlatformMappingsPage } from '../pages/system/PlatformMappingsPage';
+import { EmptyState } from '../design-system';
 
 export function App() {
   return (
@@ -69,8 +72,27 @@ export function App() {
           <Route path="/purchase-receipts" element={<PurchaseReceiptsPage />} />
           <Route path="/system" element={<SystemPage />} />
           <Route path="/platform-mappings" element={<PlatformMappingsPage />} />
+          {/* 404：未知路由回到空态 + 返回首页（Phase 3 G10）。 */}
+          <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Route>
     </Routes>
+  );
+}
+
+function NotFoundPage() {
+  const navigate = useNavigate();
+  return (
+    <div style={{ padding: '80px 0', display: 'flex', justifyContent: 'center' }}>
+      <EmptyState
+        title="页面不存在"
+        description="地址有误或页面已被移除。"
+        action={
+          <Button type="primary" onClick={() => void navigate('/')}>
+            返回首页
+          </Button>
+        }
+      />
+    </div>
   );
 }

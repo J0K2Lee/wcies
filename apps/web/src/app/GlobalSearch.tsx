@@ -225,7 +225,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
         key: `store-${store.id}`,
         icon: <ShopOutlined />,
         primary: store.name,
-        secondary: `${store.storeCode} · ${store.name}`,
+        secondary: store.storeCode,
         type: '店铺',
         onSelect: () =>
           goTo({
@@ -244,7 +244,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
         key: entry.key,
         icon: <AppstoreOutlined />,
         primary: entry.label,
-        secondary: entry.to,
+        secondary: entry.type,
         type: entry.type,
         timestamp: entry.ts,
         onSelect: () => goTo(entry),
@@ -261,17 +261,13 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
         { key: 'quick', label: '快速操作', items: quickActionItems },
       ];
     }
+    // 搜索态只展示实体命中（快速操作属于空闲态；Phase 3 T6 移除空关键词死分支）。
     return [
       { key: 'orders', label: '订单', items: orderItems },
       { key: 'skus', label: 'SKU', items: skuItems },
       { key: 'stores', label: '店铺', items: storeItems },
-      {
-        key: 'quick',
-        label: '快速操作',
-        items: keyword.trim().length === 0 ? quickActionItems : [],
-      },
     ];
-  }, [searchable, recentItems, quickActionItems, orderItems, skuItems, storeItems, keyword]);
+  }, [searchable, recentItems, quickActionItems, orderItems, skuItems, storeItems]);
 
   return (
     <CommandPalette

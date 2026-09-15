@@ -1,6 +1,6 @@
 import { useMutation } from '@tanstack/react-query';
 import { App, Alert, Button, Card, Form, Input, Typography } from 'antd';
-import { useEffect } from 'react';
+
 import { useNavigate, useSearchParams } from 'react-router';
 import { apiClient } from '../api/client';
 
@@ -15,13 +15,7 @@ export function LoginPage() {
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get('redirect');
   const expired = searchParams.get('reason') === 'expired';
-
-  // Session expiry was signaled by the 401 handler via ?reason=expired.
-  useEffect(() => {
-    if (expired) {
-      void message.warning('登录已过期，请重新登录');
-    }
-  }, [expired, message]);
+  // 会话过期提示只走 Alert（表单上方），不再叠加 message 双提示（Phase 3 T6）。
 
   const loginMutation = useMutation({
     mutationFn: async (values: LoginFormValues) => {

@@ -6,6 +6,7 @@ import {
   Drawer,
   Form,
   Modal,
+  Popconfirm,
   Radio,
   Select,
   Space,
@@ -31,11 +32,16 @@ import {
   ContextSection,
   DataTable,
   EntitySummary,
+  EntityLink,
   ErrorState,
   FilterBar,
+  InfoGrid,
+  KpiRow,
   MetricCard,
   PageHeader,
   PlatformTag,
+  RailHint,
+  RawDataBlock,
   RelativeTime,
   SectionCard,
   StatusBadge,
@@ -220,27 +226,36 @@ export function SyncCenterPage() {
   // ---- Context rail (task §18) ----
   const railContent = useMemo<ContextRailContent>(() => {
     if (selectedJob === null) {
+      // 空闲态统计与 KPI 卡去重（规范 §2）：只保留最近失败任务列表 + 提示。
+      const recentFailed = rows.filter((job) => job.status === 'FAILED').slice(0, 5);
       return {
         defaultCollapsed: true,
         children: (
-          <ContextSection title="同步概览">
-            <ContextMetric label="当前筛选" value={`${jobs.data?.meta.total ?? 0} 个任务`} />
-            <ContextMetric label="运行中" value={runningCount.data?.meta.total ?? 0} />
-            <ContextMetric
-              label={<span style={{ color: colors.danger }}>失败</span>}
-              value={failedCount.data?.meta.total ?? 0}
-            />
-            <span
-              style={{
-                fontSize: 12.5,
-                color: colors.textTertiary,
-                display: 'block',
-                paddingTop: 8,
-              }}
-            >
-              点击任务行查看处理进度与错误；失败任务可从右栏重新执行。
-            </span>
-          </ContextSection>
+          <>
+            <ContextSection title="同步概览">
+              <RailHint>
+                任务分布见上方指标卡；点击任务行查看处理进度与错误，失败任务可从右栏重新执行。
+              </RailHint>
+            </ContextSection>
+            {recentFailed.length > 0 && (
+              <ContextSection title={`最近失败（${recentFailed.length}）`}>
+                {recentFailed.map((job) => (
+                  <ContextMetric
+                    key={job.id}
+                    label={`${SYNC_TYPE_META[job.syncType] ?? job.syncType} · ${job.storeCode}`}
+                    value={<SyncStatusBadge status={job.status} />}
+                    onClick={() => setSelectedJobId(job.id)}
+                  />
+                ))}
+              </ContextSection>
+            )}
+            <ContextSection title="同步启停">
+              <RailHint>
+                自动同步开关在店铺管理 → 店铺详情内配置；同步中心不直接停用同步（不改 API）。
+              </RailHint>
+              <EntityLink to="/stores" primary="前往店铺管理" />
+            </ContextSection>
+          </>
         ),
       };
     }
@@ -306,13 +321,16 @@ export function SyncCenterPage() {
           <ContextAction>
             <Space orientation="vertical" style={{ width: '100%' }} size={8}>
               <Button block onClick={() => setDetailJobId(selectedJob.id)}>
-                查看完整详情
+                查看详情
               </Button>
-              <Button
-                block
-                icon={<PlayCircleOutlined />}
-                loading={triggerMutation.isPending}
-                onClick={() =>
+              {/* 重新执行 = 唯一入口（右栏）；与「立即同步」（触发新任务、可选全店铺）
+                  区分：这里针对当前失败任务按同参数重跑，L1 轻确认。 */}
+              <Popconfirm
+                title="重新执行该同步任务？"
+                description={`将按同参数重跑（${SYNC_TYPE_META[selectedJob.syncType] ?? selectedJob.syncType} · ${selectedJob.storeCode}）。`}
+                okText="重新执行"
+                cancelText="取消"
+                onConfirm={() =>
                   triggerMutation.mutate({
                     type: selectedJob.syncType === 'ORDER_SYNC' ? 'orders' : 'listings',
                     storeId: selectedJob.storeId,
@@ -320,14 +338,16 @@ export function SyncCenterPage() {
                   })
                 }
               >
-                重新执行
-              </Button>
+                <Button block icon={<PlayCircleOutlined />} loading={triggerMutation.isPending}>
+                  重新执行
+                </Button>
+              </Popconfirm>
             </Space>
           </ContextAction>
         </>
       ),
     };
-  }, [selectedJob, jobs.data, runningCount.data, failedCount.data, triggerMutation]);
+  }, [selectedJob, jobs.data, rows, triggerMutation.isPending, triggerMutation.mutate]);
   useContextRail(railContent);
 
   const jobColumns = [
@@ -461,14 +481,7 @@ export function SyncCenterPage() {
         }
       />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
-          gap: 16,
-          marginBottom: 16,
-        }}
-      >
+      <KpiRow>
         <MetricCard
           icon={<PlayCircleOutlined />}
           title="运行中"
@@ -493,7 +506,7 @@ export function SyncCenterPage() {
           value={fmtNumber(failedCount.data?.meta.total ?? 0)}
           aux="需要重新执行"
         />
-      </div>
+      </KpiRow>
 
       <FilterBar>
         <Select
@@ -576,7 +589,9 @@ export function SyncCenterPage() {
                       showSizeChanger: false,
                     }}
                     onRow={(record) => ({
-                      onClick: () => setSelectedJobId(record.id),
+                      onClick: () =>
+                        setSelectedJobId(record.id === selectedJobId ? null : record.id),
+                      onDoubleClick: () => setDetailJobId(record.id),
                       style: {
                         cursor: 'pointer',
                         background: record.id === selectedJobId ? colors.primarySoft : undefined,
@@ -606,8 +621,13 @@ export function SyncCenterPage() {
                     showSizeChanger: false,
                   }}
                   onRow={(record) => ({
-                    onClick: () => setEventDetail(record),
-                    style: { cursor: 'pointer' },
+                    // 事件行：单击选中（视觉），双击打开报文 Drawer（与其他页一致）。
+                    onClick: () => setSelectedJobId(selectedJobId === record.id ? null : record.id),
+                    onDoubleClick: () => setEventDetail(record),
+                    style: {
+                      cursor: 'pointer',
+                      background: selectedJobId === record.id ? colors.primarySoft : undefined,
+                    },
                   })}
                   columns={[
                     {
@@ -679,71 +699,71 @@ export function SyncCenterPage() {
         {detailJob !== null ? (
           <Space orientation="vertical" size="large" style={{ width: '100%' }}>
             <section>
-              <DrawerSectionTitle>Summary</DrawerSectionTitle>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-                <DrawerField label="状态" value={<SyncStatusBadge status={detailJob.status} />} />
-                <DrawerField
-                  label="平台 / 店铺"
-                  value={
-                    <PlatformTag
-                      code={detailJob.platformCode}
-                      suffix={`${detailJob.storeCode} · ${detailJob.storeName}`}
-                    />
-                  }
-                />
-                <DrawerField
-                  label="任务类型"
-                  value={`${SYNC_TYPE_META[detailJob.syncType] ?? detailJob.syncType}同步`}
-                />
-                <DrawerField
-                  label="触发方式"
-                  value={TRIGGER_TYPE_META[detailJob.triggerType] ?? detailJob.triggerType}
-                />
-                <DrawerField
-                  label="开始时间"
-                  value={fmtDateTime(detailJob.startedAt ?? detailJob.createdAt)}
-                />
-                <DrawerField
-                  label="结束时间"
-                  value={detailJob.finishedAt === null ? '—' : fmtDateTime(detailJob.finishedAt)}
-                />
-                <DrawerField label="耗时" value={fmtDuration(detailJob.durationMs)} />
-                <DrawerField
-                  label="Job ID"
-                  value={
-                    <Typography.Text code copyable style={{ fontSize: 12 }}>
-                      {detailJob.id}
-                    </Typography.Text>
-                  }
-                />
-              </div>
+              <DrawerSectionTitle>任务概要</DrawerSectionTitle>
+              <InfoGrid
+                columns={2}
+                items={[
+                  { label: '状态', children: <SyncStatusBadge status={detailJob.status} /> },
+                  {
+                    label: '平台 / 店铺',
+                    children: (
+                      <PlatformTag
+                        code={detailJob.platformCode}
+                        suffix={`${detailJob.storeCode} · ${detailJob.storeName}`}
+                      />
+                    ),
+                  },
+                  {
+                    label: '任务类型',
+                    children: `${SYNC_TYPE_META[detailJob.syncType] ?? detailJob.syncType}同步`,
+                  },
+                  {
+                    label: '触发方式',
+                    children: TRIGGER_TYPE_META[detailJob.triggerType] ?? detailJob.triggerType,
+                  },
+                  {
+                    label: '开始时间',
+                    children: fmtDateTime(detailJob.startedAt ?? detailJob.createdAt),
+                  },
+                  {
+                    label: '结束时间',
+                    children:
+                      detailJob.finishedAt === null ? '—' : fmtDateTime(detailJob.finishedAt),
+                  },
+                  { label: '耗时', children: fmtDuration(detailJob.durationMs) },
+                  {
+                    label: 'Job ID',
+                    children: (
+                      <Typography.Text code copyable style={{ fontSize: 12 }}>
+                        {detailJob.id}
+                      </Typography.Text>
+                    ),
+                  },
+                ]}
+              />
             </section>
 
             <section>
-              <DrawerSectionTitle>Statistics</DrawerSectionTitle>
+              <DrawerSectionTitle>处理统计</DrawerSectionTitle>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
                 <StatTile
-                  label="Total"
+                  label="总数"
                   value={fmtNumber(
                     detailJob.successCount + detailJob.failedCount + detailJob.skippedCount,
                   )}
                 />
+                <StatTile label="成功" value={fmtNumber(detailJob.successCount)} tone="success" />
                 <StatTile
-                  label="Success"
-                  value={fmtNumber(detailJob.successCount)}
-                  tone="success"
-                />
-                <StatTile
-                  label="Failed"
+                  label="失败"
                   value={fmtNumber(detailJob.failedCount)}
                   tone={detailJob.failedCount > 0 ? 'danger' : undefined}
                 />
-                <StatTile label="Skipped" value={fmtNumber(detailJob.skippedCount)} />
+                <StatTile label="跳过" value={fmtNumber(detailJob.skippedCount)} />
               </div>
             </section>
 
             <section>
-              <DrawerSectionTitle>Errors</DrawerSectionTitle>
+              <DrawerSectionTitle>错误</DrawerSectionTitle>
               {detailJob.errorCode === null ? (
                 <div style={{ fontSize: 13, color: colors.textTertiary }}>本任务无错误记录</div>
               ) : (
@@ -776,25 +796,11 @@ export function SyncCenterPage() {
             <section>
               <DrawerSectionTitle>游标（Cursor）</DrawerSectionTitle>
               <Space orientation="vertical" size={6} style={{ width: '100%' }}>
-                <CursorField label="Cursor Before" value={detailJob.cursorBefore} />
-                <CursorField label="Cursor After" value={detailJob.cursorAfter} />
+                <CursorField label="执行前游标" value={detailJob.cursorBefore} />
+                <CursorField label="执行后游标" value={detailJob.cursorAfter} />
               </Space>
             </section>
-
-            <Button
-              type="primary"
-              icon={<PlayCircleOutlined />}
-              loading={triggerMutation.isPending}
-              onClick={() =>
-                triggerMutation.mutate({
-                  type: detailJob.syncType === 'ORDER_SYNC' ? 'orders' : 'listings',
-                  storeId: detailJob.storeId,
-                  storeLabel: detailJob.storeCode,
-                })
-              }
-            >
-              重新执行此同步
-            </Button>
+            {/* 重新执行的唯一入口在右栏（本抽屉只读，Phase 3 T6）。 */}
           </Space>
         ) : (
           <div style={{ padding: '40px 0', textAlign: 'center', color: colors.textTertiary }}>
@@ -813,62 +819,52 @@ export function SyncCenterPage() {
       >
         {eventDetail !== null && (
           <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-              <DrawerField
-                label="事件 ID"
-                value={
-                  <Typography.Text code copyable style={{ fontSize: 12 }}>
-                    {eventDetail.id}
-                  </Typography.Text>
-                }
-              />
-              <DrawerField
-                label="状态"
-                value={
-                  <StatusBadge
-                    tone={
-                      (EVENT_STATUS_META[eventDetail.status] ?? { tone: 'neutral' as const }).tone
-                    }
-                    label={EVENT_STATUS_META[eventDetail.status]?.label ?? eventDetail.status}
-                    hint={eventDetail.status}
-                  />
-                }
-              />
-              <DrawerField
-                label="平台事件 ID"
-                value={eventDetail.externalEventId ?? '（无，按 payload hash 去重）'}
-              />
-              <DrawerField
-                label="Payload Hash"
-                value={
-                  <span style={{ fontSize: 12, fontFamily: 'monospace' }}>
-                    {eventDetail.payloadHash}
-                  </span>
-                }
-              />
-              <DrawerField label="接收时间" value={fmtDateTime(eventDetail.receivedAt)} />
-              <DrawerField
-                label="处理时间"
-                value={
-                  eventDetail.processedAt === null ? '—' : fmtDateTime(eventDetail.processedAt)
-                }
-              />
-            </div>
+            <InfoGrid
+              columns={2}
+              items={[
+                {
+                  label: '事件 ID',
+                  children: (
+                    <Typography.Text code copyable style={{ fontSize: 12 }}>
+                      {eventDetail.id}
+                    </Typography.Text>
+                  ),
+                },
+                {
+                  label: '状态',
+                  children: (
+                    <StatusBadge
+                      tone={
+                        (EVENT_STATUS_META[eventDetail.status] ?? { tone: 'neutral' as const }).tone
+                      }
+                      label={EVENT_STATUS_META[eventDetail.status]?.label ?? eventDetail.status}
+                      hint={eventDetail.status}
+                    />
+                  ),
+                },
+                {
+                  label: '平台事件 ID',
+                  children: eventDetail.externalEventId ?? '（无，按 payload hash 去重）',
+                },
+                {
+                  label: 'Payload Hash',
+                  children: (
+                    <span style={{ fontSize: 12, fontFamily: 'monospace' }}>
+                      {eventDetail.payloadHash}
+                    </span>
+                  ),
+                },
+                { label: '接收时间', children: fmtDateTime(eventDetail.receivedAt) },
+                {
+                  label: '处理时间',
+                  children:
+                    eventDetail.processedAt === null ? '—' : fmtDateTime(eventDetail.processedAt),
+                },
+              ]}
+            />
             <section>
               <DrawerSectionTitle>原始报文</DrawerSectionTitle>
-              <pre
-                style={{
-                  maxHeight: 420,
-                  overflow: 'auto',
-                  fontSize: 12,
-                  background: '#F6F7F9',
-                  border: `1px solid ${colors.border}`,
-                  borderRadius: 8,
-                  padding: 12,
-                }}
-              >
-                {JSON.stringify(eventDetail.payload, null, 2)}
-              </pre>
+              <RawDataBlock data={eventDetail.payload} />
             </section>
           </Space>
         )}
@@ -930,25 +926,6 @@ function DrawerSectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary, marginBottom: 10 }}>
       {children}
-    </div>
-  );
-}
-
-function DrawerField({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 3,
-        padding: '9px 16px 9px 0',
-        borderBottom: `1px solid ${colors.borderSoft}`,
-      }}
-    >
-      <span style={{ fontSize: 12.5, color: colors.textTertiary }}>{label}</span>
-      <span style={{ fontSize: 13.5, color: colors.textPrimary, wordBreak: 'break-word' }}>
-        {value}
-      </span>
     </div>
   );
 }

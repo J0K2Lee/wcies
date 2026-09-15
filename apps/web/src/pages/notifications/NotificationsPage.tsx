@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { App as AntdApp, Button, Popconfirm, Select } from 'antd';
 import { BellOutlined, CloseCircleOutlined, ReloadOutlined } from '@ant-design/icons';
+import { useSearchParams } from 'react-router';
 import { apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime, fmtNumber } from '../../utils/format';
 import {
@@ -52,9 +53,11 @@ type Envelope<T> = { data: T; meta: { total: number } };
 export function NotificationsPage() {
   const { message } = AntdApp.useApp();
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<string | undefined>();
-  const [type, setType] = useState<string | undefined>();
+  // 深链：通知铃铛条目跳转 /notifications?type=…（Phase 3 T6）。
+  const [type, setType] = useState<string | undefined>(() => searchParams.get('type') ?? undefined);
 
   const query = useApiQuery<Envelope<NotificationItem[]>>(
     '/api/v1/notifications',
