@@ -1,22 +1,19 @@
 import { useState } from 'react';
-import {
-  App as AntdApp,
-  Badge,
-  Button,
-  Card,
-  Collapse,
-  Descriptions,
-  Input,
-  Modal,
-  Progress,
-  Space,
-  Table,
-  Tag,
-  Upload,
-} from 'antd';
-import { Link, useParams } from 'react-router';
+import { App as AntdApp, Button, Collapse, Input, Modal, Progress, Space, Upload } from 'antd';
+import { ArrowLeftOutlined } from '@ant-design/icons';
+import { Link, useNavigate, useParams } from 'react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiPatch, apiPost, useApiQuery } from '../../api/hooks';
+import {
+  DataTable,
+  InfoGrid,
+  PACKAGE_STATUS_META,
+  PageHeader,
+  SectionCard,
+  SHIPMENT_STATUS_META,
+  StatusBadge,
+} from '../../design-system';
+import { fmtDateTime } from '../../utils/format';
 
 /**
  * Shipment workbench (Sprint 4 task §58): pending items, packed packages,
@@ -79,18 +76,9 @@ interface ShipmentDetail {
   }>;
 }
 
-import { PACKAGE_STATUS_LABEL, SHIPMENT_STATUS_LABEL } from '../../design-system';
-
-const PACKAGE_STATUS_COLORS: Record<string, string> = {
-  OPEN: 'blue',
-  SEALED: 'cyan',
-  SHIPPED: 'success',
-  CANCELLED: 'default',
-  REPACK_REQUIRED: 'warning',
-};
-
 export function ShipmentDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { message, modal } = AntdApp.useApp();
   const queryClient = useQueryClient();
   const [trackingOpen, setTrackingOpen] = useState(false);
@@ -115,7 +103,7 @@ export function ShipmentDetailPage() {
     onSuccess: (result) => {
       message.success(`包裹已创建，进入打包工作台`);
       refresh();
-      window.location.href = `#/packages/${result.packageId}`;
+      void navigate(`/packages/${result.packageId}`);
     },
     onError: (error: Error) => message.error(`创建失败：${error.message}`),
   });
@@ -162,7 +150,7 @@ export function ShipmentDetailPage() {
   };
 
   if (shipment === undefined) {
-    return <Card loading title="发货单" />;
+    return <SectionCard title="发货单">加载中…</SectionCard>;
   }
 
   const totalRequired = shipment.items.reduce((sum, item) => sum + Number(item.quantity), 0);
@@ -174,58 +162,30 @@ export function ShipmentDetailPage() {
       title: '确认正式出库？',
       content: '出库后实体库存将扣减（On Hand / Picked 减少，SN 转为 SHIPPED）。',
       okText: '确认出库',
-      okType: 'danger',
+      okButtonProps: { danger: true },
       cancelText: '取消',
       onOk: () => shipMutation.mutate(),
     });
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <Card size="small">
-        <Descriptions size="small" column={4}>
-          <Descriptions.Item label="发货单号">
-            <span style={{ fontSize: 18, fontWeight: 700 }}>{shipment.shipmentNo}</span>
-          </Descriptions.Item>
-          <Descriptions.Item label="订单">{shipment.orderNo}</Descriptions.Item>
-          <Descriptions.Item label="仓库">
-            {`${shipment.warehouseCode} ${shipment.warehouseName}`}
-          </Descriptions.Item>
-          <Descriptions.Item label="状态">
-            <Badge
-              status={shipment.status === 'SHIPPED' ? 'success' : 'processing'}
-              text={SHIPMENT_STATUS_LABEL[shipment.status] ?? shipment.status}
-            />
-          </Descriptions.Item>
-          <Descriptions.Item label="物流单号">
-            {shipment.trackingNumber ?? '未录入'}
-            {shipment.carrierCode ? `（${shipment.carrierCode}）` : ''}
-          </Descriptions.Item>
-          <Descriptions.Item label="创建时间">
-            {new Date(shipment.createdAt).toLocaleString()}
-          </Descriptions.Item>
-          <Descriptions.Item label="出库时间">
-            {shipment.shippedAt ? new Date(shipment.shippedAt).toLocaleString() : '-'}
-          </Descriptions.Item>
-        </Descriptions>
-        <Progress
-          percent={totalRequired === 0 ? 0 : Math.round((totalPacked / totalRequired) * 100)}
-          format={() => `${totalPacked} / ${totalRequired} 件已打包`}
-        />
-        <Space style={{ marginTop: 8 }} wrap>
-          {canOperate && (
+    <div>
+      <PageHeader
+        title={
+          <span>
             <Button
-              type="primary"
-              size="large"
-              loading={createPackageMutation.isPending}
-              onClick={() => createPackageMutation.mutate()}
-            >
-              新建包裹
-            </Button>
-          )}
-          {canOperate && (
+              type="text"
+              aria-label="返回发货列表"
+              icon={<ArrowLeftOutlined />}
+              onClick={() => void navigate('/shipments')}
+            />{' '}
+            发货单 {shipment.shipmentNo}
+          </span>
+        }
+        description={`${shipment.warehouseCode} ${shipment.warehouseName} · 订单 ${shipment.orderNo}`}
+        secondary={
+          canOperate ? (
             <Button
-              size="large"
               onClick={() => {
                 setTrackingNumber(shipment.trackingNumber ?? '');
                 setCarrierCode(shipment.carrierCode ?? '');
@@ -234,21 +194,62 @@ export function ShipmentDetailPage() {
             >
               录入物流单号
             </Button>
-          )}
-          {shipment.status === 'READY_TO_SHIP' && (
-            <Button type="primary" danger size="large" onClick={confirmShip}>
+          ) : undefined
+        }
+        primary={
+          shipment.status === 'READY_TO_SHIP' ? (
+            <Button type="primary" danger onClick={confirmShip}>
               正式出库
             </Button>
-          )}
-        </Space>
-      </Card>
+          ) : canOperate ? (
+            <Button
+              type="primary"
+              loading={createPackageMutation.isPending}
+              onClick={() => createPackageMutation.mutate()}
+            >
+              新建包裹
+            </Button>
+          ) : undefined
+        }
+      />
 
-      <Card size="small" title={`待发商品 (${shipment.items.length})`}>
-        <Table
+      <SectionCard style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+          <StatusBadge
+            tone={SHIPMENT_STATUS_META[shipment.status]?.tone ?? 'neutral'}
+            label={SHIPMENT_STATUS_META[shipment.status]?.label ?? shipment.status}
+            hint={shipment.status}
+          />
+          <span>
+            物流单号 {shipment.trackingNumber ?? '未录入'}
+            {shipment.carrierCode ? `（${shipment.carrierCode}）` : ''}
+          </span>
+        </div>
+        <InfoGrid
+          items={[
+            { label: '订单', children: shipment.orderNo },
+            { label: '仓库', children: `${shipment.warehouseCode} ${shipment.warehouseName}` },
+            { label: '创建时间', children: fmtDateTime(shipment.createdAt) },
+            {
+              label: '出库时间',
+              children: shipment.shippedAt ? fmtDateTime(shipment.shippedAt) : '—',
+            },
+          ]}
+        />
+        <div style={{ marginTop: 16 }}>
+          <Progress
+            percent={totalRequired === 0 ? 0 : Math.round((totalPacked / totalRequired) * 100)}
+            format={() => `${totalPacked} / ${totalRequired} 件已打包`}
+          />
+        </div>
+      </SectionCard>
+
+      <SectionCard flush title={`待发商品 (${shipment.items.length})`} style={{ marginBottom: 16 }}>
+        <DataTable
           rowKey="id"
-          size="small"
-          pagination={false}
           dataSource={shipment.items}
+          pagination={false}
+          emptyTitle="无待发商品"
           columns={[
             { title: 'SKU', dataIndex: 'skuCode', key: 'skuCode', width: 130 },
             { title: '名称', dataIndex: 'skuName', key: 'skuName' },
@@ -257,27 +258,27 @@ export function ShipmentDetailPage() {
             {
               title: 'SN',
               key: 'serial',
-              render: (_: unknown, row: ShipmentDetail['items'][number]) =>
-                row.serialTracking ? row.serialNumbers.join(', ') : '-',
+              render: (_: unknown, row: ShipmentItem) =>
+                row.serialTracking ? row.serialNumbers.join(', ') : '—',
             },
           ]}
         />
-      </Card>
+      </SectionCard>
 
       {shipment.voidedItems.length > 0 && (
         <Collapse
           size="small"
           defaultActiveKey={[]}
+          style={{ marginBottom: 16 }}
           items={[
             {
               key: 'voided',
               label: `已作废 / 历史记录 (${shipment.voidedItems.length})`,
               children: (
-                <Table
+                <DataTable
                   rowKey="id"
-                  size="small"
-                  pagination={false}
                   dataSource={shipment.voidedItems}
+                  pagination={false}
                   columns={[
                     { title: 'SKU', dataIndex: 'skuCode', key: 'skuCode', width: 130 },
                     { title: '名称', dataIndex: 'skuName', key: 'skuName' },
@@ -293,30 +294,44 @@ export function ShipmentDetailPage() {
                       dataIndex: 'status',
                       key: 'status',
                       width: 100,
-                      render: (value: string) => (
-                        <Tag color="default">{SHIPMENT_STATUS_LABEL[value] ?? value}</Tag>
-                      ),
+                      // 作废行的行状态：VOIDED（或缺失）统一呈现为已作废，
+                      // 不再误用发货单状态表（Phase 3 T4）。
+                      render: (value: string | undefined) =>
+                        value === 'ACTIVE' ? (
+                          <StatusBadge
+                            tone={SHIPMENT_STATUS_META['EXCEPTION']?.tone ?? 'warning'}
+                            label="行已作废"
+                            hint={value}
+                            showDot={false}
+                          />
+                        ) : (
+                          <StatusBadge
+                            tone="neutral"
+                            label="已作废"
+                            hint={value ?? 'VOIDED'}
+                            showDot={false}
+                          />
+                        ),
                     },
                     {
                       title: '作废原因',
                       dataIndex: 'voidReason',
                       key: 'voidReason',
-                      render: (value: string | null) => value ?? '-',
+                      render: (value: string | null) => value ?? '—',
                     },
                     {
                       title: '作废时间',
                       dataIndex: 'voidedAt',
                       key: 'voidedAt',
                       width: 170,
-                      render: (value: string | null) =>
-                        value ? new Date(value).toLocaleString() : '-',
+                      render: (value: string | null) => (value ? fmtDateTime(value) : '—'),
                     },
                     {
                       title: '作废人',
                       dataIndex: 'voidedByName',
                       key: 'voidedByName',
                       width: 120,
-                      render: (value: string | null) => value ?? '-',
+                      render: (value: string | null) => value ?? '—',
                     },
                     {
                       title: '来源',
@@ -328,7 +343,7 @@ export function ShipmentDetailPage() {
                         row.voidSourceId !== undefined ? (
                           <Link to={`/interceptions/${row.voidSourceId}`}>查看拦截任务</Link>
                         ) : (
-                          (row.voidSourceType ?? '-')
+                          (row.voidSourceType ?? '—')
                         ),
                     },
                   ]}
@@ -339,21 +354,40 @@ export function ShipmentDetailPage() {
         />
       )}
 
-      <Card size="small" title={`包裹 (${shipment.packages.length})`}>
-        <Table
+      <SectionCard flush title={`包裹 (${shipment.packages.length})`} style={{ marginBottom: 16 }}>
+        <DataTable
           rowKey="id"
-          size="small"
-          pagination={false}
           dataSource={shipment.packages}
+          pagination={false}
+          emptyTitle="暂无包裹"
+          emptyDescription="待打包/打包中的发货单可新建包裹。"
+          onRow={(record) => ({
+            onDoubleClick: () => {
+              if (record.status === 'OPEN' || record.status === 'REPACK_REQUIRED') {
+                void navigate(`/packages/${record.id}`);
+              }
+            },
+            style: {
+              cursor:
+                record.status === 'OPEN' || record.status === 'REPACK_REQUIRED'
+                  ? 'pointer'
+                  : undefined,
+            },
+          })}
           columns={[
             { title: '包裹号', dataIndex: 'packageNo', key: 'packageNo', width: 140 },
             {
               title: '状态',
               dataIndex: 'status',
               key: 'status',
-              width: 150,
+              width: 130,
               render: (value: string) => (
-                <Tag color={PACKAGE_STATUS_COLORS[value] ?? 'default'}>{PACKAGE_STATUS_LABEL[value] ?? value}</Tag>
+                <StatusBadge
+                  tone={PACKAGE_STATUS_META[value]?.tone ?? 'neutral'}
+                  label={PACKAGE_STATUS_META[value]?.label ?? value}
+                  hint={value}
+                  showDot={false}
+                />
               ),
             },
             {
@@ -375,27 +409,13 @@ export function ShipmentDetailPage() {
               dataIndex: 'sealedAt',
               key: 'sealedAt',
               width: 170,
-              render: (value: string | null) => (value ? new Date(value).toLocaleString() : '-'),
-            },
-            {
-              title: '操作',
-              key: 'actions',
-              width: 120,
-              render: (_: unknown, row: ShipmentDetail['packages'][number]) =>
-                row.status === 'OPEN' || row.status === 'REPACK_REQUIRED' ? (
-                  <Link to={`/packages/${row.id}`}>
-                    <Button type="primary" ghost size="small">
-                      打包作业
-                    </Button>
-                  </Link>
-                ) : null,
+              render: (value: string | null) => (value ? fmtDateTime(value) : '—'),
             },
           ]}
         />
-      </Card>
+      </SectionCard>
 
-      <Card
-        size="small"
+      <SectionCard
         title="面单（PDF / PNG / JPEG，浏览器打开打印）"
         extra={
           canOperate ? (
@@ -422,12 +442,14 @@ export function ShipmentDetailPage() {
                 </a>
               </Space>
             ))}
-      </Card>
+      </SectionCard>
 
       <Modal
         title="录入物流信息"
         open={trackingOpen}
         confirmLoading={trackingMutation.isPending}
+        okText="保存"
+        cancelText="取消"
         onCancel={() => setTrackingOpen(false)}
         onOk={() => trackingMutation.mutate()}
       >

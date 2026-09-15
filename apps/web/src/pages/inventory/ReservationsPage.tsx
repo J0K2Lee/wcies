@@ -1,7 +1,24 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { App, Button, Select, Space, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { App, Button, Select } from 'antd';
+import { useMemo, useState } from 'react';
 import { apiPost, useApiQuery } from '../../api/hooks';
+import {
+  ContextAction,
+  ContextMetric,
+  ContextSection,
+  DataTable,
+  EntitySummary,
+  FilterBar,
+  PageHeader,
+  RailHint,
+  RelativeTime,
+  RESERVATION_STATUS_META,
+  SectionCard,
+  StatusBadge,
+  colors,
+  useContextRail,
+  ContextRailContent,
+} from '../../design-system';
 
 interface ReservationRow {
   id: string;
@@ -22,8 +39,6 @@ interface ReservationRow {
 }
 
 const fmtQty = (value: string): string => (Number(value) % 1 === 0 ? String(Number(value)) : value);
-const fmtTime = (value: string | null): string =>
-  value === null ? '-' : value.slice(0, 19).replace('T', ' ');
 
 const LIFECYCLE_PATHS = {
   release: '/api/v1/inventory/reservations/{id}/release',
@@ -32,17 +47,30 @@ const LIFECYCLE_PATHS = {
   ship: '/api/v1/inventory/reservations/{id}/ship',
 } as const;
 
-const STATUS_TAG: Record<string, { color: string; label: string }> = {
-  ACTIVE: { color: 'blue', label: '已占用' },
-  PICKED: { color: 'orange', label: '已拣货' },
-  RELEASED: { color: 'default', label: '已释放' },
-  CONSUMED: { color: 'green', label: '已出库' },
-  CANCELLED: { color: 'red', label: '已取消' },
+type LifecycleOp = keyof typeof LIFECYCLE_PATHS;
+
+const LIFECYCLE_LABELS: Record<LifecycleOp, { text: string; explain: string }> = {
+  release: { text: '释放占用', explain: '可售 +N，占用解除' },
+  pick: { text: '拣货', explain: '已占用 → 已拣货' },
+  unpick: { text: '取消拣货', explain: '已拣货 → 已占用，仅拣错纠正' },
+  ship: { text: '出库', explain: 'Picked -N，On Hand -N' },
 };
+
+/** 状态机：已占用 → 已拣货 → 已出库；已占用可释放；已拣货可取消拣货回已占用。 */
+function actionsFor(status: string): LifecycleOp[] {
+  switch (status) {
+    case 'ACTIVE':
+      return ['pick', 'release'];
+    case 'PICKED':
+      return ['ship', 'unpick'];
+    default:
+      return [];
+  }
+}
 
 /**
  * 库存占用管理 (task §44/§54): 列表 + 生命周期操作
- * (reserve 调试入口 / release / pick / unpick / ship)。
+ * (release / pick / unpick / ship)。操作统一在右栏（Phase 3 T4）。
  */
 export function ReservationsPage() {
   const { message, modal } = App.useApp();
@@ -52,6 +80,7 @@ export function ReservationsPage() {
   const [warehouseId, setWarehouseId] = useState<string | undefined>();
   const [keyword, setKeyword] = useState('');
   const [page, setPage] = useState(1);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const reservations = useApiQuery<{ data: ReservationRow[]; meta: { total: number } }>(
     '/api/v1/inventory/reservations',
@@ -71,7 +100,7 @@ export function ReservationsPage() {
     void queryClient.invalidateQueries({ queryKey: ['inventory-reservations'] });
 
   const lifecycleMutation = useMutation({
-    mutationFn: async ({ id, op }: { id: string; op: 'release' | 'pick' | 'unpick' | 'ship' }) =>
+    mutationFn: async ({ id, op }: { id: string; op: LifecycleOp }) =>
       apiPost(LIFECYCLE_PATHS[op], {}, { id }).then(() => undefined),
     onSuccess: () => {
       void message.success('操作成功');
@@ -80,48 +109,95 @@ export function ReservationsPage() {
     onError: (error: Error) => void message.error(error.message),
   });
 
-  const runLifecycle = (record: ReservationRow, op: 'release' | 'pick' | 'unpick' | 'ship') => {
-    const labels = {
-      release: '释放占用（可售 +N）',
-      pick: '拣货（已占用 → 已拣货）',
-      unpick: '取消拣货（已拣货 → 已占用，仅拣错纠正）',
-      ship: '出库（Picked -N，On Hand -N）',
-    } as const;
+  const runLifecycle = (record: ReservationRow, op: LifecycleOp) => {
     modal.confirm({
-      title: `确认执行：${labels[op]}`,
+      title: `确认执行：${LIFECYCLE_LABELS[op].text}（${LIFECYCLE_LABELS[op].explain}）`,
       content: `预约 ${record.reservationNo}（${record.skuCode} × ${fmtQty(record.requestedQty)}）`,
+      okText: LIFECYCLE_LABELS[op].text,
+      cancelText: '返回',
       onOk: () => lifecycleMutation.mutate({ id: record.id, op }),
     });
   };
 
-  const actionsFor = (record: ReservationRow): string[] => {
-    switch (record.status) {
-      case 'ACTIVE':
-        return ['release', 'pick'];
-      case 'PICKED':
-        return ['ship', 'unpick'];
-      default:
-        return [];
+  const list = reservations.data?.data ?? [];
+  const selectedRow = useMemo(
+    () => list.find((row) => row.id === selectedId) ?? null,
+    [list, selectedId],
+  );
+
+  const railContent = useMemo<ContextRailContent>(() => {
+    if (selectedRow === null) {
+      return {
+        defaultCollapsed: true,
+        children: (
+          <ContextSection title="库存占用概览">
+            <ContextMetric label="当前筛选" value={`${reservations.data?.meta.total ?? 0} 条`} />
+            <RailHint>
+              点击占用行查看详情；生命周期操作（拣货 / 出库 / 释放 / 取消拣货）在右栏执行。
+            </RailHint>
+          </ContextSection>
+        ),
+      };
     }
-  };
+    const meta = RESERVATION_STATUS_META[selectedRow.status];
+    const ops = actionsFor(selectedRow.status);
+    // 生命周期推进动作不是 danger（UI 规范 §3.1）；首个可用动作为主操作。
+    return {
+      defaultCollapsed: true,
+      header: (
+        <EntitySummary
+          title={selectedRow.reservationNo}
+          subtitle={selectedRow.skuCode}
+          badge={
+            <StatusBadge
+              tone={meta?.tone ?? 'neutral'}
+              label={meta?.label ?? selectedRow.status}
+              hint={selectedRow.status}
+            />
+          }
+        />
+      ),
+      children: (
+        <>
+          <ContextSection title="占用信息">
+            <ContextMetric label="数量" value={fmtQty(selectedRow.requestedQty)} strong />
+            <ContextMetric label="仓库" value={selectedRow.warehouseCode} />
+            <ContextMetric
+              label="来源"
+              value={`${selectedRow.referenceType}/${selectedRow.referenceId.slice(0, 8)}`}
+            />
+            <ContextMetric label="备注" value={selectedRow.remark ?? '—'} />
+          </ContextSection>
+          <ContextAction>
+            {ops.map((op, index) => (
+              <Button
+                key={op}
+                block
+                style={index > 0 ? { marginTop: 8 } : undefined}
+                type={index === 0 ? 'primary' : 'default'}
+                loading={lifecycleMutation.isPending}
+                onClick={() => runLifecycle(selectedRow, op)}
+              >
+                {LIFECYCLE_LABELS[op].text}
+              </Button>
+            ))}
+            {ops.length === 0 && <RailHint>该占用已是终态，无可用操作。</RailHint>}
+          </ContextAction>
+        </>
+      ),
+    };
+    // lifecycleMutation 的依赖以 isPending 布尔承载（UI 规范 §4.4）。
+  }, [selectedRow, reservations.data, lifecycleMutation.isPending]);
+  useContextRail(railContent);
 
   return (
-    <Space orientation="vertical" style={{ width: '100%' }} size="middle">
-      <Space wrap>
-        <Select
-          placeholder="状态"
-          allowClear
-          style={{ width: 140 }}
-          options={Object.entries(STATUS_TAG).map(([value, meta]) => ({
-            value,
-            label: meta.label,
-          }))}
-          value={status}
-          onChange={(value) => {
-            setPage(1);
-            setStatus(value);
-          }}
-        />
+    <div>
+      <PageHeader
+        title="库存占用"
+        description="订单对库存的占用记录：已占用 → 已拣货 → 已出库；已占用可释放，已拣货可取消拣货"
+      />
+
+      <FilterBar>
         <Select
           placeholder="SKU"
           showSearch
@@ -140,6 +216,20 @@ export function ReservationsPage() {
           }))}
         />
         <Select
+          placeholder="状态"
+          allowClear
+          style={{ width: 140 }}
+          options={Object.entries(RESERVATION_STATUS_META).map(([value, meta]) => ({
+            value,
+            label: meta.label,
+          }))}
+          value={status}
+          onChange={(value) => {
+            setPage(1);
+            setStatus(value);
+          }}
+        />
+        <Select
           placeholder="仓库"
           showSearch
           allowClear
@@ -155,71 +245,68 @@ export function ReservationsPage() {
             label: `${warehouse.warehouseCode} ${warehouse.name}`,
           }))}
         />
-        <Typography.Text type="secondary">
-          状态机：已占用 → 已拣货 → 已出库；已占用可释放；已拣货可取消拣货回已占用
-        </Typography.Text>
-      </Space>
+      </FilterBar>
 
-      <Table<ReservationRow>
-        rowKey="id"
-        loading={reservations.isLoading}
-        dataSource={reservations.data?.data ?? []}
-        pagination={{
-          current: page,
-          pageSize: 50,
-          total: reservations.data?.meta.total ?? 0,
-          onChange: setPage,
-          showSizeChanger: false,
-        }}
-        columns={[
-          { title: '预约号', dataIndex: 'reservationNo', width: 120 },
-          { title: 'SKU', dataIndex: 'skuCode', width: 130 },
-          { title: '仓库', dataIndex: 'warehouseCode', width: 90 },
-          {
-            title: '来源',
-            width: 130,
-            render: (_, record) => `${record.referenceType}/${record.referenceId.slice(0, 8)}`,
-          },
-          { title: '数量', dataIndex: 'requestedQty', width: 80, align: 'right', render: fmtQty },
-          {
-            title: '状态',
-            dataIndex: 'status',
-            width: 100,
-            render: (value: string) => {
-              const meta = STATUS_TAG[value];
-              return <Tag color={meta?.color}>{meta?.label ?? value}</Tag>;
+      <SectionCard flush>
+        <DataTable<ReservationRow>
+          rowKey="id"
+          loading={reservations.isLoading}
+          dataSource={list}
+          pagination={{
+            current: page,
+            pageSize: 50,
+            total: reservations.data?.meta.total ?? 0,
+            onChange: setPage,
+            showSizeChanger: false,
+            showTotal: (total) => `共 ${total} 条占用`,
+          }}
+          emptyTitle="暂无库存占用"
+          emptyDescription="当前筛选下没有占用记录。"
+          onRow={(record) => ({
+            onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+            style: {
+              cursor: 'pointer',
+              background: record.id === selectedId ? colors.primarySoft : undefined,
             },
-          },
-          { title: '创建时间', dataIndex: 'createdAt', width: 150, render: fmtTime },
-          { title: '拣货时间', dataIndex: 'pickedAt', width: 150, render: fmtTime },
-          {
-            title: '操作',
-            width: 220,
-            render: (_, record) => (
-              <Space size="small">
-                {actionsFor(record).map((op) => (
-                  <Button
-                    key={op}
-                    size="small"
-                    danger={op === 'release' || op === 'unpick'}
-                    onClick={() =>
-                      runLifecycle(record, op as 'release' | 'pick' | 'unpick' | 'ship')
-                    }
-                  >
-                    {op === 'release'
-                      ? '释放'
-                      : op === 'pick'
-                        ? '拣货'
-                        : op === 'unpick'
-                          ? '取消拣货'
-                          : '出库'}
-                  </Button>
-                ))}
-              </Space>
-            ),
-          },
-        ]}
-      />
-    </Space>
+          })}
+          columns={[
+            { title: '预约号', dataIndex: 'reservationNo', width: 130 },
+            { title: 'SKU', dataIndex: 'skuCode', width: 130 },
+            { title: '仓库', dataIndex: 'warehouseCode', width: 90 },
+            {
+              title: '来源',
+              width: 130,
+              render: (_, record) => `${record.referenceType}/${record.referenceId.slice(0, 8)}`,
+            },
+            { title: '数量', dataIndex: 'requestedQty', width: 80, align: 'right', render: fmtQty },
+            {
+              title: '状态',
+              dataIndex: 'status',
+              width: 100,
+              render: (value: string) => (
+                <StatusBadge
+                  tone={RESERVATION_STATUS_META[value]?.tone ?? 'neutral'}
+                  label={RESERVATION_STATUS_META[value]?.label ?? value}
+                  hint={value}
+                  showDot={false}
+                />
+              ),
+            },
+            {
+              title: '创建时间',
+              dataIndex: 'createdAt',
+              width: 130,
+              render: (value: string) => <RelativeTime value={value} />,
+            },
+            {
+              title: '拣货时间',
+              dataIndex: 'pickedAt',
+              width: 130,
+              render: (value: string | null) => <RelativeTime value={value} />,
+            },
+          ]}
+        />
+      </SectionCard>
+    </div>
   );
 }

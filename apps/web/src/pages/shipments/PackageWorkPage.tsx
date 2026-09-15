@@ -1,25 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router';
-import {
-  App as AntdApp,
-  Badge,
-  Button,
-  Card,
-  Descriptions,
-  Input,
-  InputRef,
-  Progress,
-  Space,
-} from 'antd';
+import { Link } from 'react-router';
+import { App as AntdApp, Button, Input, InputRef, Popconfirm, Progress } from 'antd';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiPost, useApiQuery } from '../../api/hooks';
-import { PACKAGE_STATUS_LABEL, SHIPMENT_STATUS_LABEL } from '../../design-system';
+import {
+  PACKAGE_STATUS_META,
+  ScanFeedback,
+  ScanFeedbackData,
+  SHIPMENT_STATUS_META,
+  StatusBadge,
+  colors,
+  typography,
+} from '../../design-system';
 
 /**
  * Package workbench (Sprint 4 task §59): create → scan SKU → progress →
  * seal, with the same warehouse-friendly big-feedback UX as the picking
- * workbench (big green on success, big red on failure). Scanning never
- * touches stock.
+ * workbench (DS ScanFeedback). Scanning never touches stock.
  */
 
 interface Workbench {
@@ -59,9 +57,7 @@ export function PackageWorkPage() {
   const barcodeRef = useRef<InputRef>(null);
   const [barcode, setBarcode] = useState('');
   const [serialNumber, setSerialNumber] = useState('');
-  const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; text: string } | null>(
-    null,
-  );
+  const [feedback, setFeedback] = useState<ScanFeedbackData | null>(null);
 
   const query = useApiQuery<{ data: Workbench }>(
     '/api/v1/packages/{id}/workbench',
@@ -85,14 +81,16 @@ export function PackageWorkPage() {
     onSuccess: (result) => {
       setFeedback({
         kind: 'success',
-        text: `✓ 已装 ${result.skuCode}（${result.packedQty} / ${result.requiredQty}）`,
+        title: '已装',
+        detail: `${result.skuCode}（${result.packedQty} / ${result.requiredQty}）`,
+        progress: `${result.packedQty} / ${result.requiredQty}`,
       });
       setBarcode('');
       setSerialNumber('');
       refresh();
     },
     onError: (error: Error) => {
-      setFeedback({ kind: 'error', text: `✗ ${error.message}` });
+      setFeedback({ kind: 'error', title: '扫码失败', detail: error.message });
       setBarcode('');
     },
   });
@@ -111,7 +109,7 @@ export function PackageWorkPage() {
   }, [feedback, workbench?.package.status]);
 
   if (workbench === undefined) {
-    return <Card loading title="打包作业" />;
+    return <div style={{ padding: 24 }}>加载中…</div>;
   }
 
   const pkg = workbench.package;
@@ -135,105 +133,152 @@ export function PackageWorkPage() {
     scanMutation.mutate(input);
   };
 
+  const lineStyle: React.CSSProperties = {
+    display: 'flex',
+    justifyContent: 'space-between',
+    padding: '8px 0',
+    borderBottom: `1px solid ${colors.borderSoft}`,
+    fontSize: 16,
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <Card size="small">
-        <Descriptions size="small" column={4}>
-          <Descriptions.Item label="包裹号">
-            <span style={{ fontSize: 18, fontWeight: 700 }}>{pkg.packageNo}</span>
-          </Descriptions.Item>
-          <Descriptions.Item label="发货单">
-            <a href={`#/shipments/${pkg.shipmentId}`}>{workbench.shipmentNo}</a>
-          </Descriptions.Item>
-          <Descriptions.Item label="包裹状态">
-            <Badge
-              status={pkg.status === 'SEALED' ? 'success' : 'processing'}
-              text={PACKAGE_STATUS_LABEL[pkg.status] ?? pkg.status}
-            />
-          </Descriptions.Item>
-          <Descriptions.Item label="发货单状态">
-            {SHIPMENT_STATUS_LABEL[workbench.shipmentStatus] ?? workbench.shipmentStatus}
-          </Descriptions.Item>
-        </Descriptions>
-        <Progress
-          percent={totalRequired === 0 ? 0 : Math.round((totalPacked / totalRequired) * 100)}
-          format={() => `${totalPacked} / ${totalRequired} 件已装`}
-        />
+      {/* Header strip: id + status + progress + primary seal button (spec §12). */}
+      <div
+        style={{
+          background: colors.container,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 12,
+          padding: '16px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 20,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span style={{ fontSize: 22, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+            {pkg.packageNo}
+          </span>
+          <span style={{ fontSize: 13, color: colors.textSecondary }}>
+            发货单{' '}
+            <Link to={`/shipments/${pkg.shipmentId}`} style={{ color: colors.primary }}>
+              {workbench.shipmentNo}
+            </Link>
+          </span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <StatusBadge
+            tone={PACKAGE_STATUS_META[pkg.status]?.tone ?? 'neutral'}
+            label={PACKAGE_STATUS_META[pkg.status]?.label ?? pkg.status}
+            hint={pkg.status}
+          />
+          <StatusBadge
+            tone={SHIPMENT_STATUS_META[workbench.shipmentStatus]?.tone ?? 'neutral'}
+            label={
+              SHIPMENT_STATUS_META[workbench.shipmentStatus]?.label ?? workbench.shipmentStatus
+            }
+            hint={workbench.shipmentStatus}
+            showDot={false}
+          />
+        </div>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+            <span style={{ fontSize: 12.5, color: colors.textSecondary }}>装箱进度</span>
+            <span style={{ fontSize: 13, fontWeight: 650, fontVariantNumeric: 'tabular-nums' }}>
+              {totalPacked} / {totalRequired}
+            </span>
+          </div>
+          <Progress
+            percent={totalRequired === 0 ? 0 : Math.round((totalPacked / totalRequired) * 100)}
+            showInfo={false}
+            size={{ height: 8 }}
+            strokeColor={totalPacked === totalRequired ? colors.success : colors.primary}
+          />
+        </div>
         {open && (
-          <Button
-            type="primary"
-            size="large"
-            style={{ marginTop: 8 }}
-            loading={sealMutation.isPending}
-            onClick={() => sealMutation.mutate()}
+          /* 封箱 = L1 轻确认（UI 规范 §12）。 */
+          <Popconfirm
+            title="确认封箱？"
+            description="封箱后本包裹不可再扫码装货；需要调整时将生成重新打包任务。"
+            okText="封箱"
+            cancelText="取消"
+            onConfirm={() => sealMutation.mutate()}
           >
-            封箱（Seal）
-          </Button>
+            <Button type="primary" size="large" loading={sealMutation.isPending}>
+              封箱（Seal）
+            </Button>
+          </Popconfirm>
         )}
-      </Card>
+      </div>
 
       {open && (
-        <Card
-          size="small"
-          title={<span style={{ fontSize: 16 }}>扫码装箱（每次 1 件，回车提交；不改动库存）</span>}
-          style={{ borderColor: '#1677ff' }}
+        <div
+          style={{
+            background: colors.container,
+            border: `1px solid ${colors.primary}`,
+            borderRadius: 12,
+            padding: 20,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 14,
+          }}
         >
-          <Space orientation="vertical" style={{ width: '100%' }} size={12}>
+          <label
+            htmlFor="package-scan-input"
+            style={{ fontSize: 14, fontWeight: 600, color: colors.textPrimary }}
+          >
+            扫码装箱（每次 1 件，回车提交；不改动库存）
+          </label>
+          <Input
+            id="package-scan-input"
+            ref={barcodeRef}
+            size="large"
+            placeholder="扫描 SKU 条码…"
+            value={barcode}
+            onChange={(event) => setBarcode(event.target.value)}
+            onPressEnter={submitScan}
+            style={{ fontSize: 20, padding: '8px 16px' }}
+            autoFocus
+          />
+          {serialDemand !== undefined && (
             <Input
-              ref={barcodeRef}
               size="large"
-              placeholder="扫描 SKU 条码…"
-              value={barcode}
-              onChange={(event) => setBarcode(event.target.value)}
+              placeholder={`SN 商品（${serialDemand.skuCode}）请再扫序列号`}
+              value={serialNumber}
+              onChange={(event) => setSerialNumber(event.target.value)}
               onPressEnter={submitScan}
-              style={{ fontSize: 20, padding: '8px 16px' }}
-              autoFocus
+              style={{ fontSize: 18, padding: '6px 16px' }}
             />
-            {serialDemand !== undefined && (
-              <Input
-                size="large"
-                placeholder={`SN 商品（${serialDemand.skuCode}）请再扫序列号`}
-                value={serialNumber}
-                onChange={(event) => setSerialNumber(event.target.value)}
-                onPressEnter={submitScan}
-                style={{ fontSize: 18, padding: '6px 16px' }}
-              />
-            )}
-            {feedback !== null && (
-              <div
-                style={{
-                  fontSize: 22,
-                  fontWeight: 700,
-                  padding: '10px 16px',
-                  borderRadius: 8,
-                  color: feedback.kind === 'success' ? '#237804' : '#a8071a',
-                  background: feedback.kind === 'success' ? '#f6ffed' : '#fff1f0',
-                  border: `1px solid ${feedback.kind === 'success' ? '#b7eb8f' : '#ffa39e'}`,
-                }}
-              >
-                {feedback.text}
-              </div>
-            )}
-          </Space>
-        </Card>
+          )}
+          <ScanFeedback feedback={feedback} />
+        </div>
       )}
 
-      <Card size="small" title={`待装商品 (${workbench.demand.length})`}>
+      <div
+        style={{
+          background: colors.container,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 12,
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          style={{
+            padding: '13px 20px',
+            borderBottom: `1px solid ${colors.borderSoft}`,
+            fontSize: typography.cardTitle.size,
+            fontWeight: 600,
+          }}
+        >
+          待装商品（{workbench.demand.length}）
+        </div>
         {workbench.demand.map((row) => (
-          <div
-            key={row.orderItemId}
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              padding: '8px 0',
-              borderBottom: '1px solid #f0f0f0',
-              fontSize: 16,
-            }}
-          >
+          <div key={row.orderItemId} style={{ ...lineStyle, padding: '8px 20px' }}>
             <span>
               <strong>{row.skuCode}</strong> {row.skuName}
               {row.serialTracking && (
-                <span style={{ color: '#fa8c16', marginLeft: 8 }}>
+                <span style={{ color: colors.warning, marginLeft: 8 }}>
                   SN：{row.pendingSerialNumbers.join(', ') || '全部已装'}
                 </span>
               )}
@@ -243,25 +288,33 @@ export function PackageWorkPage() {
             </span>
           </div>
         ))}
-      </Card>
+      </div>
 
       {workbench.items.length > 0 && (
-        <Card size="small" title={`本包裹已装 (${workbench.items.length})`}>
+        <div
+          style={{
+            background: colors.container,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 12,
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              padding: '13px 20px',
+              borderBottom: `1px solid ${colors.borderSoft}`,
+              fontSize: typography.cardTitle.size,
+              fontWeight: 600,
+            }}
+          >
+            本包裹已装（{workbench.items.length}）
+          </div>
           {workbench.items.map((row) => (
-            <div
-              key={row.id}
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                padding: '8px 0',
-                borderBottom: '1px solid #f0f0f0',
-                fontSize: 16,
-              }}
-            >
+            <div key={row.id} style={{ ...lineStyle, padding: '8px 20px' }}>
               <span>
                 <strong>{row.skuCode}</strong> {row.skuName}
                 {row.serialNumbers.length > 0 && (
-                  <span style={{ color: '#fa8c16', marginLeft: 8 }}>
+                  <span style={{ color: colors.warning, marginLeft: 8 }}>
                     SN：{row.serialNumbers.join(', ')}
                   </span>
                 )}
@@ -269,7 +322,7 @@ export function PackageWorkPage() {
               <span>×{Number(row.quantity)}</span>
             </div>
           ))}
-        </Card>
+        </div>
       )}
     </div>
   );

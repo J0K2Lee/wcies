@@ -1,8 +1,25 @@
 import { useState } from 'react';
-import { App as AntdApp, Button, Form, Modal, Select, Space, Table, Tag } from 'antd';
-import { Link } from 'react-router';
+import { App as AntdApp, Button, Form, Modal, Select, Progress } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
+import { Link, useNavigate } from 'react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiPost, useApiQuery } from '../../api/hooks';
+import {
+  ContextAction,
+  ContextMetric,
+  ContextSection,
+  DataTable,
+  EntitySummary,
+  FilterBar,
+  PageHeader,
+  RelativeTime,
+  SectionCard,
+  SHIPMENT_STATUS_META,
+  StatusBadge,
+  colors,
+  useContextRail,
+  ContextRailContent,
+} from '../../design-system';
 
 /** Shipment list (Sprint 4 task §57) + creation from a PICKED order. */
 
@@ -22,23 +39,13 @@ interface ShipmentListItem {
   shippedAt: string | null;
 }
 
-import { SHIPMENT_STATUS_LABEL } from '../../design-system';
-
-const STATUS_COLORS: Record<string, string> = {
-  DRAFT: 'default',
-  READY_TO_PACK: 'blue',
-  PACKING: 'processing',
-  READY_TO_SHIP: 'cyan',
-  SHIPPED: 'success',
-  CANCELLED: 'default',
-  EXCEPTION: 'error',
-};
-
 export function ShipmentsPage() {
   const { message } = AntdApp.useApp();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<string | undefined>();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [form] = Form.useForm<{ orderId: string }>();
 
@@ -70,104 +77,198 @@ export function ShipmentsPage() {
     onError: (error: Error) => message.error(`创建失败：${error.message}`),
   });
 
+  const list = query.data?.data ?? [];
+  const selectedRow = list.find((row) => row.id === selectedId) ?? null;
+
+  const railContent: ContextRailContent =
+    selectedRow === null
+      ? {
+          defaultCollapsed: true,
+          children: (
+            <ContextSection title="发货概览">
+              <ContextMetric label="当前筛选" value={`${query.data?.meta.total ?? 0} 张发货单`} />
+            </ContextSection>
+          ),
+        }
+      : {
+          defaultCollapsed: true,
+          header: (
+            <EntitySummary
+              title={selectedRow.shipmentNo}
+              subtitle={`${selectedRow.warehouseCode} ${selectedRow.warehouseName}`}
+              badge={
+                <StatusBadge
+                  tone={SHIPMENT_STATUS_META[selectedRow.status]?.tone ?? 'neutral'}
+                  label={SHIPMENT_STATUS_META[selectedRow.status]?.label ?? selectedRow.status}
+                  hint={selectedRow.status}
+                />
+              }
+            />
+          ),
+          children: (
+            <>
+              <ContextSection title="发货概况">
+                <ContextMetric label="订单" value={selectedRow.orderNo} />
+                <ContextMetric
+                  label="包裹"
+                  value={`${selectedRow.sealedPackagesCount} 封 / ${selectedRow.packagesCount} 个`}
+                />
+                <ContextMetric label="物流单号" value={selectedRow.trackingNumber ?? '—'} />
+              </ContextSection>
+              <ContextSection title="打包进度">
+                <Progress
+                  percent={
+                    selectedRow.packagesCount === 0
+                      ? 0
+                      : Math.round(
+                          (selectedRow.sealedPackagesCount / selectedRow.packagesCount) * 100,
+                        )
+                  }
+                  size={{ height: 6 }}
+                  strokeColor={colors.primary}
+                />
+                <ContextMetric
+                  label="已封箱"
+                  value={`${selectedRow.sealedPackagesCount} / ${selectedRow.packagesCount}`}
+                />
+              </ContextSection>
+              <ContextAction>
+                <Button block onClick={() => void navigate(`/shipments/${selectedRow.id}`)}>
+                  查看详情
+                </Button>
+                <Button
+                  type="primary"
+                  block
+                  style={{ marginTop: 8 }}
+                  onClick={() => void navigate(`/shipments/${selectedRow.id}`)}
+                >
+                  进入工作台
+                </Button>
+              </ContextAction>
+            </>
+          ),
+        };
+  useContextRail(railContent);
+
   return (
     <div>
-      <Space style={{ marginBottom: 16 }}>
+      <PageHeader
+        title="发货管理"
+        description="从已拣货（PICKED）订单创建发货单，按仓拆分；双击行进入发货单详情"
+        primary={
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+            从订单创建发货单
+          </Button>
+        }
+      />
+      <FilterBar>
         <Select
           allowClear
           placeholder="发货单状态"
-          style={{ width: 180 }}
-          options={Object.keys(STATUS_COLORS).map((value) => ({ value, label: value }))}
+          style={{ width: 160 }}
+          options={Object.entries(SHIPMENT_STATUS_META).map(([value, meta]) => ({
+            value,
+            label: meta.label,
+          }))}
+          value={status}
           onChange={(value) => {
             setPage(1);
             setStatus(value);
           }}
         />
-        <Button type="primary" onClick={() => setCreateOpen(true)}>
-          从订单创建发货单
-        </Button>
-      </Space>
-      <Table<ShipmentListItem>
-        rowKey="id"
-        size="middle"
-        loading={query.isLoading}
-        dataSource={query.data?.data ?? []}
-        pagination={{
-          current: page,
-          pageSize: 20,
-          total: query.data?.meta.total ?? 0,
-          onChange: setPage,
-        }}
-        columns={[
-          { title: '发货单号', dataIndex: 'shipmentNo', key: 'shipmentNo', width: 140 },
-          {
-            title: '订单',
-            key: 'order',
-            render: (_: unknown, row: ShipmentListItem) => (
-              <Link to={`/orders`}>{row.orderNo}</Link>
-            ),
-          },
-          {
-            title: '仓库',
-            key: 'warehouse',
-            render: (_: unknown, row: ShipmentListItem) =>
-              `${row.warehouseCode} ${row.warehouseName}`,
-          },
-          {
-            title: '包裹',
-            key: 'packages',
-            width: 100,
-            render: (_: unknown, row: ShipmentListItem) =>
-              `${row.sealedPackagesCount} 封 / ${row.packagesCount} 个`,
-          },
-          {
-            title: '物流单号',
-            dataIndex: 'trackingNumber',
-            key: 'trackingNumber',
-            render: (value: string | null) => value ?? '-',
-          },
-          {
-            title: '状态',
-            dataIndex: 'status',
-            key: 'status',
-            width: 140,
-            render: (value: string) => (
-            <Tag color={STATUS_COLORS[value] ?? 'default'}>{SHIPMENT_STATUS_LABEL[value] ?? value}</Tag>
-          ),
-          },
-          {
-            title: '创建时间',
-            dataIndex: 'createdAt',
-            key: 'createdAt',
-            width: 170,
-            render: (value: string) => new Date(value).toLocaleString(),
-          },
-          {
-            title: '出库时间',
-            dataIndex: 'shippedAt',
-            key: 'shippedAt',
-            width: 170,
-            render: (value: string | null) => (value ? new Date(value).toLocaleString() : '-'),
-          },
-          {
-            title: '操作',
-            key: 'actions',
-            width: 110,
-            render: (_: unknown, row: ShipmentListItem) => (
-              <Link to={`/shipments/${row.id}`}>
-                <Button type="primary" ghost size="small">
-                  发货工作台
-                </Button>
-              </Link>
-            ),
-          },
-        ]}
-      />
+      </FilterBar>
+      <SectionCard flush>
+        <DataTable<ShipmentListItem>
+          rowKey="id"
+          loading={query.isLoading}
+          dataSource={list}
+          pagination={{
+            current: page,
+            pageSize: 20,
+            total: query.data?.meta.total ?? 0,
+            onChange: setPage,
+            showTotal: (total) => `共 ${total} 张发货单`,
+          }}
+          emptyTitle="暂无发货单"
+          emptyDescription="订单拣货完成后可从订单创建发货单。"
+          onRow={(record) => ({
+            onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+            onDoubleClick: () => void navigate(`/shipments/${record.id}`),
+            style: {
+              cursor: 'pointer',
+              background: record.id === selectedId ? colors.primarySoft : undefined,
+            },
+          })}
+          columns={[
+            { title: '发货单号', dataIndex: 'shipmentNo', key: 'shipmentNo', width: 140 },
+            {
+              title: '订单',
+              key: 'order',
+              render: (_: unknown, row: ShipmentListItem) => (
+                <Link
+                  to={`/orders?keyword=${encodeURIComponent(row.orderNo)}&focus=${row.orderId}`}
+                >
+                  {row.orderNo}
+                </Link>
+              ),
+            },
+            {
+              title: '仓库',
+              key: 'warehouse',
+              render: (_: unknown, row: ShipmentListItem) =>
+                `${row.warehouseCode} ${row.warehouseName}`,
+            },
+            {
+              title: '包裹',
+              key: 'packages',
+              width: 110,
+              render: (_: unknown, row: ShipmentListItem) =>
+                `${row.sealedPackagesCount} 封 / ${row.packagesCount} 个`,
+            },
+            {
+              title: '物流单号',
+              dataIndex: 'trackingNumber',
+              key: 'trackingNumber',
+              render: (value: string | null) => value ?? '—',
+            },
+            {
+              title: '状态',
+              dataIndex: 'status',
+              key: 'status',
+              width: 110,
+              render: (value: string) => (
+                <StatusBadge
+                  tone={SHIPMENT_STATUS_META[value]?.tone ?? 'neutral'}
+                  label={SHIPMENT_STATUS_META[value]?.label ?? value}
+                  hint={value}
+                  showDot={false}
+                />
+              ),
+            },
+            {
+              title: '创建时间',
+              dataIndex: 'createdAt',
+              key: 'createdAt',
+              width: 130,
+              render: (value: string) => <RelativeTime value={value} />,
+            },
+            {
+              title: '出库时间',
+              dataIndex: 'shippedAt',
+              key: 'shippedAt',
+              width: 130,
+              render: (value: string | null) => <RelativeTime value={value} />,
+            },
+          ]}
+        />
+      </SectionCard>
 
       <Modal
         title="从订单创建发货单（仅 PICKED 行，按仓拆分）"
         open={createOpen}
         confirmLoading={createMutation.isPending}
+        okText="创建发货单"
+        cancelText="取消"
         onCancel={() => setCreateOpen(false)}
         onOk={() => {
           void form.validateFields().then((values) => createMutation.mutate(values.orderId));
@@ -181,6 +282,8 @@ export function ShipmentsPage() {
           >
             <Select
               placeholder="选择订单"
+              showSearch
+              optionFilterProp="label"
               loading={pickedOrders.isLoading}
               options={(pickedOrders.data?.data ?? []).map((order) => ({
                 value: order.id,

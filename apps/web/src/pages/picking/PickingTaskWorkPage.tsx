@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router';
-import { App as AntdApp, Button, Input, InputRef, Progress, Skeleton } from 'antd';
+import { useNavigate } from 'react-router';
+import { App as AntdApp, Button, Input, InputRef, Popconfirm, Progress, Skeleton } from 'antd';
+import { ArrowLeftOutlined } from '@ant-design/icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiPost, useApiQuery } from '../../api/hooks';
 import {
@@ -51,6 +53,7 @@ interface TaskDetail {
 
 export function PickingTaskWorkPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { message } = AntdApp.useApp();
   const queryClient = useQueryClient();
   const barcodeRef = useRef<InputRef>(null);
@@ -205,6 +208,12 @@ export function PickingTaskWorkPage() {
             flexWrap: 'wrap',
           }}
         >
+          <Button
+            type="text"
+            aria-label="返回拣货列表"
+            icon={<ArrowLeftOutlined />}
+            onClick={() => void navigate('/picking')}
+          />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span style={{ fontSize: 22, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
               {task.pickingNo}
@@ -243,13 +252,18 @@ export function PickingTaskWorkPage() {
             </Button>
           )}
           {inProgress && (
-            <Button
-              size="large"
-              loading={completeMutation.isPending}
-              onClick={() => completeMutation.mutate()}
+            /* 完成=终态推进主操作（UI 规范 §12），L1 轻确认。 */
+            <Popconfirm
+              title="确认完成任务？"
+              description="需全部行拣完才能完成；完成后任务进入终态。"
+              okText="完成任务"
+              cancelText="取消"
+              onConfirm={() => completeMutation.mutate()}
             >
-              完成任务（需全部行拣完）
-            </Button>
+              <Button type="primary" size="large" loading={completeMutation.isPending}>
+                完成任务（需全部行拣完）
+              </Button>
+            </Popconfirm>
           )}
         </div>
 
@@ -534,7 +548,11 @@ export function PickingTaskWorkPage() {
           )}
         </ContextSection>
         <ContextSection title="异常">
-          <ContextMetric label="扫码异常" value={feedback?.kind === 'error' ? '见左上反馈' : 0} />
+          <ContextMetric
+            label="扫码异常"
+            value={feedback?.kind === 'error' ? 1 : 0}
+            strong={feedback?.kind === 'error'}
+          />
         </ContextSection>
       </aside>
     </div>

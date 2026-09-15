@@ -1,15 +1,22 @@
-import { useState } from 'react';
 import { Button, Progress, Select } from 'antd';
-import { Link } from 'react-router';
+import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router';
 import { useApiQuery } from '../../api/hooks';
 import {
+  ContextAction,
+  ContextMetric,
+  ContextSection,
   DataTable,
+  EntitySummary,
   FilterBar,
-  PICKING_STATUS_META,
   PageHeader,
+  PICKING_STATUS_META,
+  RelativeTime,
   SectionCard,
   StatusBadge,
   colors,
+  useContextRail,
+  ContextRailContent,
 } from '../../design-system';
 
 /** Picking task list (task §45) — stays inside the standard AppShell. */
@@ -30,8 +37,10 @@ interface PickingTaskListItem {
 }
 
 export function PickingPage() {
+  const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<string | undefined>();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const query = useApiQuery<{ data: PickingTaskListItem[]; meta: { total: number } }>(
     '/api/v1/picking-tasks',
@@ -39,11 +48,75 @@ export function PickingPage() {
     ['picking-tasks', page, status],
   );
 
+  const list = query.data?.data ?? [];
+  const selectedRow = useMemo(
+    () => list.find((row) => row.id === selectedId) ?? null,
+    [list, selectedId],
+  );
+
+  const railContent = useMemo<ContextRailContent>(() => {
+    if (selectedRow === null) {
+      return {
+        defaultCollapsed: true,
+        children: (
+          <ContextSection title="拣货概览">
+            <ContextMetric label="当前筛选" value={`${query.data?.meta.total ?? 0} 个任务`} />
+            <ContextMetric
+              label="进行中"
+              value={list.filter((row) => row.status === 'IN_PROGRESS').length}
+            />
+          </ContextSection>
+        ),
+      };
+    }
+    const meta = PICKING_STATUS_META[selectedRow.status];
+    const required = Number(selectedRow.requiredTotal);
+    const picked = Number(selectedRow.pickedTotal);
+    return {
+      defaultCollapsed: true,
+      header: (
+        <EntitySummary
+          title={selectedRow.pickingNo}
+          subtitle={`${selectedRow.warehouseCode} ${selectedRow.warehouseName}`}
+          badge={
+            <StatusBadge
+              tone={meta?.tone ?? 'neutral'}
+              label={meta?.label ?? selectedRow.status}
+              hint={selectedRow.status}
+            />
+          }
+        />
+      ),
+      children: (
+        <>
+          <ContextSection title="任务概况">
+            <ContextMetric label="订单数" value={selectedRow.ordersCount} />
+            <ContextMetric
+              label="商品行"
+              value={`${selectedRow.itemsPicked} / ${selectedRow.itemsTotal}`}
+            />
+            <ContextMetric label="总件数" value={`${picked} / ${required}`} strong />
+          </ContextSection>
+          <ContextAction>
+            <Button
+              type="primary"
+              block
+              onClick={() => void navigate(`/picking/${selectedRow.id}`)}
+            >
+              进入作业
+            </Button>
+          </ContextAction>
+        </>
+      ),
+    };
+  }, [selectedRow, query.data, list, navigate]);
+  useContextRail(railContent);
+
   return (
     <div>
       <PageHeader
         title="拣货作业"
-        description="按拣货单组织仓库拣货，支持扫码作业与 SN 序列号校验"
+        description="按拣货单组织仓库拣货，支持扫码作业与 SN 序列号校验；双击任务行进入作业"
       />
       <FilterBar>
         <Select
@@ -66,7 +139,7 @@ export function PickingPage() {
         <DataTable<PickingTaskListItem>
           rowKey="id"
           loading={query.isLoading}
-          dataSource={query.data?.data ?? []}
+          dataSource={list}
           pagination={{
             current: page,
             pageSize: 20,
@@ -76,6 +149,14 @@ export function PickingPage() {
           }}
           emptyTitle="暂无拣货任务"
           emptyDescription="从订单详情创建拣货任务后在此作业。"
+          onRow={(record) => ({
+            onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+            onDoubleClick: () => void navigate(`/picking/${record.id}`),
+            style: {
+              cursor: 'pointer',
+              background: record.id === selectedId ? colors.primarySoft : undefined,
+            },
+          })}
           columns={[
             {
               title: '拣货单号',
@@ -138,20 +219,8 @@ export function PickingPage() {
             {
               title: '创建时间',
               dataIndex: 'createdAt',
-              width: 150,
-              render: (value: string) => value.slice(5, 16).replace('T', ' '),
-            },
-            {
-              title: '操作',
-              key: 'actions',
-              width: 110,
-              render: (_: unknown, row: PickingTaskListItem) => (
-                <Link to={`/picking/${row.id}`}>
-                  <Button type={row.status === 'IN_PROGRESS' ? 'primary' : 'default'} size="small">
-                    进入作业
-                  </Button>
-                </Link>
-              ),
+              width: 130,
+              render: (value: string) => <RelativeTime value={value} />,
             },
           ]}
         />

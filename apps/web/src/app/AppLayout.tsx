@@ -152,8 +152,9 @@ export function AppLayout() {
     },
   });
 
-  // Focus mode for the picking workbench: shrink nav, no rail (task §46).
-  const focusMode = /^\/picking\/[^/]+$/.test(location.pathname);
+  // Focus mode for the warehouse workbenches: shrink nav, no rail (task §46;
+  // Phase 3 G10 adds the package workbench /packages/:id).
+  const focusMode = /^\/(picking|packages)\/[^/]+$/.test(location.pathname);
 
   const [railContent, setRailContent] = useState<ContextRailContent | null>(null);
   const [userRailPref, setUserRailPref] = useState<boolean | null>(() => {

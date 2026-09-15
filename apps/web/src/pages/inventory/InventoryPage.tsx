@@ -1,10 +1,22 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { App, Button, Drawer, Form, Input, InputNumber, Modal, Select, Space, Tabs } from 'antd';
+import {
+  App,
+  Button,
+  Drawer,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+  Tabs,
+} from 'antd';
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
+import { fmtDateTime } from '../../utils/format';
 import { apiPost, apiPut, useApiQuery } from '../../api/hooks';
 import {
-  ActionMenu,
   ContextAction,
   ContextMetric,
   ContextSection,
@@ -13,11 +25,14 @@ import {
   FilterBar,
   INVENTORY_STATUS_META,
   InfoGrid,
+  KpiRow,
   MetricCard,
   PageHeader,
+  RailHint,
+  RESERVATION_STATUS_META,
   SectionCard,
   StatusBadge,
-  TRANSACTION_TYPE_LABEL,
+  TRANSACTION_TYPE_META,
   colors,
   useContextRail,
   ContextRailContent,
@@ -107,7 +122,6 @@ type Envelope<T> = { data: T; meta: { total: number } };
 const asQty = (value: unknown): string =>
   typeof value === 'string' ? value : typeof value === 'number' ? String(value) : '';
 const fmtQty = (value: string): string => (Number(value) % 1 === 0 ? String(Number(value)) : value);
-const fmtTime = (value: string): string => value.slice(0, 19).replace('T', ' ');
 
 type ActionMode = 'initialize' | 'adjust' | 'safety' | 'move';
 
@@ -229,6 +243,23 @@ export function InventoryPage() {
     void queryClient.invalidateQueries({ queryKey: ['inventory-detail'] });
   };
 
+  /** Rail/block actions share this opener so presets (sku/warehouse) preload. */
+  const openRowAction = (mode: ActionMode) => {
+    if (selectedRow === null) {
+      return;
+    }
+    openAction(mode, {
+      skuId: selectedRow.skuId,
+      warehouseId: selectedRow.warehouseId,
+      warehouseCode: selectedRow.warehouseCode,
+      warehouseName: selectedRow.warehouseName,
+      binId: selectedRow.binId,
+      fromBinId: selectedRow.binId,
+      safetyWarehouseId: selectedRow.warehouseId,
+      safetyQty: Number(selectedRow.safetyQty),
+    });
+  };
+
   const submitMutation = useMutation({
     mutationFn: async (values: Record<string, unknown>) => {
       const ref = crypto.randomUUID();
@@ -303,6 +334,8 @@ export function InventoryPage() {
 
   const detailRow = detail.data?.data;
   const rows = inventory.data?.data ?? [];
+  // One representative row for the selected SKU (rail actions preload from it).
+  const selectedRow = rows.find((row) => row.skuId === selectedSku) ?? null;
 
   // ---- Context rail: stock risk by default, SKU summary on selection ----
   const railContent = useMemo<ContextRailContent>(() => {
@@ -339,7 +372,16 @@ export function InventoryPage() {
             </ContextSection>
             <ContextAction>
               <Button block onClick={() => setDetailSku(detailRow.skuId)}>
-                查看库存详情
+                查看详情
+              </Button>
+              <Button block style={{ marginTop: 8 }} onClick={() => openRowAction('adjust')}>
+                库存调整
+              </Button>
+              <Button block style={{ marginTop: 8 }} onClick={() => openRowAction('safety')}>
+                安全库存
+              </Button>
+              <Button block style={{ marginTop: 8 }} onClick={() => openRowAction('move')}>
+                库内移位
               </Button>
             </ContextAction>
           </>
@@ -362,7 +404,7 @@ export function InventoryPage() {
           </ContextSection>
           <ContextSection title="缺货 TOP">
             {oos.length === 0 ? (
-              <span style={{ fontSize: 12.5, color: colors.textTertiary }}>暂无缺货记录</span>
+              <RailHint>暂无缺货记录</RailHint>
             ) : (
               oos.map((row) => (
                 <ContextMetric
@@ -381,6 +423,7 @@ export function InventoryPage() {
       ),
     };
   }, [
+    selectedRow,
     selectedSku,
     detailRow,
     oosRows.data,
@@ -394,14 +437,7 @@ export function InventoryPage() {
     <div>
       <PageHeader
         title="库存管理"
-        description="查看各仓库实时库存、占用、拣货和可售状态"
-        secondary={
-          <>
-            <Button onClick={() => openAction('move')}>库内移位</Button>
-            <Button onClick={() => openAction('safety')}>安全库存</Button>
-            <Button onClick={() => openAction('adjust')}>库存调整</Button>
-          </>
-        }
+        description="查看各仓库实时库存、占用、拣货和可售状态；库存调整 / 安全库存 / 库内移位在右侧选中 SKU 后操作"
         primary={
           <Button type="primary" onClick={() => openAction('initialize')}>
             库存初始化
@@ -409,14 +445,7 @@ export function InventoryPage() {
         }
       />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          gap: 16,
-          marginBottom: 16,
-        }}
-      >
+      <KpiRow>
         <MetricCard
           icon={<InboxOutlined />}
           title="库存记录"
@@ -441,7 +470,7 @@ export function InventoryPage() {
           value={stockExceptions.isLoading ? '…' : (stockExceptions.data?.meta.total ?? 0)}
           aux="未处理缺货异常"
         />
-      </div>
+      </KpiRow>
 
       <FilterBar>
         <Input.Search
@@ -501,6 +530,7 @@ export function InventoryPage() {
           }}
           onRow={(record) => ({
             onClick: () => setSelectedSku(record.skuId === selectedSku ? null : record.skuId),
+            onDoubleClick: () => setDetailSku(record.skuId),
             style: {
               cursor: 'pointer',
               background: record.skuId === selectedSku ? colors.primarySoft : undefined,
@@ -594,59 +624,6 @@ export function InventoryPage() {
                 />
               ),
             },
-            {
-              title: '操作',
-              key: 'actions',
-              width: 90,
-              fixed: 'right',
-              render: (_: unknown, record: InventoryRow) => (
-                <ActionMenu
-                  items={[
-                    {
-                      key: 'detail',
-                      label: '库存详情',
-                      onClick: () => setDetailSku(record.skuId),
-                    },
-                    {
-                      key: 'adjust',
-                      label: '库存调整',
-                      onClick: () =>
-                        openAction('adjust', {
-                          skuId: record.skuId,
-                          warehouseId: record.warehouseId,
-                          warehouseCode: record.warehouseCode,
-                          warehouseName: record.warehouseName,
-                          binId: record.binId,
-                        }),
-                    },
-                    {
-                      key: 'safety',
-                      label: '安全库存',
-                      onClick: () =>
-                        openAction('safety', {
-                          skuId: record.skuId,
-                          safetyWarehouseId: record.warehouseId,
-                          warehouseCode: record.warehouseCode,
-                          warehouseName: record.warehouseName,
-                          safetyQty: Number(record.safetyQty),
-                        }),
-                    },
-                    {
-                      key: 'move',
-                      label: '库内移位',
-                      onClick: () =>
-                        openAction('move', {
-                          skuId: record.skuId,
-                          warehouseId: record.warehouseId,
-                          warehouseCode: record.warehouseCode,
-                          warehouseName: record.warehouseName,
-                          fromBinId: record.binId,
-                        }),
-                    },
-                  ]}
-                />
-              ),
-            },
           ]}
         />
       </SectionCard>
@@ -654,7 +631,7 @@ export function InventoryPage() {
       <Drawer
         open={detailSku !== null}
         onClose={() => setDetailSku(null)}
-        size={860}
+        size={880}
         title={
           <span style={{ fontSize: 16, fontWeight: 650 }}>
             {detailRow ? `库存详情 · ${detailRow.skuCode}` : '库存详情'}
@@ -669,8 +646,8 @@ export function InventoryPage() {
               <InfoGrid
                 items={[
                   { label: 'On Hand', children: fmtQty(detailRow.totals.onHandQty) },
-                  { label: 'Reserved', children: fmtQty(detailRow.totals.reservedQty) },
-                  { label: 'Picked', children: fmtQty(detailRow.totals.pickedQty) },
+                  { label: '已占用', children: fmtQty(detailRow.totals.reservedQty) },
+                  { label: '已拣货', children: fmtQty(detailRow.totals.pickedQty) },
                   { label: 'Safety', children: fmtQty(detailRow.totals.safetyQty) },
                   { label: '实物可售', children: fmtQty(detailRow.totals.physicalAvailableQty) },
                   {
@@ -710,7 +687,12 @@ export function InventoryPage() {
                           align: 'right',
                           render: fmtQty,
                         },
-                        { title: 'Picked', dataIndex: 'pickedQty', align: 'right', render: fmtQty },
+                        {
+                          title: '已拣货',
+                          dataIndex: 'pickedQty',
+                          align: 'right',
+                          render: fmtQty,
+                        },
                         { title: 'Safety', dataIndex: 'safetyQty', align: 'right', render: fmtQty },
                         {
                           title: '可售',
@@ -724,14 +706,14 @@ export function InventoryPage() {
                 },
                 {
                   key: 'reservations',
-                  label: 'Reservation',
+                  label: '库存占用',
                   children: (
                     <DataTable<ReservationRow>
                       rowKey="id"
                       dataSource={detailReservations.data?.data ?? []}
                       pagination={false}
                       loading={detailReservations.isLoading}
-                      emptyTitle="暂无 Reservation"
+                      emptyTitle="暂无库存占用"
                       emptyDescription="当前没有订单占用该 SKU 库存。"
                       columns={[
                         { title: '预约号', dataIndex: 'reservationNo', width: 130 },
@@ -742,9 +724,21 @@ export function InventoryPage() {
                           align: 'right',
                           render: fmtQty,
                         },
-                        { title: '状态', dataIndex: 'status', width: 110 },
+                        {
+                          title: '状态',
+                          dataIndex: 'status',
+                          width: 110,
+                          render: (value: string) => (
+                            <StatusBadge
+                              tone={RESERVATION_STATUS_META[value]?.tone ?? 'neutral'}
+                              label={RESERVATION_STATUS_META[value]?.label ?? value}
+                              hint={value}
+                              showDot={false}
+                            />
+                          ),
+                        },
                         { title: '来源', dataIndex: 'referenceType', width: 90 },
-                        { title: '创建时间', dataIndex: 'createdAt', render: fmtTime },
+                        { title: '创建时间', dataIndex: 'createdAt', render: fmtDateTime },
                       ]}
                     />
                   ),
@@ -765,7 +759,14 @@ export function InventoryPage() {
                           title: '类型',
                           dataIndex: 'transactionType',
                           width: 150,
-                          render: (value: string) => TRANSACTION_TYPE_LABEL[value] ?? value,
+                          render: (value: string) => (
+                            <StatusBadge
+                              tone={TRANSACTION_TYPE_META[value]?.tone ?? 'neutral'}
+                              label={TRANSACTION_TYPE_META[value]?.label ?? value}
+                              hint={value}
+                              showDot={false}
+                            />
+                          ),
                         },
                         { title: '仓库', dataIndex: 'warehouseCode', width: 90 },
                         { title: '库位', dataIndex: 'binCode', width: 140 },
@@ -779,7 +780,16 @@ export function InventoryPage() {
                           title: '变更量',
                           dataIndex: 'quantityChange',
                           align: 'right',
-                          render: fmtQty,
+                          render: (value: string) => (
+                            <span
+                              style={{
+                                color: Number(value) < 0 ? colors.danger : colors.success,
+                                fontWeight: 600,
+                              }}
+                            >
+                              {fmtQty(value)}
+                            </span>
+                          ),
                         },
                         {
                           title: '变更后',
@@ -787,7 +797,7 @@ export function InventoryPage() {
                           align: 'right',
                           render: fmtQty,
                         },
-                        { title: '时间', dataIndex: 'createdAt', render: fmtTime },
+                        { title: '时间', dataIndex: 'createdAt', render: fmtDateTime },
                       ]}
                     />
                   ),
@@ -811,12 +821,50 @@ export function InventoryPage() {
         open={action !== null}
         onCancel={() => setAction(null)}
         confirmLoading={submitMutation.isPending}
+        okText={
+          action === 'initialize'
+            ? '初始化'
+            : action === 'adjust'
+              ? '提交调整'
+              : action === 'safety'
+                ? '保存'
+                : '确认移位'
+        }
+        cancelText="取消"
+        footer={
+          action === 'move'
+            ? [
+                <Button key="cancel" onClick={() => setAction(null)}>
+                  取消
+                </Button>,
+                // 库内移位 = L1 轻确认（UI 规范 §7）：同仓移动未占用库存，可逆。
+                <Popconfirm
+                  key="submit"
+                  title="确认执行库内移位？"
+                  description="将在同一仓库内移动未占用库存，并写入移库流水。"
+                  okText="移位"
+                  cancelText="取消"
+                  onConfirm={() =>
+                    void form.validateFields().then((values) => submitMutation.mutate(values))
+                  }
+                >
+                  <Button type="primary" loading={submitMutation.isPending}>
+                    确认移位
+                  </Button>
+                </Popconfirm>,
+              ]
+            : undefined
+        }
         onOk={() =>
           void form.validateFields().then((values) => {
             if (action === 'adjust') {
+              // 手工库存调整 = L2 强确认（UI 规范 §7）：直接改写事实库存。
               modal.confirm({
                 title: '二次确认：执行库存调整？',
                 content: `调整量 ${String(values['quantityDelta'])}，原因：${String(values['reason'])}。操作将写入库存流水。`,
+                okText: '执行调整',
+                okButtonProps: { danger: true },
+                cancelText: '返回',
                 onOk: () => submitMutation.mutate(values),
               });
             } else {
