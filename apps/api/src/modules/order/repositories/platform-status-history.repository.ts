@@ -19,6 +19,8 @@ export class PlatformStatusHistoryRepository {
       toStatus: string;
       source: string | null;
       operatorName: string | null;
+      /** Platform-side transition time; null -> created_at is the fallback. */
+      platformChangedAt?: Date | null;
     },
   ): Promise<void> {
     const repository = manager.getRepository(PlatformStatusHistoryEntity);

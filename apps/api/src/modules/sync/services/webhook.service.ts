@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { PlatformWebhookEvent } from '@wcies/platform-contracts';
+import { PlatformWebhookEvent, PlatformWebhookEventType } from '@wcies/platform-contracts';
 import { QUEUE_NAMES } from '../../../infrastructure/queue/queue.constants';
 import { PlatformService } from '../../platform/platform.service';
 import { StoreService } from '../../store/services/store.service';
@@ -10,7 +10,7 @@ import { PlatformAdapterRegistry } from '../../integration/platform-adapter.regi
 import { SyncContextService } from './sync-context.service';
 import { OrderSyncService } from './order-sync.service';
 import { ExternalRawEventRepository } from '../repositories/external-raw-event.repository';
-import { webhookSellerId } from '../../integration/ozon/ozon.mapper';
+import { webhookChangedStateDate, webhookSellerId } from '../../integration/ozon/ozon.mapper';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { WebhookJobPayload } from '../sync.constants';
 
@@ -124,12 +124,29 @@ export class WebhookIngestService {
 
 /**
  * Webhook background processing (BullMQ): re-reads authoritative data from
- * the platform API for NEW_POSTING hints and ingests through the standard
- * chain. Webhook and polling can race freely - ingestion idempotency by
+ * the platform API and ingests through the standard chain. Webhook and
+ * polling can race freely - ingestion idempotency by
  * (store_id, platform_order_id) keeps exactly one order (task §45/§52).
+ *
+ * Dual-axis T2 (2026-09-15): the action set grew from NEW_POSTING to all
+ * posting-hint types - TYPE_STATE_CHANGED and TYPE_POSTING_CANCELLED also
+ * carry `posting_number` (docs/integrations/ozon.md §6.1), so the same
+ * targeted re-read applies. The push-model status vocabulary in the payload
+ * is NEVER trusted into platform_status (§6.2) - only the re-read Seller API
+ * answer is. Unknown posting numbers still ingest fully (a webhook IS a
+ * catch-up channel; ingestion idempotency makes this safe). Event status:
+ * action types end PROCESSED, failures FAILED, no-action types (PING /
+ * ITEM_CHANGED / UNKNOWN) SKIPPED.
  */
 @Injectable()
 export class WebhookProcessService {
+  /** Event types that trigger the targeted re-read action. */
+  private static readonly ACTION_TYPES = new Set<PlatformWebhookEventType>([
+    'NEW_POSTING',
+    'POSTING_STATE_CHANGED',
+    'POSTING_CANCELLED',
+  ]);
+
   constructor(
     private readonly registry: PlatformAdapterRegistry,
     private readonly contextService: SyncContextService,
@@ -152,23 +169,29 @@ export class WebhookProcessService {
       const parsed = await adapter.processWebhook?.(context, event.payload);
       const events: PlatformWebhookEvent[] = parsed ?? [];
 
+      let acted = false;
       for (const webhookEvent of events) {
         if (
-          webhookEvent.eventType === 'NEW_POSTING' &&
+          WebhookProcessService.ACTION_TYPES.has(webhookEvent.eventType) &&
           webhookEvent.platformOrderIds.length > 0 &&
           adapter.fetchOrdersByPlatformIds !== undefined
         ) {
-          // Targeted re-read: the webhook only carries a posting number.
+          // Targeted re-read: the webhook only carries a posting number and
+          // (for state events) the platform-side changed_state_date hint.
           const orders = await adapter.fetchOrdersByPlatformIds(
             context,
             webhookEvent.platformOrderIds,
           );
-          await this.orderSyncService.ingestPlatformOrders(store.id, orders, 'WEBHOOK');
+          await this.orderSyncService.ingestPlatformOrders(store.id, orders, 'WEBHOOK', {
+            platformChangedAt: webhookChangedStateDate(webhookEvent.payload),
+          });
+          acted = true;
         } else {
-          // PING / unknown types are recorded facts, not actions (§28/§29).
+          // PING / ITEM_CHANGED / UNKNOWN types are recorded facts, not
+          // actions (§28/§29) - listing changes flow through manual sync.
         }
       }
-      await this.rawEventRepo.markStatus(event.id, 'SKIPPED');
+      await this.rawEventRepo.markStatus(event.id, acted ? 'PROCESSED' : 'SKIPPED');
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       await this.rawEventRepo.markStatus(event.id, 'FAILED', {

@@ -176,24 +176,39 @@ export class OrderRepository {
   }
 
   /**
-   * Orders ORDER_SYNC re-reads by posting number (Sprint 9 T1 refresh pass):
-   * everything not yet ERP-terminal. CANCELLED is sticky (nothing left to
-   * learn) and SHIPPED goods have left the warehouse, so neither needs
-   * platform status anymore; BACKORDERED / PICKED / PICKING orders DO -
-   * their platform cancellation or deadline change must reach us.
+   * Fallback re-read rotation candidates (dual-axis T2, replacing the Sprint 9
+   * "every non-ERP-terminal order" sweep):
+   *
+   * - selection is by PLATFORM stage - NULL or AWAITING_SHIPMENT/IN_TRANSIT.
+   *   ERP terminal states no longer exclude anyone: an erp_status='SHIPPED'
+   *   order stays a candidate until the platform itself reports DELIVERED or
+   *   CANCELLED (fix A3 - delivered facts were previously unlearnable);
+   *   platform-terminal orders leave the rotation on their own.
+   * - a candidate must be due: its last CONFIRMED facts check
+   *   (platform_facts_checked_at) is NULL or older than the fallback window.
+   * - ordering checked-at ASC NULLS FIRST rotates fairly - unchanged orders
+   *   stop monopolizing the budget because their checked-at advances every
+   *   pass, while stalled orders keep being observed until platform terminal
+   *   (that is how their exceptions can auto-resolve without webhooks).
    */
   async listPlatformRefreshCandidates(
     storeId: string,
-    limit: number,
+    options: { limit: number; fallbackHours: number },
   ): Promise<Array<{ id: string; platformOrderId: string }>> {
     const entities = await this.dataSource
       .getRepository(OrderEntity)
       .createQueryBuilder('o')
       .select(['o.id', 'o.platformOrderId'])
       .where('o.store_id = :storeId', { storeId })
-      .andWhere("o.erp_status NOT IN ('CANCELLED', 'SHIPPED')")
-      .orderBy('o.ordered_at', 'ASC')
-      .take(limit)
+      .andWhere(
+        `(o.platform_stage IS NULL OR o.platform_stage IN ('AWAITING_SHIPMENT', 'IN_TRANSIT'))`,
+      )
+      .andWhere(
+        `(o.platform_facts_checked_at IS NULL OR o.platform_facts_checked_at < now() - (:fallbackHours || ' hours')::interval)`,
+        { fallbackHours: String(options.fallbackHours) },
+      )
+      .orderBy('o.platform_facts_checked_at', 'ASC', 'NULLS FIRST')
+      .take(options.limit)
       .getMany();
     return entities.map((order) => ({ id: order.id, platformOrderId: order.platformOrderId }));
   }

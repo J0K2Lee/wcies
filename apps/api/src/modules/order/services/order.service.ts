@@ -227,6 +227,7 @@ export class OrderService {
         fromStatus: entry.fromStatus,
         toStatus: entry.toStatus,
         source: entry.source,
+        platformChangedAt: entry.platformChangedAt ?? null,
         operatorName: entry.operatorName,
         createdAt: entry.createdAt,
       })),
@@ -451,16 +452,16 @@ export class OrderService {
   // --------------------------------------------------------------------------
 
   /**
-   * Refresh candidates for ORDER_SYNC's targeted re-read pass: orders of the
-   * store that are not yet ERP-terminal (CANCELLED / SHIPPED). Their platform
-   * cancellation or deadline change must still reach us even though the
-   * in_process_at window cursor has moved past them.
+   * Fallback re-read rotation candidates for ORDER_SYNC (dual-axis T2):
+   * orders whose PLATFORM stage is non-terminal and whose last confirmed
+   * facts check is older than the fallback window. Selection no longer
+   * consults erp_status - see the repository for the full rationale.
    */
   async listPlatformRefreshCandidates(
     storeId: string,
-    limit: number,
+    options: { limit: number; fallbackHours: number },
   ): Promise<Array<{ id: string; platformOrderId: string }>> {
-    return this.orderRepo.listPlatformRefreshCandidates(storeId, limit);
+    return this.orderRepo.listPlatformRefreshCandidates(storeId, options);
   }
 
   /**
@@ -533,6 +534,12 @@ export class OrderService {
             toStatus: newStatus,
             source: input.source,
             operatorName: operator.username,
+            // Platform-side transition time (docs §2.4): the webhook event's
+            // changed_state_date wins, then the mapper's stage anchor; NULL
+            // falls back to the row's created_at (our observation time).
+            platformChangedAt:
+              toInstantOrNull(input.platformChangedAt ?? null) ??
+              toInstantOrNull(input.platformStageChangedAt),
           });
         }
       });
@@ -850,6 +857,12 @@ export interface OrderPlatformFactsInput {
   platformStage: string | null;
   /** Platform's own timestamp for entering the stage; null = observation now. */
   platformStageChangedAt: Date | string | null;
+  /**
+   * Webhook-only hint: the event payload's changed_state_date, preferred as
+   * the platform-side time on the status-history row (docs §2.4). Null on
+   * the re-read paths.
+   */
+  platformChangedAt?: Date | string | null;
   shipmentDeadline: Date | string | null;
   rawData: Record<string, unknown> | null;
   /** Channel that delivered the facts (ORDER_SYNC / WEBHOOK / ...). */

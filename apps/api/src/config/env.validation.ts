@@ -47,6 +47,12 @@ export const envValidationSchema = Joi.object({
     .uri({ scheme: ['https'] })
     .optional(),
 
+  // Fallback re-read rotation window for platform order facts (dual-axis
+  // T2). Default 24h: webhooks carry changes in minutes; this bounds how
+  // long an order can go unobserved when webhooks are unavailable.
+  // Fractional hours allowed (integration tests use short windows).
+  ORDER_STATE_FALLBACK_HOURS: Joi.number().min(0.001).default(24),
+
   // Optional Feishu webhook (Sprint 4): absent = FEISHU channel stays a
   // provider boundary only; never guessed (task §49).
   FEISHU_WEBHOOK_URL: Joi.string()

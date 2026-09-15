@@ -36,6 +36,15 @@ export class PlatformStatusHistoryEntity {
   @Column({ type: 'varchar', length: 30, nullable: true })
   source!: string | null;
 
+  /**
+   * When the PLATFORM says the transition happened (dual-axis T2). Webhook
+   * source: the event payload's changed_state_date; re-read source: the
+   * mapper's platformStageChangedAt. NULL when neither is available - then
+   * created_at (our observation) is the fallback, per docs §2.4.
+   */
+  @Column({ type: 'timestamptz', name: 'platform_changed_at', nullable: true })
+  platformChangedAt!: Date | null;
+
   @Column({ type: 'varchar', length: 100, name: 'operator_name', nullable: true })
   operatorName!: string | null;
 

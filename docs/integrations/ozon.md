@@ -280,21 +280,30 @@ TYPE_UPDATE_MESSAGE                    聊天消息更改
 > 平台已订阅这三种（2026-09-14，见 §6.6），样本会以 `UNKNOWN` 落进
 > `external_raw_events`，届时回填本节。
 
-### 6.1c WCIES 对各类型的实际处理（按代码，非意图）
+### 6.1c WCIES 对各类型的实际处理（双轴 T2 起，2026-09-15）
 
-`WebhookProcessService` 目前**只对 `NEW_POSTING` 采取真实动作**（定向回读 posting →
-`OrderIngestionService` 入库）。其余类型一律「记录为事实 → 标记 `SKIPPED`」，不产生业务效果：
+`WebhookProcessService` 对**订单/发货提示类**事件采取动作（定向回读 posting →
+`OrderIngestionService` 入库 / `applySyncedPlatformFacts` 事实更新）；其余类型
+「记录为事实 → 标记 `SKIPPED`」。回读遇 WCIES 未知单**完整建单**（webhook 本就是
+补漏通道，摄入幂等；与 `NEW_POSTING` 同语义）。事件状态分流：产生动作 →
+`PROCESSED`，处理异常 → `FAILED`，无动作类型 → `SKIPPED`（payload hash 去重不变）：
 
 | 订阅类型 | 分类 | 当前行为 |
 |---|---|---|
-| `TYPE_NEW_POSTING` | `NEW_POSTING` | ✅ 定向回读 + 订单入库 |
-| `TYPE_POSTING_CANCELLED` | `POSTING_CANCELLED` | 仅落库（订单状态由轮询同步覆盖） |
-| `TYPE_STATE_CHANGED` | `POSTING_STATE_CHANGED` | 仅落库（同上） |
-| `TYPE_CREATE_ITEM` / `TYPE_UPDATE_ITEM` / `TYPE_CREATE_OR_UPDATE_ITEM` | `ITEM_CHANGED` | 仅落库（Listing 变更走手动同步） |
-| `TYPE_PING` | `PING` | 仅落库 |
-| 其余（含 `TYPE_ORDER_*`、`TYPE_FBO_*`） | `UNKNOWN` | 仅落库 |
+| `TYPE_NEW_POSTING` | `NEW_POSTING` | ✅ 定向回读 + 订单入库 → `PROCESSED` |
+| `TYPE_POSTING_CANCELLED` | `POSTING_CANCELLED` | ✅ 定向回读 + 事实应用（取消传导）→ `PROCESSED` |
+| `TYPE_STATE_CHANGED` | `POSTING_STATE_CHANGED` | ✅ 定向回读 + 事实应用（状态/阶段/时限）→ `PROCESSED` |
+| `TYPE_CREATE_ITEM` / `TYPE_UPDATE_ITEM` / `TYPE_CREATE_OR_UPDATE_ITEM` | `ITEM_CHANGED` | 仅落库（Listing 变更走手动同步）→ `SKIPPED` |
+| `TYPE_PING` | `PING` | 仅落库 → `SKIPPED` |
+| 其余（含 `TYPE_ORDER_*`、`TYPE_FBO_*`） | `UNKNOWN` | 仅落库 → `SKIPPED` |
 
-→ 订阅更多类型的意义是**积累真实样本、为后续 Sprint 铺路**，不会立刻改变行为。
+注意：
+- push 词表（§6.2 的 `new_state`）**不写入** `platform_status`，一律以回读的
+  Seller API 原文为准；
+- webhook 载荷的 `changed_state_date` 仅作为 `platform_status_history` 迁移行的
+  平台侧时间溯源（回读响应里没有该字段，§平台阶段映射 A8）；
+- `TYPE_ORDER_*` 的 `order_number` 与 posting_number 关系仍未验证（§6.1d），
+  继续只落库。
 
 ### 6.2 两套状态词表（STATE_CHANGED / CANCELLED 的 `new_state` 用 push 模型，非 Seller API 词表）
 
@@ -481,6 +490,7 @@ Request：`{filter: {product_id[] | offer_id[] | sku[]}, limit ≤ 1000}`（**fi
 | `OZON_MIN_REQUEST_INTERVAL_MS` | 110 | 每店铺最小请求间隔（限流） |
 | `ORDER_SYNC_INTERVAL_SECONDS` | 0（关） | 订单轮询频率（≥60s；需店铺 settings.sync.orderSyncEnabled） |
 | `LISTING_SYNC_INTERVAL_SECONDS` | 0（关） | Listing 同步频率（≥300s；需店铺 opt-in） |
+| `ORDER_STATE_FALLBACK_HOURS` | 24 | 兜底回读轮转窗口（小时，允许小数；超时未确认的平台事实订单才进入回读候选，双轴 T2） |
 
 ## 11. Real Smoke Test
 

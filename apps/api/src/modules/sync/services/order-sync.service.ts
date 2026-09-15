@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PlatformAdapter, PlatformOrderRaw, StoreContext } from '@wcies/platform-contracts';
 import { DomainError } from '../../../common/errors/domain.error';
 import { OrderIngestionService } from '../../order/services/order-ingestion.service';
@@ -58,6 +59,7 @@ export interface OrderSyncOutcome {
 export class OrderSyncService {
   constructor(
     private readonly contextService: SyncContextService,
+    private readonly config: ConfigService,
     private readonly ingestionService: OrderIngestionService,
     private readonly orderService: OrderService,
     private readonly jobRepo: SyncJobRepository,
@@ -76,13 +78,14 @@ export class OrderSyncService {
     storeId: string,
     orders: readonly PlatformOrderRaw[],
     syncSource: 'POLLING' | 'WEBHOOK',
+    options: { platformChangedAt?: Date | null } = {},
   ): Promise<{ ingested: number; duplicates: number; failed: number }> {
     const { store } = await this.contextService.resolveSyncableStore(storeId);
     let ingested = 0;
     let duplicates = 0;
     let failed = 0;
     for (const order of orders) {
-      const result = await this.ingestOne(store.id, order, syncSource);
+      const result = await this.ingestOne(store.id, order, syncSource, options);
       if (result === 'INGESTED' || result === 'UPDATED') {
         ingested += 1;
       } else if (result === 'DUPLICATE') {
@@ -165,6 +168,7 @@ export class OrderSyncService {
     storeId: string,
     order: PlatformOrderRaw,
     syncSource: 'POLLING' | 'WEBHOOK',
+    options: { platformChangedAt?: Date | null } = {},
   ): Promise<'INGESTED' | 'DUPLICATE' | 'UPDATED' | 'FAILED'> {
     const input: NormalizedOrderInputDto = {
       storeId,
@@ -194,7 +198,7 @@ export class OrderSyncService {
         // blind skip - status/deadline/rawData facts, platform_status_history,
         // cancel propagation and deadline re-evaluation happen inside.
         const facts = await this.orderService.applySyncedPlatformFacts(
-          this.toFactsInput(storeId, order, syncSource),
+          this.toFactsInput(storeId, order, syncSource, options),
           SYSTEM_OPERATOR,
         );
         return facts.changed ? 'UPDATED' : 'DUPLICATE';
@@ -228,10 +232,18 @@ export class OrderSyncService {
   }
 
   /**
-   * Pass 2 (Sprint 9 T1): targeted re-read of non-terminal orders. One
-   * posting per call through the adapter's verified re-read capability;
-   * per-order failures degrade to failedCount, never aborting the run
-   * (§36).
+   * Pass 2 (dual-axis T2): fair on-demand re-read rotation, replacing the
+   * former "re-read every non-ERP-terminal order every run" sweep.
+   *
+   * Candidates are selected by PLATFORM stage (never erp_status - an
+   * erp_status='SHIPPED' order stays observable until the platform reports
+   * DELIVERED/CANCELLED, which is exactly fix A3) whose last CONFIRMED check
+   * is older than ORDER_STATE_FALLBACK_HOURS. Ordering by checked-at ASC
+   * NULLS FIRST rotates fairly: unchanged facts never monopolize the budget
+   * (their checked-at advances with every pass) and stalled orders keep
+   * being observed until they reach a platform terminal state, so stalled
+   * exceptions can auto-resolve even with webhooks paused (ozon.md §6.5).
+   * One posting per call; per-order failures degrade to failedCount (§36).
    */
   private async refreshPlatformFacts(
     storeId: string,
@@ -241,10 +253,11 @@ export class OrderSyncService {
     if (adapter.fetchOrdersByPlatformIds === undefined) {
       return { updated: 0, unchanged: 0, failed: 0 };
     }
-    const candidates = await this.orderService.listPlatformRefreshCandidates(
-      storeId,
-      PLATFORM_REFRESH_BATCH,
-    );
+    const fallbackHours = this.config.get<number>('app.orderStateFallbackHours') ?? 24;
+    const candidates = await this.orderService.listPlatformRefreshCandidates(storeId, {
+      limit: PLATFORM_REFRESH_BATCH,
+      fallbackHours,
+    });
     let updated = 0;
     let unchanged = 0;
     let failed = 0;
@@ -284,6 +297,7 @@ export class OrderSyncService {
     storeId: string,
     order: PlatformOrderRaw,
     source: 'POLLING' | 'WEBHOOK',
+    options: { platformChangedAt?: Date | null } = {},
   ): OrderPlatformFactsInput {
     return {
       storeId,
@@ -292,6 +306,10 @@ export class OrderSyncService {
       platformCancelled: order.platformCancelled === true,
       platformStage: order.platformStage ?? null,
       platformStageChangedAt: order.platformStageChangedAt ?? null,
+      // Webhook-only hint: the event payload's changed_state_date, used as
+      // the platform-side time on the history row (docs §2.4). Null on the
+      // polling path - the mapper's stage anchor applies there.
+      platformChangedAt: options.platformChangedAt ?? null,
       shipmentDeadline: order.shipmentDeadline ?? null,
       rawData: order.rawData ?? null,
       source,

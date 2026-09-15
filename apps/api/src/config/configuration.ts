@@ -48,6 +48,15 @@ export const appConfig = registerAs('app', () => {
      * must NOT fall back to localhost, that URL is unreachable from OZON.
      */
     publicBaseUrl: process.env.PUBLIC_BASE_URL ?? null,
+    /**
+     * Fallback re-read rotation window (dual-axis T2): an order re-enters
+     * the ORDER_SYNC candidate set only after this many hours since its last
+     * CONFIRMED platform-facts check. Webhooks deliver changes within
+     * minutes; this rotation is the safety net when they are paused
+     * (docs/integrations/ozon.md §6.5 auto-pause is a real risk). Fractional
+     * hours are allowed so integration tests can exercise the rotation.
+     */
+    orderStateFallbackHours: Number.parseFloat(process.env.ORDER_STATE_FALLBACK_HOURS ?? '24'),
   };
 });
 

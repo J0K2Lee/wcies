@@ -271,6 +271,14 @@ export class PlatformStatusHistoryDto {
   fromStatus!: string | null;
   @ApiProperty({ example: 'delivering' }) toStatus!: string;
   @ApiProperty({ nullable: true, type: String, example: 'ORDER_SYNC' }) source!: string | null;
+  @ApiPropertyOptional({
+    nullable: true,
+    type: String,
+    format: 'date-time',
+    description:
+      '平台侧的迁移时间（webhook changed_state_date / 回读阶段锚点）；缺失时以 createdAt 为准（双轴 T2）',
+  })
+  platformChangedAt!: Date | null;
   @ApiProperty({ nullable: true, type: String }) operatorName!: string | null;
   @ApiProperty({ type: Date }) createdAt!: Date;
 }

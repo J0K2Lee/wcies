@@ -207,7 +207,14 @@ EXCEPTION
 订单除人工/测试 API 摄入外，新增两条同步链路，均**复用** `OrderIngestionService`（不重写 SKU 映射/预约/Backorder/异常逻辑）：
 
 1. **Polling**：SyncModule 按店铺游标窗口拉取平台订单（OZON `/v3/posting/fbs/list`），`orders.sync_source = 'POLLING'`。
-2. **Webhook**：平台推送提示事件（OZON `TYPE_NEW_POSTING`）→ Worker 用已认证 API 按单号回读原文后摄入，`orders.sync_source = 'WEBHOOK'`。Webhook 与 Polling 可并发竞争同一订单；`UNIQUE(store_id, platform_order_id)` + 摄入幂等保证最终仅一张订单、一组 Reservation。
+2. **Webhook**：平台推送提示事件（OZON `TYPE_NEW_POSTING` /
+   `TYPE_STATE_CHANGED` / `TYPE_POSTING_CANCELLED`，双轴 T2 起）→ Worker 用
+   已认证 API 按单号回读原文后摄入/更新事实，`orders.sync_source = 'WEBHOOK'`。
+   Webhook 与 Polling 可并发竞争同一订单；`UNIQUE(store_id, platform_order_id)`
+   + 摄入幂等保证最终仅一张订单、一组 Reservation。状态/取消事件回读遇到
+   未知单同样完整建单（webhook 是补漏通道，与 NEW_POSTING 同语义）；
+   payload 中的 push 状态词表（`new_state`）不写入 `platform_status`，
+   只以回读的 Seller API 原文为准（ozon.md §6.2）。
 
 规则：
 
@@ -224,12 +231,19 @@ ORDER_SYNC 再遇到已存在的订单（窗口重叠再投递，或定向回读
 1. **只更新平台事实字段**：`platform_status` / `shipment_deadline` / `raw_data`。
    绝不直接改 `erp_status`（§1）。平台未提供的字段（NULL 输入）保持库内原值，
    历史上 `platform_status IS NULL` 的行不得被「看起来空」而清理或改写。
-2. **窗口游标从不回看**：OZON 窗口按 `in_process_at`（订单创建时间）过滤，
-   已摄入订单不会再出现在后续窗口中。因此每次 ORDER_SYNC 在窗口推进后，
-   对该店铺**非 ERP 终态**（CANCELLED / SHIPPED 除外）的订单按 `ordered_at`
-   正序（上限 100）逐单**定向回读**（`/v3/posting/fbs/get`，即 webhook 提示
-   复用的已验证读法），用于感知取消 / 状态 / 时限变化。单单失败只计入
-   failedCount，不拖垮整批。
+2. **窗口游标从不回看 + 按需回读轮转（双轴 T2，2026-09-15）**：OZON 窗口按
+   `in_process_at`（订单创建时间）过滤，已摄入订单不会再出现在后续窗口中。
+   兜底感知改为**公平轮转制**，不再「每轮刷新全部非 ERP 终态订单」：
+   - 候选 = `platform_stage IS NULL 或 ∈ {AWAITING_SHIPMENT, IN_TRANSIT}`
+     （**按平台阶段**判定，不看 `erp_status`——`erp_status='SHIPPED'` 的单
+     继续回读直到平台妥投/取消，否则妥投事实永远学不到）；
+   - 且 `platform_facts_checked_at`（上次回读确认时间）为空或超过
+     `ORDER_STATE_FALLBACK_HOURS`（默认 24h，ENV 可配）；
+   - 排序「最久未查优先」，每单回读确认后无论事实是否变化都刷新
+     `platform_facts_checked_at`，批容量 100/轮；
+   - 该轮转制同时保证：事实不变的单不会霸占回读预算（饥饿）、停滞单持续
+     被观察直至平台终态（webhook 停用时异常仍可自动解决）。
+   单单失败只计入 failedCount，不拖垮整批。
 3. **幂等**：状态无变化（含 `raw_data` 键序无关比较——PG jsonb 不保留键序）
    时零写入，不产生任何行更新或历史记录。
 4. **平台取消 = 自动执行**（决策 1-D1b=A）：平台状态变为 `cancelled`

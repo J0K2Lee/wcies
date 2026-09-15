@@ -230,6 +230,19 @@ export function webhookSellerId(payload: unknown): string | null {
   return readNumber((payload as Record<string, unknown>).seller_id);
 }
 
+/**
+ * Extracts the platform-side transition time from a webhook payload
+ * (dual-axis T2). Only TYPE_STATE_CHANGED / TYPE_POSTING_CANCELLED carry
+ * `changed_state_date` (docs/integrations/ozon.md §6.1); tolerant - null for
+ * everything else, never throws.
+ */
+export function webhookChangedStateDate(payload: unknown): Date | null {
+  if (typeof payload !== 'object' || payload === null) {
+    return null;
+  }
+  return parseIsoDateTolerant((payload as Record<string, unknown>).changed_state_date);
+}
+
 // ---------------------------------------------------------------------------
 // Push notification acknowledgement
 // ---------------------------------------------------------------------------

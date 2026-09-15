@@ -6,7 +6,7 @@ import { spawnApiEntry, waitForHttp, ManagedProcess } from './helpers';
 import { ApiClient, runPrefix } from './sprint1.helpers';
 
 /**
- * Sprint 9 acceptance (planning T1/T2/T3/T5):
+ * Sprint 9 acceptance (planning T1/T2/T3/T5) + dual-axis T2 semantics:
  *
  * - platform cancel propagation: a RESERVED order re-synced as `cancelled`
  *   releases its reservation and cancels through the EXISTING chain;
@@ -22,10 +22,13 @@ import { ApiClient, runPrefix } from './sprint1.helpers';
  * - consecutive sync failures open a deduped SYNC_FAILED (STORE) exception
  *   and a later success resolves it.
  *
- * The cancellation/deadline updates arrive through the ORDER_SYNC refresh
- * pass (targeted /v3/posting/fbs/get re-read): the in_process_at window
- * cursor has already moved past these postings, so the window pass cannot
- * deliver them - exactly the production situation (planning §1.3).
+ * Delivery channel note (dual-axis T2): the fallback refresh pass is now a
+ * FAIR ROTATION (fallback window below ~29s), so same-run re-syncs no longer
+ * re-read fresh orders. Cancellation/deadline updates therefore arrive via
+ * the WEBHOOK event path (TYPE_POSTING_CANCELLED / TYPE_STATE_CHANGED ->
+ * targeted re-read), which is the production primary channel anyway
+ * (acceptance §4: event path <= 1 min; fallback rotation is the 24h safety
+ * net, covered by order-facts-rotation.integration.spec.ts).
  */
 
 const PREFIX = runPrefix();
@@ -34,6 +37,8 @@ const client = new ApiClient(BASE);
 
 const API_KEY = 'it-test-api-key-s9';
 const CLIENT_ID = '333000333';
+/** ~29s fallback window (dual-axis T2): short enough to wait out once. */
+const FALLBACK_HOURS = '0.008';
 
 interface MockPostingProduct {
   offer_id: string;
@@ -61,6 +66,7 @@ let mockOzonUrl = '';
 
 let ozonPlatformId = '';
 let storeId = '';
+let storeCode = '';
 let warehouseId = '';
 let binId = '';
 
@@ -290,6 +296,53 @@ async function exceptionsOfItem(
   return list.body.data;
 }
 
+interface RawEventDto {
+  id: string;
+  eventType: string;
+  status: string;
+  payload: Record<string, unknown>;
+}
+
+/**
+ * Posts a webhook event (the production primary channel since T2) and waits
+ * until the worker finishes it. The re-read delivers the mock's CURRENT
+ * posting facts, so callers mutate script.postings BEFORE calling this.
+ */
+async function postWebhookEvent(
+  messageType: 'TYPE_STATE_CHANGED' | 'TYPE_POSTING_CANCELLED',
+  postingNumber: string,
+  changedStateDate: string,
+): Promise<void> {
+  const payload = {
+    message_type: messageType,
+    posting_number: postingNumber,
+    new_state: messageType === 'TYPE_POSTING_CANCELLED' ? 'posting_canceled' : 'posting_changed',
+    changed_state_date: changedStateDate,
+    seller_id: Number(CLIENT_ID),
+  };
+  const response = await client.post(`/api/v1/webhooks/ozon/stores/${storeCode}`, payload);
+  expect(response.status).toBe(200);
+  const deadline = Date.now() + 30_000;
+  for (;;) {
+    const list = await client.get<RawEventDto[]>(
+      `/api/v1/sync/events?storeId=${storeId}&pageSize=100`,
+    );
+    const mine = list.body.data.filter(
+      (row) => row.payload['changed_state_date'] === changedStateDate,
+    );
+    if (mine.length > 0 && ['PROCESSED', 'FAILED', 'SKIPPED'].includes(mine[0]?.status ?? '')) {
+      expect(mine[0]?.status).toBe('PROCESSED');
+      return;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `webhook event did not finish (got: ${JSON.stringify(mine.map((e) => e.status))})`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+}
+
 // ---------------------------------------------------------------------------
 
 beforeAll(async () => {
@@ -302,6 +355,7 @@ beforeAll(async () => {
     REDIS_URL: 'redis://localhost:6379/11',
     OZON_API_BASE_URL: mockOzonUrl,
     OZON_MIN_REQUEST_INTERVAL_MS: '0',
+    ORDER_STATE_FALLBACK_HOURS: FALLBACK_HOURS,
   };
   api = spawnApiEntry('main.js', env);
   worker = spawnApiEntry('worker.js', env);
@@ -311,9 +365,10 @@ beforeAll(async () => {
   const platforms = await client.get<Array<{ code: string; id: string }>>('/api/v1/platforms');
   ozonPlatformId = platforms.body.data.find((p) => p.code === 'OZON')?.id ?? '';
 
+  storeCode = `${PREFIX}-A`;
   const store = await client.post<{ id: string }>('/api/v1/stores', {
     platformId: ozonPlatformId,
-    storeCode: `${PREFIX}-A`,
+    storeCode,
     name: `${PREFIX} A店`,
   });
   storeId = store.body.data.id;
@@ -366,12 +421,12 @@ describe('platform cancellation propagation (T1, decision 1-D1b=A)', () => {
     const invBefore = await inventoryOf(skuId);
     expect(Number(invBefore.reservedQty)).toBe(2);
 
-    // The window cursor has moved past this posting - only the refresh pass
-    // (targeted /v3/posting/fbs/get re-read) can deliver the cancellation.
+    // Dual-axis T2: the platform cancellation arrives through the webhook
+    // event path (TYPE_POSTING_CANCELLED -> targeted re-read of the mock's
+    // CURRENT facts). The window cursor has long moved past this posting.
     const posting = script.postings.find((p) => p.posting_number === 'IT-S9-RSV-1')!;
     posting.status = 'cancelled';
-    const job2 = await syncOrders();
-    expect(['SUCCESS', 'PARTIAL']).toContain(job2.status);
+    await postWebhookEvent('TYPE_POSTING_CANCELLED', 'IT-S9-RSV-1', '2026-09-15T09:00:01.000Z');
 
     const after = await orderByPlatformId('IT-S9-RSV-1');
     expect(after.platformStatus).toBe('cancelled');
@@ -393,19 +448,20 @@ describe('platform cancellation propagation (T1, decision 1-D1b=A)', () => {
     const before = await orderByPlatformId('IT-S9-RSV-1');
     const historyCount = before.history.length;
     const transitionsBefore = (before.platformStatusHistory ?? []).length;
-    const updatedAt = before.updatedAt;
 
-    const job = await syncOrders();
-    expect(['SUCCESS', 'PARTIAL']).toContain(job.status);
+    // A second, distinct cancellation event (new payload hash): the re-read
+    // finds the facts already applied - cancel() early-returns, no history
+    // rows, no duplicate transitions. (orders.updatedAt DOES move: the
+    // rotation cursor platform_facts_checked_at is stamped by design.)
+    await postWebhookEvent('TYPE_POSTING_CANCELLED', 'IT-S9-RSV-1', '2026-09-15T09:05:02.000Z');
 
     const after = await orderByPlatformId('IT-S9-RSV-1');
     expect(after.erpStatus).toBe('CANCELLED');
     expect(after.items[0]?.fulfillmentStatus).toBe('RELEASED');
     // No state churn: no new ERP history rows, no duplicate platform
-    // transitions, and the order row itself was not rewritten.
+    // transitions.
     expect(after.history.length).toBe(historyCount);
     expect((after.platformStatusHistory ?? []).length).toBe(transitionsBefore);
-    expect(new Date(after.updatedAt).getTime()).toBe(new Date(updatedAt).getTime());
   });
 
   it('BACKORDERED order (no reservation): cancelled re-sync closes order + exception, zero stock writes', async () => {
@@ -429,7 +485,7 @@ describe('platform cancellation propagation (T1, decision 1-D1b=A)', () => {
 
     const posting = script.postings.find((p) => p.posting_number === 'IT-S9-BKO-1')!;
     posting.status = 'cancelled';
-    await syncOrders();
+    await postWebhookEvent('TYPE_POSTING_CANCELLED', 'IT-S9-BKO-1', '2026-09-15T09:10:03.000Z');
 
     const after = await orderByPlatformId('IT-S9-BKO-1');
     expect(after.erpStatus).toBe('CANCELLED');
@@ -474,7 +530,7 @@ describe('platform cancellation propagation (T1, decision 1-D1b=A)', () => {
 
     const posting = script.postings.find((p) => p.posting_number === 'IT-S9-PCK-1')!;
     posting.status = 'cancelled';
-    await syncOrders();
+    await postWebhookEvent('TYPE_POSTING_CANCELLED', 'IT-S9-PCK-1', '2026-09-15T09:15:04.000Z');
 
     const after = await orderByPlatformId('IT-S9-PCK-1');
     expect(after.erpStatus).toBe('CANCELLED');
@@ -525,11 +581,13 @@ describe('deadline re-evaluation on re-encounter (T1, orders.md §16)', () => {
     expect(order.erpStatus).not.toBe('CANCELLED');
     expect(await exceptionsOf(order.id, 'ORDER_SHIPMENT_DEADLINE_NEAR')).toHaveLength(0);
 
-    // Platform pushes the deadline into the past -> next sync must raise.
+    // Platform pushes the deadline into the past -> the next webhook-driven
+    // re-encounter must raise (deadline re-evaluation runs on EVERY
+    // encounter, changed or not - orders.md §16).
     const posting = script.postings.find((p) => p.posting_number === 'IT-S9-DDL-1')!;
     const past = new Date(Date.now() - 60 * 60 * 1000).toISOString().slice(0, 19) + 'Z';
     posting.shipment_date = past;
-    await syncOrders();
+    await postWebhookEvent('TYPE_STATE_CHANGED', 'IT-S9-DDL-1', '2026-09-15T09:20:05.000Z');
 
     const raised = await exceptionsOf(order.id, 'ORDER_SHIPMENT_DEADLINE_NEAR');
     expect(raised.some((e) => e.status === 'OPEN')).toBe(true);
@@ -537,7 +595,7 @@ describe('deadline re-evaluation on re-encounter (T1, orders.md §16)', () => {
     // Platform pushes it far out again -> the OPEN alert resolves.
     const far2 = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString().slice(0, 19) + 'Z';
     posting.shipment_date = far2;
-    await syncOrders();
+    await postWebhookEvent('TYPE_STATE_CHANGED', 'IT-S9-DDL-1', '2026-09-15T09:25:06.000Z');
 
     const resolved = await exceptionsOf(order.id, 'ORDER_SHIPMENT_DEADLINE_NEAR');
     expect(resolved.every((e) => e.status !== 'OPEN')).toBe(true);
