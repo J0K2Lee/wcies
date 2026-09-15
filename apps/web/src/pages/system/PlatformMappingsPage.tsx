@@ -1,13 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Button, Input, Select, Space, Tooltip } from 'antd';
-import {
-  AppstoreOutlined,
-  ExportOutlined,
-  LinkOutlined,
-  ReloadOutlined,
-  WarningOutlined,
-} from '@ant-design/icons';
+import { Button, Input, Select, Tooltip } from 'antd';
+import { AppstoreOutlined, LinkOutlined, ReloadOutlined, WarningOutlined } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useApiQuery } from '../../api/hooks';
 import { fmtNumber } from '../../utils/format';
@@ -18,13 +12,14 @@ import {
   ContextRailContent,
   ContextSection,
   DataTable,
-  EntityLink,
   EntitySummary,
   ErrorState,
   FilterBar,
+  KpiRow,
   MetricCard,
   PageHeader,
   PlatformTag,
+  RailHint,
   RelativeTime,
   SectionCard,
   StatusBadge,
@@ -113,25 +108,10 @@ export function PlatformMappingsPage() {
         defaultCollapsed: true,
         children: (
           <ContextSection title="映射概况">
-            <ContextMetric label="已映射" value={fmtNumber(mappedCount.data?.meta.total ?? 0)} />
-            <ContextMetric
-              label={<span style={{ color: colors.warning }}>未映射</span>}
-              value={fmtNumber(unmappedCount.data?.meta.total ?? 0)}
-            />
-            <ContextMetric
-              label={<span style={{ color: colors.danger }}>映射类异常</span>}
-              value={fmtNumber(mappingExceptions.data?.meta.total ?? 0)}
-            />
-            <span
-              style={{
-                fontSize: 12.5,
-                color: colors.textTertiary,
-                display: 'block',
-                paddingTop: 8,
-              }}
-            >
-              点击列表行查看映射详情；具体映射操作在 SKU 映射页完成。
-            </span>
+            <ContextMetric label="当前筛选" value={`${list.data?.meta.total ?? 0} 条 Listing`} />
+            <RailHint>
+              映射健康度见上方指标卡；点击列表行查看映射详情，具体映射操作在 SKU 映射页完成。
+            </RailHint>
           </ContextSection>
         ),
       };
@@ -205,7 +185,7 @@ export function PlatformMappingsPage() {
         </>
       ),
     };
-  }, [selectedRow, mappedCount.data, unmappedCount.data, mappingExceptions.data, navigate]);
+  }, [selectedRow, list.data, navigate]);
   useContextRail(railContent);
 
   return (
@@ -214,30 +194,20 @@ export function PlatformMappingsPage() {
         title="SKU 映射总览"
         description="平台 SKU 与内部 SKU 的映射状态总览；具体映射操作在 SKU 映射页完成"
         secondary={
-          <Space>
-            <Tooltip title="刷新映射数据">
-              <Button
-                icon={<ReloadOutlined />}
-                onClick={() =>
-                  void queryClient.invalidateQueries({ queryKey: ['listings', 'overview'] })
-                }
-              >
-                刷新
-              </Button>
-            </Tooltip>
-            <EntityLink to="/listings" primary="进入 SKU 映射工作台" icon={<ExportOutlined />} />
-          </Space>
+          <Tooltip title="刷新映射数据">
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() =>
+                void queryClient.invalidateQueries({ queryKey: ['listings', 'overview'] })
+              }
+            >
+              刷新
+            </Button>
+          </Tooltip>
         }
       />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: 16,
-          marginBottom: 16,
-        }}
-      >
+      <KpiRow>
         <MetricCard
           icon={<AppstoreOutlined />}
           title="已映射"
@@ -255,14 +225,29 @@ export function PlatformMappingsPage() {
           title="映射类异常"
           value={fmtNumber(mappingExceptions.data?.meta.total ?? 0)}
           aux="待处理 ORDER_SKU_MAPPING_FAILED"
+          onClick={() => void navigate('/exceptions?exceptionType=ORDER_SKU_MAPPING_FAILED')}
         />
-      </div>
+      </KpiRow>
 
       <FilterBar>
+        <Input.Search
+          placeholder="搜索平台商品 ID / 标题"
+          allowClear
+          value={keyword}
+          onChange={(event) => setKeyword(event.target.value)}
+          onSearch={(value) => {
+            setPage(1);
+            setKeyword(value);
+          }}
+          style={{ width: 260 }}
+          aria-label="搜索映射"
+        />
         <Select
           allowClear
           placeholder="平台"
           style={{ width: 140 }}
+          showSearch
+          optionFilterProp="label"
           value={platformId}
           onChange={(value) => {
             setPage(1);
@@ -286,16 +271,6 @@ export function PlatformMappingsPage() {
             { value: 'UNMAPPED', label: '未映射' },
             { value: 'MAPPED', label: '已映射' },
           ]}
-        />
-        <Input.Search
-          placeholder="搜索平台商品 ID / 标题"
-          allowClear
-          defaultValue={effectiveKeyword}
-          onSearch={(value) => {
-            setPage(1);
-            setKeyword(value);
-          }}
-          style={{ width: 260 }}
         />
       </FilterBar>
 

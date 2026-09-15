@@ -22,7 +22,6 @@ import { apiDelete, apiPatch, apiPost, useApiQuery } from '../../api/hooks';
 import { SkuCreateModal } from '../../components/SkuCreateModal';
 import { printTasksBrowser } from '../../printing/print-browser';
 import {
-  ActionMenu,
   DeleteConfirmModal,
   ContextAction,
   ContextMetric,
@@ -32,11 +31,14 @@ import {
   FilterBar,
   InfoGrid,
   PageHeader,
+  RailHint,
+  RelativeTime,
   SectionCard,
   SKU_STATUS_META,
   BARCODE_TYPE_LABEL,
   PlatformTag,
   StatusBadge,
+  StatusSwitch,
   colors,
   useContextRail,
   ContextRailContent,
@@ -612,16 +614,7 @@ export function SkusPage() {
           <ContextSection title="SKU 概览">
             <ContextMetric label="当前筛选结果" value={`${list.data?.meta.total ?? 0} 个 SKU`} />
             <ContextMetric label="本页" value={`${rows.length} 条`} />
-            <span
-              style={{
-                fontSize: 12.5,
-                color: colors.textTertiary,
-                display: 'block',
-                paddingTop: 8,
-              }}
-            >
-              点击表格任意行，在此快速预览 SKU 库存与映射概况。
-            </span>
+            <RailHint>点击表格任意行，在此快速预览 SKU 库存与映射概况。</RailHint>
           </ContextSection>
         ),
       };
@@ -699,10 +692,26 @@ export function SkusPage() {
                   : '—'
               }
             />
+            <StatusSwitch
+              active={selectedRow.status === 'ACTIVE'}
+              entityName="SKU"
+              disableHint="停用后不可被订单分配库存，也不再推送渠道库存"
+              loading={statusMutation.isPending}
+              onChange={(next) =>
+                statusMutation.mutate({
+                  id: selectedRow.id,
+                  action: next ? 'activate' : 'deactivate',
+                })
+              }
+            />
           </ContextSection>
           <ContextAction>
+            <Button block onClick={() => setDrawerId(selectedRow.id)}>
+              查看详情
+            </Button>
             <Button
               block
+              style={{ marginTop: 8 }}
               onClick={() => {
                 setPrintBarcode(selectedRow.primaryBarcode ?? '');
                 setPrintCopies(1);
@@ -711,14 +720,29 @@ export function SkusPage() {
             >
               打印条码标签
             </Button>
-            <Button block onClick={() => setDrawerId(selectedRow.id)}>
-              打开完整详情
+            <Button
+              block
+              danger
+              style={{ marginTop: 8 }}
+              onClick={() =>
+                confirmDeleteSku(selectedRow.id, selectedRow.skuCode, selectedRow.listingCount)
+              }
+            >
+              删除
             </Button>
           </ContextAction>
         </>
       ),
     };
-  }, [selectedRow, selectedInventory.data, selectedInventory.isLoading, list.data, rows.length]);
+  }, [
+    selectedRow,
+    selectedInventory.data,
+    selectedInventory.isLoading,
+    list.data,
+    rows.length,
+    statusMutation.isPending,
+    statusMutation.mutate,
+  ]);
   useContextRail(railContent);
 
   return (
@@ -728,7 +752,7 @@ export function SkusPage() {
         description="管理内部 SKU、条码、成本、库存及平台映射"
         primary={
           <Button type="primary" onClick={() => setCreateOpen(true)}>
-            新增SKU
+            新建SKU
           </Button>
         }
       />
@@ -760,7 +784,8 @@ export function SkusPage() {
         <Input.Search
           placeholder="搜索 SKU / 名称 / 型号"
           allowClear
-          defaultValue={keyword}
+          value={keyword}
+          onChange={(event) => setKeyword(event.target.value)}
           onSearch={(value) => {
             setPage(1);
             setKeyword(value);
@@ -779,15 +804,18 @@ export function SkusPage() {
             setPage(1);
             setBrandId(value);
           }}
-          options={(brands.data?.data ?? [])
-            .filter((brand) => brand.status === 'ACTIVE')
-            .map((brand) => ({ value: brand.id, label: brand.name }))}
+          options={(brands.data?.data ?? []).map((brand) => ({
+            value: brand.id,
+            // 停用品牌保留可选但带后缀（与分类筛选一致，不过滤无标注）。
+            label: brand.status === 'ACTIVE' ? brand.name : `${brand.name}（停用）`,
+          }))}
         />
         <Cascader
           allowClear
-          placeholder="类目（含子类）"
-          style={{ width: 180 }}
+          placeholder="分类（含子类）"
+          style={{ width: 200 }}
           changeOnSelect
+          showSearch
           options={categoryOptions}
           value={categoryId === undefined ? undefined : categoryPathOf(categoryOptions, categoryId)}
           onChange={(path) => {
@@ -807,9 +835,9 @@ export function SkusPage() {
             setStatus(value);
           }}
           options={[
+            { value: 'DRAFT', label: '草稿' },
             { value: 'ACTIVE', label: '启用' },
             { value: 'INACTIVE', label: '停用' },
-            { value: 'DRAFT', label: '草稿' },
           ]}
         />
         <Select
@@ -844,6 +872,7 @@ export function SkusPage() {
           rowClassName={(record) => (record.id === selectedId ? 'wcies-row-selected' : '')}
           onRow={(record) => ({
             onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+            onDoubleClick: () => setDrawerId(record.id),
             style: {
               cursor: 'pointer',
               background: record.id === selectedId ? colors.primarySoft : undefined,
@@ -951,69 +980,7 @@ export function SkusPage() {
               title: '更新时间',
               dataIndex: 'updatedAt',
               width: 110,
-              render: (value: string) => value.slice(5, 10),
-            },
-            {
-              title: '操作',
-              key: 'actions',
-              width: 110,
-              fixed: 'right',
-              render: (_: unknown, record: SkuRow) => (
-                <ActionMenu
-                  primary={
-                    <Button
-                      type="link"
-                      size="small"
-                      style={{ paddingInline: 4 }}
-                      onClick={() => setDrawerId(record.id)}
-                    >
-                      查看
-                    </Button>
-                  }
-                  items={[
-                    {
-                      key: 'edit',
-                      label: '编辑',
-                      onClick: () => {
-                        setDrawerId(record.id);
-                        setEditOpen(true);
-                      },
-                    },
-                    record.status === 'ACTIVE'
-                      ? {
-                          key: 'deactivate',
-                          label: '停用',
-                          danger: true,
-                          onClick: () =>
-                            statusMutation.mutate({ id: record.id, action: 'deactivate' }),
-                        }
-                      : {
-                          key: 'activate',
-                          label: '启用',
-                          onClick: () =>
-                            statusMutation.mutate({ id: record.id, action: 'activate' }),
-                        },
-                    {
-                      key: 'print',
-                      label: '打印条码标签',
-                      onClick: () => {
-                        // 行数据自带主条码；printBarcodes 查询此刻必然未加载
-                        // （其 key 依赖这里才设置的 printFor），不能在这里取。
-                        setPrintBarcode(record.primaryBarcode ?? '');
-                        setPrintCopies(1);
-                        setPrintFor(record);
-                      },
-                    },
-                    {
-                      key: 'delete',
-                      label: '删除',
-                      danger: true,
-                      onClick: () =>
-                        confirmDeleteSku(record.id, record.skuCode, record.listingCount),
-                    },
-                  ]}
-                />
-              ),
+              render: (value: string) => <RelativeTime value={value} />,
             },
           ]}
         />
@@ -1102,7 +1069,7 @@ export function SkusPage() {
       <Drawer
         open={drawerId !== null}
         onClose={() => setDrawerId(null)}
-        size={800}
+        size={760}
         title={
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span style={{ fontSize: 16, fontWeight: 650 }}>{sku ? sku.skuCode : 'SKU详情'}</span>
@@ -1118,7 +1085,9 @@ export function SkusPage() {
         extra={
           sku !== undefined && (
             <>
+              {/* 编辑唯一入口（行菜单双开行为已废除）；启停在右栏 StatusSwitch。 */}
               <Button
+                size="small"
                 onClick={() => {
                   if (drawerId === null) {
                     return;
@@ -1130,23 +1099,8 @@ export function SkusPage() {
               >
                 编辑
               </Button>
-              {sku.status !== 'ACTIVE' && (
-                <Button
-                  type="primary"
-                  onClick={() => statusMutation.mutate({ id: sku.id, action: 'activate' })}
-                >
-                  启用
-                </Button>
-              )}
-              {sku.status === 'ACTIVE' && (
-                <Popconfirm
-                  title="确认停用该SKU？"
-                  onConfirm={() => statusMutation.mutate({ id: sku.id, action: 'deactivate' })}
-                >
-                  <Button danger>停用</Button>
-                </Popconfirm>
-              )}
               <Button
+                size="small"
                 danger
                 onClick={() => confirmDeleteSku(sku.id, sku.skuCode, sku.listingCount)}
               >
@@ -1319,7 +1273,7 @@ export function SkusPage() {
                             title="确认删除该图片？"
                             onConfirm={() => deleteImageMutation.mutate(image.id)}
                           >
-                            <Button size="small" type="link" danger>
+                            <Button size="small" danger>
                               删除
                             </Button>
                           </Popconfirm>

@@ -11,7 +11,6 @@ import {
   Input,
   InputNumber,
   Modal,
-  Popconfirm,
   Radio,
   Select,
   Space,
@@ -39,9 +38,15 @@ import {
   RelativeTime,
   SectionCard,
   StatusBadge,
+  StatusSwitch,
+  RailHint,
   labelOf,
   useContextRail,
 } from '../../design-system';
+import {
+  BrandQuickCreateModal,
+  CategoryQuickCreateModal,
+} from '../../components/QuickCreateModals';
 
 interface ListingRow {
   id: string;
@@ -136,12 +141,6 @@ interface CategoryNode {
   status: string;
   children: CategoryNode[];
 }
-
-const categoryOptionLabel = (node: CategoryNode): string =>
-  node.status === 'ACTIVE' ? node.nameZh : `${node.nameZh}（停用）`;
-
-const bySortOrder = (a: CategoryNode, b: CategoryNode): number =>
-  a.sortOrder - b.sortOrder || a.nameZh.localeCompare(b.nameZh);
 
 interface CategoryOption {
   value: string;
@@ -240,20 +239,14 @@ export function ListingsPage() {
       level3Count: number;
     }>;
   } | null>(null);
-  // Brand quick-create (Sprint 8.5 T4, mirrors ProductsPage's pattern).
+  // Brand / category quick-create (shared modals, G9) - open flags only.
   const [brandModalOpen, setBrandModalOpen] = useState(false);
-  // 新增分类（与商品页「新增分类」同一形态：一级/二级级联 + 内联建父级 + 三级命名）
   const [categoryCreateOpen, setCategoryCreateOpen] = useState(false);
-  const [categoryForm] = Form.useForm<{
-    parent1Id?: string;
-    parent2Id?: string;
-    nameZh?: string;
-    nameRu?: string;
-  }>();
-  const [inlineMode, setInlineMode] = useState<'level1' | 'level2' | null>(null);
-  const [inlineNameZh, setInlineNameZh] = useState('');
-  const [inlineNameRu, setInlineNameRu] = useState('');
-  const [brandForm] = Form.useForm();
+  /** Listing delete confirm (L2 shared modal) — only identity fields needed. */
+  const [deletingListing, setDeletingListing] = useState<{
+    id: string;
+    platformProductId: string;
+  } | null>(null);
 
   const list = useApiQuery<{ data: ListingRow[]; meta: { total: number } }>(
     '/api/v1/listings',
@@ -365,23 +358,6 @@ export function ListingsPage() {
       }));
     return toOptions(categories.data?.data ?? []);
   }, [categories.data]);
-  const categoryById = useMemo(() => {
-    const byId = new Map<string, CategoryNode>();
-    const walk = (nodes: CategoryNode[]): void => {
-      for (const node of nodes) {
-        byId.set(node.id, node);
-        walk(node.children);
-      }
-    };
-    walk(categories.data?.data ?? []);
-    return byId;
-  }, [categories.data]);
-  const categoryParent1Id = Form.useWatch('parent1Id', categoryForm);
-  const level2Options = useMemo(() => {
-    const parent1 =
-      categoryParent1Id !== undefined ? (categoryById.get(categoryParent1Id) ?? null) : null;
-    return parent1 === null ? [] : [...parent1.children].sort(bySortOrder);
-  }, [categoryParent1Id, categoryById]);
   const brandOptions = (brands.data?.data ?? []).map((brand) => ({
     value: brand.id,
     label: brand.name,
@@ -473,85 +449,6 @@ export function ListingsPage() {
     },
     onError: (error: Error) => void message.error(`建档失败（已整体回滚）: ${error.message}`),
   });
-
-  const brandCreateMutation = useMutation({
-    mutationFn: (values: { name: string; nameZh?: string; nameEn?: string; nameRu?: string }) =>
-      apiPost<BrandItem>('/api/v1/brands', values),
-    onSuccess: (brand) => {
-      void message.success(`品牌已创建：${brand.name}`);
-      setBrandModalOpen(false);
-      brandForm.resetFields();
-      onboardForm.setFieldValue('brandId', brand.id);
-      void queryClient.invalidateQueries({ queryKey: ['brands'] });
-    },
-    onError: (error: Error) => void message.error(error.message),
-  });
-
-  // 与商品页「新增分类」一致：级联选父级 + 内联建父级 + 三级命名；
-  // 三级创建成功后自动回填建档表单的 categoryPath。
-  const createCategoryMutation = useMutation({
-    mutationFn: (input: {
-      kind: 'level1' | 'level2' | 'leaf';
-      parentId?: string;
-      path?: string[];
-      nameZh: string;
-      nameRu?: string;
-    }) =>
-      apiPost<{ id: string }>('/api/v1/categories', {
-        parentId: input.parentId,
-        nameZh: input.nameZh,
-        nameRu: input.nameRu,
-      }),
-    onSuccess: (created, variables) => {
-      void queryClient.invalidateQueries({ queryKey: ['categories'] });
-      if (variables.kind === 'level1') {
-        void message.success('一级分类已创建');
-        categoryForm.setFieldValue('parent1Id', created.id);
-        categoryForm.setFieldValue('parent2Id', undefined);
-        setInlineMode(null);
-        setInlineNameZh('');
-        setInlineNameRu('');
-      } else if (variables.kind === 'level2') {
-        void message.success('二级分类已创建');
-        categoryForm.setFieldValue('parent2Id', created.id);
-        setInlineMode(null);
-        setInlineNameZh('');
-        setInlineNameRu('');
-      } else {
-        void message.success('分类已创建，已填入建档表单');
-        onboardForm.setFieldValue('categoryPath', [...(variables.path ?? []), created.id]);
-        setCategoryCreateOpen(false);
-      }
-    },
-    onError: (error: Error) => void message.error(`创建分类失败: ${error.message}`),
-  });
-
-  const submitInlineCategory = (kind: 'level1' | 'level2') => {
-    const nameZh = inlineNameZh.trim();
-    if (nameZh === '') {
-      void message.warning('请输入中文名称');
-      return;
-    }
-    if (kind === 'level2') {
-      const parent1Id = categoryForm.getFieldValue('parent1Id') as string | undefined;
-      if (parent1Id === undefined || parent1Id === '') {
-        void message.warning('请先选择一级分类');
-        return;
-      }
-      createCategoryMutation.mutate({
-        kind: 'level2',
-        parentId: parent1Id,
-        nameZh,
-        nameRu: inlineNameRu.trim() || undefined,
-      });
-      return;
-    }
-    createCategoryMutation.mutate({
-      kind: 'level1',
-      nameZh,
-      nameRu: inlineNameRu.trim() || undefined,
-    });
-  };
 
   // Sprint 8 T2: export the unmapped set (respects the current platform/store
   // filters) as an import-compatible Excel and download via signed URL.
@@ -881,16 +778,9 @@ export function ListingsPage() {
               label="当前筛选结果"
               value={`${list.data?.meta.total ?? 0} 个 Listing`}
             />
-            <span
-              style={{
-                fontSize: 12.5,
-                color: colors.textTertiary,
-                display: 'block',
-                paddingTop: 8,
-              }}
-            >
-              未映射行可用「建档并映射」一步完成建档；被订单撞上的未映射会排在最前。
-            </span>
+            <RailHint>
+              未映射行可双击打开详情后在变体表「建档并映射」；被订单撞上的未映射会排在最前。
+            </RailHint>
           </ContextSection>
         ),
       };
@@ -914,16 +804,52 @@ export function ListingsPage() {
               label="更新时间"
               value={<RelativeTime value={selectedRow.updatedAt} />}
             />
+            <StatusSwitch
+              active={selectedRow.status === 'ACTIVE'}
+              entityName="Listing"
+              disableHint="停用后该商品链接不再参与同步与订单匹配"
+              loading={listingStatusMutation.isPending}
+              onChange={(next) =>
+                listingStatusMutation.mutate({
+                  id: selectedRow.id,
+                  action: next ? 'activate' : 'deactivate',
+                })
+              }
+            />
           </ContextSection>
           <ContextAction>
             <Button block onClick={() => setDetailId(selectedRow.id)}>
               查看详情
             </Button>
+            {selectedRow.mappingStatus === 'UNMAPPED' && (
+              <Button
+                type="primary"
+                block
+                style={{ marginTop: 8 }}
+                onClick={() => openOnboard(selectedRow.id)}
+              >
+                建档并映射
+              </Button>
+            )}
+            <Button
+              block
+              danger
+              style={{ marginTop: 8 }}
+              onClick={() => setDeletingListing(selectedRow)}
+            >
+              删除
+            </Button>
           </ContextAction>
         </>
       ),
     };
-  }, [selectedRow, list.data, mappingStats.data]);
+  }, [
+    selectedRow,
+    list.data,
+    mappingStats.data,
+    listingStatusMutation.isPending,
+    listingStatusMutation.mutate,
+  ]);
   useContextRail(railContent);
 
   return (
@@ -946,11 +872,47 @@ export function ListingsPage() {
         }
       />
 
-      <FilterBar>
+      <FilterBar
+        actions={
+          <>
+            {(keyword !== '' ||
+              platformId !== undefined ||
+              storeId !== undefined ||
+              mappingState !== undefined) && (
+              <Button
+                onClick={() => {
+                  setKeyword('');
+                  setPlatformId(undefined);
+                  setStoreId(undefined);
+                  setMappingState(undefined);
+                  setPage(1);
+                }}
+              >
+                清除筛选
+              </Button>
+            )}
+          </>
+        }
+      >
+        <Input.Search
+          placeholder="product_id / offer_id / 平台SKU / 内部SKU / 标题"
+          allowClear
+          value={keyword}
+          onChange={(event) => setKeyword(event.target.value)}
+          onSearch={(value) => {
+            setPage(1);
+            setKeyword(value);
+          }}
+          style={{ width: 260 }}
+          aria-label="搜索映射"
+        />
         <Select
           allowClear
           placeholder="平台"
-          style={{ width: 120 }}
+          style={{ width: 130 }}
+          showSearch
+          optionFilterProp="label"
+          value={platformId}
           onChange={(value) => {
             setPage(1);
             setPlatformId(value);
@@ -978,6 +940,7 @@ export function ListingsPage() {
           allowClear
           placeholder="映射状态"
           style={{ width: 120 }}
+          value={mappingState}
           onChange={(value) => {
             setPage(1);
             setMappingState(value);
@@ -986,16 +949,6 @@ export function ListingsPage() {
             { value: 'MAPPED', label: '已映射' },
             { value: 'UNMAPPED', label: '待映射' },
           ]}
-        />
-        <Input.Search
-          placeholder="product_id / offer_id / 平台SKU / 内部SKU / 标题"
-          allowClear
-          defaultValue={keyword}
-          onSearch={(value) => {
-            setPage(1);
-            setKeyword(value);
-          }}
-          style={{ width: 240 }}
         />
       </FilterBar>
 
@@ -1019,9 +972,12 @@ export function ListingsPage() {
               total: list.data?.meta.total ?? 0,
               onChange: setPage,
               showSizeChanger: false,
+              showTotal: (total) => `共 ${total} 个 Listing`,
             }}
+            rowClassName={(record) => (record.id === selectedId ? 'wcies-row-selected' : '')}
             onRow={(record) => ({
               onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+              onDoubleClick: () => setDetailId(record.id),
               style: {
                 cursor: 'pointer',
                 background: record.id === selectedId ? colors.primarySoft : undefined,
@@ -1053,7 +1009,7 @@ export function ListingsPage() {
                       {value ?? record.url}
                     </a>
                   ) : (
-                    (value ?? '-')
+                    (value ?? '—')
                   ),
               },
               {
@@ -1089,33 +1045,6 @@ export function ListingsPage() {
                 dataIndex: 'updatedAt',
                 width: 110,
                 render: (value: string) => <RelativeTime value={value} />,
-              },
-              {
-                title: '操作',
-                key: 'actions',
-                width: 150,
-                render: (_: unknown, record: ListingRow) => (
-                  <Space size={0}>
-                    {record.mappingStatus === 'UNMAPPED' && (
-                      <Button
-                        type="link"
-                        size="small"
-                        style={{ paddingInline: 4 }}
-                        onClick={() => openOnboard(record.id)}
-                      >
-                        建档并映射
-                      </Button>
-                    )}
-                    <Button
-                      type="link"
-                      size="small"
-                      style={{ padding: 0 }}
-                      onClick={() => setDetailId(record.id)}
-                    >
-                      详情
-                    </Button>
-                  </Space>
-                ),
               },
             ]}
           />
@@ -1267,53 +1196,35 @@ export function ListingsPage() {
 
       <Drawer
         title={
-          listingDetail
-            ? `${listingDetail.storeCode} / ${listingDetail.platformProductId}`
-            : 'Listing详情'
+          listingDetail ? (
+            <Space size={10}>
+              <span style={{ fontSize: 16, fontWeight: 650 }}>
+                {listingDetail.storeCode} / {listingDetail.platformProductId}
+              </span>
+              {listingStatusBadge(listingDetail.status)}
+            </Space>
+          ) : (
+            'Listing详情'
+          )
         }
-        size={720}
+        size={760}
         open={detailId !== null}
         onClose={() => setDetailId(null)}
         extra={
           listingDetail !== undefined ? (
-            <Space>
-              {listingDetail.status === 'ACTIVE' ? (
-                <Popconfirm
-                  title="确认停用该Listing？"
-                  description="停用后可随时重新启用。"
-                  onConfirm={() =>
-                    listingStatusMutation.mutate({
-                      id: listingDetail.id,
-                      action: 'deactivate',
-                    })
-                  }
-                >
-                  <Button size="small" danger loading={listingStatusMutation.isPending}>
-                    停用
-                  </Button>
-                </Popconfirm>
-              ) : (
-                <Button
-                  size="small"
-                  type="primary"
-                  loading={listingStatusMutation.isPending}
-                  onClick={() =>
-                    listingStatusMutation.mutate({ id: listingDetail.id, action: 'activate' })
-                  }
-                >
-                  启用
-                </Button>
-              )}
-              <Popconfirm
-                title="确认删除该Listing？"
-                description="存在变体映射的Listing无法删除；被拒时会返回具体原因。"
-                onConfirm={() => listingDeleteMutation.mutate(listingDetail.id)}
-              >
-                <Button size="small" danger loading={listingDeleteMutation.isPending}>
-                  删除
-                </Button>
-              </Popconfirm>
-            </Space>
+            <Button
+              size="small"
+              danger
+              loading={listingDeleteMutation.isPending}
+              onClick={() =>
+                setDeletingListing({
+                  id: listingDetail.id,
+                  platformProductId: listingDetail.platformProductId,
+                })
+              }
+            >
+              删除
+            </Button>
           ) : undefined
         }
       >
@@ -1423,7 +1334,7 @@ export function ListingsPage() {
                   {
                     title: '名称',
                     dataIndex: 'skuName',
-                    render: (value: string | null) => value ?? '-',
+                    render: (value: string | null) => value ?? '—',
                   },
                   {
                     title: 'Platform SKU',
@@ -1444,95 +1355,88 @@ export function ListingsPage() {
                     title: '操作',
                     key: 'actions',
                     width: 220,
-                    render: (_: unknown, row: ListingSkuRow) =>
-                      row.mappingStatus === 'UNMAPPED' ? (
-                        <Space size={0}>
-                          <Button
-                            size="small"
-                            type="primary"
-                            ghost
-                            onClick={() => {
-                              setMapTarget(row);
-                              mapForm.resetFields();
-                            }}
-                          >
-                            人工映射
-                          </Button>
+                    render: (_: unknown, row: ListingSkuRow) => (
+                      // 子表规范 §4.5：统一 ActionMenu（primary link + 菜单），
+                      // UNMAPPED 行主链接为「建档并映射」，其余为「人工映射」。
+                      <ActionMenu
+                        primary={
                           <Button
                             type="link"
                             size="small"
                             style={{ paddingInline: 4 }}
                             onClick={() => {
-                              setOnboardResult(null);
-                              setOnboardVariantId(row.id);
-                              setOnboardPinnedProductId(null);
-                              setOnboardMode('new');
-                              onboardForm.resetFields();
-                              onboardForm.setFieldsValue({
-                                generateBarcode: true,
-                                rememberCategoryMapping: true,
-                              });
-                              setOnboardListingId(listingDetail.id);
-                            }}
-                          >
-                            建档并映射
-                          </Button>
-                        </Space>
-                      ) : (
-                        <ActionMenu
-                          primary={
-                            <Button
-                              type="link"
-                              size="small"
-                              style={{ paddingInline: 4 }}
-                              onClick={() => {
+                              if (row.mappingStatus === 'UNMAPPED') {
+                                setOnboardResult(null);
+                                setOnboardVariantId(row.id);
+                                setOnboardPinnedProductId(null);
+                                setOnboardMode('new');
+                                onboardForm.resetFields();
+                                onboardForm.setFieldsValue({
+                                  generateBarcode: true,
+                                  rememberCategoryMapping: true,
+                                });
+                                setOnboardListingId(listingDetail.id);
+                              } else {
                                 setMapTarget(row);
                                 mapForm.resetFields();
-                              }}
-                            >
-                              人工映射
-                            </Button>
-                          }
-                          items={[
-                            {
-                              key: 'edit',
-                              label: '编辑映射',
-                              onClick: () => {
-                                setMappingEditTarget(row);
-                                mappingEditForm.resetFields();
-                              },
-                            },
-                            row.status === 'ACTIVE'
-                              ? {
-                                  key: 'deactivate',
-                                  label: '停用',
-                                  danger: true,
-                                  onClick: () =>
-                                    mappingStatusMutation.mutate({
-                                      listingId: row.listingId,
-                                      mappingId: row.id,
-                                      status: 'INACTIVE',
-                                    }),
-                                }
-                              : {
-                                  key: 'activate',
-                                  label: '启用',
-                                  onClick: () =>
-                                    mappingStatusMutation.mutate({
-                                      listingId: row.listingId,
-                                      mappingId: row.id,
-                                      status: 'ACTIVE',
-                                    }),
+                              }
+                            }}
+                          >
+                            {row.mappingStatus === 'UNMAPPED' ? '建档并映射' : '人工映射'}
+                          </Button>
+                        }
+                        items={[
+                          ...(row.mappingStatus === 'UNMAPPED'
+                            ? [
+                                {
+                                  key: 'map',
+                                  label: '人工映射',
+                                  onClick: () => {
+                                    setMapTarget(row);
+                                    mapForm.resetFields();
+                                  },
                                 },
-                            {
-                              key: 'delete',
-                              label: '删除',
-                              danger: true,
-                              onClick: () => setMappingDeleteTarget(row),
+                              ]
+                            : []),
+                          {
+                            key: 'edit',
+                            label: '编辑映射',
+                            onClick: () => {
+                              setMappingEditTarget(row);
+                              mappingEditForm.resetFields();
                             },
-                          ]}
-                        />
-                      ),
+                          },
+                          row.status === 'ACTIVE'
+                            ? {
+                                key: 'deactivate',
+                                label: '停用',
+                                danger: true,
+                                onClick: () =>
+                                  mappingStatusMutation.mutate({
+                                    listingId: row.listingId,
+                                    mappingId: row.id,
+                                    status: 'INACTIVE',
+                                  }),
+                              }
+                            : {
+                                key: 'activate',
+                                label: '启用',
+                                onClick: () =>
+                                  mappingStatusMutation.mutate({
+                                    listingId: row.listingId,
+                                    mappingId: row.id,
+                                    status: 'ACTIVE',
+                                  }),
+                              },
+                          {
+                            key: 'delete',
+                            label: '删除',
+                            danger: true,
+                            onClick: () => setMappingDeleteTarget(row),
+                          },
+                        ]}
+                      />
+                    ),
                   },
                 ]}
               />
@@ -1560,7 +1464,7 @@ export function ListingsPage() {
           }
           confirmLoading={mapMutation.isPending}
         >
-          <p style={{ color: '#888' }}>
+          <p style={{ color: colors.textTertiary, fontSize: 12.5 }}>
             同步而来的平台SKU事实，人工确认后绑定内部SKU；后续平台同步不会覆盖该映射。
           </p>
           <Form form={mapForm} layout="vertical">
@@ -1736,7 +1640,7 @@ export function ListingsPage() {
                   : []),
                 ...(hasNextVariant
                   ? [
-                      <Button key="next" type="primary" ghost onClick={startNextVariant}>
+                      <Button key="next" onClick={startNextVariant}>
                         保存并下一变体
                       </Button>,
                     ]
@@ -1894,12 +1798,9 @@ export function ListingsPage() {
                         type="link"
                         size="small"
                         style={{ padding: 0, height: 'auto' }}
-                        onClick={() => {
-                          brandForm.resetFields();
-                          setBrandModalOpen(true);
-                        }}
+                        onClick={() => setBrandModalOpen(true)}
                       >
-                        + 新增品牌
+                        + 新建品牌
                       </Button>
                     </Space>
                   }
@@ -1921,13 +1822,9 @@ export function ListingsPage() {
                         type="link"
                         size="small"
                         style={{ padding: 0, height: 'auto' }}
-                        onClick={() => {
-                          categoryForm.resetFields();
-                          setInlineMode(null);
-                          setCategoryCreateOpen(true);
-                        }}
+                        onClick={() => setCategoryCreateOpen(true)}
                       >
-                        + 新增分类
+                        + 新建分类
                       </Button>
                     </Space>
                   }
@@ -2031,255 +1928,38 @@ export function ListingsPage() {
         )}
       </Modal>
 
-      {/* ---- 品牌快建：与商品页「新增品牌」完全一致（四语名称，编码自动生成）---- */}
-      <Modal
-        title="新增品牌"
+      {/* ---- Listing 删除 = L2 统一 DeleteConfirmModal（G4） ---- */}
+      <DeleteConfirmModal
+        open={deletingListing !== null}
+        title={`删除 Listing ${deletingListing?.platformProductId ?? ''}？`}
+        description="存在变体映射的 Listing 无法删除；被拒时会返回具体原因。"
+        confirmLoading={listingDeleteMutation.isPending}
+        onConfirm={() => {
+          if (deletingListing !== null) {
+            listingDeleteMutation.mutate(deletingListing.id);
+          }
+        }}
+        onCancel={() => setDeletingListing(null)}
+      />
+
+      {/* ---- Shared quick-create dialogs (G9); opened from the onboarding
+           modal (zIndex 1100), so they sit at 1200 (UI spec §8.3). ---- */}
+      <BrandQuickCreateModal
         open={brandModalOpen}
         zIndex={1200}
-        afterOpenChange={(open) => {
-          if (!open) {
-            brandForm.resetFields();
-          }
+        onClose={() => setBrandModalOpen(false)}
+        onCreated={(brandId) => {
+          onboardForm.setFieldValue('brandId', brandId);
         }}
-        onCancel={() => setBrandModalOpen(false)}
-        onOk={() =>
-          void brandForm.validateFields().then((values) => {
-            brandCreateMutation.mutate({
-              name: (values.name as string).trim(),
-              nameZh: (values.nameZh as string | undefined)?.trim() || undefined,
-              nameEn: (values.nameEn as string | undefined)?.trim() || undefined,
-              nameRu: (values.nameRu as string | undefined)?.trim() || undefined,
-            });
-          })
-        }
-        confirmLoading={brandCreateMutation.isPending}
-      >
-        <p style={{ marginTop: 0, fontSize: 12.5, color: colors.textTertiary }}>
-          品牌编码无需填写，创建后自动生成。
-        </p>
-        <Form form={brandForm} layout="vertical">
-          <Form.Item
-            name="name"
-            label="一般名称"
-            rules={[{ required: true, message: '请输入一般名称' }]}
-          >
-            <Input maxLength={200} placeholder="主显示名，如 Valkyrie" />
-          </Form.Item>
-          <Form.Item name="nameZh" label="中文名称（选填）">
-            <Input maxLength={200} />
-          </Form.Item>
-          <Form.Item name="nameEn" label="英文名称（选填）">
-            <Input maxLength={200} />
-          </Form.Item>
-          <Form.Item name="nameRu" label="俄文名称（选填）">
-            <Input maxLength={200} />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* ---- 新增分类：与商品页「新增分类」完全一致（级联 + 内联建父级 + 三级命名）---- */}
-      <Modal
-        title="新增分类"
+      />
+      <CategoryQuickCreateModal
         open={categoryCreateOpen}
         zIndex={1200}
-        afterOpenChange={(open) => {
-          if (!open) {
-            categoryForm.resetFields();
-            setInlineMode(null);
-            setInlineNameZh('');
-            setInlineNameRu('');
-          }
+        onClose={() => setCategoryCreateOpen(false)}
+        onCreated={(path) => {
+          onboardForm.setFieldValue('categoryPath', path);
         }}
-        onCancel={() => setCategoryCreateOpen(false)}
-        onOk={() =>
-          void categoryForm.validateFields().then((values) => {
-            const parent1Id = values.parent1Id;
-            const parent2Id = values.parent2Id;
-            if (parent1Id === undefined || parent2Id === undefined) {
-              return;
-            }
-            createCategoryMutation.mutate({
-              kind: 'leaf',
-              parentId: parent2Id,
-              path: [parent1Id, parent2Id],
-              nameZh: (values.nameZh as string).trim(),
-              nameRu: values.nameRu?.trim() || undefined,
-            });
-          })
-        }
-        confirmLoading={createCategoryMutation.isPending}
-      >
-        <p style={{ marginTop: 0, fontSize: 12.5, color: colors.textTertiary }}>
-          分类编码无需填写，创建后自动生成。商品只能挂载三级分类。
-        </p>
-        <Form form={categoryForm} layout="vertical">
-          <Form.Item
-            name="parent1Id"
-            label="一级分类"
-            rules={[{ required: true, message: '请选择一级分类' }]}
-          >
-            <Select
-              showSearch
-              optionFilterProp="label"
-              placeholder="搜索或选择一级分类"
-              onChange={() => categoryForm.setFieldValue('parent2Id', undefined)}
-              options={[...(categories.data?.data ?? [])]
-                .sort(bySortOrder)
-                .map((node) => ({ value: node.id, label: categoryOptionLabel(node) }))}
-            />
-          </Form.Item>
-          {inlineMode === 'level1' ? (
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 8,
-                padding: 12,
-                marginBottom: 16,
-                border: `1px solid ${colors.border}`,
-                borderRadius: 8,
-              }}
-            >
-              <span style={{ fontSize: 13, fontWeight: 550 }}>新增一级分类</span>
-              <Input
-                placeholder="中文名称（必填）"
-                maxLength={200}
-                value={inlineNameZh}
-                onChange={(event) => setInlineNameZh(event.target.value)}
-              />
-              <Input
-                placeholder="俄文名称（选填）"
-                maxLength={200}
-                value={inlineNameRu}
-                onChange={(event) => setInlineNameRu(event.target.value)}
-              />
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Button
-                  size="small"
-                  type="primary"
-                  loading={createCategoryMutation.isPending}
-                  onClick={() => submitInlineCategory('level1')}
-                >
-                  创建并选中
-                </Button>
-                <Button
-                  size="small"
-                  onClick={() => {
-                    setInlineMode(null);
-                    setInlineNameZh('');
-                    setInlineNameRu('');
-                  }}
-                >
-                  取消
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <Button
-              size="small"
-              type="link"
-              style={{ padding: 0, marginTop: -12, marginBottom: 16 }}
-              onClick={() => {
-                setInlineNameZh('');
-                setInlineNameRu('');
-                setInlineMode('level1');
-              }}
-            >
-              ＋ 新增一级分类
-            </Button>
-          )}
-
-          <Form.Item
-            name="parent2Id"
-            label="二级分类"
-            dependencies={['parent1Id']}
-            rules={[{ required: true, message: '请选择二级分类' }]}
-          >
-            <Select
-              showSearch
-              optionFilterProp="label"
-              placeholder="先选择一级分类"
-              disabled={categoryParent1Id === undefined || categoryParent1Id === ''}
-              options={level2Options.map((node) => ({
-                value: node.id,
-                label: categoryOptionLabel(node),
-              }))}
-            />
-          </Form.Item>
-          {inlineMode === 'level2' ? (
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 8,
-                padding: 12,
-                marginBottom: 16,
-                border: `1px solid ${colors.border}`,
-                borderRadius: 8,
-              }}
-            >
-              <span style={{ fontSize: 13, fontWeight: 550 }}>新增二级分类</span>
-              <Input
-                placeholder="中文名称（必填）"
-                maxLength={200}
-                value={inlineNameZh}
-                onChange={(event) => setInlineNameZh(event.target.value)}
-              />
-              <Input
-                placeholder="俄文名称（选填）"
-                maxLength={200}
-                value={inlineNameRu}
-                onChange={(event) => setInlineNameRu(event.target.value)}
-              />
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Button
-                  size="small"
-                  type="primary"
-                  loading={createCategoryMutation.isPending}
-                  onClick={() => submitInlineCategory('level2')}
-                >
-                  创建并选中
-                </Button>
-                <Button
-                  size="small"
-                  onClick={() => {
-                    setInlineMode(null);
-                    setInlineNameZh('');
-                    setInlineNameRu('');
-                  }}
-                >
-                  取消
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <Button
-              size="small"
-              type="link"
-              style={{ padding: 0, marginTop: -12, marginBottom: 16 }}
-              disabled={categoryParent1Id === undefined || categoryParent1Id === ''}
-              onClick={() => {
-                setInlineNameZh('');
-                setInlineNameRu('');
-                setInlineMode('level2');
-              }}
-            >
-              ＋ 新增二级分类
-            </Button>
-          )}
-
-          <Form.Item
-            name="nameZh"
-            label="三级分类名称"
-            rules={[{ required: true, message: '请输入三级分类名称' }]}
-          >
-            <Input maxLength={200} placeholder="如 积木拼插" />
-          </Form.Item>
-          <Form.Item name="nameRu" label="俄文名称（选填）">
-            <Input maxLength={200} />
-          </Form.Item>
-        </Form>
-      </Modal>
+      />
 
       {/* ---- Sprint 8.5 T3: category tools (tree sync + one-click import) ---- */}
       <Modal
