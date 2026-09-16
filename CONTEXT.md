@@ -28,3 +28,10 @@
 | 发货时限 | Shipment Deadline | 平台要求的发货截止时间（平台事实，非 ERP 状态） |
 | 待采购 | NOT_ORDERED | 订单行派生采购状态：尚未登记采购 |
 | 移动加权平均成本 | Moving Average Cost | 收货确认时按数量加权更新的 SKU 平均成本 |
+| 财务流水 | Finance Transaction | 追加型资金凭证（FV 编号）；不可修改，错账冲正 |
+| 冲正 | Reversal | 方向相反的成对流水，两笔在汇总中净额为零 |
+| 平台回款 | Payout | 平台打款批次（PY 编号）；确认后自动生成收入流水 |
+| 订单结算 | Order Settlement | 已发货订单的收入/成本/毛利快照（成本冻结于生成时点） |
+| 采购应付 | Payable | 派生值：采购单行金额 − 已付款流水（不落库） |
+| 调拨 | Transfer | 仓库间库存移动（TRF 编号）；确认时单事务双段移库 |
+| 补货建议 | Replenishment Suggestion | 销速/安全库存/在途采购推导的建议采购量（仅建议） |

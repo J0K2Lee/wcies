@@ -2,7 +2,11 @@
 
 跨境电商综合管理系统（Cross-border E-commerce Integrated Management System）。
 
-当前阶段：**Sprint 0 — 工程骨架与基础设施**。业务模块（商品 / SKU / 库存 / 订单 / 平台集成）自 Sprint 1 开始实现。
+当前阶段：**Sprint 10 已交付 —— 财务 / 调拨 / 补货建议**（见
+`docs/WCIES_下一阶段规划_Sprint_10_财务调拨与补齐.md`）。业务域已覆盖：
+商品 / SKU / 平台映射、库存（余额/流水/占用/安全库存）、采购与收货、订单、
+拣货、发货、拦截、退货退款、异常、同步（OZON 轮询 + Webhook）、通知、
+**财务（流水/回款/结算/应付）**、**调拨**、**补货建议**。
 
 ## 技术栈
 
@@ -145,6 +149,12 @@ tests/integration/      # 跨进程集成测试
 docs/                   # 架构 / 业务规则 / 集成文档
 scripts/                # db / architecture-check / api-client 生成脚本
 ```
+
+财务模块（Sprint 10）：`finance_transactions`（追加型流水，冲正成对）、
+`finance_payouts`（平台回款，确认即生成收入流水）、`order_settlements`
+（订单收入/成本/毛利快照，成本冻结于生成时点）；采购应付为派生值不落库。
+调拨模块：`transfer_orders/lines`，确认时单事务双段移库（TRANSFER_OUT/IN）。
+业务规则见 `docs/business-rules/finance.md` 与 `transfer.md`。
 
 ## 开发纪律
 

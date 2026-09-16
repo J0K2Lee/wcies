@@ -86,6 +86,7 @@ export function FinanceTransactionsPage() {
   const [direction, setDirection] = useState<string | undefined>();
   const [category, setCategory] = useState<string | undefined>();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [form] = Form.useForm<VoucherFormValues>();
 
@@ -104,9 +105,9 @@ export function FinanceTransactionsPage() {
   const detail = useApiQuery<{ data: TransactionRow }>(
     '/api/v1/finance/transactions/{id}',
     {},
-    ['finance-transaction-detail', selectedId],
-    { id: selectedId ?? '' },
-    selectedId !== null,
+    ['finance-transaction-detail', detailId],
+    { id: detailId ?? '' },
+    detailId !== null,
   );
 
   const rows = list.data?.data ?? [];
@@ -194,7 +195,7 @@ export function FinanceTransactionsPage() {
             <ContextMetric label="备注" value={selectedRow.remark ?? '—'} />
           </ContextSection>
           <ContextAction>
-            <Button block onClick={() => setSelectedId(selectedRow.id)}>
+            <Button block onClick={() => setDetailId(selectedRow.id)}>
               查看详情
             </Button>
             {selectedRow.reversedByVoucherNo === null && (
@@ -303,7 +304,7 @@ export function FinanceTransactionsPage() {
           }}
           onRow={(record) => ({
             onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
-            onDoubleClick: () => setSelectedId(record.id),
+            onDoubleClick: () => setDetailId(record.id),
             style: {
               cursor: 'pointer',
               background: record.id === selectedId ? colors.primarySoft : undefined,
@@ -378,8 +379,8 @@ export function FinanceTransactionsPage() {
       </SectionCard>
 
       <Drawer
-        open={selectedId !== null && detailRow !== null}
-        onClose={() => setSelectedId(null)}
+        open={detailId !== null && detailRow !== null}
+        onClose={() => setDetailId(null)}
         size={640}
         title={
           detailRow !== null && (
