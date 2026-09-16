@@ -32,7 +32,16 @@ EXPOSE 3000
 # which the host-side integration tests spawn their API processes from.
 # pnpm run passes a literal "--" through to the script, which nest chokes
 # on, so use `pnpm exec` to hand nest its docker tsconfig cleanly.
-CMD ["sh", "-c", "pnpm install --frozen-lockfile && pnpm build:packages && pnpm --filter @wcies/api exec nest start --watch -p tsconfig.build.docker.json"]
+#
+# `pnpm db:migrate` runs BEFORE the watch starts (idempotent: no-op when the
+# schema is current). Rationale (2026-09-16 incident): the watch picks up new
+# entities/services the moment they land in the bind mount, but the DB schema
+# only changes when migrations run - without this step a container restarted
+# onto newer code fails every scheduled ORDER_SYNC with "column
+# OrderEntity.<x> does not exist", surfacing only as a SYNC_FAILED exception
+# hours later. Dev profile only; production schema stays a manual, explicit
+# CLI step (AGENTS.md §55).
+CMD ["sh", "-c", "pnpm install --frozen-lockfile && pnpm build:packages && pnpm db:migrate && pnpm --filter @wcies/api exec nest start --watch -p tsconfig.build.docker.json"]
 
 # ---- Stage 1: build (prod target only) ----
 FROM node:24-alpine AS build
