@@ -58,6 +58,14 @@ export class OrderItemEntity {
   @Column({ type: 'numeric', precision: 18, scale: 3 })
   quantity!: string;
 
+  /** Platform unit sale price (finance.md §2); NULL = platform gave none. */
+  @Column({ type: 'numeric', precision: 18, scale: 4, name: 'unit_price', nullable: true })
+  unitPrice!: string | null;
+
+  /** unit_price × quantity, computed at write time (finance.md §2). */
+  @Column({ type: 'numeric', precision: 18, scale: 4, name: 'total_price', nullable: true })
+  totalPrice!: string | null;
+
   @Column({ type: 'varchar', length: 30, name: 'fulfillment_status' })
   fulfillmentStatus!: OrderItemFulfillmentStatus;
 

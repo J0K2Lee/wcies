@@ -103,6 +103,8 @@ export class OrderRepository {
       sellerSku: string | null;
       offerId: string | null;
       quantity: string;
+      unitPrice: string | null;
+      totalPrice: string | null;
       rawData: Record<string, unknown> | null;
     }>,
   ): Promise<OrderEntity> {
@@ -119,6 +121,8 @@ export class OrderRepository {
           sellerSku: item.sellerSku,
           offerId: item.offerId,
           quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          totalPrice: item.totalPrice,
           fulfillmentStatus: 'PENDING',
           mappingStatus: 'PENDING',
           rawData: item.rawData,

@@ -186,6 +186,7 @@ export class OrderSyncService {
         sellerSku: item.sellerSku ?? undefined,
         offerId: item.offerId ?? undefined,
         quantity: item.quantity,
+        unitPrice: item.unitPrice ?? undefined,
         rawData: item.rawData,
       })),
       rawData: order.rawData,

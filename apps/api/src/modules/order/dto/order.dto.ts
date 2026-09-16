@@ -26,6 +26,7 @@ import {
 } from '../enums/order.constants';
 
 const POSITIVE_QTY_PATTERN = /^\d{1,15}(\.\d{1,3})?$/;
+const UNIT_PRICE_PATTERN = /^\d{1,14}(\.\d{1,4})?$/;
 const asQuantityString = ({ value }: { value: unknown }): string | undefined => {
   if (typeof value === 'string') {
     return value;
@@ -49,6 +50,15 @@ export class NormalizedOrderItemInputDto {
   @Transform(asQuantityString)
   @Matches(POSITIVE_QTY_PATTERN, { message: '数量必须为正数（最多3位小数）' })
   quantity!: string;
+  @ApiPropertyOptional({
+    example: '107.0000',
+    nullable: true,
+    description: '平台单价（财务事实，finance.md §2）；平台未提供为 null，禁止臆造为 0',
+  })
+  @IsOptional()
+  @Transform(asQuantityString)
+  @Matches(UNIT_PRICE_PATTERN, { message: '单价格式错误（最多4位小数）' })
+  unitPrice?: string | null;
   @ApiPropertyOptional({ type: Object })
   @IsOptional()
   @IsObject()

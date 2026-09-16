@@ -49,6 +49,8 @@ function makeItem(
     skuId: null,
     warehouseId: null,
     quantity: '2.000',
+    unitPrice: null,
+    totalPrice: null,
     fulfillmentStatus: 'PENDING',
     mappingStatus: 'PENDING',
     reservationId: null,

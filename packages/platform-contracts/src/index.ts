@@ -124,6 +124,12 @@ export interface PlatformOrderItemRaw {
   readonly offerId: string | null;
   readonly sellerSku: string | null;
   readonly quantity: string;
+  /**
+   * Platform-reported unit sale price as a decimal string (Sprint 10 T1,
+   * finance.md §2 - a structured finance fact). Null when the platform
+   * omitted or malformed it; mappers must tolerate, never fabricate.
+   */
+  readonly unitPrice: string | null;
   readonly rawData: Record<string, unknown>;
 }
 

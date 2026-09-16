@@ -116,9 +116,32 @@ describe('mapPostingToOrder', () => {
     expect(item?.platformSkuId).toBe('987654321');
     expect(item?.offerId).toBe('VK87-BLK');
     expect(item?.quantity).toBe('2');
+    // Sprint 10 T1: structured unit-price fact (finance.md §2).
+    expect(item?.unitPrice).toBe('4590.0000');
     // Raw posting preserved verbatim (task §23).
     expect(order.rawData).toEqual(POSTING);
     expect(item?.rawData).toEqual(POSTING.products[0]);
+  });
+
+  it('normalizes, tolerates and never fabricates unit prices (finance.md §2)', () => {
+    const longFraction: OzonFbsPosting = {
+      ...POSTING,
+      products: [{ ...POSTING.products[0], price: '107.123456' } as OzonPostingProduct],
+    };
+    expect(mapPostingToOrder(longFraction).items[0]?.unitPrice).toBe('107.1235');
+
+    const noPrice: OzonFbsPosting = {
+      ...POSTING,
+      products: [{ ...POSTING.products[0], price: undefined } as OzonPostingProduct],
+    };
+    expect(mapPostingToOrder(noPrice).items[0]?.unitPrice).toBeNull();
+
+    const badPrice: OzonFbsPosting = {
+      ...POSTING,
+      products: [{ ...POSTING.products[0], price: 'not-a-number' } as OzonPostingProduct],
+    };
+    // A malformed price must not fail the whole posting sync (AGENTS §49).
+    expect(mapPostingToOrder(badPrice).items[0]?.unitPrice).toBeNull();
   });
 
   it('rejects postings without posting_number / products / dates', () => {

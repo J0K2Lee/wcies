@@ -148,6 +148,7 @@ export function mapPostingToOrder(posting: OzonFbsPosting): PlatformOrderRaw {
         offerId: product.offer_id,
         sellerSku: null,
         quantity,
+        unitPrice: parseUnitPriceTolerant(product.price),
         rawData: { ...product },
       };
     },
@@ -325,6 +326,33 @@ function firstCurrency(products: readonly { currency_code?: unknown }[]): string
     }
   }
   return null;
+}
+
+/**
+ * OZON posting products[].price arrives as a string like "107.000000"
+ * (verified field, docs/integrations/ozon.md). Sprint 10 T1: normalize it to
+ * a <=4-decimal string for the structured finance fact; a missing/malformed
+ * value becomes NULL - one bad price must neither fail the posting sync
+ * (AGENTS.md §49) nor be fabricated as 0 (finance.md §2).
+ */
+function parseUnitPriceTolerant(price: string | undefined): string | null {
+  if (typeof price !== 'string') {
+    return null;
+  }
+  const trimmed = price.trim();
+  if (!/^\d{1,14}(\.\d+)?$/.test(trimmed)) {
+    return null;
+  }
+  const [whole, fraction = ''] = trimmed.split('.');
+  // Keep at most 4 fraction digits (half-up on the 5th) without float math.
+  const kept = (fraction + '0000').slice(0, 4);
+  const rest = fraction.slice(4, 5);
+  let last = Number(kept[3]);
+  if (rest >= '5') {
+    last += 1;
+  }
+  const fractionFinal = kept.slice(0, 3) + String(last);
+  return `${whole}.${fractionFinal}`;
 }
 
 function normalizeQuantity(value: unknown, field: string): string {

@@ -36,6 +36,8 @@ function makeItem(overrides: Partial<OrderItemEntity>): OrderItemEntity {
     skuId: 'sku-1',
     warehouseId: 'wh-1',
     quantity: '1.000',
+    unitPrice: null,
+    totalPrice: null,
     fulfillmentStatus: 'PENDING',
     mappingStatus: 'MAPPED',
     reservationId: null,

@@ -24,6 +24,8 @@ function makeItem(
     skuId: mappingStatus === 'FAILED' ? null : 'sku-1',
     warehouseId: null,
     quantity: '1.000',
+    unitPrice: null,
+    totalPrice: null,
     fulfillmentStatus,
     mappingStatus,
     reservationId: null,

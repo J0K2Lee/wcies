@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import { formatQty, parseQty } from '../../../common/utils/quantity';
+import { formatAmount, mulAmountByQty, parseAmount } from '../../../common/utils/money';
 import { StoreService } from '../../store/services/store.service';
 import { StoreNotFoundError } from '../../store/errors/store-errors';
 import { ListingResolverService } from '../../listing/services/listing-resolver.service';
@@ -117,6 +118,8 @@ export class OrderIngestionService {
             sellerSku: item.sellerSku ?? null,
             offerId: item.offerId ?? null,
             quantity: formatQty(parseQty(item.quantity)),
+            unitPrice: item.unitPrice ?? null,
+            totalPrice: lineTotalPrice(item.unitPrice, item.quantity),
             rawData: item.rawData ?? null,
           })),
         );
@@ -511,4 +514,15 @@ function isUniqueViolationOnOrders(error: unknown): boolean {
   };
   const driver = candidate.driverError ?? candidate;
   return driver.code === '23505' && driver.constraint === 'uq_orders_store_platform';
+}
+
+/**
+ * Line total = unit_price × quantity (finance.md §2). No price -> NULL
+ * (a missing fact is never fabricated as 0).
+ */
+function lineTotalPrice(unitPrice: string | null | undefined, quantity: string): string | null {
+  if (unitPrice === null || unitPrice === undefined || unitPrice === '') {
+    return null;
+  }
+  return formatAmount(mulAmountByQty(parseAmount(unitPrice), quantity));
 }
