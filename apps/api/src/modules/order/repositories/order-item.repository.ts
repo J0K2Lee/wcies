@@ -49,6 +49,8 @@ export class OrderItemRepository {
         skuId: (row['sku_id'] as string | null) ?? null,
         warehouseId: (row['warehouse_id'] as string | null) ?? null,
         quantity: String(row['quantity']),
+        unitPrice: (row['unit_price'] as string | null) ?? null,
+        totalPrice: (row['total_price'] as string | null) ?? null,
         fulfillmentStatus: String(row['fulfillment_status']) as OrderItemFulfillmentStatus,
         mappingStatus: String(row['mapping_status']) as OrderItemMappingStatus,
         reservationId: (row['reservation_id'] as string | null) ?? null,

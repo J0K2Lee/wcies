@@ -22,12 +22,20 @@ export class MoneyInvalidError extends Error {
 /** Parses "107.5" / "107" / number into scaled BigInt (1e-4). */
 export function parseAmount(value: string | number): bigint {
   const text = typeof value === 'number' ? String(value) : value.trim();
-  if (!/^\d{1,14}(\.\d{1,4})?$/.test(text)) {
+  // Tolerant on the fraction length: SQL NUMERIC arithmetic (SUM/ROUND on
+  // mixed 18,3 x 18,4 columns) legitimately returns more than 4 fraction
+  // digits; anything past 4 is rounded HALF_UP so the 1e-4 scale holds.
+  if (!/^\d{1,14}(\.\d{1,10})?$/.test(text)) {
     throw new MoneyInvalidError(text);
   }
   const [whole, fraction = ''] = text.split('.');
-  const padded = (fraction + '0000').slice(0, Number(MONEY_SCALE));
-  return BigInt(whole!) * MONEY_SCALE_FACTOR + BigInt(padded);
+  const kept = (fraction + '0000').slice(0, 4);
+  const rest = fraction.length > 4 ? Number(fraction[4]) : 0;
+  let tail = BigInt(kept);
+  if (rest >= 5) {
+    tail += 1n;
+  }
+  return BigInt(whole!) * MONEY_SCALE_FACTOR + tail;
 }
 
 /** "107.5000" form, canonical NUMERIC string (4 fraction digits). */

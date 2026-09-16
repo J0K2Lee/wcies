@@ -183,6 +183,8 @@ export class OrderService {
           skuName,
           warehouseId: item.warehouseId,
           quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          totalPrice: item.totalPrice,
           fulfillmentStatus: item.fulfillmentStatus,
           mappingStatus: item.mappingStatus,
           // Derived procurement state (purchase.md §3.5) - NULL for unmapped

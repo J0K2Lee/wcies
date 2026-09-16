@@ -18,8 +18,11 @@ describe('money utils (NUMERIC 18,4 string arithmetic, finance.md §2)', () => {
   it('rejects malformed amounts', () => {
     expect(() => parseAmount('')).toThrow(MoneyInvalidError);
     expect(() => parseAmount('-5')).toThrow(MoneyInvalidError);
-    expect(() => parseAmount('1.23456')).toThrow(MoneyInvalidError);
     expect(() => parseAmount('abc')).toThrow(MoneyInvalidError);
+    // SQL NUMERIC sums may carry >4 fraction digits - tolerated + rounded.
+    expect(formatAmount(parseAmount('1.23456'))).toBe('1.2346');
+    // ...but anything beyond 10 fraction digits is still malformed.
+    expect(() => parseAmount('1.12345678901')).toThrow(MoneyInvalidError);
   });
 
   it('amountFromDb is null-safe', () => {

@@ -33,6 +33,9 @@ const SCOPE_PURCHASE_ORDER = 'purchase_order';
 const SCOPE_PURCHASE_RECEIPT = 'purchase_receipt';
 /** Return batch numbering RT%06d (dual-axis T5, returns.md §3.1). */
 const SCOPE_RETURN_BATCH = 'return_batch';
+/** Finance documents (Sprint 10, finance.md §8). */
+const SCOPE_FINANCE_VOUCHER = 'finance_voucher';
+const SCOPE_FINANCE_PAYOUT = 'finance_payout';
 
 export function warehouseScope(warehouseType: WarehouseCodeType): string {
   return `warehouse:${warehouseType}`;
@@ -186,6 +189,18 @@ export class BusinessCodeService {
   async nextReturnBatchNo(): Promise<string> {
     const seq = await this.next(SCOPE_RETURN_BATCH);
     return `RT${String(seq).padStart(6, '0')}`;
+  }
+
+  /** Finance voucher number FV%06d (Sprint 10, finance.md §8). */
+  async nextFinanceVoucherNo(manager?: EntityManager): Promise<string> {
+    const seq = await this.next(SCOPE_FINANCE_VOUCHER, manager);
+    return `FV${String(seq).padStart(6, '0')}`;
+  }
+
+  /** Finance payout number PY%06d (Sprint 10, finance.md §8). */
+  async nextFinancePayoutNo(manager?: EntityManager): Promise<string> {
+    const seq = await this.next(SCOPE_FINANCE_PAYOUT, manager);
+    return `PY${String(seq).padStart(6, '0')}`;
   }
 
   async nextCategoryCode(): Promise<string> {

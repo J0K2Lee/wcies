@@ -270,6 +270,18 @@ export class OrderItemDto {
   @ApiProperty({ example: 'VK87 MAX V2 黑色' }) skuName!: string;
   @ApiProperty({ nullable: true, type: String }) warehouseId!: string | null;
   @ApiProperty({ example: '2.000' }) quantity!: string;
+  @ApiPropertyOptional({
+    nullable: true,
+    example: '107.0000',
+    description: '平台单价（财务事实，finance.md §2）；平台未提供为 null',
+  })
+  unitPrice!: string | null;
+  @ApiPropertyOptional({
+    nullable: true,
+    example: '214.0000',
+    description: '行金额 = 单价 × 数量；无价为 null',
+  })
+  totalPrice!: string | null;
   @ApiProperty({ enum: ORDER_ITEM_FULFILLMENT_STATUSES }) fulfillmentStatus!: string;
   @ApiProperty({ enum: ORDER_ITEM_MAPPING_STATUSES }) mappingStatus!: string;
   @ApiPropertyOptional({

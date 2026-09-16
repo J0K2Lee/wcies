@@ -307,6 +307,60 @@ export class PurchaseOrderService {
   }
 
   // --------------------------------------------------------------------------
+  // Finance-module facts (Sprint 10, finance.md §6): payable amounts per PO.
+  // Purchase owns the line-cost facts; the paid side lives in finance.
+  // --------------------------------------------------------------------------
+
+  /**
+   * Payable facts for every PO (cancelled included so finance can reject
+   * payments against them with a precise message): payable = SUM(quantity ×
+   * unit_cost) over priced lines (unpriced lines contribute 0 and raise the
+   * flag - an unknown cost is never fabricated, finance.md §6). Callers
+   * filter by status for the payables list view.
+   */
+  async listPayableFacts(): Promise<
+    Array<{
+      id: string;
+      poNo: string;
+      supplierId: string | null;
+      status: string;
+      orderedAt: Date;
+      payableAmount: string;
+      hasUnpricedLines: boolean;
+    }>
+  > {
+    const rows = await this.dataSource.query<
+      Array<{
+        id: string;
+        po_no: string;
+        supplier_id: string | null;
+        status: string;
+        ordered_at: string;
+        payable: string | null;
+        unpriced: string;
+      }>
+    >(
+      `SELECT po.id, po.po_no, po.supplier_id, po.status, po.ordered_at,
+              COALESCE(SUM(i.quantity * i.unit_cost)
+                FILTER (WHERE i.unit_cost IS NOT NULL), 0) AS payable,
+              COUNT(i.id) FILTER (WHERE i.unit_cost IS NULL) AS unpriced
+       FROM purchase_orders po
+       LEFT JOIN purchase_order_items i ON i.po_id = po.id
+       GROUP BY po.id
+       ORDER BY po.ordered_at DESC`,
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      poNo: row.po_no,
+      supplierId: row.supplier_id,
+      status: row.status,
+      orderedAt: new Date(row.ordered_at),
+      payableAmount: row.payable ?? '0',
+      hasUnpricedLines: Number(row.unpriced) > 0,
+    }));
+  }
+
+  // --------------------------------------------------------------------------
   // Internals
   // --------------------------------------------------------------------------
 
