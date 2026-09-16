@@ -271,6 +271,41 @@ export const NOTIFICATION_STATUS_META: Record<string, StatusMeta> = {
   CANCELLED: { tone: 'neutral', label: '已取消' },
 };
 
+/** Finance payout status → tone + label (finance pages, Sprint 10 G3). */
+export const FINANCE_PAYOUT_STATUS_META: Record<string, StatusMeta> = {
+  DRAFT: { tone: 'neutral', label: '草稿' },
+  CONFIRMED: { tone: 'success', label: '已确认', hint: '已生成关联销售收入流水' },
+  CANCELLED: { tone: 'neutral', label: '已取消' },
+};
+
+/** Finance transaction category → tone + label (finance pages, Sprint 10 G3). */
+export const FINANCE_CATEGORY_META: Record<string, StatusMeta> = {
+  SALE_INCOME: { tone: 'success', label: '销售收入' },
+  SALE_REFUND: { tone: 'danger', label: '订单退款' },
+  PURCHASE_PAYMENT: { tone: 'warning', label: '采购付款' },
+  SUPPLIER_REFUND: { tone: 'info', label: '供应商退款' },
+  PLATFORM_FEE: { tone: 'warning', label: '平台费用' },
+  LOGISTICS_FEE: { tone: 'warning', label: '物流费用' },
+  OTHER_INCOME: { tone: 'success', label: '其他收入' },
+  OTHER_EXPENSE: { tone: 'neutral', label: '其他支出' },
+};
+
+/** Derived purchase payment state → tone + label (payables page, G3). */
+export const PURCHASE_PAYMENT_STATE_META: Record<string, StatusMeta> = {
+  NOTHING_TO_PAY: { tone: 'neutral', label: '无需付款', hint: '采购单未登记成本' },
+  UNPAID: { tone: 'warning', label: '未付款' },
+  PARTIAL: { tone: 'info', label: '部分付款' },
+  PAID: { tone: 'success', label: '已付清' },
+  OVERPAID: { tone: 'danger', label: '超付', hint: '已付金额超过应付' },
+};
+
+/** Transfer order status → tone + label (transfer page, Sprint 10 G3). */
+export const TRANSFER_STATUS_META: Record<string, StatusMeta> = {
+  DRAFT: { tone: 'neutral', label: '草稿' },
+  CONFIRMED: { tone: 'success', label: '已确认', hint: '库存已双段移动' },
+  CANCELLED: { tone: 'neutral', label: '已取消' },
+};
+
 /** Notification event type → tone + label (Bell + NotificationsPage, G3). */
 export const NOTIFICATION_TYPE_META: Record<string, StatusMeta> = {
   ORDER_INTERCEPTION_REQUIRED: { tone: 'warning', label: '需要拦截' },

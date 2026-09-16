@@ -70,3 +70,29 @@ export function fmtNumber(value: number | null | undefined): string {
   }
   return value.toLocaleString('zh-CN');
 }
+
+/**
+ * Money display (UI spec §9): NUMERIC strings from the backend are shown
+ * as-is with thousand separators + the currency mark; NULL is the long
+ * dash (a missing fact is never rendered as 0).
+ */
+export function fmtMoney(value: string | null | undefined, currency?: string | null): string {
+  if (value === null || value === undefined || value === '') {
+    return '—';
+  }
+  const num = Number(value);
+  if (Number.isNaN(num)) {
+    return value;
+  }
+  const mark = currency === 'CNY' || currency === undefined || currency === null ? '¥' : currency;
+  const body = num.toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return mark === '¥' ? `¥${body}` : `${body} ${mark}`;
+}
+
+/** Money cell with sign semantics: expenses render in danger color tokens. */
+export function moneyTone(direction: string): 'success' | 'danger' {
+  return direction === 'INCOME' ? 'success' : 'danger';
+}

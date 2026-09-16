@@ -218,3 +218,125 @@ export class FinanceSummaryQueryDto {
   @IsDateString()
   to?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Response DTOs (contract-guard requirement: every envelope resolves to a
+// real schema; the flat shapes match what the services return).
+// ---------------------------------------------------------------------------
+
+export class FinanceTransactionDto {
+  @ApiProperty() id!: string;
+  @ApiProperty({ example: 'FV000001' }) voucherNo!: string;
+  @ApiProperty({ enum: FINANCE_DIRECTIONS }) direction!: string;
+  @ApiProperty({ enum: FINANCE_TRANSACTION_CATEGORIES }) category!: string;
+  @ApiProperty({ example: '107.0000' }) amount!: string;
+  @ApiProperty({ example: 'CNY' }) currency!: string;
+  @ApiProperty({ type: Date }) occurredAt!: Date;
+  @ApiProperty({ nullable: true, type: String }) storeId!: string | null;
+  @ApiProperty({ nullable: true, type: String }) supplierId!: string | null;
+  @ApiProperty({ nullable: true, type: String }) orderId!: string | null;
+  @ApiProperty({ nullable: true, type: String }) purchaseOrderId!: string | null;
+  @ApiProperty({ nullable: true, type: String }) payoutId!: string | null;
+  @ApiProperty({ nullable: true, type: String }) reversedByVoucherNo!: string | null;
+  @ApiProperty({ nullable: true, type: String }) remark!: string | null;
+  @ApiProperty({ nullable: true, type: String }) createdBy!: string | null;
+  @ApiProperty({ type: Date }) createdAt!: Date;
+  @ApiProperty({ type: Date }) updatedAt!: Date;
+  @ApiPropertyOptional({ nullable: true, type: String }) storeName!: string | null;
+  @ApiPropertyOptional({ nullable: true, type: String }) supplierName!: string | null;
+  @ApiPropertyOptional({ nullable: true, type: String }) orderNo!: string | null;
+  @ApiPropertyOptional({ nullable: true, type: String }) purchaseOrderNo!: string | null;
+}
+
+export class FinancePayoutDto {
+  @ApiProperty() id!: string;
+  @ApiProperty({ example: 'PY000001' }) payoutNo!: string;
+  @ApiProperty() storeId!: string;
+  @ApiProperty({ type: Date }) periodStart!: Date;
+  @ApiProperty({ type: Date }) periodEnd!: Date;
+  @ApiProperty({ example: '1284.0000' }) amount!: string;
+  @ApiProperty({ example: 'CNY' }) currency!: string;
+  @ApiProperty({ enum: FINANCE_PAYOUT_STATUSES }) status!: string;
+  @ApiProperty({ nullable: true, type: String }) remark!: string | null;
+  @ApiProperty({ nullable: true, type: String }) createdBy!: string | null;
+  @ApiProperty({ type: Date }) createdAt!: Date;
+  @ApiProperty({ type: Date }) updatedAt!: Date;
+  @ApiPropertyOptional({ nullable: true, type: String }) storeName!: string | null;
+}
+
+export class FinancePayoutPreviewDto {
+  @ApiProperty({ type: FinancePayoutDto }) payout!: FinancePayoutDto;
+  @ApiProperty({ example: '1284.0000' }) settledRevenue!: string;
+  @ApiProperty({ example: 12 }) settledOrderCount!: number;
+  @ApiProperty({ example: '0.0000' }) difference!: string;
+}
+
+export class OrderSettlementItemDto {
+  @ApiProperty() id!: string;
+  @ApiProperty() settlementId!: string;
+  @ApiProperty() orderItemId!: string;
+  @ApiProperty({ nullable: true, type: String }) skuId!: string | null;
+  @ApiProperty({ example: '2.000' }) quantity!: string;
+  @ApiProperty({ nullable: true, type: String, example: '107.0000' }) unitPrice!: string | null;
+  @ApiProperty({ example: '214.0000' }) revenue!: string;
+  @ApiProperty({ nullable: true, type: String, example: '80.0000' }) unitCost!: string | null;
+  @ApiProperty({ example: '160.0000' }) cost!: string;
+}
+
+export class OrderSettlementDto {
+  @ApiProperty() id!: string;
+  @ApiProperty() orderId!: string;
+  @ApiProperty({ nullable: true, type: String, example: 'CNY' }) currency!: string | null;
+  @ApiProperty({ example: '214.0000' }) revenueTotal!: string;
+  @ApiProperty({ example: '160.0000' }) productCostTotal!: string;
+  @ApiProperty({ example: '25.0000' }) shippingFee!: string;
+  @ApiProperty({ example: '0.0000' }) otherFee!: string;
+  @ApiProperty({ nullable: true, type: String, example: '29.0000' }) profit!: string | null;
+  @ApiProperty() hasMissingPrice!: boolean;
+  @ApiProperty() hasMissingCost!: boolean;
+  @ApiProperty({ nullable: true, type: String }) generatedBy!: string | null;
+  @ApiProperty({ type: Date }) generatedAt!: Date;
+  @ApiProperty({ type: Date }) updatedAt!: Date;
+  @ApiPropertyOptional({ example: 'ORD00000001' }) orderNo!: string;
+  @ApiPropertyOptional({ example: 'OZON-123' }) platformOrderId!: string;
+  @ApiPropertyOptional() storeId!: string;
+  @ApiPropertyOptional({ nullable: true, type: String }) storeName!: string | null;
+  @ApiPropertyOptional({ type: Date }) orderedAt!: Date;
+}
+
+export class OrderSettlementDetailDto extends OrderSettlementDto {
+  @ApiProperty({ type: [OrderSettlementItemDto] }) items!: OrderSettlementItemDto[];
+}
+
+export class SettlementGenerateMissingResultDto {
+  @ApiProperty({ example: 3 }) generated!: number;
+  @ApiProperty({ example: 0 }) skipped!: number;
+  @ApiProperty({ type: [String] }) settlementIds!: string[];
+}
+
+export class PayableRowDto {
+  @ApiProperty() id!: string;
+  @ApiProperty({ example: 'PO000001' }) poNo!: string;
+  @ApiProperty({ nullable: true, type: String }) supplierId!: string | null;
+  @ApiProperty({ nullable: true, type: String }) supplierName!: string | null;
+  @ApiProperty({ example: 'RECEIVED' }) status!: string;
+  @ApiProperty({ type: Date }) orderedAt!: Date;
+  @ApiProperty({ example: '300.0000' }) payableAmount!: string;
+  @ApiProperty({ example: '100.0000' }) paidAmount!: string;
+  @ApiProperty({ example: '200.0000' }) unpaidAmount!: string;
+  @ApiProperty({ enum: PURCHASE_PAYMENT_STATES }) paymentState!: string;
+  @ApiProperty() hasUnpricedLines!: boolean;
+}
+
+export class FinanceSummaryResponseDto {
+  @ApiProperty({ type: Object, nullable: true })
+  range!: { from: string | null; to: string | null };
+  @ApiProperty({ example: '150.0000' }) incomeTotal!: string;
+  @ApiProperty({ example: '300.0000' }) expenseTotal!: string;
+  @ApiProperty({ example: '-150.0000' }) netTotal!: string;
+  @ApiProperty({ example: '214.0000' }) settledRevenue!: string;
+  @ApiProperty({ example: '185.0000' }) settledCost!: string;
+  @ApiProperty({ example: '29.0000' }) settledProfit!: string;
+  @ApiProperty({ example: '200.0000' }) unpaidPurchaseTotal!: string;
+  @ApiProperty({ example: '150.0000' }) confirmedPayoutTotal!: string;
+}

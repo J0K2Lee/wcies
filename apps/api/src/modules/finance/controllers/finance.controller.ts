@@ -17,12 +17,20 @@ import { ApiOkEnvelope, ApiOkPagedEnvelope } from '../../../common/swagger/api-e
 import {
   CreateFinancePayoutRequestDto,
   CreateFinanceTransactionRequestDto,
+  FinancePayoutDto,
   FinancePayoutListQueryDto,
+  FinancePayoutPreviewDto,
   FinanceSummaryQueryDto,
+  FinanceSummaryResponseDto,
+  FinanceTransactionDto,
   FinanceTransactionListQueryDto,
   GenerateOrderSettlementRequestDto,
+  OrderSettlementDetailDto,
+  OrderSettlementDto,
   OrderSettlementListQueryDto,
+  PayableRowDto,
   PayablesQueryDto,
+  SettlementGenerateMissingResultDto,
   UpdateOrderSettlementFeesRequestDto,
 } from '../dto/finance.dto';
 import { FinanceTransactionService } from '../services/finance-transaction.service';
@@ -45,7 +53,7 @@ export class FinanceController {
 
   @Get('transactions')
   @ApiOperation({ summary: '收支流水列表' })
-  @ApiOkPagedEnvelope(Object)
+  @ApiOkPagedEnvelope(FinanceTransactionDto)
   async listTransactions(@Query() query: FinanceTransactionListQueryDto) {
     const result = await this.transactions.list(
       {
@@ -67,14 +75,14 @@ export class FinanceController {
 
   @Get('transactions/:id')
   @ApiOperation({ summary: '收支流水详情' })
-  @ApiOkEnvelope(Object)
+  @ApiOkEnvelope(FinanceTransactionDto)
   async getTransaction(@Param('id') id: string) {
     return ok(await this.transactions.getDetail(id));
   }
 
   @Post('transactions')
   @ApiOperation({ summary: '登记收支流水（追加型，不可修改；错账用冲正）' })
-  @ApiOkEnvelope(Object)
+  @ApiOkEnvelope(FinanceTransactionDto)
   async createTransaction(
     @Body() body: CreateFinanceTransactionRequestDto,
     @CurrentOperator() operator: OperatorContext,
@@ -101,7 +109,7 @@ export class FinanceController {
   @Post('transactions/:id/reverse')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '冲正流水（生成方向相反的成对凭证）' })
-  @ApiOkEnvelope(Object)
+  @ApiOkEnvelope(FinanceTransactionDto)
   async reverseTransaction(@Param('id') id: string, @CurrentOperator() operator: OperatorContext) {
     return ok(await this.transactions.reverse(id, operator));
   }
@@ -110,7 +118,7 @@ export class FinanceController {
 
   @Get('payouts')
   @ApiOperation({ summary: '平台回款单列表' })
-  @ApiOkPagedEnvelope(Object)
+  @ApiOkPagedEnvelope(FinancePayoutDto)
   async listPayouts(@Query() query: FinancePayoutListQueryDto) {
     const result = await this.payouts.list(
       { keyword: query.keyword, storeId: query.storeId, status: query.status },
@@ -121,21 +129,21 @@ export class FinanceController {
 
   @Get('payouts/:id')
   @ApiOperation({ summary: '平台回款单详情' })
-  @ApiOkEnvelope(Object)
+  @ApiOkEnvelope(FinancePayoutDto)
   async getPayout(@Param('id') id: string) {
     return ok(await this.payouts.getDetail(id));
   }
 
   @Get('payouts/:id/preview')
   @ApiOperation({ summary: '回款对账预览（应计收入 vs 打款金额，人工判断）' })
-  @ApiOkEnvelope(Object)
+  @ApiOkEnvelope(FinancePayoutPreviewDto)
   async previewPayout(@Param('id') id: string) {
     return ok(await this.payouts.preview(id));
   }
 
   @Post('payouts')
   @ApiOperation({ summary: '登记平台回款单（DRAFT）' })
-  @ApiOkEnvelope(Object)
+  @ApiOkEnvelope(FinancePayoutDto)
   async createPayout(
     @Body() body: CreateFinancePayoutRequestDto,
     @CurrentOperator() operator: OperatorContext,
@@ -158,7 +166,7 @@ export class FinanceController {
   @Post('payouts/:id/confirm')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '确认回款（自动生成销售收入流水，幂等）' })
-  @ApiOkEnvelope(Object)
+  @ApiOkEnvelope(FinancePayoutDto)
   async confirmPayout(@Param('id') id: string, @CurrentOperator() operator: OperatorContext) {
     return ok(await this.payouts.confirm(id, operator));
   }
@@ -166,7 +174,7 @@ export class FinanceController {
   @Post('payouts/:id/cancel')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '取消回款（仅 DRAFT；确认后错账走冲正）' })
-  @ApiOkEnvelope(Object)
+  @ApiOkEnvelope(FinancePayoutDto)
   async cancelPayout(@Param('id') id: string, @CurrentOperator() operator: OperatorContext) {
     return ok(await this.payouts.cancel(id, operator));
   }
@@ -175,7 +183,7 @@ export class FinanceController {
 
   @Get('settlements')
   @ApiOperation({ summary: '订单结算列表（收入/成本/毛利快照）' })
-  @ApiOkPagedEnvelope(Object)
+  @ApiOkPagedEnvelope(OrderSettlementDto)
   async listSettlements(@Query() query: OrderSettlementListQueryDto) {
     const result = await this.settlements.list(
       {
@@ -191,14 +199,14 @@ export class FinanceController {
 
   @Get('settlements/:id')
   @ApiOperation({ summary: '订单结算详情（含行快照）' })
-  @ApiOkEnvelope(Object)
+  @ApiOkEnvelope(OrderSettlementDetailDto)
   async getSettlement(@Param('id') id: string) {
     return ok(await this.settlements.getDetail(id));
   }
 
   @Post('settlements/generate')
   @ApiOperation({ summary: '生成单笔订单结算（仅已发货订单，幂等）' })
-  @ApiOkEnvelope(Object)
+  @ApiOkEnvelope(OrderSettlementDto)
   async generateSettlement(
     @Body() body: GenerateOrderSettlementRequestDto,
     @CurrentOperator() operator: OperatorContext,
@@ -209,14 +217,14 @@ export class FinanceController {
   @Post('settlements/generate-missing')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '批量生成全部缺失结算（已发货未结算订单）' })
-  @ApiOkEnvelope(Object)
+  @ApiOkEnvelope(SettlementGenerateMissingResultDto)
   async generateMissingSettlements(@CurrentOperator() operator: OperatorContext) {
     return ok(await this.settlements.generateMissing(operator));
   }
 
   @Patch('settlements/:id/fees')
   @ApiOperation({ summary: '修改结算费用（物流/其他，重算毛利；行快照不可改）' })
-  @ApiOkEnvelope(Object)
+  @ApiOkEnvelope(OrderSettlementDto)
   async updateSettlementFees(
     @Param('id') id: string,
     @Body() body: UpdateOrderSettlementFeesRequestDto,
@@ -228,7 +236,7 @@ export class FinanceController {
 
   @Get('payables')
   @ApiOperation({ summary: '采购应付列表（应付/已付/未付均为派生值）' })
-  @ApiOkPagedEnvelope(Object)
+  @ApiOkPagedEnvelope(PayableRowDto)
   async listPayables(@Query() query: PayablesQueryDto) {
     const result = await this.reports.listPayables({
       keyword: query.keyword,
@@ -241,7 +249,7 @@ export class FinanceController {
 
   @Get('summary')
   @ApiOperation({ summary: '财务汇总（期间收支/毛利/应付/回款，全部派生）' })
-  @ApiOkEnvelope(Object)
+  @ApiOkEnvelope(FinanceSummaryResponseDto)
   async summary(@Query() query: FinanceSummaryQueryDto) {
     return ok(
       await this.reports.summary(

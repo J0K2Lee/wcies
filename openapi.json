@@ -4876,7 +4876,9 @@
                 "SHIP",
                 "RETURN_PICKED",
                 "MOVE_BIN",
-                "MANUAL_ADJUSTMENT"
+                "MANUAL_ADJUSTMENT",
+                "TRANSFER_OUT",
+                "TRANSFER_IN"
               ]
             }
           },
@@ -4886,7 +4888,15 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT", "RETURN_RECEIPT"]
+              "enum": [
+                "MANUAL",
+                "TEST",
+                "ORDER",
+                "IMPORT",
+                "PURCHASE_RECEIPT",
+                "RETURN_RECEIPT",
+                "TRANSFER"
+              ]
             }
           },
           {
@@ -5254,6 +5264,57 @@
           }
         },
         "summary": "List reservations",
+        "tags": ["inventory-reservations"]
+      }
+    },
+    "/api/v1/inventory/replenishment-suggestions": {
+      "get": {
+        "operationId": "InventoryReservationController_replenishmentSuggestions",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data", "meta"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ReplenishmentSuggestionDto"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": ["page", "pageSize", "total"],
+                      "properties": {
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "pageSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "补货建议（派生建议：销速/安全库存/在途采购 → 建议采购量）",
         "tags": ["inventory-reservations"]
       }
     },
@@ -9310,6 +9371,1243 @@
         "tags": ["webhooks"]
       }
     },
+    "/api/v1/finance/transactions": {
+      "get": {
+        "operationId": "FinanceController_listTransactions",
+        "parameters": [
+          {
+            "name": "keyword",
+            "required": false,
+            "in": "query",
+            "description": "凭证号 / 订单号 / 采购单号模糊搜索",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "direction",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["INCOME", "EXPENSE"]
+            }
+          },
+          {
+            "name": "category",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "SALE_INCOME",
+                "SALE_REFUND",
+                "PURCHASE_PAYMENT",
+                "SUPPLIER_REFUND",
+                "PLATFORM_FEE",
+                "LOGISTICS_FEE",
+                "OTHER_INCOME",
+                "OTHER_EXPENSE"
+              ]
+            }
+          },
+          {
+            "name": "storeId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "supplierId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "orderId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "purchaseOrderId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "payoutId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data", "meta"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FinanceTransactionDto"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": ["page", "pageSize", "total"],
+                      "properties": {
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "pageSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "收支流水列表",
+        "tags": ["finance"]
+      },
+      "post": {
+        "operationId": "FinanceController_createTransaction",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateFinanceTransactionRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/FinanceTransactionDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "登记收支流水（追加型，不可修改；错账用冲正）",
+        "tags": ["finance"]
+      }
+    },
+    "/api/v1/finance/transactions/{id}": {
+      "get": {
+        "operationId": "FinanceController_getTransaction",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/FinanceTransactionDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "收支流水详情",
+        "tags": ["finance"]
+      }
+    },
+    "/api/v1/finance/transactions/{id}/reverse": {
+      "post": {
+        "operationId": "FinanceController_reverseTransaction",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/FinanceTransactionDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "冲正流水（生成方向相反的成对凭证）",
+        "tags": ["finance"]
+      }
+    },
+    "/api/v1/finance/payouts": {
+      "get": {
+        "operationId": "FinanceController_listPayouts",
+        "parameters": [
+          {
+            "name": "keyword",
+            "required": false,
+            "in": "query",
+            "description": "回款单号模糊搜索",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "storeId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["DRAFT", "CONFIRMED", "CANCELLED"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data", "meta"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FinancePayoutDto"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": ["page", "pageSize", "total"],
+                      "properties": {
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "pageSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "平台回款单列表",
+        "tags": ["finance"]
+      },
+      "post": {
+        "operationId": "FinanceController_createPayout",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateFinancePayoutRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/FinancePayoutDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "登记平台回款单（DRAFT）",
+        "tags": ["finance"]
+      }
+    },
+    "/api/v1/finance/payouts/{id}": {
+      "get": {
+        "operationId": "FinanceController_getPayout",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/FinancePayoutDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "平台回款单详情",
+        "tags": ["finance"]
+      }
+    },
+    "/api/v1/finance/payouts/{id}/preview": {
+      "get": {
+        "operationId": "FinanceController_previewPayout",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/FinancePayoutPreviewDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "回款对账预览（应计收入 vs 打款金额，人工判断）",
+        "tags": ["finance"]
+      }
+    },
+    "/api/v1/finance/payouts/{id}/confirm": {
+      "post": {
+        "operationId": "FinanceController_confirmPayout",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/FinancePayoutDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "确认回款（自动生成销售收入流水，幂等）",
+        "tags": ["finance"]
+      }
+    },
+    "/api/v1/finance/payouts/{id}/cancel": {
+      "post": {
+        "operationId": "FinanceController_cancelPayout",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/FinancePayoutDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "取消回款（仅 DRAFT；确认后错账走冲正）",
+        "tags": ["finance"]
+      }
+    },
+    "/api/v1/finance/settlements": {
+      "get": {
+        "operationId": "FinanceController_listSettlements",
+        "parameters": [
+          {
+            "name": "keyword",
+            "required": false,
+            "in": "query",
+            "description": "订单号 / 平台订单号模糊搜索",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "storeId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "结算生成时间 ≥",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "结算生成时间 <",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data", "meta"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/OrderSettlementDto"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": ["page", "pageSize", "total"],
+                      "properties": {
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "pageSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "订单结算列表（收入/成本/毛利快照）",
+        "tags": ["finance"]
+      }
+    },
+    "/api/v1/finance/settlements/{id}": {
+      "get": {
+        "operationId": "FinanceController_getSettlement",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/OrderSettlementDetailDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "订单结算详情（含行快照）",
+        "tags": ["finance"]
+      }
+    },
+    "/api/v1/finance/settlements/generate": {
+      "post": {
+        "operationId": "FinanceController_generateSettlement",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateOrderSettlementRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/OrderSettlementDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "生成单笔订单结算（仅已发货订单，幂等）",
+        "tags": ["finance"]
+      }
+    },
+    "/api/v1/finance/settlements/generate-missing": {
+      "post": {
+        "operationId": "FinanceController_generateMissingSettlements",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SettlementGenerateMissingResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "批量生成全部缺失结算（已发货未结算订单）",
+        "tags": ["finance"]
+      }
+    },
+    "/api/v1/finance/settlements/{id}/fees": {
+      "patch": {
+        "operationId": "FinanceController_updateSettlementFees",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOrderSettlementFeesRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/OrderSettlementDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "修改结算费用（物流/其他，重算毛利；行快照不可改）",
+        "tags": ["finance"]
+      }
+    },
+    "/api/v1/finance/payables": {
+      "get": {
+        "operationId": "FinanceController_listPayables",
+        "parameters": [
+          {
+            "name": "keyword",
+            "required": false,
+            "in": "query",
+            "description": "采购单号 / 供应商模糊搜索",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "paymentState",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["NOTHING_TO_PAY", "UNPAID", "PARTIAL", "PAID", "OVERPAID"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data", "meta"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PayableRowDto"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": ["page", "pageSize", "total"],
+                      "properties": {
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "pageSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "采购应付列表（应付/已付/未付均为派生值）",
+        "tags": ["finance"]
+      }
+    },
+    "/api/v1/finance/summary": {
+      "get": {
+        "operationId": "FinanceController_summary",
+        "parameters": [
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/FinanceSummaryResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "财务汇总（期间收支/毛利/应付/回款，全部派生）",
+        "tags": ["finance"]
+      }
+    },
+    "/api/v1/transfers": {
+      "get": {
+        "operationId": "TransferController_list",
+        "parameters": [
+          {
+            "name": "keyword",
+            "required": false,
+            "in": "query",
+            "description": "调拨单号模糊搜索",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fromWarehouseId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "toWarehouseId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["DRAFT", "CONFIRMED", "CANCELLED"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data", "meta"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TransferOrderDto"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": ["page", "pageSize", "total"],
+                      "properties": {
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "pageSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "调拨单列表",
+        "tags": ["transfers"]
+      },
+      "post": {
+        "operationId": "TransferController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTransferRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/TransferOrderDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "登记调拨单（DRAFT，可继续增删行）",
+        "tags": ["transfers"]
+      }
+    },
+    "/api/v1/transfers/{id}": {
+      "get": {
+        "operationId": "TransferController_getDetail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/TransferOrderDetailDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "调拨单详情（含行与库位）",
+        "tags": ["transfers"]
+      }
+    },
+    "/api/v1/transfers/{id}/lines": {
+      "post": {
+        "operationId": "TransferController_addLine",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddTransferLineRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/TransferOrderDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "调拨单追加明细行（仅 DRAFT）",
+        "tags": ["transfers"]
+      }
+    },
+    "/api/v1/transfers/{id}/lines/{lineId}": {
+      "delete": {
+        "operationId": "TransferController_removeLine",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "lineId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/TransferOrderDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "调拨单删除明细行（仅 DRAFT）",
+        "tags": ["transfers"]
+      }
+    },
+    "/api/v1/transfers/{id}/confirm": {
+      "post": {
+        "operationId": "TransferController_confirm",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/TransferOrderDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "确认调拨（单事务双段移库，任一行失败整体回滚）",
+        "tags": ["transfers"]
+      }
+    },
+    "/api/v1/transfers/{id}/cancel": {
+      "post": {
+        "operationId": "TransferController_cancel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/TransferOrderDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "取消调拨（仅 DRAFT，未碰库存）",
+        "tags": ["transfers"]
+      }
+    },
     "/api/v1/dev/test-job": {
       "post": {
         "operationId": "DevController_createTestJob",
@@ -12984,7 +14282,9 @@
               "SHIP",
               "RETURN_PICKED",
               "MOVE_BIN",
-              "MANUAL_ADJUSTMENT"
+              "MANUAL_ADJUSTMENT",
+              "TRANSFER_OUT",
+              "TRANSFER_IN"
             ]
           },
           "transactionType": {
@@ -12999,7 +14299,9 @@
               "SHIP",
               "RETURN_PICKED",
               "MOVE_BIN",
-              "MANUAL_ADJUSTMENT"
+              "MANUAL_ADJUSTMENT",
+              "TRANSFER_OUT",
+              "TRANSFER_IN"
             ]
           },
           "skuId": {
@@ -13055,7 +14357,15 @@
           },
           "referenceType": {
             "type": "string",
-            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT", "RETURN_RECEIPT"]
+            "enum": [
+              "MANUAL",
+              "TEST",
+              "ORDER",
+              "IMPORT",
+              "PURCHASE_RECEIPT",
+              "RETURN_RECEIPT",
+              "TRANSFER"
+            ]
           },
           "referenceId": {
             "type": "string"
@@ -13196,7 +14506,15 @@
           },
           "referenceType": {
             "type": "string",
-            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT", "RETURN_RECEIPT"]
+            "enum": [
+              "MANUAL",
+              "TEST",
+              "ORDER",
+              "IMPORT",
+              "PURCHASE_RECEIPT",
+              "RETURN_RECEIPT",
+              "TRANSFER"
+            ]
           },
           "referenceId": {
             "type": "string"
@@ -13250,7 +14568,15 @@
           },
           "referenceType": {
             "type": "string",
-            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT", "RETURN_RECEIPT"]
+            "enum": [
+              "MANUAL",
+              "TEST",
+              "ORDER",
+              "IMPORT",
+              "PURCHASE_RECEIPT",
+              "RETURN_RECEIPT",
+              "TRANSFER"
+            ]
           },
           "referenceId": {
             "type": "string"
@@ -13370,7 +14696,15 @@
           },
           "referenceType": {
             "type": "string",
-            "enum": ["MANUAL", "TEST", "ORDER", "IMPORT", "PURCHASE_RECEIPT", "RETURN_RECEIPT"]
+            "enum": [
+              "MANUAL",
+              "TEST",
+              "ORDER",
+              "IMPORT",
+              "PURCHASE_RECEIPT",
+              "RETURN_RECEIPT",
+              "TRANSFER"
+            ]
           },
           "referenceId": {
             "type": "string"
@@ -13538,6 +14872,81 @@
           "referenceType",
           "referenceId",
           "idempotencyKey"
+        ]
+      },
+      "ReplenishmentSuggestionDto": {
+        "type": "object",
+        "properties": {
+          "skuId": {
+            "type": "string"
+          },
+          "skuCode": {
+            "type": "string",
+            "example": "SKU000001001"
+          },
+          "skuName": {
+            "type": "string",
+            "example": "浴帘 黑色"
+          },
+          "skuStatus": {
+            "type": "string",
+            "example": "ACTIVE"
+          },
+          "onHandQty": {
+            "type": "string",
+            "example": "6.000"
+          },
+          "reservedQty": {
+            "type": "string",
+            "example": "2.000"
+          },
+          "pickedQty": {
+            "type": "string",
+            "example": "0.000"
+          },
+          "availableQty": {
+            "type": "string",
+            "example": "4.000"
+          },
+          "safetyQty": {
+            "type": "string",
+            "example": "2.000"
+          },
+          "shippedInWindowQty": {
+            "type": "string",
+            "example": "30.000"
+          },
+          "dailyVelocityQty": {
+            "type": "string",
+            "example": "1.000"
+          },
+          "openPoQty": {
+            "type": "string",
+            "example": "12.000"
+          },
+          "suggestedQty": {
+            "type": "string",
+            "example": "16.000"
+          },
+          "needsReplenishment": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "skuId",
+          "skuCode",
+          "skuName",
+          "skuStatus",
+          "onHandQty",
+          "reservedQty",
+          "pickedQty",
+          "availableQty",
+          "safetyQty",
+          "shippedInWindowQty",
+          "dailyVelocityQty",
+          "openPoQty",
+          "suggestedQty",
+          "needsReplenishment"
         ]
       },
       "ReservationListItemDto": {
@@ -13950,6 +15359,18 @@
           "quantity": {
             "type": "string",
             "example": "2.000"
+          },
+          "unitPrice": {
+            "type": "object",
+            "nullable": true,
+            "example": "107.0000",
+            "description": "平台单价（财务事实，finance.md §2）；平台未提供为 null"
+          },
+          "totalPrice": {
+            "type": "object",
+            "nullable": true,
+            "example": "214.0000",
+            "description": "行金额 = 单价 × 数量；无价为 null"
           },
           "fulfillmentStatus": {
             "type": "string",
@@ -14399,6 +15820,12 @@
           "quantity": {
             "type": "string",
             "example": "2"
+          },
+          "unitPrice": {
+            "type": "object",
+            "example": "107.0000",
+            "nullable": true,
+            "description": "平台单价（财务事实，finance.md §2）；平台未提供为 null，禁止臆造为 0"
           },
           "rawData": {
             "type": "object"
@@ -17336,6 +18763,958 @@
           "errorCode",
           "errorMessage"
         ]
+      },
+      "FinanceTransactionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "voucherNo": {
+            "type": "string",
+            "example": "FV000001"
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["INCOME", "EXPENSE"]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "SALE_INCOME",
+              "SALE_REFUND",
+              "PURCHASE_PAYMENT",
+              "SUPPLIER_REFUND",
+              "PLATFORM_FEE",
+              "LOGISTICS_FEE",
+              "OTHER_INCOME",
+              "OTHER_EXPENSE"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "example": "107.0000"
+          },
+          "currency": {
+            "type": "string",
+            "example": "CNY"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "storeId": {
+            "type": "string",
+            "nullable": true
+          },
+          "supplierId": {
+            "type": "string",
+            "nullable": true
+          },
+          "orderId": {
+            "type": "string",
+            "nullable": true
+          },
+          "purchaseOrderId": {
+            "type": "string",
+            "nullable": true
+          },
+          "payoutId": {
+            "type": "string",
+            "nullable": true
+          },
+          "reversedByVoucherNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "remark": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "storeName": {
+            "type": "string",
+            "nullable": true
+          },
+          "supplierName": {
+            "type": "string",
+            "nullable": true
+          },
+          "orderNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "purchaseOrderNo": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "voucherNo",
+          "direction",
+          "category",
+          "amount",
+          "currency",
+          "occurredAt",
+          "storeId",
+          "supplierId",
+          "orderId",
+          "purchaseOrderId",
+          "payoutId",
+          "reversedByVoucherNo",
+          "remark",
+          "createdBy",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "CreateFinanceTransactionRequestDto": {
+        "type": "object",
+        "properties": {
+          "direction": {
+            "type": "string",
+            "enum": ["INCOME", "EXPENSE"]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "SALE_INCOME",
+              "SALE_REFUND",
+              "PURCHASE_PAYMENT",
+              "SUPPLIER_REFUND",
+              "PLATFORM_FEE",
+              "LOGISTICS_FEE",
+              "OTHER_INCOME",
+              "OTHER_EXPENSE"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "example": "107.0000"
+          },
+          "currency": {
+            "type": "string",
+            "example": "CNY"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "业务发生时间，默认当前"
+          },
+          "storeId": {
+            "type": "string",
+            "description": "关联店铺"
+          },
+          "supplierId": {
+            "type": "string",
+            "description": "关联供应商（采购付款必填）"
+          },
+          "orderId": {
+            "type": "string",
+            "description": "关联订单（销售收入/退款必填）"
+          },
+          "purchaseOrderId": {
+            "type": "string",
+            "description": "关联采购单（采购付款必填）"
+          },
+          "remark": {
+            "type": "string"
+          }
+        },
+        "required": ["direction", "category", "amount"]
+      },
+      "FinancePayoutDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "payoutNo": {
+            "type": "string",
+            "example": "PY000001"
+          },
+          "storeId": {
+            "type": "string"
+          },
+          "periodStart": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "periodEnd": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "example": "1284.0000"
+          },
+          "currency": {
+            "type": "string",
+            "example": "CNY"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["DRAFT", "CONFIRMED", "CANCELLED"]
+          },
+          "remark": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "storeName": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "payoutNo",
+          "storeId",
+          "periodStart",
+          "periodEnd",
+          "amount",
+          "currency",
+          "status",
+          "remark",
+          "createdBy",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "FinancePayoutPreviewDto": {
+        "type": "object",
+        "properties": {
+          "payout": {
+            "$ref": "#/components/schemas/FinancePayoutDto"
+          },
+          "settledRevenue": {
+            "type": "string",
+            "example": "1284.0000"
+          },
+          "settledOrderCount": {
+            "type": "number",
+            "example": 12
+          },
+          "difference": {
+            "type": "string",
+            "example": "0.0000"
+          }
+        },
+        "required": ["payout", "settledRevenue", "settledOrderCount", "difference"]
+      },
+      "CreateFinancePayoutRequestDto": {
+        "type": "object",
+        "properties": {
+          "storeId": {
+            "type": "string"
+          },
+          "periodStart": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "periodEnd": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "amount": {
+            "type": "string",
+            "example": "1284.0000"
+          },
+          "currency": {
+            "type": "string",
+            "example": "CNY"
+          },
+          "remark": {
+            "type": "string"
+          }
+        },
+        "required": ["storeId", "periodStart", "periodEnd", "amount"]
+      },
+      "OrderSettlementDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "orderId": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string",
+            "nullable": true,
+            "example": "CNY"
+          },
+          "revenueTotal": {
+            "type": "string",
+            "example": "214.0000"
+          },
+          "productCostTotal": {
+            "type": "string",
+            "example": "160.0000"
+          },
+          "shippingFee": {
+            "type": "string",
+            "example": "25.0000"
+          },
+          "otherFee": {
+            "type": "string",
+            "example": "0.0000"
+          },
+          "profit": {
+            "type": "string",
+            "nullable": true,
+            "example": "29.0000"
+          },
+          "hasMissingPrice": {
+            "type": "boolean"
+          },
+          "hasMissingCost": {
+            "type": "boolean"
+          },
+          "generatedBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "generatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "orderNo": {
+            "type": "string",
+            "example": "ORD00000001"
+          },
+          "platformOrderId": {
+            "type": "string",
+            "example": "OZON-123"
+          },
+          "storeId": {
+            "type": "string"
+          },
+          "storeName": {
+            "type": "string",
+            "nullable": true
+          },
+          "orderedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "orderId",
+          "currency",
+          "revenueTotal",
+          "productCostTotal",
+          "shippingFee",
+          "otherFee",
+          "profit",
+          "hasMissingPrice",
+          "hasMissingCost",
+          "generatedBy",
+          "generatedAt",
+          "updatedAt"
+        ]
+      },
+      "OrderSettlementItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "settlementId": {
+            "type": "string"
+          },
+          "orderItemId": {
+            "type": "string"
+          },
+          "skuId": {
+            "type": "string",
+            "nullable": true
+          },
+          "quantity": {
+            "type": "string",
+            "example": "2.000"
+          },
+          "unitPrice": {
+            "type": "string",
+            "nullable": true,
+            "example": "107.0000"
+          },
+          "revenue": {
+            "type": "string",
+            "example": "214.0000"
+          },
+          "unitCost": {
+            "type": "string",
+            "nullable": true,
+            "example": "80.0000"
+          },
+          "cost": {
+            "type": "string",
+            "example": "160.0000"
+          }
+        },
+        "required": [
+          "id",
+          "settlementId",
+          "orderItemId",
+          "skuId",
+          "quantity",
+          "unitPrice",
+          "revenue",
+          "unitCost",
+          "cost"
+        ]
+      },
+      "OrderSettlementDetailDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "orderId": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string",
+            "nullable": true,
+            "example": "CNY"
+          },
+          "revenueTotal": {
+            "type": "string",
+            "example": "214.0000"
+          },
+          "productCostTotal": {
+            "type": "string",
+            "example": "160.0000"
+          },
+          "shippingFee": {
+            "type": "string",
+            "example": "25.0000"
+          },
+          "otherFee": {
+            "type": "string",
+            "example": "0.0000"
+          },
+          "profit": {
+            "type": "string",
+            "nullable": true,
+            "example": "29.0000"
+          },
+          "hasMissingPrice": {
+            "type": "boolean"
+          },
+          "hasMissingCost": {
+            "type": "boolean"
+          },
+          "generatedBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "generatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "orderNo": {
+            "type": "string",
+            "example": "ORD00000001"
+          },
+          "platformOrderId": {
+            "type": "string",
+            "example": "OZON-123"
+          },
+          "storeId": {
+            "type": "string"
+          },
+          "storeName": {
+            "type": "string",
+            "nullable": true
+          },
+          "orderedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderSettlementItemDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "orderId",
+          "currency",
+          "revenueTotal",
+          "productCostTotal",
+          "shippingFee",
+          "otherFee",
+          "profit",
+          "hasMissingPrice",
+          "hasMissingCost",
+          "generatedBy",
+          "generatedAt",
+          "updatedAt",
+          "items"
+        ]
+      },
+      "GenerateOrderSettlementRequestDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          }
+        },
+        "required": ["orderId"]
+      },
+      "SettlementGenerateMissingResultDto": {
+        "type": "object",
+        "properties": {
+          "generated": {
+            "type": "number",
+            "example": 3
+          },
+          "skipped": {
+            "type": "number",
+            "example": 0
+          },
+          "settlementIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["generated", "skipped", "settlementIds"]
+      },
+      "UpdateOrderSettlementFeesRequestDto": {
+        "type": "object",
+        "properties": {
+          "shippingFee": {
+            "type": "string",
+            "example": "25.0000",
+            "description": "物流费（重算毛利）"
+          },
+          "otherFee": {
+            "type": "string",
+            "example": "0.0000",
+            "description": "其他费用（重算毛利）"
+          }
+        }
+      },
+      "PayableRowDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "poNo": {
+            "type": "string",
+            "example": "PO000001"
+          },
+          "supplierId": {
+            "type": "string",
+            "nullable": true
+          },
+          "supplierName": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "example": "RECEIVED"
+          },
+          "orderedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "payableAmount": {
+            "type": "string",
+            "example": "300.0000"
+          },
+          "paidAmount": {
+            "type": "string",
+            "example": "100.0000"
+          },
+          "unpaidAmount": {
+            "type": "string",
+            "example": "200.0000"
+          },
+          "paymentState": {
+            "type": "string",
+            "enum": ["NOTHING_TO_PAY", "UNPAID", "PARTIAL", "PAID", "OVERPAID"]
+          },
+          "hasUnpricedLines": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "poNo",
+          "supplierId",
+          "supplierName",
+          "status",
+          "orderedAt",
+          "payableAmount",
+          "paidAmount",
+          "unpaidAmount",
+          "paymentState",
+          "hasUnpricedLines"
+        ]
+      },
+      "FinanceSummaryResponseDto": {
+        "type": "object",
+        "properties": {
+          "range": {
+            "type": "object",
+            "nullable": true
+          },
+          "incomeTotal": {
+            "type": "string",
+            "example": "150.0000"
+          },
+          "expenseTotal": {
+            "type": "string",
+            "example": "300.0000"
+          },
+          "netTotal": {
+            "type": "string",
+            "example": "-150.0000"
+          },
+          "settledRevenue": {
+            "type": "string",
+            "example": "214.0000"
+          },
+          "settledCost": {
+            "type": "string",
+            "example": "185.0000"
+          },
+          "settledProfit": {
+            "type": "string",
+            "example": "29.0000"
+          },
+          "unpaidPurchaseTotal": {
+            "type": "string",
+            "example": "200.0000"
+          },
+          "confirmedPayoutTotal": {
+            "type": "string",
+            "example": "150.0000"
+          }
+        },
+        "required": [
+          "range",
+          "incomeTotal",
+          "expenseTotal",
+          "netTotal",
+          "settledRevenue",
+          "settledCost",
+          "settledProfit",
+          "unpaidPurchaseTotal",
+          "confirmedPayoutTotal"
+        ]
+      },
+      "TransferOrderDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "transferNo": {
+            "type": "string",
+            "example": "TRF000001"
+          },
+          "fromWarehouseId": {
+            "type": "string"
+          },
+          "toWarehouseId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["DRAFT", "CONFIRMED", "CANCELLED"]
+          },
+          "remark": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "fromWarehouseName": {
+            "type": "string",
+            "nullable": true
+          },
+          "toWarehouseName": {
+            "type": "string",
+            "nullable": true
+          },
+          "linesCount": {
+            "type": "number",
+            "example": 2
+          }
+        },
+        "required": [
+          "id",
+          "transferNo",
+          "fromWarehouseId",
+          "toWarehouseId",
+          "status",
+          "remark",
+          "createdBy",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "TransferOrderLineDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "transferId": {
+            "type": "string"
+          },
+          "skuId": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "string",
+            "example": "4.000"
+          },
+          "fromBinId": {
+            "type": "string",
+            "nullable": true
+          },
+          "toBinId": {
+            "type": "string",
+            "nullable": true
+          },
+          "outEventNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "inEventNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "remark": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "skuCode": {
+            "type": "string",
+            "example": "SKU000001001"
+          },
+          "skuName": {
+            "type": "string",
+            "example": "浴帘 黑色"
+          },
+          "fromBinCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "toBinCode": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "transferId",
+          "skuId",
+          "quantity",
+          "fromBinId",
+          "toBinId",
+          "outEventNo",
+          "inEventNo",
+          "remark",
+          "createdAt"
+        ]
+      },
+      "TransferOrderDetailDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "transferNo": {
+            "type": "string",
+            "example": "TRF000001"
+          },
+          "fromWarehouseId": {
+            "type": "string"
+          },
+          "toWarehouseId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["DRAFT", "CONFIRMED", "CANCELLED"]
+          },
+          "remark": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "fromWarehouseName": {
+            "type": "string",
+            "nullable": true
+          },
+          "toWarehouseName": {
+            "type": "string",
+            "nullable": true
+          },
+          "linesCount": {
+            "type": "number",
+            "example": 2
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TransferOrderLineDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "transferNo",
+          "fromWarehouseId",
+          "toWarehouseId",
+          "status",
+          "remark",
+          "createdBy",
+          "createdAt",
+          "updatedAt",
+          "lines"
+        ]
+      },
+      "TransferLineInputDto": {
+        "type": "object",
+        "properties": {
+          "skuId": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "string",
+            "example": "5"
+          },
+          "fromBinId": {
+            "type": "string",
+            "description": "源库位（空 = 源仓默认库位）"
+          },
+          "toBinId": {
+            "type": "string",
+            "description": "目标库位（空 = 目标仓默认库位）"
+          },
+          "remark": {
+            "type": "string"
+          }
+        },
+        "required": ["skuId", "quantity"]
+      },
+      "CreateTransferRequestDto": {
+        "type": "object",
+        "properties": {
+          "fromWarehouseId": {
+            "type": "string",
+            "description": "源仓库"
+          },
+          "toWarehouseId": {
+            "type": "string",
+            "description": "目标仓库"
+          },
+          "remark": {
+            "type": "string"
+          },
+          "lines": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TransferLineInputDto"
+            }
+          }
+        },
+        "required": ["fromWarehouseId", "toWarehouseId", "lines"]
+      },
+      "AddTransferLineRequestDto": {
+        "type": "object",
+        "properties": {
+          "skuId": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "string",
+            "example": "5"
+          },
+          "fromBinId": {
+            "type": "string",
+            "description": "源库位（空 = 源仓默认库位）"
+          },
+          "toBinId": {
+            "type": "string",
+            "description": "目标库位（空 = 目标仓默认库位）"
+          },
+          "remark": {
+            "type": "string"
+          }
+        },
+        "required": ["skuId", "quantity"]
       },
       "TestJobResultDto": {
         "type": "object",

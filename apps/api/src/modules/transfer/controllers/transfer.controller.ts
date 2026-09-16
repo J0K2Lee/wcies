@@ -18,6 +18,8 @@ import {
   AddTransferLineRequestDto,
   CreateTransferRequestDto,
   TransferListQueryDto,
+  TransferOrderDetailDto,
+  TransferOrderDto,
 } from '../dto/transfer.dto';
 import { TransferService } from '../services/transfer.service';
 
@@ -29,7 +31,7 @@ export class TransferController {
 
   @Get()
   @ApiOperation({ summary: '调拨单列表' })
-  @ApiOkPagedEnvelope(Object)
+  @ApiOkPagedEnvelope(TransferOrderDto)
   async list(@Query() query: TransferListQueryDto) {
     const result = await this.transfers.list(
       {
@@ -45,14 +47,14 @@ export class TransferController {
 
   @Get(':id')
   @ApiOperation({ summary: '调拨单详情（含行与库位）' })
-  @ApiOkEnvelope(Object)
+  @ApiOkEnvelope(TransferOrderDetailDto)
   async getDetail(@Param('id') id: string) {
     return ok(await this.transfers.getDetail(id));
   }
 
   @Post()
   @ApiOperation({ summary: '登记调拨单（DRAFT，可继续增删行）' })
-  @ApiOkEnvelope(Object)
+  @ApiOkEnvelope(TransferOrderDto)
   async create(
     @Body() body: CreateTransferRequestDto,
     @CurrentOperator() operator: OperatorContext,
@@ -79,7 +81,7 @@ export class TransferController {
   @Post(':id/lines')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '调拨单追加明细行（仅 DRAFT）' })
-  @ApiOkEnvelope(Object)
+  @ApiOkEnvelope(TransferOrderDto)
   async addLine(
     @Param('id') id: string,
     @Body() body: AddTransferLineRequestDto,
@@ -102,7 +104,7 @@ export class TransferController {
 
   @Delete(':id/lines/:lineId')
   @ApiOperation({ summary: '调拨单删除明细行（仅 DRAFT）' })
-  @ApiOkEnvelope(Object)
+  @ApiOkEnvelope(TransferOrderDto)
   async removeLine(
     @Param('id') id: string,
     @Param('lineId') lineId: string,
@@ -114,7 +116,7 @@ export class TransferController {
   @Post(':id/confirm')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '确认调拨（单事务双段移库，任一行失败整体回滚）' })
-  @ApiOkEnvelope(Object)
+  @ApiOkEnvelope(TransferOrderDto)
   async confirm(@Param('id') id: string, @CurrentOperator() operator: OperatorContext) {
     return ok(await this.transfers.confirm(id, operator));
   }
@@ -122,7 +124,7 @@ export class TransferController {
   @Post(':id/cancel')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '取消调拨（仅 DRAFT，未碰库存）' })
-  @ApiOkEnvelope(Object)
+  @ApiOkEnvelope(TransferOrderDto)
   async cancel(@Param('id') id: string, @CurrentOperator() operator: OperatorContext) {
     return ok(await this.transfers.cancel(id, operator));
   }

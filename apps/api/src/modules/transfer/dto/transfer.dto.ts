@@ -71,3 +71,43 @@ export class TransferListQueryDto extends PaginationQueryDto {
   @IsIn(TRANSFER_ORDER_STATUSES)
   status?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Response DTOs (contract guard: envelopes must resolve to real schemas).
+// ---------------------------------------------------------------------------
+
+export class TransferOrderDto {
+  @ApiProperty() id!: string;
+  @ApiProperty({ example: 'TRF000001' }) transferNo!: string;
+  @ApiProperty() fromWarehouseId!: string;
+  @ApiProperty() toWarehouseId!: string;
+  @ApiProperty({ enum: TRANSFER_ORDER_STATUSES }) status!: string;
+  @ApiProperty({ nullable: true, type: String }) remark!: string | null;
+  @ApiProperty({ nullable: true, type: String }) createdBy!: string | null;
+  @ApiProperty({ type: Date }) createdAt!: Date;
+  @ApiProperty({ type: Date }) updatedAt!: Date;
+  @ApiPropertyOptional({ nullable: true, type: String }) fromWarehouseName!: string | null;
+  @ApiPropertyOptional({ nullable: true, type: String }) toWarehouseName!: string | null;
+  @ApiPropertyOptional({ example: 2 }) linesCount!: number;
+}
+
+export class TransferOrderLineDto {
+  @ApiProperty() id!: string;
+  @ApiProperty() transferId!: string;
+  @ApiProperty() skuId!: string;
+  @ApiProperty({ example: '4.000' }) quantity!: string;
+  @ApiProperty({ nullable: true, type: String }) fromBinId!: string | null;
+  @ApiProperty({ nullable: true, type: String }) toBinId!: string | null;
+  @ApiProperty({ nullable: true, type: String }) outEventNo!: string | null;
+  @ApiProperty({ nullable: true, type: String }) inEventNo!: string | null;
+  @ApiProperty({ nullable: true, type: String }) remark!: string | null;
+  @ApiProperty({ type: Date }) createdAt!: Date;
+  @ApiPropertyOptional({ example: 'SKU000001001' }) skuCode!: string;
+  @ApiPropertyOptional({ example: '浴帘 黑色' }) skuName!: string;
+  @ApiPropertyOptional({ nullable: true, type: String }) fromBinCode!: string | null;
+  @ApiPropertyOptional({ nullable: true, type: String }) toBinCode!: string | null;
+}
+
+export class TransferOrderDetailDto extends TransferOrderDto {
+  @ApiProperty({ type: [TransferOrderLineDto] }) lines!: TransferOrderLineDto[];
+}

@@ -29,6 +29,13 @@ import { ExceptionsPage } from '../pages/exceptions/ExceptionsPage';
 import { SuppliersPage } from '../pages/purchase/SuppliersPage';
 import { PurchaseOrdersPage } from '../pages/purchase/PurchaseOrdersPage';
 import { PurchaseReceiptsPage } from '../pages/purchase/PurchaseReceiptsPage';
+import { FinanceOverviewPage } from '../pages/finance/FinanceOverviewPage';
+import { FinanceTransactionsPage } from '../pages/finance/FinanceTransactionsPage';
+import { FinancePayoutsPage } from '../pages/finance/FinancePayoutsPage';
+import { FinanceSettlementsPage } from '../pages/finance/FinanceSettlementsPage';
+import { FinancePayablesPage } from '../pages/finance/FinancePayablesPage';
+import { TransfersPage } from '../pages/transfer/TransfersPage';
+import { ReplenishmentPage } from '../pages/inventory/ReplenishmentPage';
 import { SystemPage } from '../pages/system/SystemPage';
 import { PlatformMappingsPage } from '../pages/system/PlatformMappingsPage';
 import { EmptyState } from '../design-system';
@@ -52,6 +59,7 @@ export function App() {
           <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/inventory/transactions" element={<InventoryTransactionsPage />} />
           <Route path="/inventory/reservations" element={<ReservationsPage />} />
+          <Route path="/inventory/replenishment" element={<ReplenishmentPage />} />
           <Route path="/orders" element={<OrdersPage />} />
           {/* 作业中心：拣货/发货/拦截/退货合并入口；旧列表路由重定向保持深链兼容。 */}
           <Route path="/warehouse-ops" element={<WarehouseOpsPage />} />
@@ -75,6 +83,13 @@ export function App() {
           <Route path="/suppliers" element={<SuppliersPage />} />
           <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
           <Route path="/purchase-receipts" element={<PurchaseReceiptsPage />} />
+          {/* 财务中心（Sprint 10）：流水/回款/结算/应付 + 总览。 */}
+          <Route path="/finance" element={<FinanceOverviewPage />} />
+          <Route path="/finance/transactions" element={<FinanceTransactionsPage />} />
+          <Route path="/finance/payouts" element={<FinancePayoutsPage />} />
+          <Route path="/finance/settlements" element={<FinanceSettlementsPage />} />
+          <Route path="/finance/payables" element={<FinancePayablesPage />} />
+          <Route path="/transfers" element={<TransfersPage />} />
           <Route path="/system" element={<SystemPage />} />
           <Route path="/platform-mappings" element={<PlatformMappingsPage />} />
           {/* 404：未知路由回到空态 + 返回首页（Phase 3 G10）。 */}

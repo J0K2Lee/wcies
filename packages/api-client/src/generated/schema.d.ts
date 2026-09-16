@@ -1378,6 +1378,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/inventory/replenishment-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 补货建议（派生建议：销速/安全库存/在途采购 → 建议采购量） */
+        get: operations["InventoryReservationController_replenishmentSuggestions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/inventory/reservations/{id}": {
         parameters: {
             query?: never;
@@ -2573,6 +2590,366 @@ export interface paths {
         put?: never;
         /** OZON push notification 入口（保存 raw event 后立即返回） */
         post: operations["OzonWebhookController_receive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 收支流水列表 */
+        get: operations["FinanceController_listTransactions"];
+        put?: never;
+        /** 登记收支流水（追加型，不可修改；错账用冲正） */
+        post: operations["FinanceController_createTransaction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/transactions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 收支流水详情 */
+        get: operations["FinanceController_getTransaction"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/transactions/{id}/reverse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 冲正流水（生成方向相反的成对凭证） */
+        post: operations["FinanceController_reverseTransaction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/payouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 平台回款单列表 */
+        get: operations["FinanceController_listPayouts"];
+        put?: never;
+        /** 登记平台回款单（DRAFT） */
+        post: operations["FinanceController_createPayout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/payouts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 平台回款单详情 */
+        get: operations["FinanceController_getPayout"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/payouts/{id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 回款对账预览（应计收入 vs 打款金额，人工判断） */
+        get: operations["FinanceController_previewPayout"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/payouts/{id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 确认回款（自动生成销售收入流水，幂等） */
+        post: operations["FinanceController_confirmPayout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/payouts/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 取消回款（仅 DRAFT；确认后错账走冲正） */
+        post: operations["FinanceController_cancelPayout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/settlements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 订单结算列表（收入/成本/毛利快照） */
+        get: operations["FinanceController_listSettlements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/settlements/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 订单结算详情（含行快照） */
+        get: operations["FinanceController_getSettlement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/settlements/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 生成单笔订单结算（仅已发货订单，幂等） */
+        post: operations["FinanceController_generateSettlement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/settlements/generate-missing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量生成全部缺失结算（已发货未结算订单） */
+        post: operations["FinanceController_generateMissingSettlements"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/settlements/{id}/fees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** 修改结算费用（物流/其他，重算毛利；行快照不可改） */
+        patch: operations["FinanceController_updateSettlementFees"];
+        trace?: never;
+    };
+    "/api/v1/finance/payables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 采购应付列表（应付/已付/未付均为派生值） */
+        get: operations["FinanceController_listPayables"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 财务汇总（期间收支/毛利/应付/回款，全部派生） */
+        get: operations["FinanceController_summary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/transfers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 调拨单列表 */
+        get: operations["TransferController_list"];
+        put?: never;
+        /** 登记调拨单（DRAFT，可继续增删行） */
+        post: operations["TransferController_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/transfers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 调拨单详情（含行与库位） */
+        get: operations["TransferController_getDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/transfers/{id}/lines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 调拨单追加明细行（仅 DRAFT） */
+        post: operations["TransferController_addLine"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/transfers/{id}/lines/{lineId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 调拨单删除明细行（仅 DRAFT） */
+        delete: operations["TransferController_removeLine"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/transfers/{id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 确认调拨（单事务双段移库，任一行失败整体回滚） */
+        post: operations["TransferController_confirm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/transfers/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 取消调拨（仅 DRAFT，未碰库存） */
+        post: operations["TransferController_cancel"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4099,9 +4476,9 @@ export interface components {
             /** @example IEV00000042 */
             eventNo: string;
             /** @enum {string} */
-            eventType: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "RETURN_PICKED" | "MOVE_BIN" | "MANUAL_ADJUSTMENT";
+            eventType: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "RETURN_PICKED" | "MOVE_BIN" | "MANUAL_ADJUSTMENT" | "TRANSFER_OUT" | "TRANSFER_IN";
             /** @enum {string} */
-            transactionType: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "RETURN_PICKED" | "MOVE_BIN" | "MANUAL_ADJUSTMENT";
+            transactionType: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "RETURN_PICKED" | "MOVE_BIN" | "MANUAL_ADJUSTMENT" | "TRANSFER_OUT" | "TRANSFER_IN";
             skuId: string;
             skuCode: string;
             warehouseId: string;
@@ -4118,7 +4495,7 @@ export interface components {
             pickedChange?: Record<string, never> | null;
             pickedAfter?: Record<string, never> | null;
             /** @enum {string} */
-            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT" | "RETURN_RECEIPT";
+            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT" | "RETURN_RECEIPT" | "TRANSFER";
             referenceId: string;
             operatorId?: Record<string, never> | null;
             operatorName?: Record<string, never> | null;
@@ -4171,7 +4548,7 @@ export interface components {
             /** @description SN 管理商品必填：与数量一致的 SN 列表；非 SN 商品禁止提供 */
             serialNumbers?: string[];
             /** @enum {string} */
-            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT" | "RETURN_RECEIPT";
+            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT" | "RETURN_RECEIPT" | "TRANSFER";
             referenceId: string;
             remark?: string;
             /** @example INIT:PRD-VK87:2026-09-08 */
@@ -4195,7 +4572,7 @@ export interface components {
             /** @description SN 管理商品必填：与数量一致的 SN 列表；非 SN 商品禁止提供 */
             serialNumbers?: string[];
             /** @enum {string} */
-            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT" | "RETURN_RECEIPT";
+            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT" | "RETURN_RECEIPT" | "TRANSFER";
             referenceId: string;
             remark?: string;
             /** @example INIT:PRD-VK87:2026-09-08 */
@@ -4248,7 +4625,7 @@ export interface components {
             /** @example 4 */
             quantity: string;
             /** @enum {string} */
-            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT" | "RETURN_RECEIPT";
+            referenceType: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT" | "RETURN_RECEIPT" | "TRANSFER";
             referenceId: string;
             remark?: string;
             idempotencyKey: string;
@@ -4299,6 +4676,34 @@ export interface components {
             remark?: string;
             /** @example ORDER_RESERVE:orderItem123 */
             idempotencyKey: string;
+        };
+        ReplenishmentSuggestionDto: {
+            skuId: string;
+            /** @example SKU000001001 */
+            skuCode: string;
+            /** @example 浴帘 黑色 */
+            skuName: string;
+            /** @example ACTIVE */
+            skuStatus: string;
+            /** @example 6.000 */
+            onHandQty: string;
+            /** @example 2.000 */
+            reservedQty: string;
+            /** @example 0.000 */
+            pickedQty: string;
+            /** @example 4.000 */
+            availableQty: string;
+            /** @example 2.000 */
+            safetyQty: string;
+            /** @example 30.000 */
+            shippedInWindowQty: string;
+            /** @example 1.000 */
+            dailyVelocityQty: string;
+            /** @example 12.000 */
+            openPoQty: string;
+            /** @example 16.000 */
+            suggestedQty: string;
+            needsReplenishment: boolean;
         };
         ReservationListItemDto: {
             id: string;
@@ -4430,6 +4835,16 @@ export interface components {
             warehouseId: string | null;
             /** @example 2.000 */
             quantity: string;
+            /**
+             * @description 平台单价（财务事实，finance.md §2）；平台未提供为 null
+             * @example 107.0000
+             */
+            unitPrice?: Record<string, never> | null;
+            /**
+             * @description 行金额 = 单价 × 数量；无价为 null
+             * @example 214.0000
+             */
+            totalPrice?: Record<string, never> | null;
             /** @enum {string} */
             fulfillmentStatus: "PENDING" | "RESERVED" | "BACKORDERED" | "PICKED" | "SHIPPED" | "RELEASED";
             /** @enum {string} */
@@ -4563,6 +4978,11 @@ export interface components {
             offerId?: string;
             /** @example 2 */
             quantity: string;
+            /**
+             * @description 平台单价（财务事实，finance.md §2）；平台未提供为 null，禁止臆造为 0
+             * @example 107.0000
+             */
+            unitPrice?: Record<string, never> | null;
             rawData?: Record<string, never>;
         };
         NormalizedOrderInputDto: {
@@ -5580,6 +6000,332 @@ export interface components {
             processedAt: string | null;
             errorCode: string | null;
             errorMessage: string | null;
+        };
+        FinanceTransactionDto: {
+            id: string;
+            /** @example FV000001 */
+            voucherNo: string;
+            /** @enum {string} */
+            direction: "INCOME" | "EXPENSE";
+            /** @enum {string} */
+            category: "SALE_INCOME" | "SALE_REFUND" | "PURCHASE_PAYMENT" | "SUPPLIER_REFUND" | "PLATFORM_FEE" | "LOGISTICS_FEE" | "OTHER_INCOME" | "OTHER_EXPENSE";
+            /** @example 107.0000 */
+            amount: string;
+            /** @example CNY */
+            currency: string;
+            /** Format: date-time */
+            occurredAt: string;
+            storeId: string | null;
+            supplierId: string | null;
+            orderId: string | null;
+            purchaseOrderId: string | null;
+            payoutId: string | null;
+            reversedByVoucherNo: string | null;
+            remark: string | null;
+            createdBy: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            storeName?: string | null;
+            supplierName?: string | null;
+            orderNo?: string | null;
+            purchaseOrderNo?: string | null;
+        };
+        CreateFinanceTransactionRequestDto: {
+            /** @enum {string} */
+            direction: "INCOME" | "EXPENSE";
+            /** @enum {string} */
+            category: "SALE_INCOME" | "SALE_REFUND" | "PURCHASE_PAYMENT" | "SUPPLIER_REFUND" | "PLATFORM_FEE" | "LOGISTICS_FEE" | "OTHER_INCOME" | "OTHER_EXPENSE";
+            /** @example 107.0000 */
+            amount: string;
+            /** @example CNY */
+            currency?: string;
+            /**
+             * Format: date-time
+             * @description 业务发生时间，默认当前
+             */
+            occurredAt?: string;
+            /** @description 关联店铺 */
+            storeId?: string;
+            /** @description 关联供应商（采购付款必填） */
+            supplierId?: string;
+            /** @description 关联订单（销售收入/退款必填） */
+            orderId?: string;
+            /** @description 关联采购单（采购付款必填） */
+            purchaseOrderId?: string;
+            remark?: string;
+        };
+        FinancePayoutDto: {
+            id: string;
+            /** @example PY000001 */
+            payoutNo: string;
+            storeId: string;
+            /** Format: date-time */
+            periodStart: string;
+            /** Format: date-time */
+            periodEnd: string;
+            /** @example 1284.0000 */
+            amount: string;
+            /** @example CNY */
+            currency: string;
+            /** @enum {string} */
+            status: "DRAFT" | "CONFIRMED" | "CANCELLED";
+            remark: string | null;
+            createdBy: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            storeName?: string | null;
+        };
+        FinancePayoutPreviewDto: {
+            payout: components["schemas"]["FinancePayoutDto"];
+            /** @example 1284.0000 */
+            settledRevenue: string;
+            /** @example 12 */
+            settledOrderCount: number;
+            /** @example 0.0000 */
+            difference: string;
+        };
+        CreateFinancePayoutRequestDto: {
+            storeId: string;
+            /** Format: date-time */
+            periodStart: string;
+            /** Format: date-time */
+            periodEnd: string;
+            /** @example 1284.0000 */
+            amount: string;
+            /** @example CNY */
+            currency?: string;
+            remark?: string;
+        };
+        OrderSettlementDto: {
+            id: string;
+            orderId: string;
+            /** @example CNY */
+            currency: string | null;
+            /** @example 214.0000 */
+            revenueTotal: string;
+            /** @example 160.0000 */
+            productCostTotal: string;
+            /** @example 25.0000 */
+            shippingFee: string;
+            /** @example 0.0000 */
+            otherFee: string;
+            /** @example 29.0000 */
+            profit: string | null;
+            hasMissingPrice: boolean;
+            hasMissingCost: boolean;
+            generatedBy: string | null;
+            /** Format: date-time */
+            generatedAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** @example ORD00000001 */
+            orderNo?: string;
+            /** @example OZON-123 */
+            platformOrderId?: string;
+            storeId?: string;
+            storeName?: string | null;
+            /** Format: date-time */
+            orderedAt?: string;
+        };
+        OrderSettlementItemDto: {
+            id: string;
+            settlementId: string;
+            orderItemId: string;
+            skuId: string | null;
+            /** @example 2.000 */
+            quantity: string;
+            /** @example 107.0000 */
+            unitPrice: string | null;
+            /** @example 214.0000 */
+            revenue: string;
+            /** @example 80.0000 */
+            unitCost: string | null;
+            /** @example 160.0000 */
+            cost: string;
+        };
+        OrderSettlementDetailDto: {
+            id: string;
+            orderId: string;
+            /** @example CNY */
+            currency: string | null;
+            /** @example 214.0000 */
+            revenueTotal: string;
+            /** @example 160.0000 */
+            productCostTotal: string;
+            /** @example 25.0000 */
+            shippingFee: string;
+            /** @example 0.0000 */
+            otherFee: string;
+            /** @example 29.0000 */
+            profit: string | null;
+            hasMissingPrice: boolean;
+            hasMissingCost: boolean;
+            generatedBy: string | null;
+            /** Format: date-time */
+            generatedAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** @example ORD00000001 */
+            orderNo?: string;
+            /** @example OZON-123 */
+            platformOrderId?: string;
+            storeId?: string;
+            storeName?: string | null;
+            /** Format: date-time */
+            orderedAt?: string;
+            items: components["schemas"]["OrderSettlementItemDto"][];
+        };
+        GenerateOrderSettlementRequestDto: {
+            orderId: string;
+        };
+        SettlementGenerateMissingResultDto: {
+            /** @example 3 */
+            generated: number;
+            /** @example 0 */
+            skipped: number;
+            settlementIds: string[];
+        };
+        UpdateOrderSettlementFeesRequestDto: {
+            /**
+             * @description 物流费（重算毛利）
+             * @example 25.0000
+             */
+            shippingFee?: string;
+            /**
+             * @description 其他费用（重算毛利）
+             * @example 0.0000
+             */
+            otherFee?: string;
+        };
+        PayableRowDto: {
+            id: string;
+            /** @example PO000001 */
+            poNo: string;
+            supplierId: string | null;
+            supplierName: string | null;
+            /** @example RECEIVED */
+            status: string;
+            /** Format: date-time */
+            orderedAt: string;
+            /** @example 300.0000 */
+            payableAmount: string;
+            /** @example 100.0000 */
+            paidAmount: string;
+            /** @example 200.0000 */
+            unpaidAmount: string;
+            /** @enum {string} */
+            paymentState: "NOTHING_TO_PAY" | "UNPAID" | "PARTIAL" | "PAID" | "OVERPAID";
+            hasUnpricedLines: boolean;
+        };
+        FinanceSummaryResponseDto: {
+            range: Record<string, never> | null;
+            /** @example 150.0000 */
+            incomeTotal: string;
+            /** @example 300.0000 */
+            expenseTotal: string;
+            /** @example -150.0000 */
+            netTotal: string;
+            /** @example 214.0000 */
+            settledRevenue: string;
+            /** @example 185.0000 */
+            settledCost: string;
+            /** @example 29.0000 */
+            settledProfit: string;
+            /** @example 200.0000 */
+            unpaidPurchaseTotal: string;
+            /** @example 150.0000 */
+            confirmedPayoutTotal: string;
+        };
+        TransferOrderDto: {
+            id: string;
+            /** @example TRF000001 */
+            transferNo: string;
+            fromWarehouseId: string;
+            toWarehouseId: string;
+            /** @enum {string} */
+            status: "DRAFT" | "CONFIRMED" | "CANCELLED";
+            remark: string | null;
+            createdBy: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            fromWarehouseName?: string | null;
+            toWarehouseName?: string | null;
+            /** @example 2 */
+            linesCount?: number;
+        };
+        TransferOrderLineDto: {
+            id: string;
+            transferId: string;
+            skuId: string;
+            /** @example 4.000 */
+            quantity: string;
+            fromBinId: string | null;
+            toBinId: string | null;
+            outEventNo: string | null;
+            inEventNo: string | null;
+            remark: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** @example SKU000001001 */
+            skuCode?: string;
+            /** @example 浴帘 黑色 */
+            skuName?: string;
+            fromBinCode?: string | null;
+            toBinCode?: string | null;
+        };
+        TransferOrderDetailDto: {
+            id: string;
+            /** @example TRF000001 */
+            transferNo: string;
+            fromWarehouseId: string;
+            toWarehouseId: string;
+            /** @enum {string} */
+            status: "DRAFT" | "CONFIRMED" | "CANCELLED";
+            remark: string | null;
+            createdBy: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            fromWarehouseName?: string | null;
+            toWarehouseName?: string | null;
+            /** @example 2 */
+            linesCount?: number;
+            lines: components["schemas"]["TransferOrderLineDto"][];
+        };
+        TransferLineInputDto: {
+            skuId: string;
+            /** @example 5 */
+            quantity: string;
+            /** @description 源库位（空 = 源仓默认库位） */
+            fromBinId?: string;
+            /** @description 目标库位（空 = 目标仓默认库位） */
+            toBinId?: string;
+            remark?: string;
+        };
+        CreateTransferRequestDto: {
+            /** @description 源仓库 */
+            fromWarehouseId: string;
+            /** @description 目标仓库 */
+            toWarehouseId: string;
+            remark?: string;
+            lines: components["schemas"]["TransferLineInputDto"][];
+        };
+        AddTransferLineRequestDto: {
+            skuId: string;
+            /** @example 5 */
+            quantity: string;
+            /** @description 源库位（空 = 源仓默认库位） */
+            fromBinId?: string;
+            /** @description 目标库位（空 = 目标仓默认库位） */
+            toBinId?: string;
+            remark?: string;
         };
         TestJobResultDto: {
             /** @example 42 */
@@ -8404,8 +9150,8 @@ export interface operations {
                 skuId?: string;
                 warehouseId?: string;
                 binId?: string;
-                transactionType?: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "RETURN_PICKED" | "MOVE_BIN" | "MANUAL_ADJUSTMENT";
-                referenceType?: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT" | "RETURN_RECEIPT";
+                transactionType?: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "RETURN_PICKED" | "MOVE_BIN" | "MANUAL_ADJUSTMENT" | "TRANSFER_OUT" | "TRANSFER_IN";
+                referenceType?: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT" | "RETURN_RECEIPT" | "TRANSFER";
                 referenceId?: string;
                 createdFrom?: string;
                 createdTo?: string;
@@ -8599,6 +9345,34 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["ReservationDto"];
+                    };
+                };
+            };
+        };
+    };
+    InventoryReservationController_replenishmentSuggestions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ReplenishmentSuggestionDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
                     };
                 };
             };
@@ -10863,6 +11637,672 @@ export interface operations {
                          * @example 2026-09-14T15:30:00Z
                          */
                         time: string;
+                    };
+                };
+            };
+        };
+    };
+    FinanceController_listTransactions: {
+        parameters: {
+            query?: {
+                /** @description 凭证号 / 订单号 / 采购单号模糊搜索 */
+                keyword?: string;
+                direction?: "INCOME" | "EXPENSE";
+                category?: "SALE_INCOME" | "SALE_REFUND" | "PURCHASE_PAYMENT" | "SUPPLIER_REFUND" | "PLATFORM_FEE" | "LOGISTICS_FEE" | "OTHER_INCOME" | "OTHER_EXPENSE";
+                storeId?: string;
+                supplierId?: string;
+                orderId?: string;
+                purchaseOrderId?: string;
+                payoutId?: string;
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["FinanceTransactionDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    FinanceController_createTransaction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateFinanceTransactionRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["FinanceTransactionDto"];
+                    };
+                };
+            };
+        };
+    };
+    FinanceController_getTransaction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["FinanceTransactionDto"];
+                    };
+                };
+            };
+        };
+    };
+    FinanceController_reverseTransaction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["FinanceTransactionDto"];
+                    };
+                };
+            };
+        };
+    };
+    FinanceController_listPayouts: {
+        parameters: {
+            query?: {
+                /** @description 回款单号模糊搜索 */
+                keyword?: string;
+                storeId?: string;
+                status?: "DRAFT" | "CONFIRMED" | "CANCELLED";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["FinancePayoutDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    FinanceController_createPayout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateFinancePayoutRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["FinancePayoutDto"];
+                    };
+                };
+            };
+        };
+    };
+    FinanceController_getPayout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["FinancePayoutDto"];
+                    };
+                };
+            };
+        };
+    };
+    FinanceController_previewPayout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["FinancePayoutPreviewDto"];
+                    };
+                };
+            };
+        };
+    };
+    FinanceController_confirmPayout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["FinancePayoutDto"];
+                    };
+                };
+            };
+        };
+    };
+    FinanceController_cancelPayout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["FinancePayoutDto"];
+                    };
+                };
+            };
+        };
+    };
+    FinanceController_listSettlements: {
+        parameters: {
+            query?: {
+                /** @description 订单号 / 平台订单号模糊搜索 */
+                keyword?: string;
+                storeId?: string;
+                /** @description 结算生成时间 ≥ */
+                from?: string;
+                /** @description 结算生成时间 < */
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderSettlementDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    FinanceController_getSettlement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderSettlementDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    FinanceController_generateSettlement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerateOrderSettlementRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderSettlementDto"];
+                    };
+                };
+            };
+        };
+    };
+    FinanceController_generateMissingSettlements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SettlementGenerateMissingResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    FinanceController_updateSettlementFees: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateOrderSettlementFeesRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderSettlementDto"];
+                    };
+                };
+            };
+        };
+    };
+    FinanceController_listPayables: {
+        parameters: {
+            query?: {
+                /** @description 采购单号 / 供应商模糊搜索 */
+                keyword?: string;
+                paymentState?: "NOTHING_TO_PAY" | "UNPAID" | "PARTIAL" | "PAID" | "OVERPAID";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PayableRowDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    FinanceController_summary: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["FinanceSummaryResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    TransferController_list: {
+        parameters: {
+            query?: {
+                /** @description 调拨单号模糊搜索 */
+                keyword?: string;
+                fromWarehouseId?: string;
+                toWarehouseId?: string;
+                status?: "DRAFT" | "CONFIRMED" | "CANCELLED";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["TransferOrderDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    TransferController_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTransferRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["TransferOrderDto"];
+                    };
+                };
+            };
+        };
+    };
+    TransferController_getDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["TransferOrderDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    TransferController_addLine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddTransferLineRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["TransferOrderDto"];
+                    };
+                };
+            };
+        };
+    };
+    TransferController_removeLine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                lineId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["TransferOrderDto"];
+                    };
+                };
+            };
+        };
+    };
+    TransferController_confirm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["TransferOrderDto"];
+                    };
+                };
+            };
+        };
+    };
+    TransferController_cancel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["TransferOrderDto"];
                     };
                 };
             };

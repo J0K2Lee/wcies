@@ -11,6 +11,7 @@ import {
   HomeOutlined,
   InboxOutlined,
   LayoutOutlined,
+  PayCircleOutlined,
   QuestionCircleOutlined,
   ShopOutlined,
   ShoppingCartOutlined,
@@ -63,6 +64,8 @@ const MENU_ITEMS = [
       { key: '/inventory', label: '库存查询' },
       { key: '/inventory/transactions', label: '库存流水' },
       { key: '/inventory/reservations', label: '库存占用' },
+      { key: '/inventory/replenishment', label: '补货建议' },
+      { key: '/transfers', label: '调拨单' },
     ],
   },
   {
@@ -73,6 +76,18 @@ const MENU_ITEMS = [
       { key: '/purchase-orders', label: '采购单' },
       { key: '/purchase-receipts', label: '收货单' },
       { key: '/suppliers', label: '供应商' },
+    ],
+  },
+  {
+    key: 'finance-group',
+    label: '财务',
+    icon: <PayCircleOutlined />,
+    children: [
+      { key: '/finance', label: '财务总览' },
+      { key: '/finance/transactions', label: '收支流水' },
+      { key: '/finance/payouts', label: '平台回款' },
+      { key: '/finance/settlements', label: '订单结算' },
+      { key: '/finance/payables', label: '采购应付' },
     ],
   },
   {

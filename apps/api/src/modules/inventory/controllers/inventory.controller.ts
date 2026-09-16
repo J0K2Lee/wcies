@@ -44,6 +44,7 @@ import {
   TransactionListQueryDto,
   UpsertSafetyStockRequestDto,
 } from '../dto/inventory.dto';
+import { ReplenishmentSuggestionDto } from '../dto/replenishment.dto';
 
 /**
  * Inventory core HTTP API (task §41-§45): read models are authenticated;
@@ -247,7 +248,7 @@ export class InventoryReservationController {
   @ApiOperation({
     summary: '补货建议（派生建议：销速/安全库存/在途采购 → 建议采购量）',
   })
-  @ApiOkPagedEnvelope(Object)
+  @ApiOkPagedEnvelope(ReplenishmentSuggestionDto)
   async replenishmentSuggestions(
     @Query()
     query: {
