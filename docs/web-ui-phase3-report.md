@@ -65,6 +65,18 @@
 
 验证：typecheck / eslint / build / check:architecture / vitest(19) 全绿；dev 实测 SKU 右栏「在库/已占用/可售 + 规格·重量 1200 g + 1 个商品链接」、SKU映射页「共 1324 个商品链接」「未映射总数 1320 个商品链接」、映射总览 KPI 与同步中心 KPI 全中文（截图 `verify_skus_rail_cn_terms_weight.png`、`verify_listings_cn_terms.png`）。
 
+### 2.2 信息架构与同步中心事件订阅（用户复验跟进，2026-09-16）
+
+用户复验指出导航分区与同步中心事件体验问题，全部落地：
+
+- **导航分区**：「店铺管理 / 店仓绑定」从「同步与异常」移出，成立独立「店铺」分组（订单之后）；「通知中心」从「系统」移出，成为独立顶级导航项（同步与异常之后）；「系统」组仅保留 系统管理 / 导入中心。
+- **仓库作业合并**：拣货 / 发货 / 拦截 / 退货四个列表页合并为单入口「作业中心」（`/warehouse-ops?tab=picking|shipments|interceptions|returns`，页内 Tab 切换，`destroyOnHidden` 保证右栏注册互不覆盖）；导航从 6 项降到 3 项（作业中心 / 仓库管理 / 库位管理）。旧路由 `/picking`、`/shipments`、`/interceptions`、`/returns` 保留为 `<Navigate replace>` 重定向；详情路由（`/picking/:id`、`/shipments/:id`、`/packages/:id`、`/interceptions/:id`）与 focus mode 不变；详情页返回按钮、全局搜索快捷入口指向新地址。
+- **同步中心「事件订阅」**：Tab 由「Webhook 事件」更名（页面描述/空态/全局搜索/系统页同步更新）；事件类型改为中文 META（新订单 / 订单取消 / 订单状态变更 / 商品变更 / 连通性检测 / 未知类型，源自 platform-contracts 的 `PLATFORM_WEBHOOK_EVENT_TYPES` 全集，原文在 hint 中保留）。
+- **错误信息**：任务与事件两个表格的错误列共用 `ErrorCell`——错误信息为主、错误代码为辅（悬停显示完整 `message（code）`）；事件详情 Drawer 新增「处理错误」区。不再只显示裸代码（如 42703）。
+- **事件行右栏**（修复原缺陷：事件行单击误复用任务选中态，右栏无响应）：事件行单击选中 → 右栏显示概要（类型 + 店铺 + 状态徽标 + 平台）、事件信息（ID / 原始类型 / 接收/处理时间 / 载荷哈希）、处理错误（代码 + 完整信息）、操作区（查看完整报文 Drawer、按事件类型对应的「重新同步订单/商品」L1 确认——事件是线索、权威数据靠重读平台 API）；空闲态显示事件概览提示与最近失败事件列表；切换 Tab 清空选中。
+
+验证：dev 实测导航新分区、作业中心四个 Tab 及右栏联动、旧路由重定向、事件订阅中文类型、错误信息展示、事件行右栏（截图 `verify_sync_event_rail.png`、`verify_warehouse_ops_returns_tab.png`）；lint / typecheck / build / check:architecture / vitest 全绿。
+
 ## 3. 截图回归（`gui-redesign-phase3-screenshots/`，本地留存，仓库 .gitignore 既定忽略 `gui-*-screenshots/`）
 
 - 1920×1080：25 个页面各 1 张（`1920x1080_<page>.png`，page 覆盖 dashboard/products/skus/listings/platform-mappings/inventory/inventory-transactions/inventory-reservations/orders/purchase-orders/purchase-receipts/suppliers/warehouses/bins/stores/store-bindings/sync/exceptions/interceptions/returns/picking/shipments/import/notifications/system）+ 选中态 `1920x1080_products_selected.png` + Drawer `1920x1080_products_drawer.png`。

@@ -1,4 +1,4 @@
-import { Route, Routes } from 'react-router';
+import { Navigate, Route, Routes } from 'react-router';
 import { useNavigate } from 'react-router';
 import { Button } from 'antd';
 import { HealthTestPage } from '../pages/HealthTestPage';
@@ -18,13 +18,10 @@ import { InventoryPage } from '../pages/inventory/InventoryPage';
 import { InventoryTransactionsPage } from '../pages/inventory/InventoryTransactionsPage';
 import { ReservationsPage } from '../pages/inventory/ReservationsPage';
 import { OrdersPage } from '../pages/orders/OrdersPage';
-import { PickingPage } from '../pages/picking/PickingPage';
+import { WarehouseOpsPage } from '../pages/warehouse-ops/WarehouseOpsPage';
 import { PickingTaskWorkPage } from '../pages/picking/PickingTaskWorkPage';
-import { ShipmentsPage } from '../pages/shipments/ShipmentsPage';
 import { ShipmentDetailPage } from '../pages/shipments/ShipmentDetailPage';
 import { PackageWorkPage } from '../pages/shipments/PackageWorkPage';
-import { InterceptionsPage } from '../pages/interceptions/InterceptionsPage';
-import { ReturnsPage } from '../pages/returns/ReturnsPage';
 import { InterceptionDetailPage } from '../pages/interceptions/InterceptionDetailPage';
 import { NotificationsPage } from '../pages/notifications/NotificationsPage';
 import { SyncCenterPage } from '../pages/sync/SyncCenterPage';
@@ -56,14 +53,22 @@ export function App() {
           <Route path="/inventory/transactions" element={<InventoryTransactionsPage />} />
           <Route path="/inventory/reservations" element={<ReservationsPage />} />
           <Route path="/orders" element={<OrdersPage />} />
-          <Route path="/picking" element={<PickingPage />} />
+          {/* 作业中心：拣货/发货/拦截/退货合并入口；旧列表路由重定向保持深链兼容。 */}
+          <Route path="/warehouse-ops" element={<WarehouseOpsPage />} />
+          <Route path="/picking" element={<Navigate to="/warehouse-ops?tab=picking" replace />} />
           <Route path="/picking/:id" element={<PickingTaskWorkPage />} />
-          <Route path="/shipments" element={<ShipmentsPage />} />
+          <Route
+            path="/shipments"
+            element={<Navigate to="/warehouse-ops?tab=shipments" replace />}
+          />
           <Route path="/shipments/:id" element={<ShipmentDetailPage />} />
           <Route path="/packages/:id" element={<PackageWorkPage />} />
-          <Route path="/interceptions" element={<InterceptionsPage />} />
+          <Route
+            path="/interceptions"
+            element={<Navigate to="/warehouse-ops?tab=interceptions" replace />}
+          />
           <Route path="/interceptions/:id" element={<InterceptionDetailPage />} />
-          <Route path="/returns" element={<ReturnsPage />} />
+          <Route path="/returns" element={<Navigate to="/warehouse-ops?tab=returns" replace />} />
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/sync" element={<SyncCenterPage />} />
           <Route path="/exceptions" element={<ExceptionsPage />} />

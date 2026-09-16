@@ -142,16 +142,21 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
         key: 'qa-sync',
         icon: <CloudSyncOutlined />,
         primary: '打开同步中心',
-        secondary: '同步任务与 Webhook 事件',
+        secondary: '同步任务与事件订阅',
         onSelect: () => goTo({ key: 'qa-sync', type: '操作', label: '打开同步中心', to: '/sync' }),
       },
       {
         key: 'qa-picking',
         icon: <ToolOutlined />,
         primary: '进入拣货',
-        secondary: '拣货任务工作台',
+        secondary: '作业中心 · 拣货',
         onSelect: () =>
-          goTo({ key: 'qa-picking', type: '操作', label: '进入拣货', to: '/picking' }),
+          goTo({
+            key: 'qa-picking',
+            type: '操作',
+            label: '进入拣货',
+            to: '/warehouse-ops?tab=picking',
+          }),
       },
       {
         key: 'qa-create-sku',

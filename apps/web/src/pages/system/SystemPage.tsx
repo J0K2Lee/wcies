@@ -73,7 +73,7 @@ const ENTRIES: Array<{ to: string; title: string; description: string; icon: Rea
   {
     to: '/sync',
     title: '同步中心',
-    description: '平台同步任务与 Webhook 事件',
+    description: '平台同步任务与事件订阅',
     icon: <CloudSyncOutlined />,
   },
   {

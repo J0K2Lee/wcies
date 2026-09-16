@@ -132,7 +132,7 @@ export function InterceptionDetailPage() {
               type="text"
               aria-label="返回拦截列表"
               icon={<ArrowLeftOutlined />}
-              onClick={() => void navigate('/interceptions')}
+              onClick={() => void navigate('/warehouse-ops?tab=interceptions')}
             />{' '}
             拦截任务 {detail.interceptionNo}
           </span>

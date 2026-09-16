@@ -177,7 +177,7 @@ export function ShipmentDetailPage() {
               type="text"
               aria-label="返回发货列表"
               icon={<ArrowLeftOutlined />}
-              onClick={() => void navigate('/shipments')}
+              onClick={() => void navigate('/warehouse-ops?tab=shipments')}
             />{' '}
             发货单 {shipment.shipmentNo}
           </span>

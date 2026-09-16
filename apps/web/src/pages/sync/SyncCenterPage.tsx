@@ -52,8 +52,9 @@ import {
 /**
  * Sync Center (Phase 2 task §12-§19): KPI cards + dense job table answering
  * "正在同步什么、哪些失败、为什么失败", a job context rail with error
- * preview, a detail drawer with statistics/cursors, and the existing webhook
- * raw-event tab. Manual trigger (POST /sync/orders|listings) is real.
+ * preview, a detail drawer with statistics/cursors, and the platform
+ * event-subscription tab (raw events + per-event rail). Manual trigger
+ * (POST /sync/orders|listings) is real.
  */
 
 interface SyncJobRow {
@@ -105,7 +106,7 @@ const SYNC_TYPE_META: Record<string, string> = {
 const TRIGGER_TYPE_META: Record<string, string> = {
   MANUAL: '手动',
   SCHEDULED: '定时',
-  WEBHOOK: 'Webhook',
+  WEBHOOK: '事件推送',
   RETRY: '重试',
 };
 
@@ -121,6 +122,44 @@ const EVENT_STATUS_META: Record<
   SKIPPED: { tone: 'neutral', label: '已跳过' },
 };
 
+/** 平台事件类型 → 中文（platform-contracts 的 PLATFORM_WEBHOOK_EVENT_TYPES 全集）。 */
+const EVENT_TYPE_META: Record<
+  string,
+  { tone: 'success' | 'danger' | 'warning' | 'neutral' | 'info'; label: string }
+> = {
+  NEW_POSTING: { tone: 'info', label: '新订单' },
+  POSTING_CANCELLED: { tone: 'warning', label: '订单取消' },
+  POSTING_STATE_CHANGED: { tone: 'info', label: '订单状态变更' },
+  ITEM_CHANGED: { tone: 'info', label: '商品变更' },
+  PING: { tone: 'neutral', label: '连通性检测' },
+  UNKNOWN: { tone: 'neutral', label: '未知类型' },
+};
+
+/** 事件类型 → 重新同步动作（事件是 hint，权威数据靠重读平台 API）。 */
+const EVENT_SYNC_ACTION: Record<string, { type: 'orders' | 'listings'; label: string }> = {
+  NEW_POSTING: { type: 'orders', label: '重新同步订单' },
+  POSTING_CANCELLED: { type: 'orders', label: '重新同步订单' },
+  POSTING_STATE_CHANGED: { type: 'orders', label: '重新同步订单' },
+  ITEM_CHANGED: { type: 'listings', label: '重新同步商品' },
+};
+
+/** 错误列（任务/事件共用）：错误信息为主、错误代码为辅，避免只看到裸代码。 */
+function ErrorCell({ code, message }: { code: string | null; message: string | null }) {
+  if (code === null) {
+    return <span style={{ color: colors.textTertiary }}>—</span>;
+  }
+  return (
+    <Tooltip title={message !== null ? `${message}（${code}）` : code}>
+      <span style={{ color: colors.danger, fontSize: 12.5 }}>
+        {message ?? code}
+        {message !== null && (
+          <span style={{ color: colors.textTertiary, marginLeft: 6, fontSize: 11.5 }}>{code}</span>
+        )}
+      </span>
+    </Tooltip>
+  );
+}
+
 export function SyncCenterPage() {
   const { message } = AntdApp.useApp();
   const queryClient = useQueryClient();
@@ -129,6 +168,8 @@ export function SyncCenterPage() {
   const [syncType, setSyncType] = useState<string | undefined>();
   const [status, setStatus] = useState<string | undefined>();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'jobs' | 'events'>('jobs');
   const [detailJobId, setDetailJobId] = useState<string | null>(null);
   const [triggerOpen, setTriggerOpen] = useState(false);
   const [eventPage, setEventPage] = useState(1);
@@ -194,6 +235,10 @@ export function SyncCenterPage() {
     () => rows.find((job) => job.id === selectedJobId) ?? null,
     [rows, selectedJobId],
   );
+  const selectedEvent = useMemo(
+    () => (events.data?.data ?? []).find((event) => event.id === selectedEventId) ?? null,
+    [events.data, selectedEventId],
+  );
   const detailJob = useMemo(
     () => rows.find((job) => job.id === detailJobId) ?? null,
     [rows, detailJobId],
@@ -225,6 +270,143 @@ export function SyncCenterPage() {
 
   // ---- Context rail (task §18) ----
   const railContent = useMemo<ContextRailContent>(() => {
+    if (activeTab === 'events') {
+      // 事件订阅 tab 的右栏：空闲态提示 + 最近失败事件；选中事件看详情与操作。
+      if (selectedEvent === null) {
+        const eventRows = events.data?.data ?? [];
+        const recentFailedEvents = eventRows
+          .filter((event) => event.status === 'FAILED')
+          .slice(0, 5);
+        return {
+          defaultCollapsed: true,
+          children: (
+            <>
+              <ContextSection title="事件概览">
+                <RailHint>
+                  平台事件是线索，权威数据由下方同步任务重读获取；点击事件行查看处理详情。
+                </RailHint>
+              </ContextSection>
+              {recentFailedEvents.length > 0 && (
+                <ContextSection title={`最近失败（${recentFailedEvents.length}）`}>
+                  {recentFailedEvents.map((event) => (
+                    <ContextMetric
+                      key={event.id}
+                      label={EVENT_TYPE_META[event.eventType]?.label ?? event.eventType}
+                      value={<SyncStatusBadge status={event.status} />}
+                      onClick={() => setSelectedEventId(event.id)}
+                    />
+                  ))}
+                </ContextSection>
+              )}
+            </>
+          ),
+        };
+      }
+      const typeMeta = EVENT_TYPE_META[selectedEvent.eventType] ?? {
+        tone: 'neutral' as const,
+        label: selectedEvent.eventType,
+      };
+      const statusMeta = EVENT_STATUS_META[selectedEvent.status] ?? {
+        tone: 'neutral' as const,
+        label: selectedEvent.status,
+      };
+      const syncAction = EVENT_SYNC_ACTION[selectedEvent.eventType];
+      const eventStore = (stores.data?.data ?? []).find(
+        (store) => store.id === selectedEvent.storeId,
+      );
+      const eventStoreLabel =
+        eventStore !== undefined ? `${eventStore.storeCode} · ${eventStore.name}` : '未知店铺';
+      return {
+        defaultCollapsed: true,
+        header: (
+          <EntitySummary
+            title={typeMeta.label}
+            subtitle={eventStoreLabel}
+            badge={
+              <StatusBadge
+                tone={statusMeta.tone}
+                label={statusMeta.label}
+                hint={selectedEvent.status}
+              />
+            }
+            meta={<PlatformTag code={selectedEvent.platform} />}
+          />
+        ),
+        children: (
+          <>
+            <ContextSection title="事件信息">
+              <ContextMetric
+                label="事件 ID"
+                value={
+                  <span style={{ fontSize: 12, fontFamily: 'monospace' }}>
+                    {selectedEvent.id.slice(0, 8)}…
+                  </span>
+                }
+              />
+              <ContextMetric label="原始类型" value={selectedEvent.eventType} />
+              <ContextMetric
+                label="接收时间"
+                value={<RelativeTime value={selectedEvent.receivedAt} />}
+              />
+              <ContextMetric
+                label="处理时间"
+                value={<RelativeTime value={selectedEvent.processedAt} />}
+              />
+              <ContextMetric
+                label="载荷哈希"
+                value={
+                  <span style={{ fontSize: 12, fontFamily: 'monospace' }}>
+                    {selectedEvent.payloadHash.slice(0, 10)}…
+                  </span>
+                }
+              />
+            </ContextSection>
+            {selectedEvent.errorCode !== null && (
+              <ContextSection title="处理错误">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <StatusBadge tone="danger" label={selectedEvent.errorCode} />
+                  <span
+                    style={{
+                      fontSize: 12.5,
+                      color: colors.textSecondary,
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    {selectedEvent.errorMessage ?? '（无详细说明）'}
+                  </span>
+                </div>
+              </ContextSection>
+            )}
+            <ContextAction>
+              <Space orientation="vertical" style={{ width: '100%' }} size={8}>
+                <Button block onClick={() => setEventDetail(selectedEvent)}>
+                  查看完整报文
+                </Button>
+                {syncAction !== undefined && (
+                  <Popconfirm
+                    title={`${syncAction.label}？`}
+                    description="事件只携带线索，权威数据由重新同步从平台重读获取。"
+                    okText="立即同步"
+                    cancelText="取消"
+                    onConfirm={() =>
+                      triggerMutation.mutate({
+                        type: syncAction.type,
+                        storeId: selectedEvent.storeId,
+                        storeLabel: eventStore?.storeCode ?? '该店铺',
+                      })
+                    }
+                  >
+                    <Button block icon={<CloudSyncOutlined />} loading={triggerMutation.isPending}>
+                      {syncAction.label}
+                    </Button>
+                  </Popconfirm>
+                )}
+              </Space>
+            </ContextAction>
+          </>
+        ),
+      };
+    }
     if (selectedJob === null) {
       // 空闲态统计与 KPI 卡去重（规范 §2）：只保留最近失败任务列表 + 提示。
       const recentFailed = rows.filter((job) => job.status === 'FAILED').slice(0, 5);
@@ -347,7 +529,17 @@ export function SyncCenterPage() {
         </>
       ),
     };
-  }, [selectedJob, jobs.data, rows, triggerMutation.isPending, triggerMutation.mutate]);
+  }, [
+    activeTab,
+    selectedEvent,
+    selectedJob,
+    jobs.data,
+    events.data,
+    stores.data,
+    rows,
+    triggerMutation.isPending,
+    triggerMutation.mutate,
+  ]);
   useContextRail(railContent);
 
   const jobColumns = [
@@ -445,14 +637,9 @@ export function SyncCenterPage() {
       title: '错误',
       key: 'error',
       ellipsis: true,
-      render: (_: unknown, row: SyncJobRow) =>
-        row.errorCode === null ? (
-          <span style={{ color: colors.textTertiary }}>—</span>
-        ) : (
-          <Tooltip title={row.errorMessage ?? undefined}>
-            <span style={{ color: colors.danger, fontSize: 12.5 }}>{row.errorCode}</span>
-          </Tooltip>
-        ),
+      render: (_: unknown, row: SyncJobRow) => (
+        <ErrorCell code={row.errorCode} message={row.errorMessage} />
+      ),
     },
   ];
 
@@ -460,7 +647,7 @@ export function SyncCenterPage() {
     <div>
       <PageHeader
         title="同步中心"
-        description="监控平台商品、订单等同步任务与 Webhook 事件"
+        description="监控平台商品、订单等同步任务与事件订阅"
         secondary={
           <Tooltip title="刷新任务列表">
             <Button
@@ -560,7 +747,12 @@ export function SyncCenterPage() {
       </FilterBar>
 
       <Tabs
-        defaultActiveKey="jobs"
+        activeKey={activeTab}
+        onChange={(key) => {
+          setActiveTab(key === 'events' ? 'events' : 'jobs');
+          setSelectedJobId(null);
+          setSelectedEventId(null);
+        }}
         items={[
           {
             key: 'jobs',
@@ -604,15 +796,15 @@ export function SyncCenterPage() {
           },
           {
             key: 'events',
-            label: 'Webhook 事件',
+            label: '事件订阅',
             children: (
               <SectionCard flush>
                 <DataTable<RawEventRow>
                   rowKey="id"
                   loading={events.isLoading}
                   dataSource={events.data?.data ?? []}
-                  emptyTitle="暂无 Webhook 事件"
-                  emptyDescription="平台 Webhook 推送将在这里显示"
+                  emptyTitle="暂无事件推送"
+                  emptyDescription="平台事件推送（订单、商品变更等）将在这里显示"
                   pagination={{
                     current: eventPage,
                     pageSize: 20,
@@ -621,12 +813,13 @@ export function SyncCenterPage() {
                     showSizeChanger: false,
                   }}
                   onRow={(record) => ({
-                    // 事件行：单击选中（视觉），双击打开报文 Drawer（与其他页一致）。
-                    onClick: () => setSelectedJobId(selectedJobId === record.id ? null : record.id),
+                    // 事件行：单击选中（右栏详情与操作），双击打开报文 Drawer。
+                    onClick: () =>
+                      setSelectedEventId(selectedEventId === record.id ? null : record.id),
                     onDoubleClick: () => setEventDetail(record),
                     style: {
                       cursor: 'pointer',
-                      background: selectedJobId === record.id ? colors.primarySoft : undefined,
+                      background: selectedEventId === record.id ? colors.primarySoft : undefined,
                     },
                   })}
                   columns={[
@@ -637,7 +830,26 @@ export function SyncCenterPage() {
                       width: 100,
                       render: (value: string) => <PlatformTag code={value} />,
                     },
-                    { title: '事件类型', dataIndex: 'eventType', key: 'eventType' },
+                    {
+                      title: '事件类型',
+                      dataIndex: 'eventType',
+                      key: 'eventType',
+                      width: 150,
+                      render: (value: string) => {
+                        const meta = EVENT_TYPE_META[value] ?? {
+                          tone: 'neutral' as const,
+                          label: value,
+                        };
+                        return (
+                          <StatusBadge
+                            tone={meta.tone}
+                            label={meta.label}
+                            hint={value}
+                            showDot={false}
+                          />
+                        );
+                      },
+                    },
                     {
                       title: '状态',
                       dataIndex: 'status',
@@ -669,16 +881,9 @@ export function SyncCenterPage() {
                       title: '错误',
                       key: 'error',
                       ellipsis: true,
-                      render: (_: unknown, row: RawEventRow) =>
-                        row.errorCode === null ? (
-                          <span style={{ color: colors.textTertiary }}>—</span>
-                        ) : (
-                          <Tooltip title={row.errorMessage ?? undefined}>
-                            <span style={{ color: colors.danger, fontSize: 12.5 }}>
-                              {row.errorCode}
-                            </span>
-                          </Tooltip>
-                        ),
+                      render: (_: unknown, row: RawEventRow) => (
+                        <ErrorCell code={row.errorCode} message={row.errorMessage} />
+                      ),
                     },
                   ]}
                 />
@@ -845,9 +1050,13 @@ export function SyncCenterPage() {
         )}
       </Drawer>
 
-      {/* ---- Webhook event payload drawer (existing feature, restyled) ---- */}
+      {/* ---- 事件报文 drawer ---- */}
       <Drawer
-        title={eventDetail ? `${eventDetail.platform} / ${eventDetail.eventType}` : '事件详情'}
+        title={
+          eventDetail !== null
+            ? `事件详情 · ${EVENT_TYPE_META[eventDetail.eventType]?.label ?? eventDetail.eventType}`
+            : '事件详情'
+        }
         size={640}
         open={eventDetail !== null}
         onClose={() => setEventDetail(null)}
@@ -864,6 +1073,20 @@ export function SyncCenterPage() {
                     <Typography.Text code copyable style={{ fontSize: 12 }}>
                       {eventDetail.id}
                     </Typography.Text>
+                  ),
+                },
+                {
+                  label: '事件类型',
+                  children: (
+                    <StatusBadge
+                      tone={
+                        (EVENT_TYPE_META[eventDetail.eventType] ?? { tone: 'neutral' as const })
+                          .tone
+                      }
+                      label={EVENT_TYPE_META[eventDetail.eventType]?.label ?? eventDetail.eventType}
+                      hint={eventDetail.eventType}
+                      showDot={false}
+                    />
                   ),
                 },
                 {
@@ -898,6 +1121,28 @@ export function SyncCenterPage() {
                 },
               ]}
             />
+            {eventDetail.errorCode !== null && (
+              <section>
+                <div
+                  style={{
+                    fontSize: 14.5,
+                    fontWeight: 600,
+                    color: colors.textPrimary,
+                    marginBottom: 10,
+                  }}
+                >
+                  处理错误
+                </div>
+                <Space orientation="vertical" size={6} style={{ width: '100%' }}>
+                  <StatusBadge tone="danger" label={eventDetail.errorCode} />
+                  <span
+                    style={{ fontSize: 12.5, color: colors.textSecondary, wordBreak: 'break-word' }}
+                  >
+                    {eventDetail.errorMessage ?? '（无详细说明）'}
+                  </span>
+                </Space>
+              </section>
+            )}
             <section>
               <div
                 style={{

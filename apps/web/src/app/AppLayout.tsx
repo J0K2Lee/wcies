@@ -6,11 +6,13 @@ import { LogoutOutlined } from '@ant-design/icons';
 import {
   AppstoreOutlined,
   BarChartOutlined,
+  BellOutlined,
   CloudSyncOutlined,
   HomeOutlined,
   InboxOutlined,
   LayoutOutlined,
   QuestionCircleOutlined,
+  ShopOutlined,
   ShoppingCartOutlined,
   ShoppingOutlined,
   ToolOutlined,
@@ -80,14 +82,20 @@ const MENU_ITEMS = [
     children: [{ key: '/orders', label: '订单管理' }],
   },
   {
+    key: 'store-group',
+    label: '店铺',
+    icon: <ShopOutlined />,
+    children: [
+      { key: '/stores', label: '店铺管理' },
+      { key: '/store-bindings', label: '店仓绑定' },
+    ],
+  },
+  {
     key: 'warehouse-ops-group',
     label: '仓库作业',
     icon: <ToolOutlined />,
     children: [
-      { key: '/picking', label: '拣货' },
-      { key: '/shipments', label: '发货' },
-      { key: '/interceptions', label: '拦截' },
-      { key: '/returns', label: '退货' },
+      { key: '/warehouse-ops', label: '作业中心' },
       { key: '/warehouses', label: '仓库管理' },
       { key: '/bins', label: '库位管理' },
     ],
@@ -99,10 +107,9 @@ const MENU_ITEMS = [
     children: [
       { key: '/sync', label: '同步中心' },
       { key: '/exceptions', label: '异常中心' },
-      { key: '/stores', label: '店铺管理' },
-      { key: '/store-bindings', label: '店仓绑定' },
     ],
   },
+  { key: '/notifications', label: '通知中心', icon: <BellOutlined /> },
   {
     key: 'system-group',
     label: '系统',
@@ -110,7 +117,6 @@ const MENU_ITEMS = [
     children: [
       { key: '/system', label: '系统管理' },
       { key: '/import', label: '导入中心' },
-      { key: '/notifications', label: '通知中心' },
     ],
   },
 ];

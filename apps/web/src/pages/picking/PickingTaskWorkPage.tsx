@@ -212,7 +212,7 @@ export function PickingTaskWorkPage() {
             type="text"
             aria-label="返回拣货列表"
             icon={<ArrowLeftOutlined />}
-            onClick={() => void navigate('/picking')}
+            onClick={() => void navigate('/warehouse-ops?tab=picking')}
           />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span style={{ fontSize: 22, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
