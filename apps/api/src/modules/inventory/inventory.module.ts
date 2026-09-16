@@ -15,6 +15,7 @@ import { InventoryReservationRepository } from './repositories/inventory-reserva
 import { InventoryTransactionRepository } from './repositories/inventory-transaction.repository';
 import { InventorySafetyStockRepository } from './repositories/inventory-safety-stock.repository';
 import { InventorySerialRepository } from './repositories/inventory-serial.repository';
+import { ReplenishmentRepository } from './repositories/replenishment.repository';
 import { InventoryService } from './services/inventory.service';
 import { InventoryAdjustmentService } from './services/inventory-adjustment.service';
 import { InventoryMovementService } from './services/inventory-movement.service';
@@ -59,6 +60,7 @@ import {
     InventoryTransactionRepository,
     InventorySafetyStockRepository,
     InventorySerialRepository,
+    ReplenishmentRepository,
     InventoryService,
     InventoryAdjustmentService,
     InventoryMovementService,

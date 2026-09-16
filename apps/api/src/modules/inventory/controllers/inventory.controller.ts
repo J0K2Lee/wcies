@@ -243,6 +243,33 @@ export class InventoryReservationController {
     );
   }
 
+  @Get('inventory/replenishment-suggestions')
+  @ApiOperation({
+    summary: '补货建议（派生建议：销速/安全库存/在途采购 → 建议采购量）',
+  })
+  @ApiOkPagedEnvelope(Object)
+  async replenishmentSuggestions(
+    @Query()
+    query: {
+      windowDays?: string;
+      coverDays?: string;
+      onlyAlert?: string;
+      keyword?: string;
+      page?: string;
+      pageSize?: string;
+    },
+  ) {
+    const result = await this.queryService.listReplenishmentSuggestions({
+      windowDays: clampDays(query.windowDays, 30, 1, 365),
+      coverDays: clampDays(query.coverDays, 14, 0, 365),
+      onlyAlert: query.onlyAlert === 'true',
+      keyword: query.keyword,
+      page: clampInt(query.page, 1, 1, 100000),
+      pageSize: clampInt(query.pageSize, 50, 1, 100),
+    });
+    return okPage(result.items, result.meta);
+  }
+
   @Get('inventory/reservations')
   @ApiOperation({ summary: 'List reservations' })
   @ApiOkPagedEnvelope(ReservationListItemDto)
@@ -371,4 +398,16 @@ export class InventorySafetyStockController {
   ): Promise<{ success: true; data: SafetyStockDto }> {
     return ok(await this.safetyStockService.upsert(skuId, warehouseId, dto.safetyQty, operator));
   }
+}
+
+function clampInt(raw: string | undefined, fallback: number, min: number, max: number): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, Math.trunc(parsed)));
+}
+
+function clampDays(raw: string | undefined, fallback: number, min: number, max: number): number {
+  return clampInt(raw, fallback, min, max);
 }

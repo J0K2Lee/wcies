@@ -20,6 +20,7 @@ import {
   TransactionListFilters,
 } from '../repositories/inventory-transaction.repository';
 import { ReservationDto, ReservationService } from './reservation.service';
+import { ReplenishmentRepository } from '../repositories/replenishment.repository';
 import { InventoryCondition } from '../enums/inventory.constants';
 import { InventorySerialEntity } from '../entities/inventory-serial.entity';
 
@@ -144,6 +145,7 @@ export class InventoryQueryService {
     private readonly serialRepo: InventorySerialRepository,
     private readonly reservationService: ReservationService,
     private readonly skuService: SkuService,
+    private readonly replenishmentRepo: ReplenishmentRepository,
   ) {}
 
   /**
@@ -425,6 +427,85 @@ export class InventoryQueryService {
       safetyQty: formatQty(safety),
       sellableAvailableQty: formatQty(sellable),
       status: physical > 0n ? 'IN_STOCK' : 'OUT_OF_STOCK',
+    };
+  }
+  /**
+   * Replenishment suggestions (Sprint 10 T4): an ADVISORY derivation, never
+   * a stock fact. For every active SKU:
+   *
+   *   dailyVelocity   = shipped qty in window / windowDays
+   *   projected       = available + open PO quantity (already bought)
+   *   suggestedQty    = ceil(dailyVelocity * coverDays + safety - projected)
+   *                     when positive, else 0 (no suggestion)
+   *
+   * `onlyAlert` keeps just the rows with suggestedQty > 0. Sorting: most
+   * urgent (largest suggestion / least cover) first.
+   */
+  async listReplenishmentSuggestions(input: {
+    windowDays: number;
+    coverDays: number;
+    onlyAlert: boolean;
+    keyword?: string;
+    page: number;
+    pageSize: number;
+  }): Promise<{ items: Array<Record<string, unknown>>; meta: PageMeta }> {
+    const facts = await this.replenishmentRepo.gatherFacts(input.windowDays);
+    const windowDays = BigInt(Math.max(1, input.windowDays));
+
+    let rows = facts.map((fact) => {
+      const available = parseQty(fact.availableQty);
+      const safety = parseQty(fact.safetyQty);
+      const shipped = parseQty(fact.shippedQty);
+      const openPo = parseQty(fact.openPoQty);
+      const dailyVelocity = (shipped * 1000n + windowDays * 500n) / (windowDays * 1000n); // half-up /windowDays
+      const projected = available + openPo;
+      const target = dailyVelocity * BigInt(Math.max(0, input.coverDays)) + safety;
+      const gap = target - projected;
+      const suggestedQty = gap > 0n ? ((gap + 999n) / 1000n) * 1000n : 0n; // ceil to whole units
+      return {
+        skuId: fact.skuId,
+        skuCode: fact.skuCode,
+        skuName: fact.skuName,
+        skuStatus: fact.skuStatus,
+        onHandQty: formatQty(parseQty(fact.onHandQty)),
+        reservedQty: formatQty(parseQty(fact.reservedQty)),
+        pickedQty: formatQty(parseQty(fact.pickedQty)),
+        availableQty: formatQty(available),
+        safetyQty: formatQty(safety),
+        shippedInWindowQty: formatQty(shipped),
+        dailyVelocityQty: formatQty(dailyVelocity),
+        openPoQty: formatQty(openPo),
+        suggestedQty: formatQty(suggestedQty),
+        needsReplenishment: suggestedQty > 0n,
+      };
+    });
+
+    if (input.keyword !== undefined && input.keyword !== '') {
+      const keyword = input.keyword.toLowerCase();
+      rows = rows.filter(
+        (row) =>
+          String(row.skuCode).toLowerCase().includes(keyword) ||
+          String(row.skuName).toLowerCase().includes(keyword),
+      );
+    }
+    if (input.onlyAlert) {
+      rows = rows.filter((row) => row.needsReplenishment);
+    }
+    rows.sort((a, b) => {
+      const bySuggested = parseQty(String(b.suggestedQty)) - parseQty(String(a.suggestedQty));
+      if (bySuggested !== 0n) {
+        return bySuggested > 0n ? 1 : -1;
+      }
+      const aAvail = parseQty(String(a.availableQty));
+      const bAvail = parseQty(String(b.availableQty));
+      return aAvail < bAvail ? -1 : aAvail > bAvail ? 1 : 0;
+    });
+
+    const total = rows.length;
+    const start = (input.page - 1) * input.pageSize;
+    return {
+      items: rows.slice(start, start + input.pageSize),
+      meta: { page: input.page, pageSize: input.pageSize, total },
     };
   }
 }
