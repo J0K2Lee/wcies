@@ -286,8 +286,8 @@ SCRAP
 | 取消拣货并实体回库 | 0 | 0 | -N | RETURN_PICKED |
 | 盘盈 | +N | 0 | 0 | MANUAL_ADJUSTMENT |
 | 盘亏 | -N | 0 | 0 | MANUAL_ADJUSTMENT |
-| 调拨发出 | -N | 0 | 0 | （调拨 Sprint） |
-| 调拨接收 | +N | 0 | 0 | （调拨 Sprint） |
+| 调拨发出（Sprint 10，transfer.md） | -N | 0 | 0 | TRANSFER_OUT |
+| 调拨接收（Sprint 10，transfer.md） | +N | 0 | 0 | TRANSFER_IN |
 | 库内移位（同一 Event 两条流水） | 源 -N / 目标 +N | 0 | 0 | MOVE_BIN |
 
 任何新增库存行为，都应先补充本表或对应规则。
@@ -1540,13 +1540,15 @@ Available
 
 ## Transfer
 
+Sprint 10 起实现（规则冻结于 `docs/business-rules/transfer.md`）：单事务
+双段移库，无在途状态——
+
 ```text
-Source On Hand
-↓
-In Transit
-↓
-Target On Hand
+Source On Hand --TRANSFER_OUT--> [同一数据库事务] --TRANSFER_IN--> Target On Hand
 ```
+
+可售口径校验（On Hand − Reserved − Picked）在出段执行；被订单占用的
+库存不可调拨。在途库存建模明确不做（transfer.md §1）。
 
 ## Return
 
@@ -1636,6 +1638,7 @@ SELLABLE / DEFECTIVE / REPAIR / SCRAPPED
 - `initializeStock → INITIAL_STOCK`（允许数量 0 以建立零余额记录）；`receiveStock → RECEIVE`（未来采购收货底层能力）。
 - `reserveStock → RESERVE`（跨 Bin 贪心分配，按 bin_code 顺序）；`release/pick/unpick/ship → RELEASE/PICK/UNPICK/SHIP`。
 - `moveBin → MOVE_BIN`（同一 Event 两条流水：源 -N / 目标 +N；不得移动 Reserved/Picked 占用部分）。
+- `transferOutInTx → TRANSFER_OUT` / `transferInInTx → TRANSFER_IN`（Sprint 10 调拨单确认事务的双段；幂等键 `TRANSFER_OUT:<lineId>` / `TRANSFER_IN:<lineId>`；SN 商品拒绝，见 transfer.md §5）。
 - `adjustStock → MANUAL_ADJUSTMENT`（仅 On Hand；不得使结果为负或低于占用；必须填写原因）。
 - Reference 类型：`MANUAL / TEST / ORDER / IMPORT / PURCHASE_RECEIPT`（Sprint 7 新增
   `PURCHASE_RECEIPT`：收货确认的库存流水按来源对账，决策 0013 §5；Reservation 第一阶段仅 `TEST / MANUAL / ORDER`）。

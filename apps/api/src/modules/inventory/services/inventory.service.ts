@@ -13,6 +13,8 @@ import {
 } from '../enums/inventory.constants';
 import {
   IdempotencyConflictError,
+  InsufficientMovableStockError,
+  InsufficientStockError,
   InventoryQuantityInvalidError,
   InventorySerialInvalidError,
 } from '../errors/inventory.errors';
@@ -131,6 +133,145 @@ export class InventoryService {
   ): Promise<StockChangeResult & { wrote: boolean }> {
     const prevalidated = await this.validateAddStock(input);
     return this.addStockInTx(runner, input, 'RECEIVE', prevalidated);
+  }
+
+  /**
+   * Transfer IN leg (Sprint 10, transfer.md §5): the same locked-balance
+   * addition path as receiveStockInTx, but booked as TRANSFER_IN with the
+   * caller's transaction. Idempotency: `TRANSFER_IN:<transferLineId>`.
+   */
+  async transferInInTx(
+    runner: QueryRunner,
+    input: Omit<AddStockInput, 'referenceType' | 'referenceId'> & {
+      referenceId: string;
+    },
+  ): Promise<StockChangeResult & { wrote: boolean }> {
+    const prevalidated = await this.validateAddStock({
+      ...input,
+      referenceType: 'TRANSFER',
+      referenceId: input.referenceId,
+    });
+    return this.addStockInTx(
+      runner,
+      { ...input, referenceType: 'TRANSFER' },
+      'TRANSFER_IN',
+      prevalidated,
+    );
+  }
+
+  /**
+   * Transfer OUT leg (Sprint 10, transfer.md §4/§5): decrements the SOURCE
+   * bin's SELLABLE On Hand on the caller's runner. Guarded by the SELLABLE
+   * availability rule - stock reserved or picked by orders can never be
+   * transferred away (AGENTS.md §11/§16). SN-tracked SKUs are rejected:
+   * which serials move is a unit-level decision this flow cannot make.
+   * Idempotency: `TRANSFER_OUT:<transferLineId>` replays like every write.
+   */
+  async transferOutInTx(
+    runner: QueryRunner,
+    input: {
+      skuId: string;
+      warehouseId: string;
+      binId?: string | null;
+      quantity: string;
+      referenceId: string;
+      remark?: string | null;
+      idempotencyKey: string;
+      operator: OperatorContext;
+    },
+  ): Promise<StockChangeResult & { wrote: boolean }> {
+    const qty = parseQty(input.quantity);
+    if (qty <= 0n) {
+      throw new InventoryQuantityInvalidError('调拨数量必须为正数', {
+        idempotencyKey: input.idempotencyKey,
+        quantity: input.quantity,
+      });
+    }
+    const dim = await resolveDimension(this.deps, input, input.operator);
+    const sku = await this.deps.skuService.getEntityById(input.skuId);
+    if (sku === null) {
+      throw new SkuNotFoundError(input.skuId);
+    }
+    if (sku.serialTracking) {
+      throw new InventorySerialInvalidError(
+        'SN 管理商品暂不支持调拨（需指定具体序列号，transfer.md §5）',
+        { skuId: input.skuId },
+      );
+    }
+
+    // Replay a committed duplicate without touching anything.
+    const raced = await this.ledgerRepo.findEventByIdempotencyKeyTx(runner, input.idempotencyKey);
+    if (raced !== null) {
+      return {
+        ...(await this.replayStockChangeInTx(runner, input.idempotencyKey, dim)),
+        wrote: false,
+      };
+    }
+
+    const balance = await this.balanceRepo.lockByDim(runner, {
+      skuId: dim.skuId,
+      warehouseId: dim.warehouseId,
+      binId: dim.binId,
+      condition: 'SELLABLE',
+    });
+    if (balance === null) {
+      throw new InsufficientStockError({
+        skuId: input.skuId,
+        warehouseId: input.warehouseId,
+        requestedQty: formatQty(qty),
+        availableQty: '0.000',
+      });
+    }
+    const available =
+      parseQty(balance.onHandQty) - parseQty(balance.reservedQty) - parseQty(balance.pickedQty);
+    if (available < qty) {
+      throw new InsufficientMovableStockError({
+        skuId: input.skuId,
+        binId: dim.binId,
+        requestedQty: formatQty(qty),
+        movableQty: formatQty(available),
+      });
+    }
+
+    const patch = {
+      onHandQty: formatQty(parseQty(balance.onHandQty) - qty),
+      reservedQty: balance.reservedQty,
+      pickedQty: balance.pickedQty,
+      version: nextVersionOf(balance),
+    };
+    assertBalanceInvariants(patch);
+    await this.balanceRepo.saveQuantities(runner, balance.id, patch);
+
+    const event = await this.ledgerRepo.insertEventWithLines(
+      runner,
+      {
+        eventType: 'TRANSFER_OUT',
+        referenceType: 'TRANSFER',
+        referenceId: input.referenceId,
+        idempotencyKey: input.idempotencyKey,
+        operatorId: input.operator.userId,
+        remark: input.remark ?? null,
+      },
+      [
+        {
+          skuId: dim.skuId,
+          warehouseId: dim.warehouseId,
+          binId: dim.binId,
+          transactionType: 'TRANSFER_OUT',
+          quantityBefore: balance.onHandQty,
+          quantityChange: formatQty(-qty),
+          quantityAfter: patch.onHandQty,
+        },
+      ],
+    );
+
+    return {
+      eventNo: event.eventNo,
+      transactionNos: [event.eventNo + '-1'],
+      balance: this.snapshot(balance.id, dim, 'SELLABLE', patch),
+      idempotentReplay: false,
+      wrote: true,
+    };
   }
 
   private async addStock(

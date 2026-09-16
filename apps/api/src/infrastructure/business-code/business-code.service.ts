@@ -36,6 +36,8 @@ const SCOPE_RETURN_BATCH = 'return_batch';
 /** Finance documents (Sprint 10, finance.md §8). */
 const SCOPE_FINANCE_VOUCHER = 'finance_voucher';
 const SCOPE_FINANCE_PAYOUT = 'finance_payout';
+/** Transfer order numbering TRF%06d (Sprint 10, transfer.md §8). */
+const SCOPE_TRANSFER_ORDER = 'transfer_order';
 
 export function warehouseScope(warehouseType: WarehouseCodeType): string {
   return `warehouse:${warehouseType}`;
@@ -201,6 +203,12 @@ export class BusinessCodeService {
   async nextFinancePayoutNo(manager?: EntityManager): Promise<string> {
     const seq = await this.next(SCOPE_FINANCE_PAYOUT, manager);
     return `PY${String(seq).padStart(6, '0')}`;
+  }
+
+  /** Transfer order number TRF%06d (Sprint 10, transfer.md §2). */
+  async nextTransferNo(manager?: EntityManager): Promise<string> {
+    const seq = await this.next(SCOPE_TRANSFER_ORDER, manager);
+    return `TRF${String(seq).padStart(6, '0')}`;
   }
 
   async nextCategoryCode(): Promise<string> {

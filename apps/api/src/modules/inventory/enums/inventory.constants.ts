@@ -62,6 +62,13 @@ export const INVENTORY_EVENT_TYPES = [
   'RETURN_PICKED',
   'MOVE_BIN',
   'MANUAL_ADJUSTMENT',
+  /**
+   * Warehouse-to-warehouse transfer legs (Sprint 10, transfer.md §5): OUT
+   * decrements the source bin, IN increments the destination bin; both are
+   * written by the SAME transfer-order confirmation transaction.
+   */
+  'TRANSFER_OUT',
+  'TRANSFER_IN',
 ] as const;
 export type InventoryEventType = (typeof INVENTORY_EVENT_TYPES)[number];
 
@@ -88,6 +95,11 @@ export const INVENTORY_REFERENCE_TYPES = [
    * receiveStockInTx with this reference (referenceId = return batch item).
    */
   'RETURN_RECEIPT',
+  /**
+   * Transfer-order stock writes (Sprint 10, transfer.md §5):
+   * referenceId = transfer order line id on both legs.
+   */
+  'TRANSFER',
 ] as const;
 export type InventoryReferenceType = (typeof INVENTORY_REFERENCE_TYPES)[number];
 
