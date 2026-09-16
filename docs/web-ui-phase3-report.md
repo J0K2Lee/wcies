@@ -46,11 +46,24 @@
 | G5 主表操作列 | 同 R1，全部移除 |
 | G6 行交互 | 单击=选中（右栏即时更新）、双击=打开详情 Drawer；表格内 StatusBadge `showDot={false}`；实测通过 |
 | G7 筛选受控 | 平台/类型/状态筛选写 URL（`focus`/`type`/页签参数）；Listings 清除筛选清空全部 |
-| G8 术语统一 | 「新建店铺」「启用」等统一；`SkuCreateModal`「SKU 已创建」 |
+| G8 术语统一 | 「新建店铺」「启用」等统一；`SkuCreateModal`「SKU 已创建」；**中英混用清除见 §2.1** |
 | G9 共享提取 | `BinBatchCreateModal`（Warehouses/Bins 共享）、`QuickCreateModals`（Brand/Category 快建，Products zIndex 1100、Listings 1200） |
 | G10 结构补齐 | Shipments/Interceptions/Reservations/Transactions 等 8 页整页重构对齐规范；App.tsx 补 `*` 404（EmptyState+返回首页）；规范 §2 KPI/右栏重复在 6 页去重 |
 
 另：`providers.tsx` ConfigProvider `button={{ autoInsertSpace: false }}`——antd 对双字按钮自动插空格（「登 录」）关闭；`global.css` 补 `.wcies-entry-tile:hover`；`typography.monoFamily` token 落地（RawDataBlock/单号等宽）。
+
+### 2.1 中英混用清除（用户复验跟进，2026-09-16）
+
+任务书 G8 原案允许表头保留 `On Hand/Safety/Available` 英文术语；用户复验明确要求消除中英混用，按「用户明确确认优先」全量中文化：
+
+- 库存术语：`On Hand`→在库、`Reserved`→已占用、`Picked`→已拣货、`Safety`→安全库存、`Available`→可售、`IN_STOCK/OUT_OF_STOCK 记录`→有可售/无可售库存记录（InventoryPage 右栏/表头/InfoGrid、SkusPage 右栏、ReservationsPage 操作说明、InterceptionDetailPage 提示、ShipmentDetailPage 确认文案）。
+- `Listing`→商品链接：SkusPage / ListingsPage / PlatformMappingsPage / StoresPage 全部计数、按钮、弹窗、描述（含 emptyTitle「暂无商品链接」）；「新建/删除/建档」等动作文案同步。
+- 状态枚举不再直接当标签：`订单行已 RESERVED`→已占用、`保持 BACKORDERED`→保持缺货、`订单转入 SHIPPED`→已发货、`移除（RESERVED）（PICKED）（BACKORDERED）` 括号注解、`RELEASED` 注解。
+- 系统自有字段中文化：`SKU Code`→SKU 编码、`Platform Product ID`→平台商品 ID、`Store ID`→店铺 ID、`Job ID`→任务 ID、`Payload Hash`→载荷哈希、`Raw Data`→原始数据、`MAIN_API 凭证`→主 API 凭证、`Bin × 数量`→库位 × 数量、`SELLABLE/DEFECTIVE` 说明→合格/不合格、`STAGING`→暂存位、KPI `aux`（OPEN/RESOLVED/IGNORED/MAPPED/UNMAPPED/SUCCESS）→中文。
+- 保留（经判定为平台事实/通用术语，非混用）：平台字段原文（Offer ID、Seller SKU、Seller ID、Client ID、API Key、平台 SKU）、状态原文 hint（StatusBadge `hint={status}`）、履约语义（FBS/FBW/FBY）、技术缩写（SKU、SN、ID、API、URL、JSON、Excel、Webhook、PDF/PNG/JPEG）、货币与语言代码（CNY、RUB、ZH_HANS）。
+- SKU 右栏新增「规格」区：显示重量（`weightG` 列表 API 已返回，此前仅详情 Drawer 可见）。
+
+验证：typecheck / eslint / build / check:architecture / vitest(19) 全绿；dev 实测 SKU 右栏「在库/已占用/可售 + 规格·重量 1200 g + 1 个商品链接」、SKU映射页「共 1324 个商品链接」「未映射总数 1320 个商品链接」、映射总览 KPI 与同步中心 KPI 全中文（截图 `verify_skus_rail_cn_terms_weight.png`、`verify_listings_cn_terms.png`）。
 
 ## 3. 截图回归（`gui-redesign-phase3-screenshots/`，本地留存，仓库 .gitignore 既定忽略 `gui-*-screenshots/`）
 

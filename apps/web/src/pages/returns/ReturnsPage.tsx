@@ -475,7 +475,7 @@ export function ReturnsPage() {
                     <StatusBadge
                       tone="neutral"
                       label={value}
-                      hint="平台原文退款状态（仅展示，returns.md §4）"
+                      hint="平台原文退款状态（仅展示）"
                       showDot={false}
                     />
                   ),
@@ -667,7 +667,7 @@ export function ReturnsPage() {
                       <span style={{ display: 'inline-flex', gap: 6 }}>
                         <Popconfirm
                           title="按合格回库？"
-                          description="按 SELLABLE 回库（未指定库位时自动落 STAGING）。"
+                          description="合格回库（未指定库位时自动落暂存位）。"
                           okText="合格回库"
                           cancelText="取消"
                           onConfirm={() =>
@@ -680,7 +680,7 @@ export function ReturnsPage() {
                         </Popconfirm>
                         <Popconfirm
                           title="标记不合格？"
-                          description="按 DEFECTIVE 入隔离库存；关联平台记录时创建退货差异异常。"
+                          description="不合格入隔离库存；关联平台记录时创建退货差异异常。"
                           okText="不合格"
                           cancelText="取消"
                           onConfirm={() =>

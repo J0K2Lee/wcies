@@ -183,7 +183,7 @@ const GOODS_STATE_CHIPS: Array<{
     key: 'TO_PICK',
     label: '待拣货',
     flow: true,
-    tooltip: '存在已占用待拣货（RESERVED）的订单行',
+    tooltip: '存在已占用待拣货的订单行',
   },
   {
     key: 'PICKING',
@@ -195,13 +195,13 @@ const GOODS_STATE_CHIPS: Array<{
     key: 'TO_SHIP',
     label: '待发货',
     flow: true,
-    tooltip: '存在已拣货待出库（PICKED）的订单行',
+    tooltip: '存在已拣货待出库的订单行',
   },
   {
     key: 'BACKORDERED',
     label: '缺货',
     flow: false,
-    tooltip: '存在库存不足（BACKORDERED）的订单行；行内可见「已采购 / 已到货」',
+    tooltip: '存在库存不足的订单行；行内可见「已采购 / 已到货」',
   },
   {
     key: 'MAPPING_FAILED',
@@ -226,14 +226,14 @@ const GOODS_STATE_CHIPS: Array<{
 /** 固定 JSON Fixtures（task §66 Case A–F 的单店可复用形态） */
 const FIXTURES: Array<{ label: string; json: Record<string, unknown> }> = [
   {
-    label: 'Case A: 单SKU正常订单',
+    label: '场景 A：单 SKU 正常订单',
     json: {
       platformOrderId: 'MOCK-A-001',
       items: [{ platformSkuId: 'MOCK-SKU-A', quantity: '2' }],
     },
   },
   {
-    label: 'Case B: 多SKU正常订单',
+    label: '场景 B：多 SKU 正常订单',
     json: {
       platformOrderId: 'MOCK-B-001',
       items: [
@@ -243,14 +243,14 @@ const FIXTURES: Array<{ label: string; json: Record<string, unknown> }> = [
     },
   },
   {
-    label: 'Case C: 一个SKU缺货',
+    label: '场景 C：一个 SKU 缺货',
     json: {
       platformOrderId: 'MOCK-C-001',
       items: [{ platformSkuId: 'MOCK-SKU-A', quantity: '999' }],
     },
   },
   {
-    label: 'Case D: 一个Listing无法映射',
+    label: '场景 D：一个商品链接无法映射',
     json: {
       platformOrderId: 'MOCK-D-001',
       items: [{ platformSkuId: 'NO-SUCH-MAPPING', quantity: '1' }],
@@ -455,7 +455,7 @@ export function OrdersPage() {
         { id },
       ),
     onSuccess: (result: { releasedItems: number }) => {
-      message.success(`已标记外部履约（关账 ${result.releasedItems} 行），订单转入 SHIPPED`);
+      message.success(`已标记外部履约（关账 ${result.releasedItems} 行），订单转入已发货`);
       setExternalTarget(null);
       externalForm.resetFields();
       void queryClient.invalidateQueries({ queryKey: ['orders'] });
@@ -492,11 +492,11 @@ export function OrdersPage() {
       ),
     onSuccess: (result: { reserved: boolean; fulfillmentStatus: string }) => {
       if (result.reserved) {
-        message.success('重新分配成功，订单行已 RESERVED');
+        message.success('重新分配成功，订单行已占用');
       } else if (result.fulfillmentStatus === 'BACKORDERED') {
-        message.warning('映射已修复，但库存不足，订单行保持 BACKORDERED');
+        message.warning('映射已修复，但库存不足，订单行保持缺货');
       } else {
-        message.warning('库存仍然不足，保持 BACKORDERED');
+        message.warning('库存仍然不足，订单行保持缺货');
       }
       void queryClient.invalidateQueries({ queryKey: ['orders'] });
       void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
@@ -782,7 +782,7 @@ export function OrdersPage() {
                   // 取消订单 = L2：modal.confirm + danger ok。
                   modal.confirm({
                     title: `取消订单 ${selectedRow.orderNo}？`,
-                    content: 'Reserved 行将释放库存；Picked 行将创建拦截任务（不自动恢复库存）。',
+                    content: '已占用行将释放库存；已拣货行将创建拦截任务（不自动恢复库存）。',
                     okText: '取消订单',
                     okButtonProps: { danger: true },
                     cancelText: '返回',
@@ -819,7 +819,7 @@ export function OrdersPage() {
       key: 'sku',
       render: (_: unknown, row: OrderItem) =>
         row.skuId === null ? (
-          <StatusBadge tone="purple" label="无法映射" hint="ORDER_SKU_MAPPING_FAILED" />
+          <StatusBadge tone="purple" label="无法映射" hint="缺少 SKU 映射，去 SKU 映射补随后重试" />
         ) : (
           <div>
             <div style={{ fontWeight: 550 }}>{row.skuCode}</div>
@@ -873,7 +873,7 @@ export function OrdersPage() {
       },
     },
     {
-      title: '库存分配（Bin × 数量）',
+      title: '库存分配（库位 × 数量）',
       key: 'bins',
       render: (_: unknown, row: OrderItem) =>
         row.reservation === null ? (
@@ -1108,7 +1108,7 @@ export function OrdersPage() {
                     {row.reservedCount > 0 && (
                       <StatusBadge
                         tone="info"
-                        label={`Reserved ${row.reservedCount}`}
+                        label={`已占用 ${row.reservedCount}`}
                         showDot={false}
                       />
                     )}
@@ -1483,7 +1483,7 @@ export function OrdersPage() {
                 },
                 {
                   key: 'raw',
-                  label: 'Raw Data',
+                  label: '原始数据',
                   children:
                     detail.rawData === null ? (
                       <span style={{ color: colors.textTertiary }}>无平台原始数据</span>
@@ -1576,7 +1576,7 @@ export function OrdersPage() {
             }}
           >
             适用于货物从未进入 WCIES
-            仓库、在系统外完成的订单（如线下采购直发买家）。订单行将关账（RELEASED）、订单转入
+            仓库、在系统外完成的订单（如线下采购直发买家）。订单行将关账、订单转入
             SHIPPED，不产生任何库存流水，并关闭该订单的缺货/时限异常。存在 RESERVED / PICKED
             行的订单请走「取消订单」。
           </span>

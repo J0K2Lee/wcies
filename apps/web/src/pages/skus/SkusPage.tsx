@@ -334,7 +334,7 @@ export function SkusPage() {
     mutationFn: ({ id, action }: { id: string; action: 'activate' | 'deactivate' }) =>
       apiPost(`/api/v1/skus/{id}/${action}`, {}, { id }),
     onSuccess: (_data, variables) => {
-      void message.success(variables.action === 'activate' ? 'SKU已启用' : 'SKU已停用');
+      void message.success(variables.action === 'activate' ? 'SKU 已启用' : 'SKU 已停用');
       refreshSku();
     },
     onError: (error: Error) => void message.error(error.message),
@@ -344,7 +344,7 @@ export function SkusPage() {
     mutationFn: ({ id, force }: { id: string; force: boolean }) =>
       apiDelete(`/api/v1/skus/{id}${force ? '?force=true' : ''}`, { id }),
     onSuccess: () => {
-      void message.success('SKU已删除');
+      void message.success('SKU 已删除');
       setDrawerId(null);
       setSelectedId(null);
       refreshSku();
@@ -360,7 +360,7 @@ export function SkusPage() {
     mutationFn: (values: Record<string, unknown>) =>
       apiPatch('/api/v1/skus/{id}', values, { id: drawerId ?? '' }),
     onSuccess: () => {
-      void message.success('SKU已更新');
+      void message.success('SKU 已更新');
       setEditOpen(false);
       refreshSku();
     },
@@ -507,7 +507,7 @@ export function SkusPage() {
         skuVariants: [{ offerId: values.offerId || undefined, skuId: drawerId ?? '' }],
       }),
     onSuccess: () => {
-      void message.success('Listing已创建并映射到该SKU');
+      void message.success('商品链接已创建并映射到该 SKU');
       setListingCreateOpen(false);
       listingForm.resetFields();
       refreshSku();
@@ -670,17 +670,23 @@ export function SkusPage() {
               <span style={{ fontSize: 12.5, color: colors.textTertiary }}>暂无库存记录</span>
             ) : (
               <>
-                <ContextMetric label="On Hand" value={fmtQty(totals.onHandQty)} strong />
-                <ContextMetric label="Reserved" value={fmtQty(totals.reservedQty)} />
+                <ContextMetric label="在库" value={fmtQty(totals.onHandQty)} strong />
+                <ContextMetric label="已占用" value={fmtQty(totals.reservedQty)} />
                 <ContextMetric label="可售" value={fmtQty(totals.sellableAvailableQty)} strong />
               </>
             )}
+          </ContextSection>
+          <ContextSection title="规格">
+            <ContextMetric
+              label="重量"
+              value={selectedRow.weightG !== null ? `${selectedRow.weightG} g` : '—'}
+            />
           </ContextSection>
           <ContextSection title="映射与标识">
             <ContextMetric
               label="平台映射"
               value={
-                selectedRow.listingCount > 0 ? `${selectedRow.listingCount} 个 Listing` : '未映射'
+                selectedRow.listingCount > 0 ? `${selectedRow.listingCount} 个商品链接` : '未映射'
               }
             />
             <ContextMetric label="主条码" value={selectedRow.primaryBarcode ?? '—'} />
@@ -1121,7 +1127,7 @@ export function SkusPage() {
               children: sku !== undefined && (
                 <InfoGrid
                   items={[
-                    { label: 'SKU Code', children: sku.skuCode },
+                    { label: 'SKU 编码', children: sku.skuCode },
                     { label: '中文名称', children: sku.nameZh },
                     {
                       label: '商品',
@@ -1154,7 +1160,7 @@ export function SkusPage() {
                     { label: 'SN管理', children: sku.serialTracking ? '是' : '否' },
                     {
                       label: '平台映射',
-                      children: `${mappings.data?.data.length ?? 0} 个 Listing`,
+                      children: `${mappings.data?.data.length ?? 0} 个商品链接`,
                     },
                   ]}
                 />
@@ -1298,7 +1304,7 @@ export function SkusPage() {
                         setListingCreateOpen(true);
                       }}
                     >
-                      新建 Listing 并映射
+                      新建商品链接并映射
                     </Button>
                     <Button
                       disabled={drawerId === null}
@@ -1317,7 +1323,7 @@ export function SkusPage() {
                     pagination={false}
                     loading={mappings.isLoading}
                     emptyTitle="暂无平台映射"
-                    emptyDescription="该 SKU 尚未映射到任何平台 Listing。"
+                    emptyDescription="该 SKU 尚未映射到任何平台商品链接。"
                     columns={[
                       {
                         title: '平台',
@@ -1326,7 +1332,7 @@ export function SkusPage() {
                         render: (value: string) => <PlatformTag code={value} />,
                       },
                       { title: '店铺', dataIndex: 'storeCode', width: 110 },
-                      { title: 'Platform Product ID', dataIndex: 'platformProductId' },
+                      { title: '平台商品 ID', dataIndex: 'platformProductId' },
                       { title: 'Offer ID', dataIndex: 'offerId' },
                       { title: 'Seller SKU', dataIndex: 'sellerSku' },
                       {
@@ -1479,7 +1485,7 @@ export function SkusPage() {
 
       {/* ---- Create a new listing mapped to this SKU (§11.6) ---- */}
       <Modal
-        title="新建 Listing 并映射"
+        title="新建商品链接并映射"
         open={listingCreateOpen}
         zIndex={1100}
         afterOpenChange={(open) => {
@@ -1525,7 +1531,7 @@ export function SkusPage() {
           </Form.Item>
           <Form.Item
             name="platformProductId"
-            label="Platform Product ID"
+            label="平台商品 ID"
             rules={[{ required: true, message: '请输入平台商品 ID' }]}
           >
             <Input placeholder="如 152987456001" />
@@ -1570,8 +1576,8 @@ export function SkusPage() {
         <Form form={mapExistingForm} layout="vertical">
           <Form.Item
             name="listingId"
-            label="Listing"
-            rules={[{ required: true, message: '请选择 Listing' }]}
+            label="商品链接"
+            rules={[{ required: true, message: '请选择商品链接' }]}
           >
             <Select
               showSearch

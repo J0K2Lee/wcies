@@ -456,7 +456,7 @@ export function ExceptionsPage() {
           icon={<WarningOutlined />}
           title="待处理"
           value={fmtNumber(openCount.data?.meta.total ?? 0)}
-          aux="OPEN"
+          aux="未解决"
         />
         <MetricCard
           icon={<WarningOutlined />}
@@ -468,13 +468,13 @@ export function ExceptionsPage() {
           icon={<CheckCircleOutlined />}
           title="已解决"
           value={fmtNumber(resolvedCount.data?.meta.total ?? 0)}
-          aux="RESOLVED"
+          aux="已处理"
         />
         <MetricCard
           icon={<FileDoneOutlined />}
           title="已忽略"
           value={fmtNumber(ignoredCount.data?.meta.total ?? 0)}
-          aux="IGNORED"
+          aux="人工忽略"
         />
       </KpiRow>
 

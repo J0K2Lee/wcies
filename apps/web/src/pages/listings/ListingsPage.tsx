@@ -580,7 +580,7 @@ export function ListingsPage() {
       onboardUnmapped.find((variant) => variant.id !== onboardResult.mappingId) ??
       null;
     if (next === null) {
-      void message.info('该 Listing 的变体已全部建档完成');
+      void message.info('该商品链接的变体已全部建档完成');
       closeOnboard();
       return;
     }
@@ -652,7 +652,7 @@ export function ListingsPage() {
       }>;
     }) => apiPost('/api/v1/listings', values),
     onSuccess: () => {
-      void message.success('Listing已创建');
+      void message.success('商品链接已创建');
       setCreateOpen(false);
       form.resetFields();
       void queryClient.invalidateQueries({ queryKey: ['listings'] });
@@ -670,7 +670,7 @@ export function ListingsPage() {
         { id },
       ),
     onSuccess: () => {
-      void message.success('Listing状态已更新');
+      void message.success('商品链接状态已更新');
       refreshListings();
     },
     onError: (error: Error) => void message.error(error.message),
@@ -679,7 +679,7 @@ export function ListingsPage() {
   const listingDeleteMutation = useMutation({
     mutationFn: (id: string) => apiDelete('/api/v1/listings/{id}', { id }),
     onSuccess: (_data, id) => {
-      void message.success('Listing已删除');
+      void message.success('商品链接已删除');
       if (detailId === id) {
         setDetailId(null);
       }
@@ -767,7 +767,7 @@ export function ListingsPage() {
               value={
                 mappingStats.data === undefined
                   ? '…'
-                  : `${mappingStats.data.data.unmapped} 个 Listing`
+                  : `${mappingStats.data.data.unmapped} 个商品链接`
               }
             />
             <ContextMetric
@@ -776,7 +776,7 @@ export function ListingsPage() {
             />
             <ContextMetric
               label="当前筛选结果"
-              value={`${list.data?.meta.total ?? 0} 个 Listing`}
+              value={`${list.data?.meta.total ?? 0} 个商品链接`}
             />
             <RailHint>
               未映射行可双击打开详情后在变体表「建档并映射」；被订单撞上的未映射会排在最前。
@@ -806,7 +806,7 @@ export function ListingsPage() {
             />
             <StatusSwitch
               active={selectedRow.status === 'ACTIVE'}
-              entityName="Listing"
+              entityName="商品链接"
               disableHint="停用后该商品链接不再参与同步与订单匹配"
               loading={listingStatusMutation.isPending}
               onChange={(next) =>
@@ -856,7 +856,7 @@ export function ListingsPage() {
     <div>
       <PageHeader
         title="SKU映射"
-        description="管理平台商品（Listing）与内部SKU的变体映射；人工确认的映射不会被后续同步覆盖"
+        description="管理平台商品链接与内部 SKU 的变体映射；人工确认的映射不会被后续同步覆盖"
         secondary={
           <>
             <Button onClick={() => setCategoryToolsOpen(true)}>OZON类目工具</Button>
@@ -964,7 +964,7 @@ export function ListingsPage() {
             rowKey="id"
             loading={list.isLoading}
             dataSource={rows}
-            emptyTitle="暂无Listing"
+            emptyTitle="暂无商品链接"
             emptyDescription="调整筛选条件，或点击右上角新建映射"
             pagination={{
               current: page,
@@ -972,7 +972,7 @@ export function ListingsPage() {
               total: list.data?.meta.total ?? 0,
               onChange: setPage,
               showSizeChanger: false,
-              showTotal: (total) => `共 ${total} 个 Listing`,
+              showTotal: (total) => `共 ${total} 个商品链接`,
             }}
             rowClassName={(record) => (record.id === selectedId ? 'wcies-row-selected' : '')}
             onRow={(record) => ({
@@ -992,7 +992,7 @@ export function ListingsPage() {
               },
               { title: '店铺', dataIndex: 'storeCode', width: 100 },
               {
-                title: 'Platform Product ID',
+                title: '平台商品 ID',
                 dataIndex: 'platformProductId',
                 width: 160,
                 render: (value: string) => (
@@ -1052,7 +1052,7 @@ export function ListingsPage() {
       </SectionCard>
 
       <Modal
-        title="新建Listing映射（支持多SKU变体）"
+        title="新建商品链接映射（支持多 SKU 变体）"
         open={createOpen}
         width={720}
         zIndex={1100}
@@ -1071,7 +1071,7 @@ export function ListingsPage() {
             showIcon
             style={{ marginBottom: 12 }}
             title="平台已同步的商品请勿在此新建"
-            description="若平台商品已同步到系统，本表单会因「该店铺+Platform Product ID 已存在」而失败。请先搜索该商品，在其详情里把已同步的未映射变体「人工映射」到内部 SKU——这样映射会带上平台标识，订单才匹配得到。"
+            description="若平台商品已同步到系统，本表单会因「该店铺 + 平台商品 ID 已存在」而失败。请先搜索该商品，在其详情里把已同步的未映射变体「人工映射」到内部 SKU——这样映射会带上平台标识，订单才匹配得到。"
           />
           <Space wrap>
             <Form.Item
@@ -1106,11 +1106,7 @@ export function ListingsPage() {
                 }))}
               />
             </Form.Item>
-            <Form.Item
-              name="platformProductId"
-              label="Platform Product ID"
-              rules={[{ required: true }]}
-            >
+            <Form.Item name="platformProductId" label="平台商品 ID" rules={[{ required: true }]}>
               <Input style={{ width: 200 }} />
             </Form.Item>
           </Space>
@@ -1126,9 +1122,9 @@ export function ListingsPage() {
             {(fields, { add, remove }) => (
               <>
                 <p style={{ fontSize: 12.5, color: colors.textTertiary, marginBottom: 10 }}>
-                  每个变体至少要填 Platform SKU ID 或 Seller SKU： 订单只按这两个标识反查内部
-                  SKU（Offer ID 可被运营在平台侧修改，不作为解析依据； 仍会作为平台事实记录）。OZON
-                  的 Platform SKU ID 填平台返回的 sku。
+                  每个变体至少要填平台 SKU ID 或 Seller SKU：订单只按这两个标识反查内部 SKU（Offer
+                  ID 可被运营在平台侧修改，不作为解析依据； 仍会作为平台事实记录）。OZON 的平台 SKU
+                  ID 填平台返回的 sku。
                 </p>
                 {fields.map((field) => (
                   <Space key={field.key} align="baseline" wrap>
@@ -1167,14 +1163,14 @@ export function ListingsPage() {
                               ? Promise.resolve()
                               : Promise.reject(
                                   new Error(
-                                    '至少填 Platform SKU ID 或 Seller SKU（Offer ID 不作为解析依据）',
+                                    '至少填平台 SKU ID 或 Seller SKU（Offer ID 不作为解析依据）',
                                   ),
                                 );
                           },
                         }),
                       ]}
                     >
-                      <Input placeholder="Platform SKU ID" style={{ width: 150 }} />
+                      <Input placeholder="平台 SKU ID" style={{ width: 150 }} />
                     </Form.Item>
                     <Form.Item name={[field.name, 'sellerSku']}>
                       <Input placeholder="Seller SKU" style={{ width: 130 }} />
@@ -1204,7 +1200,7 @@ export function ListingsPage() {
               {listingStatusBadge(listingDetail.status)}
             </Space>
           ) : (
-            'Listing详情'
+            '商品链接详情'
           )
         }
         size={760}
@@ -1279,7 +1275,7 @@ export function ListingsPage() {
                       ),
                   },
                   {
-                    label: 'Platform Product ID',
+                    label: '平台商品 ID',
                     children: (
                       <span style={{ fontFamily: 'monospace', fontSize: 12.5 }}>
                         {listingDetail.platformProductId}
@@ -1312,7 +1308,7 @@ export function ListingsPage() {
                 dataSource={listingDetail.skus}
                 pagination={false}
                 emptyTitle="暂无变体"
-                emptyDescription="该Listing尚无变体映射记录"
+                emptyDescription="该商品链接尚无变体映射记录"
                 columns={[
                   {
                     title: '映射状态',
@@ -1337,7 +1333,7 @@ export function ListingsPage() {
                     render: (value: string | null) => value ?? '—',
                   },
                   {
-                    title: 'Platform SKU',
+                    title: '平台 SKU',
                     dataIndex: 'platformSkuId',
                     render: (value: string | null) => value ?? '—',
                   },
@@ -1516,7 +1512,7 @@ export function ListingsPage() {
             仅记录为平台事实——它可被运营在平台侧修改，不参与订单解析。
           </p>
           <Form form={mappingEditForm} layout="vertical">
-            <Form.Item name="platformSkuId" label="Platform SKU ID">
+            <Form.Item name="platformSkuId" label="平台 SKU ID">
               <Input placeholder="平台 SKU ID" maxLength={255} />
             </Form.Item>
             <Form.Item name="sellerSku" label="Seller SKU">
@@ -1533,7 +1529,7 @@ export function ListingsPage() {
           title="确认删除该映射？"
           description={`将删除「${mappingDeleteTarget?.skuCode ?? ''}」与平台变体「${
             mappingDeleteTarget?.offerId ?? mappingDeleteTarget?.platformSkuId ?? ''
-          }」的映射关系。Listing 本身保留。`}
+          }」的映射关系。商品链接本身保留。`}
           forceWarning="若该映射已被订单行引用，删除会被拒绝——订单行是履约凭证，无法移除。"
           confirmLoading={mappingDeleteMutation.isPending}
           onConfirm={() => {
@@ -1660,7 +1656,7 @@ export function ListingsPage() {
               description={
                 onboardResult.productCreated
                   ? '失败会整体回滚，不会留下「建了 SKU 但没映射」的半成品。商品图将从平台 CDN 异步转存到自有桶。'
-                  : '本次 SKU 挂靠到已有商品（同 Listing 变体不裂变）。商品图将从平台 CDN 异步转存到自有桶。'
+                  : '本次 SKU 挂靠到已有商品（同商品链接变体不裂变）。商品图将从平台 CDN 异步转存到自有桶。'
               }
             />
             <InfoGrid
@@ -1699,7 +1695,7 @@ export function ListingsPage() {
               <Alert
                 type="info"
                 showIcon
-                title="该 Listing 还有未建档的变体"
+                title="该商品链接还有未建档的变体"
                 description="点「保存并下一变体」继续：商品已锁定挂靠，类目/品牌/条码选择沿用，名称按下一变体预填。"
               />
             )}
@@ -1707,7 +1703,7 @@ export function ListingsPage() {
         ) : (
           <Form form={onboardForm} layout="vertical" preserve={false}>
             {onboardUnmapped.length > 1 && (
-              <Form.Item label="要建档映射的变体（该 Listing 有多个未映射变体）" required>
+              <Form.Item label="要建档映射的变体（该商品链接有多个未映射变体）" required>
                 <Select
                   value={onboardSelectedVariantId}
                   onChange={(value) => {
@@ -1734,7 +1730,7 @@ export function ListingsPage() {
                 type="warning"
                 showIcon
                 style={{ marginBottom: 12 }}
-                title="该 Listing 没有未映射的变体"
+                title="该商品链接没有未映射的变体"
                 description="可能刚刚已完成映射，请刷新列表后重试。"
               />
             )}
@@ -1760,7 +1756,7 @@ export function ListingsPage() {
             {(onboardCtx?.defaultAttachProductId !== null &&
               onboardCtx?.defaultAttachProductId !== undefined) ||
             onboardPinnedProductId !== null ? (
-              <Form.Item label="多变体挂靠（同 Listing 变体默认共用一个商品）" required>
+              <Form.Item label="多变体挂靠（同商品链接变体默认共用一个商品）" required>
                 <Radio.Group
                   value={onboardMode}
                   onChange={(event) => setOnboardMode(event.target.value as 'attach' | 'new')}
@@ -1784,10 +1780,10 @@ export function ListingsPage() {
               <>
                 <Form.Item
                   name="productNameZh"
-                  label="商品名（Product）"
+                  label="商品名"
                   rules={[{ required: true, message: '请填写商品名' }]}
                 >
-                  <Input maxLength={255} placeholder="默认取 Listing 标题" />
+                  <Input maxLength={255} placeholder="默认取商品链接标题" />
                 </Form.Item>
                 <Form.Item
                   name="brandId"
@@ -1931,8 +1927,8 @@ export function ListingsPage() {
       {/* ---- Listing 删除 = L2 统一 DeleteConfirmModal（G4） ---- */}
       <DeleteConfirmModal
         open={deletingListing !== null}
-        title={`删除 Listing ${deletingListing?.platformProductId ?? ''}？`}
-        description="存在变体映射的 Listing 无法删除；被拒时会返回具体原因。"
+        title={`删除商品链接 ${deletingListing?.platformProductId ?? ''}？`}
+        description="存在变体映射的商品链接无法删除；被拒时会返回具体原因。"
         confirmLoading={listingDeleteMutation.isPending}
         onConfirm={() => {
           if (deletingListing !== null) {

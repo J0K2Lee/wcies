@@ -273,7 +273,7 @@ export function SyncCenterPage() {
         <>
           <ContextSection title="任务概况">
             <ContextMetric
-              label="Job ID"
+              label="任务 ID"
               value={
                 <span style={{ fontSize: 12, fontFamily: 'monospace' }}>
                   {selectedJob.id.slice(0, 8)}…
@@ -498,7 +498,7 @@ export function SyncCenterPage() {
           icon={<CheckCircleOutlined />}
           title="累计成功"
           value={fmtNumber(successCount.data?.meta.total ?? 0)}
-          aux="SUCCESS 任务"
+          aux="成功任务"
         />
         <MetricCard
           icon={<WarningOutlined />}
@@ -741,7 +741,7 @@ export function SyncCenterPage() {
                   },
                   { label: '耗时', children: fmtDuration(detailJob.durationMs) },
                   {
-                    label: 'Job ID',
+                    label: '任务 ID',
                     children: (
                       <Typography.Text code copyable style={{ fontSize: 12 }}>
                         {detailJob.id}
@@ -829,7 +829,7 @@ export function SyncCenterPage() {
                   marginBottom: 10,
                 }}
               >
-                游标（Cursor）
+                游标
               </div>
               <Space orientation="vertical" size={6} style={{ width: '100%' }}>
                 <CursorField label="执行前游标" value={detailJob.cursorBefore} />
@@ -880,10 +880,10 @@ export function SyncCenterPage() {
                 },
                 {
                   label: '平台事件 ID',
-                  children: eventDetail.externalEventId ?? '（无，按 payload hash 去重）',
+                  children: eventDetail.externalEventId ?? '（无，按载荷哈希去重）',
                 },
                 {
-                  label: 'Payload Hash',
+                  label: '载荷哈希',
                   children: (
                     <span style={{ fontSize: 12, fontFamily: 'monospace' }}>
                       {eventDetail.payloadHash}
@@ -957,7 +957,7 @@ export function SyncCenterPage() {
             <Radio.Group
               options={[
                 { value: 'orders', label: '订单同步' },
-                { value: 'listings', label: '商品（Listing）同步' },
+                { value: 'listings', label: '商品链接同步' },
               ]}
             />
           </Form.Item>

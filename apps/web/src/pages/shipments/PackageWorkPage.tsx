@@ -206,7 +206,7 @@ export function PackageWorkPage() {
             onConfirm={() => sealMutation.mutate()}
           >
             <Button type="primary" size="large" loading={sealMutation.isPending}>
-              封箱（Seal）
+              封箱
             </Button>
           </Popconfirm>
         )}

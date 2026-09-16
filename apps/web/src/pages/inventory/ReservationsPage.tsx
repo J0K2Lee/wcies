@@ -53,7 +53,7 @@ const LIFECYCLE_LABELS: Record<LifecycleOp, { text: string; explain: string }> =
   release: { text: '释放占用', explain: '可售 +N，占用解除' },
   pick: { text: '拣货', explain: '已占用 → 已拣货' },
   unpick: { text: '取消拣货', explain: '已拣货 → 已占用，仅拣错纠正' },
-  ship: { text: '出库', explain: 'Picked -N，On Hand -N' },
+  ship: { text: '出库', explain: '已拣货 -N，在库 -N' },
 };
 
 /** 状态机：已占用 → 已拣货 → 已出库；已占用可释放；已拣货可取消拣货回已占用。 */

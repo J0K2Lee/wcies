@@ -160,7 +160,7 @@ export function ShipmentDetailPage() {
   const confirmShip = (): void => {
     modal.confirm({
       title: '确认正式出库？',
-      content: '出库后实体库存将扣减（On Hand / Picked 减少，SN 转为 SHIPPED）。',
+      content: '出库后实体库存将扣减（在库 / 已拣货减少，SN 转为已发货）。',
       okText: '确认出库',
       okButtonProps: { danger: true },
       cancelText: '取消',
@@ -456,13 +456,13 @@ export function ShipmentDetailPage() {
         <Space orientation="vertical" style={{ width: '100%' }}>
           <Input
             size="large"
-            placeholder="物流单号 trackingNumber"
+            placeholder="物流单号"
             value={trackingNumber}
             onChange={(event) => setTrackingNumber(event.target.value)}
           />
           <Input
             size="large"
-            placeholder="承运商 carrierCode（如 CDEK）"
+            placeholder="承运商代码（如 CDEK）"
             value={carrierCode}
             onChange={(event) => setCarrierCode(event.target.value)}
           />

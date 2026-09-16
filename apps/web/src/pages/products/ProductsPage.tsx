@@ -1219,7 +1219,7 @@ export function ProductsPage() {
               emptyTitle="暂无 SKU"
               emptyDescription="该商品还没有创建内部 SKU。"
               columns={[
-                { title: 'SKU Code', dataIndex: 'skuCode', width: 120 },
+                { title: 'SKU 编码', dataIndex: 'skuCode', width: 120 },
                 { title: '名称', dataIndex: 'nameZh', ellipsis: true },
                 {
                   title: '型号',

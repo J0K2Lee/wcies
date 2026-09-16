@@ -357,10 +357,10 @@ export function InventoryPage() {
         children: (
           <>
             <ContextSection title="库存汇总">
-              <ContextMetric label="On Hand" value={fmtQty(detailRow.totals.onHandQty)} strong />
+              <ContextMetric label="在库" value={fmtQty(detailRow.totals.onHandQty)} strong />
               <ContextMetric label="已占用" value={fmtQty(detailRow.totals.reservedQty)} />
               <ContextMetric label="已拣货" value={fmtQty(detailRow.totals.pickedQty)} />
-              <ContextMetric label="Safety" value={fmtQty(detailRow.totals.safetyQty)} />
+              <ContextMetric label="安全库存" value={fmtQty(detailRow.totals.safetyQty)} />
               <ContextMetric
                 label="可售"
                 value={fmtQty(detailRow.totals.sellableAvailableQty)}
@@ -456,13 +456,13 @@ export function InventoryPage() {
           icon={<AppstoreOutlined />}
           title="有可售"
           value={inStockTotal.isLoading ? '…' : (inStockTotal.data?.meta.total ?? 0)}
-          aux="IN_STOCK 记录"
+          aux="有可售库存记录"
         />
         <MetricCard
           icon={<WarningOutlined />}
           title="缺货记录"
           value={outOfStockTotal.isLoading ? '…' : (outOfStockTotal.data?.meta.total ?? 0)}
-          aux="OUT_OF_STOCK 记录"
+          aux="无可售库存记录"
         />
         <MetricCard
           icon={<ExclamationCircleOutlined />}
@@ -588,7 +588,7 @@ export function InventoryPage() {
                 ),
             },
             {
-              title: 'On Hand',
+              title: '在库',
               dataIndex: 'onHandQty',
               width: 90,
               render: fmtQty,
@@ -602,9 +602,15 @@ export function InventoryPage() {
               align: 'right',
             },
             { title: '已拣货', dataIndex: 'pickedQty', width: 80, render: fmtQty, align: 'right' },
-            { title: 'Safety', dataIndex: 'safetyQty', width: 80, render: fmtQty, align: 'right' },
             {
-              title: 'Available',
+              title: '安全库存',
+              dataIndex: 'safetyQty',
+              width: 80,
+              render: fmtQty,
+              align: 'right',
+            },
+            {
+              title: '可售',
               dataIndex: 'sellableAvailableQty',
               width: 95,
               align: 'right',
@@ -646,10 +652,10 @@ export function InventoryPage() {
             <div style={{ marginBottom: 16 }}>
               <InfoGrid
                 items={[
-                  { label: 'On Hand', children: fmtQty(detailRow.totals.onHandQty) },
+                  { label: '在库', children: fmtQty(detailRow.totals.onHandQty) },
                   { label: '已占用', children: fmtQty(detailRow.totals.reservedQty) },
                   { label: '已拣货', children: fmtQty(detailRow.totals.pickedQty) },
-                  { label: 'Safety', children: fmtQty(detailRow.totals.safetyQty) },
+                  { label: '安全库存', children: fmtQty(detailRow.totals.safetyQty) },
                   { label: '实物可售', children: fmtQty(detailRow.totals.physicalAvailableQty) },
                   {
                     label: '渠道可售',
@@ -677,7 +683,7 @@ export function InventoryPage() {
                         { title: '仓库', dataIndex: 'warehouseCode', width: 90 },
                         { title: '库位', dataIndex: 'binCode', width: 140 },
                         {
-                          title: 'On Hand',
+                          title: '在库',
                           dataIndex: 'onHandQty',
                           align: 'right',
                           render: fmtQty,
@@ -694,7 +700,12 @@ export function InventoryPage() {
                           align: 'right',
                           render: fmtQty,
                         },
-                        { title: 'Safety', dataIndex: 'safetyQty', align: 'right', render: fmtQty },
+                        {
+                          title: '安全库存',
+                          dataIndex: 'safetyQty',
+                          align: 'right',
+                          render: fmtQty,
+                        },
                         {
                           title: '可售',
                           dataIndex: 'sellableAvailableQty',
@@ -903,7 +914,7 @@ export function InventoryPage() {
               </Form.Item>
               <Form.Item
                 name="safetyQty"
-                label="安全库存（渠道保护量，不改变 On Hand）"
+                label="安全库存（渠道保护量，不改变在库）"
                 rules={[{ required: true }]}
                 extra="显示当前值，保存后立即生效"
               >

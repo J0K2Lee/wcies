@@ -111,8 +111,7 @@ export function InterceptionDetailPage() {
     // 确认回库 = L2：modal.confirm + danger ok（UI 规范 §7）。
     modal.confirm({
       title: '确认回库？',
-      content:
-        '将执行 Picked - N（On Hand 不变），SN 回到目标库位，关联包裹同步解除。该操作原子执行。',
+      content: '将执行已拣货 - N（在库不变），SN 回到目标库位，关联包裹同步解除。该操作原子执行。',
       okText: '确认回库',
       okButtonProps: { danger: true },
       cancelText: '返回',
@@ -293,7 +292,7 @@ export function InterceptionDetailPage() {
       {detail.status === 'INTERCEPTED' && (
         <SectionCard>
           <Button danger size="large" onClick={confirmReturn}>
-            确认回库（Picked - N，OnHand 不变）
+            确认回库（已拣货 - N，在库不变）
           </Button>
         </SectionCard>
       )}
@@ -343,7 +342,7 @@ export function InterceptionDetailPage() {
         }
       >
         <Input
-          placeholder="失败原因（库存保持 Picked，将创建异常）"
+          placeholder="失败原因（库存保持已拣货，将创建异常）"
           value={failReason}
           onChange={(event) => setFailReason(event.target.value)}
         />

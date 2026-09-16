@@ -212,19 +212,19 @@ export function PlatformMappingsPage() {
           icon={<AppstoreOutlined />}
           title="已映射"
           value={fmtNumber(mappedCount.data?.meta.total ?? 0)}
-          aux="MAPPED"
+          aux="映射完成"
         />
         <MetricCard
           icon={<WarningOutlined />}
           title="未映射"
           value={fmtNumber(unmappedCount.data?.meta.total ?? 0)}
-          aux="UNMAPPED · 需处理"
+          aux="未映射 · 需处理"
         />
         <MetricCard
           icon={<WarningOutlined />}
           title="映射类异常"
           value={fmtNumber(mappingExceptions.data?.meta.total ?? 0)}
-          aux="待处理 ORDER_SKU_MAPPING_FAILED"
+          aux="待处理映射类异常"
           onClick={() => void navigate('/exceptions?exceptionType=ORDER_SKU_MAPPING_FAILED')}
         />
       </KpiRow>
@@ -288,7 +288,7 @@ export function PlatformMappingsPage() {
             rowKey="id"
             loading={list.isLoading}
             dataSource={rows}
-            emptyTitle="暂无 Listing"
+            emptyTitle="暂无商品链接"
             emptyDescription="同步商品后将出现在这里"
             pagination={{
               current: page,

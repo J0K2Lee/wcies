@@ -154,7 +154,7 @@ export function ShipmentsPage() {
     <div>
       <PageHeader
         title="发货管理"
-        description="从已拣货（PICKED）订单创建发货单，按仓拆分；双击行进入发货单详情"
+        description="从已拣货订单创建发货单，按仓拆分；双击行进入发货单详情"
         primary={
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
             从订单创建发货单
@@ -264,7 +264,7 @@ export function ShipmentsPage() {
       </SectionCard>
 
       <Modal
-        title="从订单创建发货单（仅 PICKED 行，按仓拆分）"
+        title="从订单创建发货单（仅已拣货行，按仓拆分）"
         open={createOpen}
         confirmLoading={createMutation.isPending}
         okText="创建发货单"
@@ -277,7 +277,7 @@ export function ShipmentsPage() {
         <Form form={form} layout="vertical">
           <Form.Item
             name="orderId"
-            label="选择 PICKED 状态订单"
+            label="选择已拣货状态订单"
             rules={[{ required: true, message: '请选择订单' }]}
           >
             <Select

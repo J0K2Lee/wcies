@@ -629,7 +629,7 @@ export function StoresPage() {
                 menu={{
                   items: [
                     { key: 'orders', label: '同步订单' },
-                    { key: 'listings', label: '同步商品（Listing）' },
+                    { key: 'listings', label: '同步商品链接' },
                   ],
                   onClick: ({ key }) =>
                     triggerFor(selectedRow.id, key === 'orders' ? 'orders' : 'listings'),
@@ -937,7 +937,7 @@ export function StoresPage() {
       <DeleteConfirmModal
         open={deleting !== null}
         title={`删除店铺 ${deleting?.name ?? ''}？`}
-        description="仅零引用（无凭证/绑定/Listing/订单/同步记录）的店铺可删除；被引用时会返回具体原因。"
+        description="仅零引用（无凭证/绑定/商品链接/订单/同步记录）的店铺可删除；被引用时会返回具体原因。"
         confirmLoading={deleteMutation.isPending}
         onConfirm={() => {
           if (deleting !== null) {
@@ -998,9 +998,7 @@ export function StoresPage() {
 
       {/* ---- Credential modal (create or replace payload) ---- */}
       <Modal
-        title={
-          editingCredentialId === null ? '配置 MAIN_API 凭证' : '编辑 MAIN_API 凭证（替换密钥）'
-        }
+        title={editingCredentialId === null ? '配置主 API 凭证' : '编辑主 API 凭证（替换密钥）'}
         open={credentialOpen}
         zIndex={1100}
         afterOpenChange={(open) => {
@@ -1017,7 +1015,7 @@ export function StoresPage() {
           const configured = (credentials.data?.data ?? [])[0];
           return configured !== undefined ? (
             <p style={{ color: colors.textTertiary, fontSize: 12.5, marginBottom: 12 }}>
-              当前已配置：MAIN_API · 更新时间 {fmtDateTime(configured.updatedAt)}。
+              当前已配置：主 API · 更新时间 {fmtDateTime(configured.updatedAt)}。
               提交后将以新值覆盖（密钥加密存储，不回显）。
             </p>
           ) : (
@@ -1146,7 +1144,7 @@ function StoreDetailBody({
               children: <PlatformTag code={store.platformCode} suffix={store.platformName} />,
             },
             {
-              label: 'Store ID',
+              label: '店铺 ID',
               children: <span style={{ fontSize: 12, fontFamily: 'monospace' }}>{store.id}</span>,
             },
             {
@@ -1181,7 +1179,7 @@ function StoreDetailBody({
           </span>
           {
             <Button size="small" type="primary" onClick={onConfigure}>
-              配置 MAIN_API 凭证
+              配置主 API 凭证
             </Button>
           }
         </div>
@@ -1192,7 +1190,7 @@ function StoreDetailBody({
           dataSource={credentials}
           pagination={false}
           emptyTitle="暂无凭证"
-          emptyDescription="配置 MAIN_API 凭证后才能连接平台"
+          emptyDescription="配置主 API 凭证后才能连接平台"
           columns={[
             {
               title: '类型',
@@ -1411,9 +1409,7 @@ function StoreDetailBody({
               borderBottom: `1px solid ${colors.borderSoft}`,
             }}
           >
-            <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
-              商品（Listing）自动同步
-            </span>
+            <span style={{ fontSize: 12.5, color: colors.textTertiary }}>商品链接自动同步</span>
             <Switch
               checked={syncSettings.listingSyncEnabled}
               loading={syncSettingsSaving}
