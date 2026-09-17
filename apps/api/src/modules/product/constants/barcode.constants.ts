@@ -5,6 +5,10 @@
 export const BARCODE_TYPES = ['EAN', 'GTIN', 'MANUFACTURER', 'INTERNAL', 'OTHER'] as const;
 export type BarcodeType = (typeof BARCODE_TYPES)[number];
 
+/** Read-only cost suggestions returned by barcode resolution. */
+export const BARCODE_COST_SOURCES = { MOVING_AVERAGE: 'MOVING_AVERAGE' } as const;
+export type BarcodeCostSource = (typeof BARCODE_COST_SOURCES)[keyof typeof BARCODE_COST_SOURCES];
+
 /**
  * Internal barcode format (decision 0017, 2026-09-14): `W%08d`, e.g.
  * `W00000014`. The `WCSKU%08d` prefix printed too many modules for a small

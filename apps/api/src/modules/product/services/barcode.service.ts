@@ -12,7 +12,7 @@ import {
   CreateBarcodeRequestDto,
   UpdateBarcodeRequestDto,
 } from '../dto/barcode-image.dto';
-import { formatInternalBarcode } from '../constants/barcode.constants';
+import { BARCODE_COST_SOURCES, formatInternalBarcode } from '../constants/barcode.constants';
 
 const ENTITY_TYPE = 'SKU_BARCODE';
 
@@ -176,6 +176,8 @@ export class BarcodeService {
     if (sku === null) {
       return null;
     }
+    // Read-only suggestion: preserve NUMERIC precision and never invent an unknown cost.
+    const suggestedUnitCost = sku.movingAverageCost ?? null;
     return {
       skuId: sku.id,
       skuCode: sku.skuCode,
@@ -183,6 +185,9 @@ export class BarcodeService {
       matchedBarcode: record.barcode,
       barcodeType: record.barcodeType,
       serialTracking: sku.serialTracking,
+      suggestedUnitCost,
+      suggestedUnitCostSource:
+        suggestedUnitCost === null ? null : BARCODE_COST_SOURCES.MOVING_AVERAGE,
     };
   }
 

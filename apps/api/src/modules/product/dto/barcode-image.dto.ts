@@ -1,6 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsIn, IsOptional, IsString, Length, MaxLength } from 'class-validator';
-import { BARCODE_TYPES } from '../constants/barcode.constants';
+import {
+  BARCODE_COST_SOURCES,
+  BARCODE_TYPES,
+  BarcodeCostSource,
+} from '../constants/barcode.constants';
 
 export class CreateBarcodeRequestDto {
   @ApiProperty({ example: '6971234567890', maxLength: 255 })
@@ -50,6 +54,15 @@ export class BarcodeResolveDto {
   @ApiProperty({ example: '6971234567890' }) matchedBarcode!: string;
   @ApiProperty({ example: 'EAN' }) barcodeType!: string;
   @ApiProperty({ example: false }) serialTracking!: boolean;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: '12.3400',
+    description: '建议单位成本（移动加权），未知时为 null',
+  })
+  suggestedUnitCost!: string | null;
+  @ApiProperty({ type: String, enum: Object.values(BARCODE_COST_SOURCES), nullable: true })
+  suggestedUnitCostSource!: BarcodeCostSource | null;
 }
 
 export class BarcodeResponseDto {

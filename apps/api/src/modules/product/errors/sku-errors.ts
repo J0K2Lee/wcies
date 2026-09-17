@@ -5,7 +5,7 @@ export class SkuNotFoundError extends DomainError {
   readonly httpStatus = 404;
 
   constructor(id: string) {
-    super(`SKU not found: ${id}`, { id });
+    super(`SKU「${id}」不存在，请刷新后重新选择 SKU。`, { id });
   }
 }
 
