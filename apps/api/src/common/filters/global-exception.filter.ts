@@ -61,7 +61,13 @@ export class GlobalExceptionFilter implements NestExceptionFilterInterface<unkno
         logBindings,
       );
     } else {
-      this.logger.warn(`Request failed: ${normalized.message}`, logBindings);
+      this.logger.warn(`Request failed: ${normalized.message}`, {
+        ...logBindings,
+        // Log constraint messages only, never request bodies or submitted values.
+        ...(normalized.code === 'COMMON_VALIDATION_FAILED'
+          ? { validationErrors: normalized.details.validationErrors }
+          : {}),
+      });
     }
 
     response.status(normalized.status).json({
@@ -131,7 +137,8 @@ export class GlobalExceptionFilter implements NestExceptionFilterInterface<unkno
       message = body;
     } else if (isValidation) {
       details.validationErrors = body.message;
-      message = 'Request validation failed';
+      const constraints = Array.isArray(body.message) ? body.message.join('；') : body.message;
+      message = `请求参数校验失败：${constraints}`;
     } else if ('message' in body && typeof body.message === 'string') {
       message = body.message;
     } else {

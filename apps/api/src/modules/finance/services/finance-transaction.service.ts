@@ -204,17 +204,8 @@ export class FinanceTransactionService {
       throw new FinanceOverpaymentError({ message: '金额必须大于 0' });
     }
 
-    if (input.category === 'PURCHASE_PAYMENT') {
-      const missing: string[] = [];
-      if (input.supplierId === undefined) {
-        missing.push('供应商');
-      }
-      if (input.purchaseOrderId === undefined) {
-        missing.push('采购单');
-      }
-      if (missing.length > 0) {
-        throw new FinanceRelationRequiredError(missing);
-      }
+    if (input.category === 'PURCHASE_PAYMENT' && input.purchaseOrderId === undefined) {
+      throw new FinanceRelationRequiredError(['采购单']);
     }
     if (input.category === 'SALE_INCOME' || input.category === 'SALE_REFUND') {
       if (input.orderId === undefined) {

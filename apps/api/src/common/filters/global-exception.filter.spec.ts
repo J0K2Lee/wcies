@@ -8,9 +8,9 @@ interface CapturedResponse {
   body: unknown;
 }
 
-function runFilter(exception: unknown): CapturedResponse {
-  const logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn() } as unknown as AppLoggerService;
-  const filter = new GlobalExceptionFilter(logger);
+function runFilter(exception: unknown) {
+  const logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn() };
+  const filter = new GlobalExceptionFilter(logger as unknown as AppLoggerService);
   const captured: CapturedResponse = { status: 0, body: null };
   const host = {
     switchToHttp: () => ({
@@ -25,42 +25,66 @@ function runFilter(exception: unknown): CapturedResponse {
     }),
   } as unknown as ArgumentsHost;
   filter.catch(exception, host);
-  return captured;
+  return { ...captured, logger };
 }
 
 describe('GlobalExceptionFilter HTTP normalization', () => {
   it('does not mislabel Nest 404 bodies as validation failures', () => {
-    // Shape of Nest's default NotFoundException body: it satisfies the
-    // message + statusCode check and must NOT become COMMON_VALIDATION_FAILED.
-    const captured = runFilter(new NotFoundException('Cannot POST /api/v1/warehouses//bins/batch'));
+    const message = 'Cannot POST /api/v1/warehouses//bins/batch';
+    const captured = runFilter(new NotFoundException(message));
 
     expect(captured.status).toBe(404);
-    const body = captured.body as {
-      success: boolean;
-      error: { code: string; message: string; details: Record<string, unknown> };
-    };
-    expect(body.error.code).toBe('COMMON_NOT_FOUND');
-    expect(body.error.message).not.toBe('Request validation failed');
-    expect(body.error.details.validationErrors).toBeUndefined();
+    expect(captured.body).toMatchObject({
+      success: false,
+      error: { code: 'COMMON_NOT_FOUND', message, details: {} },
+    });
+    expect(captured.logger.warn).toHaveBeenCalledWith(`Request failed: ${message}`, {
+      module: 'http',
+      statusCode: 404,
+      errorCode: 'COMMON_NOT_FOUND',
+    });
   });
 
-  it('keeps real 400 validation failures with array validationErrors', () => {
-    // Shape produced by the global ValidationPipe on a real 400.
-    const captured = runFilter(
-      new BadRequestException({
-        message: ['warehouseCode must be longer than or equal to 3 characters'],
-        error: 'Bad Request',
+  it.each([
+    {
+      validationErrors: [
+        'warehouseCode must be longer than or equal to 3 characters',
+        '金额格式错误（最多4位小数）',
+      ],
+      joined:
+        'warehouseCode must be longer than or equal to 3 characters；金额格式错误（最多4位小数）',
+    },
+    { validationErrors: '金额格式错误（最多4位小数）', joined: '金额格式错误（最多4位小数）' },
+  ])(
+    'preserves validation constraints in the response and WARN log ($joined)',
+    ({ validationErrors, joined }) => {
+      const captured = runFilter(
+        new BadRequestException({
+          message: validationErrors,
+          error: 'Bad Request',
+          statusCode: 400,
+          // Extra response fields must not be copied into logs.
+          password: 'sensitive-submitted-value',
+        }),
+      );
+      const message = `请求参数校验失败：${joined}`;
+
+      expect(captured.status).toBe(400);
+      expect(captured.body).toMatchObject({
+        success: false,
+        error: {
+          code: 'COMMON_VALIDATION_FAILED',
+          message,
+          details: { validationErrors },
+        },
+      });
+      expect(captured.logger.warn).toHaveBeenCalledExactlyOnceWith(`Request failed: ${message}`, {
+        module: 'http',
         statusCode: 400,
-      }),
-    );
-
-    expect(captured.status).toBe(400);
-    const body = captured.body as {
-      success: boolean;
-      error: { code: string; message: string; details: { validationErrors: unknown } };
-    };
-    expect(body.error.code).toBe('COMMON_VALIDATION_FAILED');
-    expect(body.error.message).toBe('Request validation failed');
-    expect(Array.isArray(body.error.details.validationErrors)).toBe(true);
-  });
+        errorCode: 'COMMON_VALIDATION_FAILED',
+        validationErrors,
+      });
+      expect(captured.logger.error).not.toHaveBeenCalled();
+    },
+  );
 });

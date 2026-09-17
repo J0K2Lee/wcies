@@ -54,7 +54,7 @@ finance_transactions:
   currency          varchar(10) NOT NULL DEFAULT 'CNY'
   occurred_at       timestamptz 业务发生时间（登记时可指定，默认当前）
   store_id          关联店铺（可空）
-  supplier_id       关联供应商（可空，采购付款必填见 3.3）
+  supplier_id       关联供应商（可空，采购付款亦可空，见 3.3）
   order_id          关联订单（可空，销售收入/退款必填见 3.3）
   purchase_order_id 关联采购单（可空，采购付款必填见 3.3）
   payout_id         关联回款单（可空，回款确认自动生成时写入）
@@ -68,7 +68,7 @@ finance_transactions:
 |---|---|---|
 | SALE_INCOME | INCOME | 销售收入（回款确认自动生成 / 人工登记） |
 | SALE_REFUND | EXPENSE | 订单退款支出（关联订单） |
-| PURCHASE_PAYMENT | EXPENSE | 采购付款（关联供应商+采购单） |
+| PURCHASE_PAYMENT | EXPENSE | 采购付款（必须关联采购单，供应商可空） |
 | SUPPLIER_REFUND | INCOME | 供应商退款/退货收款 |
 | PLATFORM_FEE | EXPENSE | 平台费用（佣金、服务费） |
 | LOGISTICS_FEE | EXPENSE | 物流费用 |
@@ -79,7 +79,11 @@ finance_transactions:
 
 ## 3.3 关联约束（登记时校验）
 
-- PURCHASE_PAYMENT：`supplier_id` 与 `purchase_order_id` 必填。
+- PURCHASE_PAYMENT：`purchaseOrderId`（`purchase_order_id`）必填，付款必须锚定采购单；
+  `supplierId`（`supplier_id`）可空，适用于供应商未知的白牌/一次性网购采购。
+  传入供应商时仍校验存在性；展示时可回退显示采购单的供应商或货源说明（`source_note`）。
+  缺采购单仍使用 `FINANCE_RELATION_REQUIRED`，消息只提示必须关联采购单。
+  规则来源：用户 2026-09-17 人工测试建议 #13；与 purchase.md §2「供应商可空」一致。
 - SALE_INCOME / SALE_REFUND：`order_id` 必填（人工登记销售收入必须挂单；
   无订单汇总收入用 OTHER_INCOME）。
 - 金额不得超过对应采购单未付余额（PURCHASE_PAYMENT，防超付）。

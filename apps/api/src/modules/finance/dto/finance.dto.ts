@@ -62,7 +62,7 @@ export class CreateFinanceTransactionRequestDto {
   @IsUUID()
   storeId?: string;
 
-  @ApiPropertyOptional({ description: '关联供应商（采购付款必填）' })
+  @ApiPropertyOptional({ description: '关联供应商（可空，采购付款亦可空）' })
   @IsOptional()
   @IsUUID()
   supplierId?: string;
