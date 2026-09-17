@@ -4,6 +4,7 @@ import {
   Button,
   Drawer,
   Form,
+  Image,
   Input,
   InputNumber,
   Modal,
@@ -13,13 +14,16 @@ import {
   Tooltip,
 } from 'antd';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate, useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
+import { ExportOutlined } from '@ant-design/icons';
 import { apiPost, useApiQuery } from '../../api/hooks';
+import { fmtMoney } from '../../utils/format';
 import {
   ContextAction,
   ContextMetric,
   ContextSection,
   DataTable,
+  EntityLink,
   EntitySummary,
   ERP_STATUS_META,
   FilterChips,
@@ -80,6 +84,9 @@ interface OrderItem {
   skuCode: string;
   skuName: string;
   quantity: string;
+  unitPrice: string | null;
+  totalPrice: string | null;
+  imageUrl: string | null;
   fulfillmentStatus: string;
   mappingStatus: string;
   /** Derived procurement state (purchase.md §3.5); NULL for unmapped lines. */
@@ -326,7 +333,6 @@ function deadlineBadge(deadline: string | null): {
 export function OrdersPage() {
   const { message, modal } = AntdApp.useApp();
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState(() => searchParams.get('keyword') ?? '');
@@ -464,24 +470,6 @@ export function OrdersPage() {
     },
     onError: (error: Error) => message.error(`标记失败：${error.message}`),
   });
-
-  /** 跳转到 SKU 映射工作台并自动搜索该行的平台标识（快捷建档入口）。 */
-  const openMappingWorkbench = (item: {
-    platformSkuId: string | null;
-    sellerSku: string | null;
-    offerId: string | null;
-  }) => {
-    const keyword = mappingSearchKeyword(item);
-    if (keyword === null || keyword.trim() === '') {
-      message.warning(
-        '该订单行没有任何平台 SKU 标识（platformSkuId / sellerSku / offerId），无法自动搜索',
-      );
-      return;
-    }
-    void navigate(
-      `/platform-mappings?keyword=${encodeURIComponent(keyword.trim())}&mappingState=UNMAPPED`,
-    );
-  };
 
   const retryMutation = useMutation({
     mutationFn: (itemId: string) =>
@@ -624,7 +612,7 @@ export function OrdersPage() {
                   label={`ORDER_SKU_MAPPING_FAILED ×${selectedRow.mappingFailedCount}`}
                 />
                 <span style={{ fontSize: 12.5, color: colors.textSecondary }}>
-                  平台 SKU 无法映射内部 SKU。请先在 SKU映射 中补齐该平台变体的映射，
+                  平台 SKU 无法映射内部 SKU。请先在 SKU映射（关联操作）中补齐该平台变体的映射，
                   再点下方按钮重试——重试会按最新映射重新解析该行。
                 </span>
                 {failedMappingItems.slice(0, 3).map((item) => (
@@ -636,28 +624,34 @@ export function OrdersPage() {
                     <span style={{ fontSize: 13, color: colors.textSecondary }}>
                       {item.platformSkuId ?? item.offerId ?? `第 ${item.lineNo} 行`}
                     </span>
-                    <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
-                      <Button
-                        size="small"
-                        type="primary"
-                        ghost
-                        onClick={() => openMappingWorkbench(item)}
-                      >
-                        去建档
-                      </Button>
-                      <Button
-                        size="small"
-                        loading={retryMutation.isPending}
-                        onClick={() => retryMutation.mutate(item.id)}
-                      >
-                        重试映射
-                      </Button>
-                    </span>
+                    <Button
+                      size="small"
+                      loading={retryMutation.isPending}
+                      style={{ marginLeft: 'auto' }}
+                      onClick={() => retryMutation.mutate(item.id)}
+                    >
+                      重试映射
+                    </Button>
                   </div>
                 ))}
               </div>
             </ContextSection>
           )}
+          {/* 关联操作：建档入口是深链（规范 §4.2 单条 EntityLink），与异常中心
+              「前往 SKU 映射」同一目标 /listings（快速建档工作台），不是只读总览。 */}
+          {failedMappingItems.length > 0 &&
+            mappingSearchKeyword(failedMappingItems[0]!) !== null && (
+              <ContextSection title="关联操作">
+                <EntityLink
+                  to={`/listings?keyword=${encodeURIComponent(
+                    mappingSearchKeyword(failedMappingItems[0]!) ?? '',
+                  )}`}
+                  icon={<ExportOutlined />}
+                  primary="映射失败行 · 去快捷建档"
+                  secondary={`自动搜索 ${mappingSearchKeyword(failedMappingItems[0]!)}`}
+                />
+              </ContextSection>
+            )}
           {selectedRow.mappingFailedCount === 0 && selectedRow.backorderedCount > 0 && (
             <ContextSection title="风险">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -815,6 +809,37 @@ export function OrdersPage() {
   const itemColumns = [
     { title: '#', dataIndex: 'lineNo', key: 'lineNo', width: 40 },
     {
+      title: '图片',
+      key: 'image',
+      width: 60,
+      render: (_: unknown, row: OrderItem) =>
+        row.imageUrl === null ? (
+          <div
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 6,
+              background: colors.neutralBg,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: colors.textTertiary,
+              fontSize: 11,
+            }}
+          >
+            无图
+          </div>
+        ) : (
+          <Image
+            src={row.imageUrl}
+            width={40}
+            height={40}
+            style={{ objectFit: 'cover', borderRadius: 6 }}
+            preview={{ mask: false }}
+          />
+        ),
+    },
+    {
       title: 'SKU',
       key: 'sku',
       render: (_: unknown, row: OrderItem) =>
@@ -828,6 +853,22 @@ export function OrdersPage() {
         ),
     },
     { title: '数量', dataIndex: 'quantity', key: 'quantity', width: 70, align: 'right' as const },
+    {
+      title: '单价',
+      dataIndex: 'unitPrice',
+      key: 'unitPrice',
+      width: 110,
+      align: 'right' as const,
+      render: (value: string | null) => fmtMoney(value, detail?.currency),
+    },
+    {
+      title: '小计',
+      dataIndex: 'totalPrice',
+      key: 'totalPrice',
+      width: 110,
+      align: 'right' as const,
+      render: (value: string | null) => fmtMoney(value, detail?.currency),
+    },
     {
       title: '履约状态',
       dataIndex: 'fulfillmentStatus',

@@ -77,6 +77,15 @@
 
 验证：dev 实测导航新分区、作业中心四个 Tab 及右栏联动、旧路由重定向、事件订阅中文类型、错误信息展示、事件行右栏（截图 `verify_sync_event_rail.png`、`verify_warehouse_ops_returns_tab.png`）；lint / typecheck / build / check:architecture / vitest 全绿。
 
+### 2.3 订单详情：去建档归位关联操作 + 行图片/价格（用户复验跟进，2026-09-17）
+
+- **去建档归位**：订单右栏风险区内的「去建档」小按钮移除，改建为「关联操作」ContextSection 内的 EntityLink 深链（规范 §4.2「单条处理入口（EntityLink）」），与异常中心「前往 SKU 映射」完全同格式。
+- **修复去建档目标**：T3 收敛行内按钮时误将目标写成 `/platform-mappings`（只读总览），本次回归修复为 `/listings?keyword=<平台标识>`（SKU映射工作台，快速建档所在）——abe4453 曾修正过同一处目标，T3 重构时未保留该结论。dev 实测点击后跳转 `/listings?keyword=5456434554` 且搜索框预填。
+- **行图片与价格**：订单详情「商品」表新增 图片（内部 SKU 主图签名 URL，未映射行显示「无图」占位）、单价、小计 三列（金额按订单币种经 `fmtMoney` 格式化）。
+- **后端小改动**（用户明确要求；非 Phase 3 原范围）：`OrderItemDto` 增加 `imageUrl` 字段——`OrderService` 经公开 `SkuImageService`（`OrderModule` 引入 `ProductModule`，遵循 AGENTS.md §9）按行 `skuId` 批量解析主图 signed URL；`unitPrice/totalPrice` 早已在 DTO 中，仅前端未展示。
+
+验证：dev 实测右栏结构（风险区「重试映射」+ 关联操作 EntityLink）、深链跳转与搜索预填、Drawer 图片缩略图与 ¥505.00 单价/小计（截图 `verify_orders_rail_entitylink.png`、`verify_orders_drawer_image_price.png`）；API 测试 222 项、web phase3 19 项、lint / typecheck / build / check:architecture 全绿。
+
 ## 3. 截图回归（`gui-redesign-phase3-screenshots/`，本地留存，仓库 .gitignore 既定忽略 `gui-*-screenshots/`）
 
 - 1920×1080：25 个页面各 1 张（`1920x1080_<page>.png`，page 覆盖 dashboard/products/skus/listings/platform-mappings/inventory/inventory-transactions/inventory-reservations/orders/purchase-orders/purchase-receipts/suppliers/warehouses/bins/stores/store-bindings/sync/exceptions/interceptions/returns/picking/shipments/import/notifications/system）+ 选中态 `1920x1080_products_selected.png` + Drawer `1920x1080_products_drawer.png`。

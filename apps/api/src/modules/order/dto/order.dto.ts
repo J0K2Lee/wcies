@@ -282,6 +282,12 @@ export class OrderItemDto {
     description: '行金额 = 单价 × 数量；无价为 null',
   })
   totalPrice!: string | null;
+  @ApiPropertyOptional({
+    nullable: true,
+    type: String,
+    description: '行图片 = 内部 SKU 主图签名 URL；未映射行为 null',
+  })
+  imageUrl!: string | null;
   @ApiProperty({ enum: ORDER_ITEM_FULFILLMENT_STATUSES }) fulfillmentStatus!: string;
   @ApiProperty({ enum: ORDER_ITEM_MAPPING_STATUSES }) mappingStatus!: string;
   @ApiPropertyOptional({

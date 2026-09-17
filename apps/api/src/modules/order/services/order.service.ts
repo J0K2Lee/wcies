@@ -6,6 +6,7 @@ import { ReservationService } from '../../inventory/services/reservation.service
 import { InventoryQueryService } from '../../inventory/services/inventory-query.service';
 import { ExceptionService } from '../../exception/services/exception.service';
 import { StoreService } from '../../store/services/store.service';
+import { SkuImageService } from '../../product/services/sku-image.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { OrderEntity } from '../entities/order.entity';
 import { OrderItemEntity } from '../entities/order-item.entity';
@@ -54,6 +55,7 @@ export class OrderService {
     private readonly inventoryQuery: InventoryQueryService,
     private readonly exceptionService: ExceptionService,
     private readonly storeService: StoreService,
+    private readonly skuImageService: SkuImageService,
     private readonly operationLog: OperationLogService,
     private readonly logger: AppLoggerService,
     @Inject(forwardRef(() => ORDER_PICKING_STATE_PORT))
@@ -185,6 +187,7 @@ export class OrderService {
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           totalPrice: item.totalPrice,
+          imageUrl: null as string | null,
           fulfillmentStatus: item.fulfillmentStatus,
           mappingStatus: item.mappingStatus,
           // Derived procurement state (purchase.md §3.5) - NULL for unmapped
@@ -215,6 +218,12 @@ export class OrderService {
       await this.procurementPort.getProcurementStatesByOrderItemIds(mappedItemIds);
     for (const dto of itemDtos) {
       dto.procurementState = procurementStates[dto.id] ?? null;
+    }
+
+    // 行图片 = 内部 SKU 主图（签名 URL）；未映射行没有 SKU，保持 null。
+    const imageUrls = await this.resolvePrimaryImages(items);
+    for (const dto of itemDtos) {
+      dto.imageUrl = dto.skuId === null ? null : (imageUrls.get(dto.skuId) ?? null);
     }
 
     const pickingTasks = await this.pickingState.listTasksForOrder(order.id);
@@ -268,6 +277,31 @@ export class OrderService {
       })),
       pickingTasks,
     };
+  }
+
+  /**
+   * SKU 主图（signed URL）批量解析：订单行图片取内部 SKU 主图，
+   * 每个 SKU 一次查询（订单行数有限，不做额外缓存层）。
+   */
+  private async resolvePrimaryImages(
+    items: Array<{ item: OrderItemEntity }>,
+  ): Promise<Map<string, string>> {
+    const skuIds = [
+      ...new Set(
+        items.map(({ item }) => item.skuId).filter((skuId): skuId is string => skuId !== null),
+      ),
+    ];
+    const urlBySku = new Map<string, string>();
+    await Promise.all(
+      skuIds.map(async (skuId) => {
+        const images = await this.skuImageService.listBySku(skuId);
+        const primary = images.find((image) => image.isPrimary) ?? images[0];
+        if (primary !== undefined) {
+          urlBySku.set(skuId, primary.url);
+        }
+      }),
+    );
+    return urlBySku;
   }
 
   // --------------------------------------------------------------------------

@@ -13,6 +13,7 @@ import { ReservationService } from '../../inventory/services/reservation.service
 import { InventoryQueryService } from '../../inventory/services/inventory-query.service';
 import { ExceptionService } from '../../exception/services/exception.service';
 import { StoreService } from '../../store/services/store.service';
+import { SkuImageService } from '../../product/services/sku-image.service';
 import { OperationLogService } from '../../operation-log/operation-log.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { OrderPickingStatePort } from '../ports/order-picking-state.port';
@@ -95,6 +96,7 @@ describe('OrderService.retryAllocation - mapped line without stock', () => {
       {} as InventoryQueryService,
       exceptionService,
       {} as StoreService,
+      {} as SkuImageService,
       { record: vi.fn() } as unknown as OperationLogService,
       { log: vi.fn(), warn: vi.fn() } as unknown as AppLoggerService,
       {} as OrderPickingStatePort,

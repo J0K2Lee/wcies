@@ -5,6 +5,7 @@ import { ListingModule } from '../listing/listing.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { ExceptionModule } from '../exception/exception.module';
 import { WarehouseModule } from '../warehouse/warehouse.module';
+import { ProductModule } from '../product/product.module';
 import { OperationLogModule } from '../operation-log/operation-log.module';
 import { LoggerModule } from '../../common/logger/logger.module';
 import { PickingModule } from '../picking/picking.module';
@@ -49,6 +50,8 @@ import { OrderController } from './controllers/order.controller';
     OperationLogModule,
     LoggerModule,
     NotificationModule,
+    // 行图片取内部 SKU 主图（公开 Service SkuImageService，AGENTS.md §9）。
+    ProductModule,
     forwardRef(() => PickingModule),
     forwardRef(() => InterceptionModule),
     forwardRef(() => PurchaseModule),
