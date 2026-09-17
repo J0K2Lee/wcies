@@ -142,6 +142,7 @@ export const FULFILLMENT_STATUS_META: Record<string, StatusMeta> = {
   BACKORDERED: { tone: 'warning', label: '缺货' },
   PICKED: { tone: 'success', label: '已拣货' },
   RELEASED: { tone: 'neutral', label: '已释放' },
+  EXTERNAL_FULFILLED: { tone: 'info', label: '外部履约' },
 };
 
 /** Picking task status → tone + label. */

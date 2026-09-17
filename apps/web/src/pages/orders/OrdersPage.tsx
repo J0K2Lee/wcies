@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ColumnsType } from 'antd/es/table';
 import {
   App as AntdApp,
   Button,
+  Checkbox,
   Drawer,
   Form,
   Image,
@@ -9,7 +11,6 @@ import {
   InputNumber,
   Modal,
   Select,
-  Switch,
   Tabs,
   Timeline,
   Tooltip,
@@ -28,7 +29,7 @@ import {
   ERP_STATUS_META,
   FilterChips,
   FULFILLMENT_STATUS_META,
-  FULFILLMENT_MODE_LABEL,
+  FULFILLMENT_MODE_META,
   FilterBar,
   InfoGrid,
   PageHeader,
@@ -36,7 +37,6 @@ import {
   PlatformTag,
   RailHint,
   RawDataBlock,
-  RelativeTime,
   INTERCEPTION_STATUS_META,
   SectionCard,
   StatusBadge,
@@ -46,10 +46,13 @@ import {
 } from '../../design-system';
 
 /**
- * Orders workbench (redesign task §37-§43): status tabs with counts, dense
- * table, order context rail (risk-first: mapping failed / backordered with
- * retry) and a full detail drawer. Cancel / retry-allocation / create-picking
- * / ingest flows are the unchanged Sprint 3 business logic.
+ * Orders workbench (redesign task §37-§43; 用户指示 2026-09-17 改造)：
+ * - 视图设置（原「摄入测试订单」按钮位置）：默认展开全部、每页行数、
+ *   主表/展开行列显隐与拖动排序、主图缩略图尺寸（localStorage 持久化）；
+ * - 履约方式独立列 + 筛选（「平台/店铺」列改为「店铺」，仅平台图标+店铺名）；
+ * - 展开行：方形主图（不裁剪）、最近采购价；点击展开行 → 侧边栏 SKU 信息
+ *   + 创建采购单（复用登记采购弹窗）；
+ * - 下单时间显示为日期+时间点。
  */
 
 interface OrderListItem {
@@ -84,6 +87,8 @@ interface OrderItem {
   lineNo: number;
   skuCode: string;
   skuName: string;
+  /** SKU 主数据维护的最近采购价（master-data.md §4.3；用户指示 2026-09-17 展示）。 */
+  latestPurchasePrice: string | null;
   quantity: string;
   unitPrice: string | null;
   totalPrice: string | null;
@@ -237,46 +242,182 @@ const GOODS_STATE_CHIPS: Array<{
   },
 ];
 
-/** 固定 JSON Fixtures（task §66 Case A–F 的单店可复用形态） */
-const FIXTURES: Array<{ label: string; json: Record<string, unknown> }> = [
-  {
-    label: '场景 A：单 SKU 正常订单',
-    json: {
-      platformOrderId: 'MOCK-A-001',
-      items: [{ platformSkuId: 'MOCK-SKU-A', quantity: '2' }],
-    },
-  },
-  {
-    label: '场景 B：多 SKU 正常订单',
-    json: {
-      platformOrderId: 'MOCK-B-001',
-      items: [
-        { platformSkuId: 'MOCK-SKU-A', quantity: '1' },
-        { platformSkuId: 'MOCK-SKU-B', quantity: '3' },
-      ],
-    },
-  },
-  {
-    label: '场景 C：一个 SKU 缺货',
-    json: {
-      platformOrderId: 'MOCK-C-001',
-      items: [{ platformSkuId: 'MOCK-SKU-A', quantity: '999' }],
-    },
-  },
-  {
-    label: '场景 D：一个商品链接无法映射',
-    json: {
-      platformOrderId: 'MOCK-D-001',
-      items: [{ platformSkuId: 'NO-SUCH-MAPPING', quantity: '1' }],
-    },
-  },
-];
-
 const PROCUREMENT_META: Record<string, { tone: 'danger' | 'info' | 'success'; label: string }> = {
   NOT_ORDERED: { tone: 'danger', label: '待采购' },
   ORDERED: { tone: 'info', label: '已采购' },
   ARRIVED: { tone: 'success', label: '已到货' },
 };
+
+// ---------------------------------------------------------------------------
+// 视图设置（用户指示 2026-09-17）：localStorage 持久化，缺省值前向兼容合并。
+// ---------------------------------------------------------------------------
+
+interface ColumnSetting {
+  key: string;
+  visible: boolean;
+}
+
+interface OrdersViewSettings {
+  /** 默认展开所有订单行。 */
+  defaultExpandAll: boolean;
+  /** 每页显示的订单行数。 */
+  pageSize: number;
+  /** 展开行主图缩略图边长（px，方形不裁剪）。 */
+  thumbnailSize: number;
+  /** 主表列（数组顺序即显示顺序）。 */
+  mainColumns: ColumnSetting[];
+  /** 展开行列（数组顺序即显示顺序）。 */
+  expandedColumns: ColumnSetting[];
+}
+
+const VIEW_SETTINGS_KEY = 'wcies.orders.view.v1';
+
+const DEFAULT_VIEW_SETTINGS: OrdersViewSettings = {
+  defaultExpandAll: false,
+  pageSize: 20,
+  thumbnailSize: 48,
+  mainColumns: [
+    { key: 'platformOrderId', visible: true },
+    { key: 'items', visible: true },
+    { key: 'erpStatus', visible: true },
+    { key: 'store', visible: true },
+    { key: 'fulfillmentMode', visible: true },
+    { key: 'shipmentDeadline', visible: true },
+    { key: 'orderedAt', visible: true },
+  ],
+  expandedColumns: [
+    { key: 'image', visible: true },
+    { key: 'sku', visible: true },
+    { key: 'offerId', visible: true },
+    { key: 'quantity', visible: true },
+    { key: 'unitPrice', visible: true },
+    { key: 'totalPrice', visible: true },
+    { key: 'latestPurchasePrice', visible: true },
+    { key: 'fulfillmentStatus', visible: true },
+  ],
+};
+
+function loadViewSettings(): OrdersViewSettings {
+  try {
+    const raw = localStorage.getItem(VIEW_SETTINGS_KEY);
+    if (raw === null) {
+      return DEFAULT_VIEW_SETTINGS;
+    }
+    const parsed = JSON.parse(raw) as Partial<OrdersViewSettings>;
+    return {
+      ...DEFAULT_VIEW_SETTINGS,
+      ...parsed,
+      // 前向兼容：新增列自动出现在尾部。
+      mainColumns:
+        parsed.mainColumns === undefined
+          ? DEFAULT_VIEW_SETTINGS.mainColumns
+          : [
+              ...parsed.mainColumns,
+              ...DEFAULT_VIEW_SETTINGS.mainColumns.filter(
+                (column) => !parsed.mainColumns?.some((existing) => existing.key === column.key),
+              ),
+            ],
+      expandedColumns:
+        parsed.expandedColumns === undefined
+          ? DEFAULT_VIEW_SETTINGS.expandedColumns
+          : [
+              ...parsed.expandedColumns,
+              ...DEFAULT_VIEW_SETTINGS.expandedColumns.filter(
+                (column) =>
+                  !parsed.expandedColumns?.some((existing) => existing.key === column.key),
+              ),
+            ],
+    };
+  } catch {
+    return DEFAULT_VIEW_SETTINGS;
+  }
+}
+
+const MAIN_COLUMN_LABELS: Record<string, string> = {
+  platformOrderId: '订单号',
+  items: '商品',
+  erpStatus: 'ERP 状态',
+  store: '店铺',
+  fulfillmentMode: '履约方式',
+  shipmentDeadline: '时限',
+  orderedAt: '下单时间',
+};
+
+const EXPANDED_COLUMN_LABELS: Record<string, string> = {
+  image: '主图',
+  sku: 'SKU',
+  offerId: 'Offer ID',
+  quantity: '数量',
+  unitPrice: '单价',
+  totalPrice: '小计',
+  latestPurchasePrice: '最近采购价',
+  fulfillmentStatus: '履约状态',
+};
+
+/**
+ * 列设置面板：原生 HTML5 拖拽排序（不引入新依赖）+ 复选框显隐。
+ */
+function SortableColumnList({
+  labelFor,
+  columns,
+  onReorder,
+  onToggleVisible,
+}: {
+  labelFor: Record<string, string>;
+  columns: ColumnSetting[];
+  onReorder: (from: number, to: number) => void;
+  onToggleVisible: (key: string) => void;
+}) {
+  const dragIndex = useRef<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {columns.map((column, index) => (
+        <div
+          key={column.key}
+          draggable
+          onDragStart={() => {
+            dragIndex.current = index;
+          }}
+          onDragOver={(event) => {
+            event.preventDefault();
+            setDragOverIndex(index);
+          }}
+          onDragLeave={() => {
+            setDragOverIndex((current) => (current === index ? null : current));
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            if (dragIndex.current !== null && dragIndex.current !== index) {
+              onReorder(dragIndex.current, index);
+            }
+            dragIndex.current = null;
+            setDragOverIndex(null);
+          }}
+          onDragEnd={() => {
+            dragIndex.current = null;
+            setDragOverIndex(null);
+          }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '5px 8px',
+            borderRadius: 6,
+            border: `1px solid ${dragOverIndex === index ? colors.primary : colors.border}`,
+            background: dragOverIndex === index ? colors.primarySoft : undefined,
+            cursor: 'grab',
+            userSelect: 'none',
+          }}
+        >
+          <span style={{ color: colors.textTertiary, fontSize: 12, letterSpacing: 1 }}>≡</span>
+          <Checkbox checked={column.visible} onChange={() => onToggleVisible(column.key)} />
+          <span style={{ fontSize: 13 }}>{labelFor[column.key] ?? column.key}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /**
  * 履约模式 chip 文案（T8 建议#1）：FBS → FBS、RFBS → rFBS、FBP → FBP，
@@ -287,13 +428,17 @@ function fulfillmentModeChip(mode: string | null): { short: string; hint: string
   if (mode === null) {
     return null;
   }
+  const meta = FULFILLMENT_MODE_META[mode];
+  if (meta !== undefined) {
+    return { short: meta.label, hint: meta.hint };
+  }
   if (mode === 'RFBS' || mode.endsWith('_RFBS')) {
     return { short: 'rFBS', hint: mode };
   }
   if (mode.includes('_')) {
     return { short: mode.slice(mode.lastIndexOf('_') + 1), hint: mode };
   }
-  return { short: FULFILLMENT_MODE_LABEL[mode] ?? mode, hint: mode };
+  return { short: mode, hint: mode };
 }
 
 function fmtDateTime(value: string): string {
@@ -378,16 +523,62 @@ export function OrdersPage() {
   const [externalForm] = Form.useForm<{ reason: string }>();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const [showImages, setShowImages] = useState(false);
+  /** 展开区被点中的订单行（侧边栏切换到 SKU 信息视图，用户指示 2026-09-17）。 */
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [arrivedRetryId, setArrivedRetryId] = useState<string | null>(null);
   const arrivedRetryLock = useRef(false);
-  const [ingestOpen, setIngestOpen] = useState(false);
-  const [ingestJson, setIngestJson] = useState(
-    JSON.stringify(
-      { platformOrderId: 'MOCK-A-001', items: [{ platformSkuId: 'MOCK-SKU-A', quantity: '2' }] },
-      null,
-      2,
-    ),
+  const [fulfillmentModeFilter, setFulfillmentModeFilter] = useState<string | undefined>();
+  // 视图设置（用户指示 2026-09-17）：localStorage 持久化。
+  const [viewSettings, setViewSettings] = useState<OrdersViewSettings>(loadViewSettings);
+  const [viewOpen, setViewOpen] = useState(false);
+  const updateViewSettings = useCallback((patch: Partial<OrdersViewSettings>) => {
+    setViewSettings((current) => {
+      const next = { ...current, ...patch };
+      try {
+        localStorage.setItem(VIEW_SETTINGS_KEY, JSON.stringify(next));
+      } catch {
+        // storage unavailable (private mode etc.): session-only settings.
+      }
+      return next;
+    });
+  }, []);
+  const reorderColumns = useCallback(
+    (listKey: 'mainColumns' | 'expandedColumns') => (from: number, to: number) => {
+      setViewSettings((current) => {
+        const list = [...current[listKey]];
+        const moved = list[from];
+        if (moved === undefined) {
+          return current;
+        }
+        list.splice(from, 1);
+        list.splice(to, 0, moved);
+        const next = { ...current, [listKey]: list };
+        try {
+          localStorage.setItem(VIEW_SETTINGS_KEY, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+    },
+    [],
+  );
+  const toggleColumnVisible = useCallback(
+    (listKey: 'mainColumns' | 'expandedColumns') => (key: string) => {
+      setViewSettings((current) => {
+        const list = current[listKey].map((column) =>
+          column.key === key ? { ...column, visible: !column.visible } : column,
+        );
+        const next = { ...current, [listKey]: list };
+        try {
+          localStorage.setItem(VIEW_SETTINGS_KEY, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+    },
+    [],
   );
 
   // Deep link from the global palette / exception center: focus=<orderId>
@@ -405,13 +596,14 @@ export function OrdersPage() {
     '/api/v1/orders',
     {
       page,
-      pageSize: 20,
+      pageSize: viewSettings.pageSize,
       ...(keyword ? { keyword } : {}),
       ...(stageOfActiveTab ? { stage: stageOfActiveTab } : {}),
       ...(goodsState ? { goodsState } : {}),
       ...(storeId ? { storeId } : {}),
+      ...(fulfillmentModeFilter ? { fulfillmentMode: fulfillmentModeFilter } : {}),
     },
-    ['orders', page, keyword, stageOfActiveTab, goodsState, storeId],
+    ['orders', page, keyword, stageOfActiveTab, goodsState, storeId, fulfillmentModeFilter],
   );
 
   // Tab counts: light meta.total queries, one per stage tab, ALL carrying the
@@ -661,22 +853,6 @@ export function OrdersPage() {
     onError: (error: Error) => message.error(`登记失败：${error.message}`),
   });
 
-  const ingestMutation = useMutation({
-    mutationFn: (body: unknown) =>
-      apiPost<{ orderNo: string; erpStatus: string; alreadyIngested: boolean }>(
-        '/api/v1/orders/ingest',
-        body,
-      ),
-    onSuccess: (result: { orderNo: string; erpStatus: string; alreadyIngested: boolean }) => {
-      message.success(
-        `${result.alreadyIngested ? '幂等重放' : '摄入成功'}：${result.orderNo} → ${result.erpStatus}`,
-      );
-      setIngestOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ['orders'] });
-    },
-    onError: (error: Error) => message.error(`摄入失败：${error.message}`),
-  });
-
   const list = query.data?.data ?? [];
   const detail = detailId !== null ? detailQuery.data?.data : undefined;
   const detailDeadline = detail === undefined ? null : deadlineBadge(detail.shipmentDeadline);
@@ -687,119 +863,148 @@ export function OrdersPage() {
   const railDetail = selectedId !== null ? detailQuery.data?.data : undefined;
 
   /**
-   * 行内展开（用户指示 2026-09-17）：选中行即展开，分行显示订单 SKU——
-   * 主图组（Image.PreviewGroup 点击放大翻看）、offer_id、数量、单价、小计。
-   * 数据复用右栏已共享的 detail 查询（§68），展开不产生额外请求。
+   * 展开行列注册表（用户指示 2026-09-17）：主图方形不裁剪、新增最近采购价；
+   * 列的显示顺序/显隐由视图设置驱动。数据复用右栏已共享的 detail 查询
+   * （§68），展开不产生额外请求。
    */
-  const expandedItemsColumns = (currency: string | null | undefined) => [
-    {
-      title: '主图',
-      key: 'image',
-      width: showImages ? 92 : 64,
-      render: (_: unknown, row: OrderItem) =>
-        row.imageUrl === null ? (
-          <div
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 6,
-              background: colors.neutralBg,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: colors.textTertiary,
-              fontSize: 11,
-            }}
-          >
-            无图
-          </div>
-        ) : (
-          <Tooltip title={row.imageSource === 'PLATFORM' ? '平台图' : undefined}>
-            <span style={{ display: 'inline-block' }}>
-              <Image
-                src={row.imageUrl}
-                width={showImages ? 72 : 44}
-                height={showImages ? 72 : 44}
-                style={{
-                  objectFit: showImages ? 'contain' : 'cover',
-                  borderRadius: 6,
-                  cursor: 'zoom-in',
-                }}
-              />
-            </span>
-          </Tooltip>
-        ),
-    },
-    {
-      title: 'SKU',
-      key: 'sku',
-      render: (_: unknown, row: OrderItem) =>
-        row.skuId === null ? (
-          <div>
-            <StatusBadge
-              tone="purple"
-              label="无法映射"
-              hint="缺少 SKU 映射，去 SKU 映射补齐后重试"
-            />
-            <div style={{ fontSize: 12, color: colors.textTertiary, marginTop: 2 }}>
-              {row.platformSkuId ?? row.sellerSku ?? `第 ${row.lineNo} 行`}
+  const expandedCurrency = detail !== undefined ? detail.currency : (railDetail?.currency ?? null);
+  const expandedColumnDefs = useMemo<Record<string, ColumnsType<OrderItem>[number]>>(
+    () => ({
+      image: {
+        title: '主图',
+        key: 'image',
+        width: viewSettings.thumbnailSize + 20,
+        render: (_: unknown, row: OrderItem) =>
+          row.imageUrl === null ? (
+            <div
+              style={{
+                width: viewSettings.thumbnailSize,
+                height: viewSettings.thumbnailSize,
+                borderRadius: 6,
+                background: colors.neutralBg,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: colors.textTertiary,
+                fontSize: 11,
+              }}
+            >
+              无图
             </div>
-          </div>
-        ) : (
-          <div>
-            <div style={{ fontWeight: 550 }}>{row.skuCode}</div>
-            <div style={{ fontSize: 12.5, color: colors.textSecondary }}>{row.skuName}</div>
-          </div>
+          ) : (
+            <Tooltip title={row.imageSource === 'PLATFORM' ? '平台图' : undefined}>
+              <span style={{ display: 'inline-block' }}>
+                <Image
+                  src={row.imageUrl}
+                  width={viewSettings.thumbnailSize}
+                  height={viewSettings.thumbnailSize}
+                  style={{
+                    objectFit: 'contain',
+                    borderRadius: 6,
+                    background: colors.neutralBg,
+                    cursor: 'zoom-in',
+                  }}
+                />
+              </span>
+            </Tooltip>
+          ),
+      },
+      sku: {
+        title: 'SKU',
+        key: 'sku',
+        render: (_: unknown, row: OrderItem) =>
+          row.skuId === null ? (
+            <div>
+              <StatusBadge
+                tone="purple"
+                label="无法映射"
+                hint="缺少 SKU 映射，去 SKU 映射补齐后重试"
+              />
+              <div style={{ fontSize: 12, color: colors.textTertiary, marginTop: 2 }}>
+                {row.platformSkuId ?? row.sellerSku ?? `第 ${row.lineNo} 行`}
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div style={{ fontWeight: 550 }}>{row.skuCode}</div>
+              <div style={{ fontSize: 12.5, color: colors.textSecondary }}>{row.skuName}</div>
+            </div>
+          ),
+      },
+      offerId: {
+        title: 'Offer ID',
+        key: 'offerId',
+        width: 170,
+        render: (_: unknown, row: OrderItem) => (
+          <span style={{ fontSize: 12.5, wordBreak: 'break-all' as const }}>
+            {row.offerId ?? '—'}
+          </span>
         ),
-    },
-    {
-      title: 'Offer ID',
-      key: 'offerId',
-      width: 170,
-      render: (_: unknown, row: OrderItem) => (
-        <span style={{ fontSize: 12.5, wordBreak: 'break-all' as const }}>
-          {row.offerId ?? '—'}
-        </span>
-      ),
-    },
-    {
-      title: '数量',
-      dataIndex: 'quantity',
-      key: 'quantity',
-      width: 70,
-      align: 'right' as const,
-      render: (value: string) => Number(value),
-    },
-    {
-      title: '单价',
-      dataIndex: 'unitPrice',
-      key: 'unitPrice',
-      width: 110,
-      align: 'right' as const,
-      render: (value: string | null) => fmtMoney(value, currency),
-    },
-    {
-      title: '小计',
-      dataIndex: 'totalPrice',
-      key: 'totalPrice',
-      width: 110,
-      align: 'right' as const,
-      render: (value: string | null) => fmtMoney(value, currency),
-    },
-    {
-      title: '履约状态',
-      dataIndex: 'fulfillmentStatus',
-      key: 'fulfillmentStatus',
-      width: 110,
-      render: (value: string) => (
-        <StatusBadge
-          tone={FULFILLMENT_STATUS_META[value]?.tone ?? 'neutral'}
-          label={FULFILLMENT_STATUS_META[value]?.label ?? value}
-          showDot={false}
-        />
-      ),
-    },
-  ];
+      },
+      quantity: {
+        title: '数量',
+        dataIndex: 'quantity',
+        key: 'quantity',
+        width: 70,
+        align: 'right' as const,
+        render: (value: string) => Number(value),
+      },
+      unitPrice: {
+        title: '单价',
+        dataIndex: 'unitPrice',
+        key: 'unitPrice',
+        width: 110,
+        align: 'right' as const,
+        render: (value: string | null) => fmtMoney(value, expandedCurrency),
+      },
+      totalPrice: {
+        title: '小计',
+        dataIndex: 'totalPrice',
+        key: 'totalPrice',
+        width: 110,
+        align: 'right' as const,
+        render: (value: string | null) => fmtMoney(value, expandedCurrency),
+      },
+      latestPurchasePrice: {
+        title: '最近采购价',
+        dataIndex: 'latestPurchasePrice',
+        key: 'latestPurchasePrice',
+        width: 110,
+        align: 'right' as const,
+        render: (value: string | null, row: OrderItem) =>
+          value === null ? (
+            <span style={{ color: colors.textTertiary }}>—</span>
+          ) : (
+            <Tooltip title={`SKU 主数据维护值（当前行数 ×${Number(row.quantity)}）`}>
+              <span style={{ fontSize: 12.5 }}>{fmtMoney(value, expandedCurrency)}</span>
+            </Tooltip>
+          ),
+      },
+      fulfillmentStatus: {
+        title: '履约状态',
+        dataIndex: 'fulfillmentStatus',
+        key: 'fulfillmentStatus',
+        width: 110,
+        render: (value: string) => (
+          <StatusBadge
+            tone={FULFILLMENT_STATUS_META[value]?.tone ?? 'neutral'}
+            label={FULFILLMENT_STATUS_META[value]?.label ?? value}
+            showDot={false}
+          />
+        ),
+      },
+    }),
+    [expandedCurrency, viewSettings.thumbnailSize],
+  );
+
+  const expandedColumns = useMemo(
+    () =>
+      viewSettings.expandedColumns
+        .filter((column) => column.visible)
+        .map((column) => expandedColumnDefs[column.key])
+        .filter((column) => column !== undefined),
+    [viewSettings.expandedColumns, expandedColumnDefs],
+  );
 
   /** 快速建档：按订单行标识反查商品链接（storeId 来自列表行，单击选中即有）。 */
   const openQuickOnboard = useCallback(
@@ -843,7 +1048,133 @@ export function OrdersPage() {
   );
 
   // ---- Context rail: risk-first order preview (task §41-§42) ----
+  // 点击展开行 → SKU 信息视图（用户指示 2026-09-17）；点击订单行恢复订单视图。
+  const selectedItem =
+    selectedItemId !== null
+      ? (railDetail?.items.find((item) => item.id === selectedItemId) ?? null)
+      : null;
   const railContent = useMemo<ContextRailContent>(() => {
+    if (selectedItem !== null) {
+      const fulfillmentMeta = FULFILLMENT_STATUS_META[selectedItem.fulfillmentStatus];
+      const procurementMeta =
+        selectedItem.procurementState === null
+          ? null
+          : (PROCUREMENT_META[selectedItem.procurementState] ?? null);
+      return {
+        defaultCollapsed: true,
+        header: (
+          <EntitySummary
+            title={selectedItem.skuId !== null ? selectedItem.skuCode : '未映射订单行'}
+            subtitle={selectedItem.skuName || `第 ${selectedItem.lineNo} 行`}
+            badge={
+              <StatusBadge
+                tone={fulfillmentMeta?.tone ?? 'neutral'}
+                label={fulfillmentMeta?.label ?? selectedItem.fulfillmentStatus}
+                hint={selectedItem.fulfillmentStatus}
+              />
+            }
+          />
+        ),
+        children: (
+          <>
+            <ContextSection title="SKU 信息">
+              {selectedItem.skuId !== null ? (
+                <>
+                  <ContextMetric label="SKU 编码" value={selectedItem.skuCode} />
+                  <ContextMetric label="SKU 名称" value={selectedItem.skuName} />
+                  <ContextMetric label="数量" value={Number(selectedItem.quantity)} />
+                  <ContextMetric
+                    label="最近采购价"
+                    value={
+                      selectedItem.latestPurchasePrice === null
+                        ? '—'
+                        : fmtMoney(selectedItem.latestPurchasePrice, railDetail?.currency)
+                    }
+                  />
+                  <ContextMetric
+                    label="单价 / 小计"
+                    value={`${fmtMoney(selectedItem.unitPrice, railDetail?.currency)} / ${fmtMoney(
+                      selectedItem.totalPrice,
+                      railDetail?.currency,
+                    )}`}
+                  />
+                  {procurementMeta !== null && (
+                    <ContextMetric
+                      label="采购状态"
+                      value={
+                        <StatusBadge
+                          tone={procurementMeta.tone}
+                          label={procurementMeta.label}
+                          showDot={false}
+                        />
+                      }
+                    />
+                  )}
+                  <ContextMetric label="Offer ID" value={selectedItem.offerId ?? '—'} />
+                  <ContextMetric label="平台 SKU" value={selectedItem.platformSkuId ?? '—'} />
+                </>
+              ) : (
+                <ContextMetric
+                  label="平台标识"
+                  value={
+                    selectedItem.platformSkuId ??
+                    selectedItem.sellerSku ??
+                    selectedItem.offerId ??
+                    '—'
+                  }
+                />
+              )}
+            </ContextSection>
+            <ContextAction>
+              <Button
+                block
+                type="primary"
+                disabled={
+                  selectedItem.skuId === null ||
+                  selectedItem.procurementState === 'ORDERED' ||
+                  selectedItem.procurementState === 'ARRIVED'
+                }
+                onClick={() => setRegisterItem(selectedItem)}
+              >
+                创建采购单
+              </Button>
+              {selectedItem.skuId !== null && selectedItem.procurementState !== null && (
+                <RailHint>
+                  {selectedItem.procurementState === 'NOT_ORDERED'
+                    ? '为该订单行登记采购；同一订单行重复登记会被系统拒绝。'
+                    : '该行已有进行中/已到货的采购，不能重复登记。'}
+                </RailHint>
+              )}
+              {selectedItem.fulfillmentStatus === 'BACKORDERED' && selectedItem.skuId !== null && (
+                <Button
+                  block
+                  style={{ marginTop: 8 }}
+                  loading={retryMutation.isPending}
+                  onClick={() => retryMutation.mutate(selectedItem.id)}
+                >
+                  重新尝试分配
+                </Button>
+              )}
+              {selectedItem.mappingStatus === 'FAILED' && (
+                <Button
+                  block
+                  style={{ marginTop: 8 }}
+                  loading={onboardLookupPending}
+                  onClick={() =>
+                    openQuickOnboard(
+                      selectedItem,
+                      railDetail?.storeId ?? selectedRow?.storeId ?? '',
+                    )
+                  }
+                >
+                  快速建档
+                </Button>
+              )}
+            </ContextAction>
+          </>
+        ),
+      };
+    }
     if (selectedRow === null) {
       return {
         defaultCollapsed: true,
@@ -1081,6 +1412,7 @@ export function OrdersPage() {
       ),
     };
   }, [
+    selectedItem,
     selectedRow,
     railDetail,
     retryMutation.isPending,
@@ -1144,6 +1476,14 @@ export function OrdersPage() {
             <div style={{ fontSize: 12.5, color: colors.textSecondary }}>{row.skuName}</div>
           </div>
         ),
+    },
+    {
+      title: '最近采购价',
+      dataIndex: 'latestPurchasePrice',
+      key: 'latestPurchasePrice',
+      width: 110,
+      align: 'right' as const,
+      render: (value: string | null) => (value === null ? '—' : fmtMoney(value, detail?.currency)),
     },
     { title: '数量', dataIndex: 'quantity', key: 'quantity', width: 70, align: 'right' as const },
     {
@@ -1253,6 +1593,181 @@ export function OrdersPage() {
     },
   ];
 
+  /**
+   * 主表列注册表（用户指示 2026-09-17）：显示顺序/显隐由视图设置驱动；
+   * 「平台 / 店铺」改为「店铺」（保持平台图标+店铺名，履约方式独立成列）；
+   * 下单时间显示为日期+时间点。
+   */
+  const mainColumnDefs: Record<string, ColumnsType<OrderListItem>[number]> = {
+    platformOrderId: {
+      title: '订单号',
+      key: 'platformOrderId',
+      width: 170,
+      render: (_: unknown, row: OrderListItem) => (
+        <div>
+          <div style={{ fontWeight: 550, wordBreak: 'break-all' }}>{row.platformOrderId}</div>
+          <div style={{ fontSize: 12, color: colors.textTertiary }}>{row.orderNo}</div>
+        </div>
+      ),
+    },
+    items: {
+      title: '商品',
+      key: 'items',
+      width: 170,
+      render: (_: unknown, row: OrderListItem) => {
+        if (row.mappingFailedCount > 0) {
+          return (
+            <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+              <span>{row.itemsCount} 行</span>
+              <StatusBadge tone="purple" label={`映射失败 ${row.mappingFailedCount}`} />
+            </span>
+          );
+        }
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              gap: 6,
+              alignItems: 'center',
+              flexWrap: 'wrap',
+            }}
+          >
+            <span>{row.itemsCount} 行</span>
+            {row.backorderedCount > 0 && (
+              <StatusBadge tone="warning" label={`缺货 ${row.backorderedCount}`} />
+            )}
+            {row.backorderedOrderedCount > 0 && (
+              <Tooltip title={`缺货行中已登记采购 ${row.backorderedOrderedCount} 行（采购未到货）`}>
+                <StatusBadge
+                  tone="info"
+                  label={`已采购 ${row.backorderedOrderedCount}`}
+                  showDot={false}
+                />
+              </Tooltip>
+            )}
+            {row.backorderedArrivedCount > 0 && (
+              <Tooltip
+                title={`缺货行中采购已到货 ${row.backorderedArrivedCount} 行，可「重新尝试分配」`}
+              >
+                {railDetail?.id === row.id && detailQuery.isSuccess ? (
+                  <Button
+                    size="small"
+                    loading={arrivedRetryId === row.id}
+                    disabled={arrivedRetryId !== null || retryMutation.isPending}
+                    style={{ color: colors.success }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      confirmArrivedRetry(row);
+                    }}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                  >
+                    已到货 {row.backorderedArrivedCount}
+                  </Button>
+                ) : (
+                  <StatusBadge
+                    tone="success"
+                    label={`已到货 ${row.backorderedArrivedCount}`}
+                    hint="请先展开订单加载明细，再点击重新分配"
+                    showDot={false}
+                  />
+                )}
+              </Tooltip>
+            )}
+            {row.reservedCount > 0 && (
+              <StatusBadge tone="info" label={`已占用 ${row.reservedCount}`} showDot={false} />
+            )}
+          </span>
+        );
+      },
+    },
+    erpStatus: {
+      title: 'ERP 状态',
+      dataIndex: 'erpStatus',
+      key: 'erpStatus',
+      width: 130,
+      render: (value: string, row: OrderListItem) => (
+        <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+          <StatusBadge
+            tone={ERP_STATUS_META[value]?.tone ?? 'neutral'}
+            label={ERP_STATUS_META[value]?.label ?? value}
+            hint={value}
+            showDot={false}
+          />
+          {row.openExceptionsCount > 0 && (
+            <Tooltip
+              title={`未处理异常 ${row.openExceptionsCount} 条（含缺货 ORDER_OUT_OF_STOCK、映射失败等行级异常；处理入口在异常中心或行内操作）`}
+            >
+              <span style={{ fontSize: 12, color: colors.danger, fontWeight: 600 }}>
+                ×{row.openExceptionsCount}
+              </span>
+            </Tooltip>
+          )}
+          {platformDivergent(row.platformStatus, value) && (
+            <Tooltip title={`平台状态 ${row.platformStatus}：平台侧已发货/送达，系统未发货`}>
+              <span style={{ fontSize: 12, color: colors.warning, fontWeight: 600 }}>⚠</span>
+            </Tooltip>
+          )}
+        </span>
+      ),
+    },
+    store: {
+      title: '店铺',
+      key: 'store',
+      width: 190,
+      render: (_: unknown, row: OrderListItem) => (
+        <PlatformTag code={row.platformCode} suffix={row.storeName} />
+      ),
+    },
+    fulfillmentMode: {
+      title: '履约方式',
+      key: 'fulfillmentMode',
+      width: 100,
+      render: (_: unknown, row: OrderListItem) => {
+        const mode = fulfillmentModeChip(row.fulfillmentMode);
+        return mode === null ? (
+          '—'
+        ) : (
+          <StatusBadge tone="neutral" label={mode.short} hint={mode.hint} showDot={false} />
+        );
+      },
+    },
+    shipmentDeadline: {
+      title: '时限',
+      dataIndex: 'shipmentDeadline',
+      key: 'shipmentDeadline',
+      width: 130,
+      render: (value: string | null) => {
+        const badge = deadlineBadge(value);
+        return badge === null ? (
+          '—'
+        ) : (
+          <StatusBadge tone={badge.tone} label={badge.label} hint={badge.exact} />
+        );
+      },
+    },
+    orderedAt: {
+      title: '下单时间',
+      dataIndex: 'orderedAt',
+      key: 'orderedAt',
+      width: 150,
+      render: (value: string) => <span style={{ fontSize: 12.5 }}>{fmtDateTime(value)}</span>,
+    },
+  };
+
+  const mainColumns = viewSettings.mainColumns
+    .filter((column) => column.visible)
+    .map((column) => mainColumnDefs[column.key])
+    .filter((column) => column !== undefined);
+
+  /** 默认展开所有订单行（视图设置）时整页展开，点击仅选中（侧边栏）。 */
+  const expandedRowKeys = useMemo(() => {
+    if (viewSettings.defaultExpandAll) {
+      const ids = list.map((row) => row.id);
+      return selectedId === null ? ids : [...new Set([...ids, selectedId])];
+    }
+    return selectedId === null ? [] : [selectedId];
+  }, [viewSettings.defaultExpandAll, list, selectedId]);
+
   const stageCountOf = (tabKey: string): number => {
     if (tabKey === 'all') {
       return allCount.data?.meta.total ?? 0;
@@ -1271,7 +1786,7 @@ export function OrdersPage() {
       <PageHeader
         title="订单管理"
         description="统一管理各平台订单及内部履约状态"
-        secondary={<Button onClick={() => setIngestOpen(true)}>摄入测试订单</Button>}
+        secondary={<Button onClick={() => setViewOpen(true)}>视图设置</Button>}
         extra={
           <Tabs
             activeKey={activeTab}
@@ -1337,6 +1852,22 @@ export function OrdersPage() {
             setPage(1);
           }}
         />
+        <Select
+          allowClear
+          placeholder="履约方式"
+          style={{ width: 130 }}
+          value={fulfillmentModeFilter}
+          onChange={(value) => {
+            setPage(1);
+            setFulfillmentModeFilter(value);
+          }}
+          options={[
+            { value: 'RFBS', label: 'realFBS' },
+            { value: 'FBS', label: 'FBS' },
+            { value: 'FBO', label: 'FBO' },
+            { value: 'FBP', label: 'FBP' },
+          ]}
+        />
       </FilterBar>
 
       {/* Axis 2: line-level goods-state chips (§2.2) - single select on top of
@@ -1366,7 +1897,7 @@ export function OrdersPage() {
           dataSource={list}
           pagination={{
             current: page,
-            pageSize: 20,
+            pageSize: viewSettings.pageSize,
             total: query.data?.meta.total ?? 0,
             showTotal: (total) => `共 ${total} 单`,
             onChange: setPage,
@@ -1374,7 +1905,8 @@ export function OrdersPage() {
           expandable={{
             // 选中即展开（用户指示 2026-09-17）：行点击选择驱动展开/收起，
             // 不显示独立展开列；内容复用 railDetail（已缓存详情）。
-            expandedRowKeys: selectedId === null ? [] : [selectedId],
+            // 视图设置「默认展开所有订单行」时整页展开，点击仅选中（侧边栏）。
+            expandedRowKeys: expandedRowKeys,
             showExpandColumn: false,
             expandedRowRender: (record: OrderListItem) => {
               if (detailQuery.isLoading) {
@@ -1391,17 +1923,6 @@ export function OrdersPage() {
               }
               return (
                 <div onClick={(event) => event.stopPropagation()}>
-                  <div style={{ marginBottom: 8 }}>
-                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                      <Switch
-                        size="small"
-                        checked={showImages}
-                        onChange={setShowImages}
-                        aria-label="显示图片"
-                      />
-                      显示图片
-                    </label>
-                  </div>
                   <Image.PreviewGroup>
                     <DataTable<OrderItem>
                       size="small"
@@ -1409,7 +1930,16 @@ export function OrdersPage() {
                       dataSource={railDetail.items}
                       pagination={false}
                       emptyTitle="无商品行"
-                      columns={expandedItemsColumns(record.currency)}
+                      columns={expandedColumns}
+                      onRow={(item) => ({
+                        // 点击展开行 → 侧边栏显示该 SKU 信息（用户指示 2026-09-17）。
+                        onClick: () =>
+                          setSelectedItemId(item.id === selectedItemId ? null : item.id),
+                        style: {
+                          cursor: 'pointer',
+                          background: item.id === selectedItemId ? colors.primarySoft : undefined,
+                        },
+                      })}
                     />
                   </Image.PreviewGroup>
                 </div>
@@ -1417,7 +1947,10 @@ export function OrdersPage() {
             },
           }}
           onRow={(record) => ({
-            onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+            onClick: () => {
+              setSelectedItemId(null);
+              setSelectedId(record.id === selectedId ? null : record.id);
+            },
             onDoubleClick: () => setDetailId(record.id),
             style: {
               cursor: 'pointer',
@@ -1425,181 +1958,8 @@ export function OrdersPage() {
             },
           })}
           emptyTitle="暂无订单"
-          emptyDescription="当前筛选下没有订单，可摄入测试订单验证流程。"
-          columns={[
-            {
-              title: '订单号',
-              key: 'platformOrderId',
-              width: 170,
-              render: (_: unknown, row: OrderListItem) => (
-                <div>
-                  <div style={{ fontWeight: 550, wordBreak: 'break-all' }}>
-                    {row.platformOrderId}
-                  </div>
-                  <div style={{ fontSize: 12, color: colors.textTertiary }}>{row.orderNo}</div>
-                </div>
-              ),
-            },
-            {
-              title: '商品',
-              key: 'items',
-              width: 170,
-              render: (_: unknown, row: OrderListItem) => {
-                if (row.mappingFailedCount > 0) {
-                  return (
-                    <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                      <span>{row.itemsCount} 行</span>
-                      <StatusBadge tone="purple" label={`映射失败 ${row.mappingFailedCount}`} />
-                    </span>
-                  );
-                }
-                return (
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      gap: 6,
-                      alignItems: 'center',
-                      flexWrap: 'wrap',
-                    }}
-                  >
-                    <span>{row.itemsCount} 行</span>
-                    {row.backorderedCount > 0 && (
-                      <StatusBadge tone="warning" label={`缺货 ${row.backorderedCount}`} />
-                    )}
-                    {row.backorderedOrderedCount > 0 && (
-                      <Tooltip
-                        title={`缺货行中已登记采购 ${row.backorderedOrderedCount} 行（采购未到货）`}
-                      >
-                        <StatusBadge
-                          tone="info"
-                          label={`已采购 ${row.backorderedOrderedCount}`}
-                          showDot={false}
-                        />
-                      </Tooltip>
-                    )}
-                    {row.backorderedArrivedCount > 0 && (
-                      <Tooltip
-                        title={`缺货行中采购已到货 ${row.backorderedArrivedCount} 行，可「重新尝试分配」`}
-                      >
-                        {railDetail?.id === row.id && detailQuery.isSuccess ? (
-                          <Button
-                            size="small"
-                            loading={arrivedRetryId === row.id}
-                            disabled={arrivedRetryId !== null || retryMutation.isPending}
-                            style={{ color: colors.success }}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              confirmArrivedRetry(row);
-                            }}
-                            onDoubleClick={(event) => event.stopPropagation()}
-                          >
-                            已到货 {row.backorderedArrivedCount}
-                          </Button>
-                        ) : (
-                          <StatusBadge
-                            tone="success"
-                            label={`已到货 ${row.backorderedArrivedCount}`}
-                            hint="请先展开订单加载明细，再点击重新分配"
-                            showDot={false}
-                          />
-                        )}
-                      </Tooltip>
-                    )}
-                    {row.reservedCount > 0 && (
-                      <StatusBadge
-                        tone="info"
-                        label={`已占用 ${row.reservedCount}`}
-                        showDot={false}
-                      />
-                    )}
-                  </span>
-                );
-              },
-            },
-            {
-              title: 'ERP 状态',
-              dataIndex: 'erpStatus',
-              key: 'erpStatus',
-              width: 130,
-              render: (value: string, row: OrderListItem) => (
-                <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                  <StatusBadge
-                    tone={ERP_STATUS_META[value]?.tone ?? 'neutral'}
-                    label={ERP_STATUS_META[value]?.label ?? value}
-                    hint={value}
-                    showDot={false}
-                  />
-                  {row.openExceptionsCount > 0 && (
-                    <Tooltip
-                      title={`未处理异常 ${row.openExceptionsCount} 条（含缺货 ORDER_OUT_OF_STOCK、映射失败等行级异常；处理入口在异常中心或行内操作）`}
-                    >
-                      <span style={{ fontSize: 12, color: colors.danger, fontWeight: 600 }}>
-                        ×{row.openExceptionsCount}
-                      </span>
-                    </Tooltip>
-                  )}
-                  {platformDivergent(row.platformStatus, value) && (
-                    <Tooltip
-                      title={`平台状态 ${row.platformStatus}：平台侧已发货/送达，系统未发货`}
-                    >
-                      <span style={{ fontSize: 12, color: colors.warning, fontWeight: 600 }}>
-                        ⚠
-                      </span>
-                    </Tooltip>
-                  )}
-                </span>
-              ),
-            },
-            {
-              title: '平台 / 店铺',
-              key: 'platform',
-              width: 190,
-              render: (_: unknown, row: OrderListItem) => {
-                const mode = fulfillmentModeChip(row.fulfillmentMode);
-                return (
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      gap: 6,
-                      alignItems: 'center',
-                      flexWrap: 'wrap',
-                    }}
-                  >
-                    <PlatformTag code={row.platformCode} suffix={row.storeName} />
-                    {mode !== null && (
-                      <StatusBadge
-                        tone="neutral"
-                        label={mode.short}
-                        hint={mode.hint}
-                        showDot={false}
-                      />
-                    )}
-                  </span>
-                );
-              },
-            },
-            {
-              title: '时限',
-              dataIndex: 'shipmentDeadline',
-              key: 'shipmentDeadline',
-              width: 130,
-              render: (value: string | null) => {
-                const badge = deadlineBadge(value);
-                return badge === null ? (
-                  '—'
-                ) : (
-                  <StatusBadge tone={badge.tone} label={badge.label} hint={badge.exact} />
-                );
-              },
-            },
-            {
-              title: '下单时间',
-              dataIndex: 'orderedAt',
-              key: 'orderedAt',
-              width: 130,
-              render: (value: string) => <RelativeTime value={value} />,
-            },
-          ]}
+          emptyDescription="当前筛选下没有订单；新订单由平台同步自动进入系统。"
+          columns={mainColumns}
         />
       </SectionCard>
 
@@ -2019,55 +2379,76 @@ export function OrdersPage() {
         </Form>
       </Modal>
 
+      {/* ---- 视图设置（用户指示 2026-09-17） ---- */}
       <Modal
-        title="摄入测试订单（NormalizedOrderInput，管理员）"
-        open={ingestOpen}
-        onCancel={() => setIngestOpen(false)}
-        onOk={() => {
-          try {
-            const body = JSON.parse(ingestJson) as Record<string, unknown>;
-            if (body.storeId === undefined) {
-              const firstStore = storesQuery.data?.data[0];
-              if (firstStore === undefined) {
-                message.error('没有可用店铺，请在 JSON 中显式指定 storeId');
-                return;
-              }
-              body.storeId = firstStore.id;
-            }
-            if (body.orderedAt === undefined) {
-              body.orderedAt = new Date().toISOString();
-            }
-            ingestMutation.mutate(body);
-          } catch {
-            message.error('JSON 格式错误');
-          }
-        }}
-        okText="摄入"
-        cancelText="关闭"
-        width={640}
-        confirmLoading={ingestMutation.isPending}
+        title="视图设置"
+        open={viewOpen}
+        onCancel={() => setViewOpen(false)}
+        footer={
+          <Button
+            type="primary"
+            onClick={() => {
+              setViewOpen(false);
+            }}
+          >
+            完成
+          </Button>
+        }
+        width={720}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {FIXTURES.map((fixture) => (
-              <Button
-                key={fixture.label}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <Checkbox
+                checked={viewSettings.defaultExpandAll}
+                onChange={(event) => updateViewSettings({ defaultExpandAll: event.target.checked })}
+              />
+              默认展开所有订单行
+            </label>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              每页行数：
+              <Select
                 size="small"
-                onClick={() => setIngestJson(JSON.stringify(fixture.json, null, 2))}
-              >
-                {fixture.label}
-              </Button>
-            ))}
+                style={{ width: 90 }}
+                value={viewSettings.pageSize}
+                options={[10, 20, 50, 100].map((size) => ({ value: size, label: `${size} 行` }))}
+                onChange={(value) => {
+                  setPage(1);
+                  updateViewSettings({ pageSize: value });
+                }}
+              />
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              主图缩略图：
+              <Select
+                size="small"
+                style={{ width: 90 }}
+                value={viewSettings.thumbnailSize}
+                options={[48, 64, 88].map((size) => ({ value: size, label: `${size}px` }))}
+                onChange={(value) => updateViewSettings({ thumbnailSize: value })}
+              />
+            </span>
           </div>
-          <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
-            storeId 默认取第一个店铺；items 行使用平台 SKU 标识（platformSkuId / sellerSku /
-            offerId）。
-          </span>
-          <Input.TextArea
-            rows={10}
-            value={ingestJson}
-            onChange={(event) => setIngestJson(event.target.value)}
-          />
+          <div style={{ display: 'flex', gap: 24 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>主表列（拖动排序，勾选显示）</div>
+              <SortableColumnList
+                labelFor={MAIN_COLUMN_LABELS}
+                columns={viewSettings.mainColumns}
+                onReorder={reorderColumns('mainColumns')}
+                onToggleVisible={toggleColumnVisible('mainColumns')}
+              />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>展开行列（拖动排序，勾选显示）</div>
+              <SortableColumnList
+                labelFor={EXPANDED_COLUMN_LABELS}
+                columns={viewSettings.expandedColumns}
+                onReorder={reorderColumns('expandedColumns')}
+                onToggleVisible={toggleColumnVisible('expandedColumns')}
+              />
+            </div>
+          </div>
         </div>
       </Modal>
 
