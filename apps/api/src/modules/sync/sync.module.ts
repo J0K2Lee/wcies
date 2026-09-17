@@ -28,6 +28,7 @@ import { WebhookIngestService, WebhookProcessService } from './services/webhook.
 import { PlatformWarehouseQueryService } from './services/platform-warehouse-query.service';
 import { SyncController } from './controllers/sync.controller';
 import { OzonWebhookController } from './controllers/ozon-webhook.controller';
+import { YandexWebhookController } from './controllers/yandex-webhook.controller';
 import { PlatformWarehouseController } from './controllers/platform-warehouse.controller';
 import {
   CategoryTreeSyncProcessor,
@@ -64,7 +65,12 @@ import {
     OrderModule,
     ExceptionModule,
   ],
-  controllers: [SyncController, OzonWebhookController, PlatformWarehouseController],
+  controllers: [
+    SyncController,
+    OzonWebhookController,
+    YandexWebhookController,
+    PlatformWarehouseController,
+  ],
   providers: [
     SyncJobRepository,
     SyncCursorRepository,

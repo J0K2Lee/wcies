@@ -7,6 +7,7 @@ import { PlatformService } from '../../platform/platform.service';
 import { StoreService } from '../../store/services/store.service';
 import { StoreNotFoundError } from '../../store/errors/store-errors';
 import { PlatformAdapterRegistry } from '../../integration/platform-adapter.registry';
+import { YandexAdapter } from '../../integration/yandex/yandex.adapter';
 import { SyncContextService } from './sync-context.service';
 import { OrderSyncService } from './order-sync.service';
 import { ExternalRawEventRepository } from '../repositories/external-raw-event.repository';
@@ -81,19 +82,81 @@ export class WebhookIngestService {
       return 'REJECTED';
     }
 
+    return this.storeAndEnqueue('OZON', store.id, payload as Record<string, unknown>, event);
+  }
+
+  /**
+   * Yandex Market webhook ingestion (2026-09-18, docs/integrations/yandex.md
+   * §4). Yandex signs NOTHING - identity assurance is layered:
+   * 1. source-IP allowlist (controller, before this method runs);
+   * 2. payload campaignId must match the store's resolved campaign identity;
+   * 3. events are HINTS only - the processor re-reads business orders via
+   *    the authenticated API before ingesting anything.
+   * PING never reaches this method (the controller answers it inline within
+   * the platform's 1-second budget).
+   */
+  async ingestYandex(
+    storeCode: string,
+    payload: unknown,
+  ): Promise<'ACCEPTED' | 'DUPLICATE' | 'REJECTED'> {
+    const store = await this.resolveStoreByPlatform('YANDEX', storeCode);
+    const adapter = this.registry.getAdapter('YANDEX');
+    if (adapter.processWebhook === undefined) {
+      throw new Error('YANDEX adapter does not support webhooks');
+    }
+
+    const context = await this.contextService.buildStoreContext(store);
+    // Throws on malformed payloads (PLATFORM_BAD_RESPONSE) - HTTP 400.
+    const events = await adapter.processWebhook(context, payload);
+    const event = events[0];
+    if (event === undefined) {
+      throw new StoreNotFoundError(storeCode);
+    }
+
+    // Identity: a claimed campaignId must equal the store's campaign.
+    const claimedCampaignId = readPayloadString(payload, 'campaignId');
+    if (claimedCampaignId !== null) {
+      const identity = await (adapter as YandexAdapter).resolveIdentityForContext(context);
+      if (claimedCampaignId !== identity.campaignId) {
+        await this.rawEventRepo.insertIfNew({
+          platform: 'YANDEX',
+          storeId: store.id,
+          eventType: event.eventType,
+          externalEventId: event.externalEventId,
+          payload: payload as Record<string, unknown>,
+          status: 'REJECTED',
+        });
+        this.logger.warn('yandex webhook rejected: campaignId mismatch', {
+          module: 'sync',
+          storeId: store.id,
+        });
+        return 'REJECTED';
+      }
+    }
+
+    return this.storeAndEnqueue('YANDEX', store.id, payload as Record<string, unknown>, event);
+  }
+
+  /** Persist the raw event (hash dedup) and hand off to the worker. */
+  private async storeAndEnqueue(
+    platform: string,
+    storeId: string,
+    payload: Record<string, unknown>,
+    event: PlatformWebhookEvent,
+  ): Promise<'ACCEPTED' | 'DUPLICATE'> {
     const stored = await this.rawEventRepo.insertIfNew({
-      platform: 'OZON',
-      storeId: store.id,
+      platform,
+      storeId,
       eventType: event.eventType,
       externalEventId: event.externalEventId,
-      payload: payload as Record<string, unknown>,
+      payload,
       status: 'PENDING',
     });
     if (stored === null) {
       return 'DUPLICATE';
     }
     // Persisted -> hand off to the worker; the HTTP request never waits for
-    // platform reads or order ingestion (task §28).
+    // platform reads or order ingestion (AGENTS.md §47).
     await this.webhookQueue.add(
       'process',
       { rawEventId: stored.id },
@@ -110,7 +173,14 @@ export class WebhookIngestService {
   private async resolveOzonStore(
     storeCode: string,
   ): Promise<NonNullable<Awaited<ReturnType<StoreService['getEntityById']>>>> {
-    const platform = await this.platformService.getEntityByCode('OZON');
+    return this.resolveStoreByPlatform('OZON', storeCode);
+  }
+
+  private async resolveStoreByPlatform(
+    platformCode: 'OZON' | 'YANDEX',
+    storeCode: string,
+  ): Promise<NonNullable<Awaited<ReturnType<StoreService['getEntityById']>>>> {
+    const platform = await this.platformService.getEntityByCode(platformCode);
     if (platform === null) {
       throw new StoreNotFoundError(storeCode);
     }
@@ -120,6 +190,20 @@ export class WebhookIngestService {
     }
     return store;
   }
+}
+
+function readPayloadString(payload: unknown, key: string): string | null {
+  if (typeof payload !== 'object' || payload === null) {
+    return null;
+  }
+  const value = (payload as Record<string, unknown>)[key];
+  if (typeof value === 'string' && value !== '') {
+    return value;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
 }
 
 /**
