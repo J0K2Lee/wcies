@@ -193,6 +193,16 @@ export class OrderListQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() storeId?: string;
 
   @ApiPropertyOptional({
+    description:
+      '履约方式精确匹配（用户指示 2026-09-17）：订单头 fulfillment_mode 原值，' +
+      'OZON 订单为 FBS / RFBS / FBP / FBO 短码',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  fulfillmentMode?: string;
+
+  @ApiPropertyOptional({
     enum: ['true'],
     description: '待采购视图：存在 MAPPED+BACKORDERED 且无未取消采购单覆盖的订单行',
   })
@@ -268,6 +278,13 @@ export class OrderItemDto {
   @ApiProperty({ nullable: true, type: String }) skuId!: string | null;
   @ApiProperty({ example: 'VK87-BLK' }) skuCode!: string;
   @ApiProperty({ example: 'VK87 MAX V2 黑色' }) skuName!: string;
+  @ApiPropertyOptional({
+    nullable: true,
+    type: String,
+    description:
+      '最近采购价（SKU 主数据操作者维护，master-data.md §4.3；用户指示 2026-09-17 展开行展示）',
+  })
+  latestPurchasePrice!: string | null;
   @ApiProperty({ nullable: true, type: String }) warehouseId!: string | null;
   @ApiProperty({ example: '2.000' }) quantity!: string;
   @ApiPropertyOptional({

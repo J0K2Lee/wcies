@@ -27,6 +27,7 @@ import {
 import { ORDER_PICKING_STATE_PORT, OrderPickingStatePort } from '../ports/order-picking-state.port';
 import { ORDER_INTERCEPTION_PORT, OrderInterceptionPort } from '../ports/order-interception.port';
 import { ORDER_PROCUREMENT_PORT, OrderProcurementPort } from '../ports/order-procurement.port';
+import { isExternalFulfillmentMode } from '../../platform/constants/platform.constants';
 import { OrderDetailDto, OrderListItemDto } from '../dto/order.dto';
 
 /**
@@ -183,7 +184,7 @@ export class OrderService {
     ]);
 
     const itemDtos = await Promise.all(
-      items.map(async ({ item, skuCode, skuName }) => {
+      items.map(async ({ item, skuCode, skuName, latestPurchasePrice }) => {
         let reservation: OrderDetailDto['items'][number]['reservation'] = null;
         if (item.reservationId !== null) {
           try {
@@ -217,6 +218,7 @@ export class OrderService {
           skuId: item.skuId,
           skuCode,
           skuName,
+          latestPurchasePrice,
           warehouseId: item.warehouseId,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
@@ -661,14 +663,36 @@ export class OrderService {
       );
       cancelled = true;
     } else {
-      // Time-based re-evaluation even when nothing changed (deadline was far
-      // at ingest, now < 24h). No-op writes when the OPEN state is correct.
-      await this.deadlineExceptionService.evaluate({
-        id: order.id,
-        orderNo: order.orderNo,
-        storeId: order.storeId,
-        shipmentDeadline: newDeadline ?? order.shipmentDeadline ?? null,
-      });
+      // 外部履约（FBO/FBP，用户指示 2026-09-17）：平台仓库已把货发走
+      // （platform stage 进入 IN_TRANSIT / DELIVERED）时订单自动转 SHIPPED，
+      // 业务状态随 webhook / 平台事实流转，不阻塞、不依赖内部发货单。
+      const effectiveMode = newFulfillmentMode ?? order.fulfillmentMode;
+      if (
+        isExternalFulfillmentMode(effectiveMode) &&
+        (newStage === 'IN_TRANSIT' || newStage === 'DELIVERED') &&
+        order.erpStatus !== 'SHIPPED' &&
+        order.erpStatus !== 'CANCELLED'
+      ) {
+        await this.statusService.transition(
+          order.id,
+          'SHIPPED',
+          operator,
+          `平台履约流转：平台仓库已发货（${newStage}，外部履约 ${effectiveMode}）`,
+        );
+      } else {
+        // Time-based re-evaluation even when nothing changed (deadline was
+        // far at ingest, now < 24h). No-op writes when the OPEN state is
+        // correct. 外部履约订单不评估发货时限（平台负责发货，时限不构成
+        // 内部作业压力）。
+        if (!isExternalFulfillmentMode(effectiveMode)) {
+          await this.deadlineExceptionService.evaluate({
+            id: order.id,
+            orderNo: order.orderNo,
+            storeId: order.storeId,
+            shipmentDeadline: newDeadline ?? order.shipmentDeadline ?? null,
+          });
+        }
+      }
     }
     // Stall re-evaluation on EVERY encounter (dual-axis T4, orders.md §16A):
     // a stalled order is precisely one where nothing changed, so gating on

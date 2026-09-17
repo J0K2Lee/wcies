@@ -81,12 +81,19 @@ export class OrderStatusService {
     if (items.length === 0) {
       return 'NEW';
     }
+    // EXTERNAL_FULFILLED（用户指示 2026-09-17）与 RELEASED 同样不属于内部
+    // 可履约行：平台仓库持货发货，等待平台事件推进订单（applySyncedPlatform
+    // Facts 自动转 SHIPPED）。
     const fulfillable = items.filter(
-      (item) => item.mappingStatus !== 'FAILED' && item.fulfillmentStatus !== 'RELEASED',
+      (item) =>
+        item.mappingStatus !== 'FAILED' &&
+        item.fulfillmentStatus !== 'RELEASED' &&
+        item.fulfillmentStatus !== 'EXTERNAL_FULFILLED',
     );
     if (fulfillable.length === 0) {
       // Nothing left to fulfill: pure mapping failures keep the exception
-      // status; a fully released order is on its way to CANCELLED anyway.
+      // status; a fully released order is on its way to CANCELLED anyway;
+      // a fully external order stays put until the platform ships it.
       return items.some((item) => item.mappingStatus === 'FAILED') ? 'EXCEPTION' : current;
     }
     if ((await this.pickingState.countActivePickingItems(orderId)) > 0) {

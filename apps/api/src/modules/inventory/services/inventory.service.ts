@@ -4,6 +4,7 @@ import { SkuService } from '../../product/services/sku.service';
 import { WarehouseService } from '../../warehouse/services/warehouse.service';
 import { WarehouseBinService } from '../../warehouse/services/warehouse-bin.service';
 import { OperatorContext, OperationLogService } from '../../operation-log/operation-log.service';
+import { InventoryStockListenerRegistry } from './inventory-stock-listener-registry';
 import { formatQty, parseQty, qtyFromDb } from '../../../common/utils/quantity';
 import { InventoryBalanceEntity } from '../entities/inventory-balance.entity';
 import {
@@ -106,6 +107,7 @@ export class InventoryService {
     warehouseService: WarehouseService,
     binService: WarehouseBinService,
     private readonly operationLog: OperationLogService,
+    private readonly stockListeners: InventoryStockListenerRegistry,
   ) {
     this.deps = { skuService, warehouseService, binService };
   }
@@ -407,6 +409,15 @@ export class InventoryService {
         throw error;
       }
     }
+
+    // 库存增加流水已产生（用户指示 2026-09-17）：通知进程内监听器
+    // （订单模块据此自动重新分配缺货行）。fire-and-forget、独立连接——
+    // 监听器的行锁会等到本事务提交后再拿到；回滚则预留自然失败。
+    this.stockListeners.emitStockIncreased({
+      skuId: dim.skuId,
+      warehouseId: dim.warehouseId,
+      eventType,
+    });
 
     return {
       eventNo: event.eventNo,

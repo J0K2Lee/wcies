@@ -84,3 +84,25 @@ export function fulfillmentModesForPlatform(platformCode: PlatformCode): Fulfill
 export function isFulfillmentMode(value: string): value is FulfillmentMode {
   return (FULFILLMENT_MODES as readonly string[]).includes(value);
 }
+
+/**
+ * 外部履约判定（用户指示 2026-09-17）：半托管 / 托管仓模式的履约流程在
+ * 平台侧完成，业务状态随 webhook / 平台事实自动流转，不进入内部
+ * 预留-拣货-发货流程。
+ *
+ * 订单头存的履约模式有两种形态：绑定用的是完整常量（OZON_FBO），而订单
+ * 摄入来自平台 mapper 的短码（FBO / FBP / FBW / FBY）。两种都要识别。
+ */
+const EXTERNAL_FULFILLMENT_TOKENS = ['FBO', 'FBP', 'FBW', 'FBY'] as const;
+
+export function isExternalFulfillmentMode(mode: string | null | undefined): boolean {
+  if (typeof mode !== 'string' || mode === '') {
+    return false;
+  }
+  const normalized = isFulfillmentMode(mode) ? FULFILLMENT_MODE_CATEGORY[mode] : mode;
+  if (normalized === 'MANAGED' || normalized === 'SEMI_MANAGED') {
+    return true;
+  }
+  const suffix = mode.includes('_') ? mode.slice(mode.lastIndexOf('_') + 1) : mode;
+  return (EXTERNAL_FULFILLMENT_TOKENS as readonly string[]).includes(suffix);
+}

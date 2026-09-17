@@ -22,6 +22,7 @@ import { InventoryMovementService } from './services/inventory-movement.service'
 import { InventoryQueryService } from './services/inventory-query.service';
 import { InventorySafetyStockService } from './services/inventory-safety-stock.service';
 import { ReservationService } from './services/reservation.service';
+import { InventoryStockListenerRegistry } from './services/inventory-stock-listener-registry';
 import {
   InventoryController,
   InventoryReservationController,
@@ -67,7 +68,13 @@ import {
     InventoryQueryService,
     InventorySafetyStockService,
     ReservationService,
+    InventoryStockListenerRegistry,
   ],
-  exports: [InventoryService, ReservationService, InventoryQueryService],
+  exports: [
+    InventoryService,
+    ReservationService,
+    InventoryQueryService,
+    InventoryStockListenerRegistry,
+  ],
 })
 export class InventoryModule {}

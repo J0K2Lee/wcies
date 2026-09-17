@@ -23,12 +23,40 @@ export class OrderItemRepository {
       .find({ where: { orderId }, order: { lineNo: 'ASC' } });
   }
 
+  /**
+   * 自动重新分配候选（用户指示 2026-09-17）：某个 SKU 可售增加后，
+   * 「已映射但未持有库存」的行（BACKORDERED，或历史卡住的 MAPPED+PENDING）
+   * 是重试对象。仅返回行 id + 订单 id 的轻量映射，订单头过滤在服务层。
+   */
+  async findUnallocatedItemIdsBySku(
+    skuId: string,
+  ): Promise<Array<{ itemId: string; orderId: string }>> {
+    const rows = await this.dataSource.query<Array<{ item_id: string; order_id: string }>>(
+      `SELECT i.id AS item_id, i.order_id AS order_id
+         FROM order_items i
+         JOIN orders o ON o.id = i.order_id
+        WHERE i.sku_id = $1::uuid
+          AND i.mapping_status = 'MAPPED'
+          AND i.fulfillment_status IN ('BACKORDERED', 'PENDING')
+          AND o.erp_status NOT IN ('CANCELLED', 'SHIPPED')
+        ORDER BY i.created_at ASC`,
+      [skuId],
+    );
+    return rows.map((row) => ({ itemId: row.item_id, orderId: row.order_id }));
+  }
+
   /** Items with resolved sku codes for detail views (no N+1). */
-  async findByOrderIdWithSku(
-    orderId: string,
-  ): Promise<Array<{ item: OrderItemEntity; skuCode: string; skuName: string }>> {
+  async findByOrderIdWithSku(orderId: string): Promise<
+    Array<{
+      item: OrderItemEntity;
+      skuCode: string;
+      skuName: string;
+      latestPurchasePrice: string | null;
+    }>
+  > {
     const rows = await this.dataSource.query<Array<Record<string, unknown>>>(
-      `SELECT i.*, s.sku_code AS sku_code, s.name_zh AS sku_name
+      `SELECT i.*, s.sku_code AS sku_code, s.name_zh AS sku_name,
+              s.latest_purchase_price AS latest_purchase_price
          FROM order_items i
          LEFT JOIN skus s ON s.id = i.sku_id
         WHERE i.order_id = $1::uuid
@@ -61,6 +89,8 @@ export class OrderItemRepository {
         item,
         skuCode: (row['sku_code'] as string | null) ?? '',
         skuName: (row['sku_name'] as string | null) ?? '',
+        // 主数据操作者维护的最近采购价（master-data.md §4.3），非移动平均。
+        latestPurchasePrice: (row['latest_purchase_price'] as string | null) ?? null,
       };
     });
   }

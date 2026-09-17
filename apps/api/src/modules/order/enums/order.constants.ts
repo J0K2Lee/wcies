@@ -27,7 +27,11 @@ export const ERP_ORDER_STATUSES = [
 ] as const;
 export type ErpOrderStatus = (typeof ERP_ORDER_STATUSES)[number];
 
-/** Order-item fulfillment status (task §8) - the inventory-level fact. */
+/**
+ * Order-item fulfillment status (task §8) - the inventory-level fact.
+ * EXTERNAL_FULFILLED（用户指示 2026-09-17）：FBO/FBP 等外部履约行——平台
+ * 仓库持货发货，不占用内部库存、不进入拣货流程，业务状态随平台事件流转。
+ */
 export const ORDER_ITEM_FULFILLMENT_STATUSES = [
   'PENDING',
   'RESERVED',
@@ -35,6 +39,7 @@ export const ORDER_ITEM_FULFILLMENT_STATUSES = [
   'PICKED',
   'SHIPPED',
   'RELEASED',
+  'EXTERNAL_FULFILLED',
 ] as const;
 export type OrderItemFulfillmentStatus = (typeof ORDER_ITEM_FULFILLMENT_STATUSES)[number];
 

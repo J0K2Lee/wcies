@@ -12,6 +12,8 @@ export interface OrderListFilters {
   stage?: OrderStageFilter;
   /** Axis-2 line-level goods-state filter (dual-axis §2.2). */
   goodsState?: OrderGoodsStateFilter;
+  /** 平台侧履约方式精确匹配（用户指示 2026-09-17：订单行履约方式列+筛选）。 */
+  fulfillmentMode?: string;
   storeId?: string;
   /** Hard restriction to these order ids (待采购 filter pipeline, T3). */
   orderIds?: string[];
@@ -276,6 +278,11 @@ export class OrderRepository {
     if (filters.goodsState !== undefined) {
       qb.andWhere(goodsStatePredicate(filters.goodsState));
     }
+    if (filters.fulfillmentMode !== undefined) {
+      qb.andWhere('o.fulfillment_mode = :fulfillmentMode', {
+        fulfillmentMode: filters.fulfillmentMode,
+      });
+    }
     if (filters.storeId !== undefined) {
       qb.andWhere('o.store_id = :storeId', { storeId: filters.storeId });
     }
@@ -359,6 +366,11 @@ function stagePredicate(stage: OrderStageFilter): string {
  * ABNORMAL is the union chip: BACKORDERED ∪ MAPPING_FAILED ∪ SHIPMENT_OVERDUE
  * ∪ an OPEN ORDER_TRACKING_STALLED exception on the order (T4; the type is a
  * data value here - the exception module owns the enum).
+ *
+ * BACKORDERED（缺货）修复（人工测试 2026-09-17）：订单 rollup 把「已映射但
+ * 未持有库存」的行（含历史 PENDING 卡行）都算作缺货，行级筛选必须与 rollup
+ * 同口径——MAPPED 且 fulfillment_status IN (BACKORDERED, PENDING)，否则
+ * 订单头显示缺货而缺货筛选查不到任何单。
  */
 function goodsStatePredicate(state: OrderGoodsStateFilter): string {
   switch (state) {
@@ -369,14 +381,13 @@ function goodsStatePredicate(state: OrderGoodsStateFilter): string {
     case 'TO_SHIP':
       return `EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND i.fulfillment_status = 'PICKED')`;
     case 'BACKORDERED':
-      return `EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND i.fulfillment_status = 'BACKORDERED')`;
+      return backorderedPredicate();
     case 'MAPPING_FAILED':
       return `EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND i.mapping_status = 'FAILED')`;
     case 'SHIPMENT_OVERDUE':
       return `o.shipment_deadline IS NOT NULL AND o.shipment_deadline < now() AND o.erp_status NOT IN ('SHIPPED', 'CANCELLED')`;
     case 'ABNORMAL':
-      return `(
-        EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND i.fulfillment_status = 'BACKORDERED')
+      return `(${backorderedPredicate()}
         OR EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND i.mapping_status = 'FAILED')
         OR (o.shipment_deadline IS NOT NULL AND o.shipment_deadline < now() AND o.erp_status NOT IN ('SHIPPED', 'CANCELLED'))
         OR EXISTS (SELECT 1 FROM system_exceptions e
@@ -384,4 +395,11 @@ function goodsStatePredicate(state: OrderGoodsStateFilter): string {
                 AND e.reference_type = 'ORDER' AND e.reference_id = o.id)
       )`;
   }
+}
+
+/** 与 rollup 同口径的缺货行判定（见 goodsStatePredicate 注释）。 */
+function backorderedPredicate(): string {
+  return `EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id
+      AND i.mapping_status = 'MAPPED'
+      AND i.fulfillment_status IN ('BACKORDERED', 'PENDING'))`;
 }

@@ -14,6 +14,7 @@ import { ReservationService } from '../../inventory/services/reservation.service
 import { InsufficientStockError } from '../../inventory/errors/inventory.errors';
 import { ExceptionService } from '../../exception/services/exception.service';
 import { WarehousePlatformBindingService } from '../../warehouse/services/warehouse-platform-binding.service';
+import { isExternalFulfillmentMode } from '../../platform/constants/platform.constants';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { NormalizedOrderInput } from '../dto/order.dto';
 import { OrderEntity } from '../entities/order.entity';
@@ -162,7 +163,11 @@ export class OrderIngestionService {
       operator,
       '订单摄入完成，按行结果汇总',
     );
-    await this.deadlineExceptionService.evaluate(order);
+    // 外部履约订单（FBO/FBP）发货由平台负责，发货时限不构成内部作业压力，
+    // 不评估 ORDER_SHIPMENT_DEADLINE_NEAR（用户指示 2026-09-17）。
+    if (!isExternalFulfillmentMode(order.fulfillmentMode)) {
+      await this.deadlineExceptionService.evaluate(order);
+    }
     return {
       orderId: order.id,
       orderNo: order.orderNo,
@@ -214,6 +219,11 @@ export class OrderIngestionService {
   /**
    * Maps one line to an internal SKU and reserves stock; every outcome is
    * persisted line-locally (task §17/§19/§22).
+   *
+   * 外部履约（用户指示 2026-09-17）：FBO / FBP 模式的订单行由平台仓库持货
+   * 发货——不解析内部仓库、不占用库存、不进入拣货流程，行直接进入
+   * EXTERNAL_FULFILLED；业务状态随平台 webhook / 事实同步自动流转（见
+   * OrderService.applySyncedPlatformFacts），不阻塞。
    */
   private async allocateItem(
     order: OrderEntity,
@@ -267,18 +277,34 @@ export class OrderIngestionService {
       });
     });
 
-    // 3. Warehouse: first ACTIVE inventory-source binding, lowest priority
+    // 2a. 外部履约行：平台负责履约，内部不占库存（不阻塞）。
+    if (isExternalFulfillmentMode(order.fulfillmentMode)) {
+      await this.dataSource.transaction(async (runner) => {
+        await this.itemRepo.updateFulfillment(runner, item.id, {
+          fulfillmentStatus: 'EXTERNAL_FULFILLED',
+        });
+      });
+      return;
+    }
+
+    // 3. Warehouse: first ACTIVE platform-binding warehouse, lowest priority
     //    (Sprint 3 policy, orders.md §4.6).
     const warehouseId = await this.resolveWarehouse(order.storeId);
     if (warehouseId === null) {
+      // 无法分配仓库 = 该行未持有任何库存，与 rollup「PENDING 视为缺货」
+      // 的口径对齐：行置 BACKORDERED + 异常，缺货筛选/待采购/自动重分配
+      // 都能看到它（人工测试修复 2026-09-17）。
       await this.dataSource.transaction(async (runner) => {
+        await this.itemRepo.updateFulfillment(runner, item.id, {
+          fulfillmentStatus: 'BACKORDERED',
+        });
         await this.exceptionService.createInTx(runner, {
           exceptionType: 'ORDER_INVALID_STATE',
           severity: 'HIGH',
           referenceType: 'ORDER_ITEM',
           referenceId: item.id,
           storeId: order.storeId,
-          message: `订单 ${order.orderNo} 第 ${item.lineNo} 行无法分配仓库：店铺没有可用的库存绑定仓库`,
+          message: `订单 ${order.orderNo} 第 ${item.lineNo} 行无法分配仓库：店铺没有已绑定平台仓库的可用仓库`,
           details: { orderNo: order.orderNo, lineNo: item.lineNo },
         });
       });

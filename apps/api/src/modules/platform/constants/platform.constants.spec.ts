@@ -6,6 +6,7 @@ import {
   fulfillmentModesForPlatform,
   platformCodeOfFulfillmentMode,
   isFulfillmentMode,
+  isExternalFulfillmentMode,
 } from '../constants/platform.constants';
 
 describe('fulfillment mode constants (task §44)', () => {
@@ -71,5 +72,29 @@ describe('fulfillmentModesForPlatform (bug 4: the form must not offer foreign mo
     const ozon = fulfillmentModesForPlatform('OZON');
     expect(ozon.some((mode) => mode.startsWith('WB_'))).toBe(false);
     expect(ozon.some((mode) => mode.startsWith('YANDEX_'))).toBe(false);
+  });
+});
+
+describe('isExternalFulfillmentMode (用户指示 2026-09-17：FBO/FBP 外部履约)', () => {
+  it('treats platform-fulfilled modes as external (both constant and short forms)', () => {
+    expect(isExternalFulfillmentMode('OZON_FBO')).toBe(true);
+    expect(isExternalFulfillmentMode('OZON_FBP')).toBe(true);
+    expect(isExternalFulfillmentMode('WB_FBW')).toBe(true);
+    expect(isExternalFulfillmentMode('YANDEX_FBY')).toBe(true);
+    // 订单头保存的是平台 mapper 的短码。
+    expect(isExternalFulfillmentMode('FBO')).toBe(true);
+    expect(isExternalFulfillmentMode('FBP')).toBe(true);
+    expect(isExternalFulfillmentMode('FBW')).toBe(true);
+    expect(isExternalFulfillmentMode('FBY')).toBe(true);
+  });
+
+  it('keeps seller-fulfilled modes internal', () => {
+    expect(isExternalFulfillmentMode('OZON_FBS')).toBe(false);
+    expect(isExternalFulfillmentMode('OZON_RFBS')).toBe(false);
+    expect(isExternalFulfillmentMode('FBS')).toBe(false);
+    expect(isExternalFulfillmentMode('RFBS')).toBe(false);
+    expect(isExternalFulfillmentMode(null)).toBe(false);
+    expect(isExternalFulfillmentMode(undefined)).toBe(false);
+    expect(isExternalFulfillmentMode('')).toBe(false);
   });
 });

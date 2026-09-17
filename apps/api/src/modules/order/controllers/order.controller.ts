@@ -50,6 +50,7 @@ export class OrderController {
         stage: query.stage as OrderStageFilter | undefined,
         goodsState: query.goodsState as OrderGoodsStateFilter | undefined,
         storeId: query.storeId,
+        fulfillmentMode: query.fulfillmentMode?.trim() || undefined,
         pendingProcurement: query.pendingProcurement === 'true',
       },
       {

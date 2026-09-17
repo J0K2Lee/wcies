@@ -114,13 +114,15 @@ function build(input: {
       .fn()
       .mockResolvedValue(input.existingOrder !== undefined ? input.existingOrder : null),
     nextOrderNo: vi.fn().mockResolvedValue('ORD00000001'),
-    insertWithItems: vi.fn().mockResolvedValue({
-      id: 'order-1',
-      orderNo: 'ORD00000001',
-      erpStatus: 'NEW',
-      storeId: 'store-1',
-      platformOrderId: 'P-1',
-    }),
+    insertWithItems: vi
+      .fn()
+      .mockImplementation((_runner: unknown, header: Record<string, unknown>) =>
+        Promise.resolve({
+          id: 'order-1',
+          erpStatus: 'NEW',
+          ...header,
+        }),
+      ),
   } as unknown as OrderRepository;
   let call = 0;
   const itemRepo = {
@@ -222,6 +224,41 @@ describe('OrderIngestionService (task §11-§24)', () => {
     );
   });
 
+  it('external fulfillment (FBO/FBP) marks the line EXTERNAL_FULFILLED without reserving (用户指示 2026-09-17)', async () => {
+    const { service, reservationService, itemRepo } = build({
+      createdItems: [makeItem('item-1', 1)],
+      finalItems: [
+        makeItem('item-1', 1, { fulfillmentStatus: 'EXTERNAL_FULFILLED', skuId: 'sku-1' }),
+      ],
+    });
+    const input = { ...baseInput(), fulfillmentMode: 'FBO' };
+    await service.ingest(input, OPERATOR);
+    expect(itemRepo.updateFulfillment).toHaveBeenCalledWith(
+      expect.anything(),
+      'item-1',
+      expect.objectContaining({ fulfillmentStatus: 'EXTERNAL_FULFILLED' }),
+    );
+    expect(reservationService.reserveStock).not.toHaveBeenCalled();
+  });
+
+  it('no available warehouse backorders the mapped line instead of leaving PENDING (2026-09-17 修复)', async () => {
+    const { service, itemRepo, reservationService } = build({
+      createdItems: [makeItem('item-1', 1)],
+    });
+    const bindingService = {
+      listActiveByStore: vi.fn().mockResolvedValue([]),
+    } as unknown as WarehousePlatformBindingService;
+    (service as unknown as { bindingService: WarehousePlatformBindingService }).bindingService =
+      bindingService;
+    await service.ingest(baseInput(), OPERATOR);
+    expect(itemRepo.updateFulfillment).toHaveBeenCalledWith(
+      expect.anything(),
+      'item-1',
+      expect.objectContaining({ fulfillmentStatus: 'BACKORDERED' }),
+    );
+    expect(reservationService.reserveStock).not.toHaveBeenCalled();
+  });
+
   it('per-line failure does not stop later lines (task §17)', async () => {
     const items = [makeItem('item-1', 1), makeItem('item-2', 2)];
     let resolveCalls = 0;
@@ -245,14 +282,12 @@ describe('OrderIngestionService (task §11-§24)', () => {
       reserveStock: vi.fn().mockResolvedValue({ id: 'rsv-2' }),
     } as unknown as ReservationService;
     const bindingService = {
-      listActiveByStore: vi
-        .fn()
-        .mockResolvedValue([
-          {
-            binding: { status: 'ACTIVE', priority: 1, warehouseId: 'wh-1' },
-            warehouseType: 'SELF',
-          },
-        ]),
+      listActiveByStore: vi.fn().mockResolvedValue([
+        {
+          binding: { status: 'ACTIVE', priority: 1, warehouseId: 'wh-1' },
+          warehouseType: 'SELF',
+        },
+      ]),
     } as unknown as WarehousePlatformBindingService;
     const exceptionService = {
       createInTx: vi.fn().mockResolvedValue({ id: 'exc' }),
