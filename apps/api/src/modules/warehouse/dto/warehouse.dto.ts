@@ -1,10 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
-  IsBoolean,
   IsIn,
   IsInt,
-  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -199,8 +197,8 @@ export class WarehouseListItemDto extends WarehouseResponseDto {
   @ApiProperty({ example: 20 })
   binCount!: number;
 
-  @ApiProperty({ example: 4 })
-  boundStoreCount!: number;
+  @ApiProperty({ example: 4, description: '已绑定的平台仓库数（ACTIVE）' })
+  boundPlatformWarehouseCount!: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -410,33 +408,37 @@ export class BatchCreateBinsResponseDto {
 }
 
 // ---------------------------------------------------------------------------
-// Store warehouse bindings
+// Warehouse platform bindings（仓库绑定平台仓库，用户指示 2026-09-17）
 // ---------------------------------------------------------------------------
 
-export class CreateBindingRequestDto {
-  @ApiProperty({ format: 'uuid' })
+export class CreatePlatformBindingRequestDto {
+  @ApiProperty({ format: 'uuid', description: '平台仓库归属的店铺' })
   @IsUUID()
-  warehouseId!: string;
+  storeId!: string;
 
-  @ApiProperty({ enum: FULFILLMENT_MODES, example: 'OZON_RFBS' })
-  @IsIn(FULFILLMENT_MODES)
-  fulfillmentMode!: FulfillmentMode;
+  @ApiProperty({
+    example: '1020005000770362',
+    description: '平台仓库 ID（OZON warehouse_id 等），同店铺内唯一',
+  })
+  @IsString()
+  @Length(1, 64)
+  platformWarehouseId!: string;
 
-  @ApiPropertyOptional({ example: '123456', description: 'Warehouse id on the platform side' })
+  @ApiPropertyOptional({ example: 'OZON 莫斯科东仓', description: '平台侧仓库名称快照' })
   @IsOptional()
   @IsString()
   @MaxLength(255)
-  platformWarehouseId?: string;
+  platformWarehouseName?: string;
 
-  @ApiPropertyOptional({ default: true })
-  @IsOptional()
-  @IsBoolean()
-  isInventorySource?: boolean;
+  @ApiProperty({ enum: FULFILLMENT_MODES, example: 'OZON_FBO' })
+  @IsIn(FULFILLMENT_MODES)
+  fulfillmentMode!: FulfillmentMode;
 
-  @ApiPropertyOptional({ default: false })
+  @ApiPropertyOptional({ example: '俄东主仓', description: '操作者备注名' })
   @IsOptional()
-  @IsBoolean()
-  isInventoryPushEnabled?: boolean;
+  @IsString()
+  @MaxLength(255)
+  remarkName?: string;
 
   @ApiPropertyOptional({ example: 100 })
   @IsOptional()
@@ -444,67 +446,36 @@ export class CreateBindingRequestDto {
   @IsInt()
   @Min(0)
   priority?: number;
-
-  @ApiPropertyOptional({ type: Object })
-  @IsOptional()
-  @IsObject()
-  settings?: Record<string, unknown>;
 }
 
-export class UpdateBindingRequestDto {
-  @ApiPropertyOptional({ maxLength: 255 })
-  @IsOptional()
-  @IsString()
-  platformWarehouseId?: string;
+export class PlatformBindingListQueryDto extends PaginationQueryDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  warehouseId!: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsBoolean()
-  isInventorySource?: boolean;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsBoolean()
-  isInventoryPushEnabled?: boolean;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  priority?: number;
-
-  @ApiPropertyOptional({ type: Object })
-  @IsOptional()
-  @IsObject()
-  settings?: Record<string, unknown>;
-
-  @ApiPropertyOptional({ enum: ['ACTIVE', 'DISABLED'] })
-  @IsOptional()
-  @IsIn(['ACTIVE', 'DISABLED'])
-  status?: 'ACTIVE' | 'DISABLED';
-}
-
-export class BindingListQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({ format: 'uuid' })
   @IsOptional()
   @IsUUID()
   storeId?: string;
 
-  @ApiPropertyOptional({ format: 'uuid' })
-  @IsOptional()
-  @IsUUID()
-  warehouseId?: string;
-
   @ApiPropertyOptional({ enum: ['ACTIVE', 'DISABLED'] })
   @IsOptional()
   @IsIn(['ACTIVE', 'DISABLED'])
   status?: 'ACTIVE' | 'DISABLED';
 }
 
-export class BindingResponseDto {
+export class PlatformBindingResponseDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
+
+  @ApiProperty({ format: 'uuid' })
+  warehouseId!: string;
+
+  @ApiProperty({ example: 'SZ01' })
+  warehouseCode!: string;
+
+  @ApiProperty({ example: '深圳自管仓' })
+  warehouseName!: string;
 
   @ApiProperty({ format: 'uuid' })
   storeId!: string;
@@ -518,32 +489,20 @@ export class BindingResponseDto {
   @ApiProperty({ example: 'OZON' })
   platformCode!: string;
 
-  @ApiProperty({ format: 'uuid' })
-  warehouseId!: string;
+  @ApiProperty({ example: '1020005000770362' })
+  platformWarehouseId!: string;
 
-  @ApiProperty({ example: 'SZ01' })
-  warehouseCode!: string;
+  @ApiProperty({ nullable: true, example: 'OZON 莫斯科东仓' })
+  platformWarehouseName!: string | null;
 
-  @ApiProperty({ example: '深圳自管仓' })
-  warehouseName!: string;
-
-  @ApiProperty({ example: 'OZON_RFBS' })
+  @ApiProperty({ example: 'OZON_FBO' })
   fulfillmentMode!: string;
 
-  @ApiProperty({ nullable: true })
-  platformWarehouseId!: string | null;
-
-  @ApiProperty({ example: true })
-  isInventorySource!: boolean;
-
-  @ApiProperty({ example: false })
-  isInventoryPushEnabled!: boolean;
+  @ApiProperty({ nullable: true, example: '俄东主仓' })
+  remarkName!: string | null;
 
   @ApiProperty({ example: 100 })
   priority!: number;
-
-  @ApiProperty({ type: Object, nullable: true })
-  settings!: Record<string, unknown> | null;
 
   @ApiProperty({ example: 'ACTIVE' })
   status!: string;

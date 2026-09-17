@@ -4,31 +4,31 @@ import { OperationLogModule } from '../operation-log/operation-log.module';
 import { StoreModule } from '../store/store.module';
 import { WarehouseEntity } from './entities/warehouse.entity';
 import { WarehouseBinEntity } from './entities/warehouse-bin.entity';
-import { StoreWarehouseBindingEntity } from './entities/store-warehouse-binding.entity';
+import { WarehousePlatformBindingEntity } from './entities/warehouse-platform-binding.entity';
 import { WarehouseRepository } from './repositories/warehouse.repository';
 import { WarehouseService } from './services/warehouse.service';
 import { WarehouseBinService } from './services/warehouse-bin.service';
-import { StoreWarehouseBindingService } from './services/store-warehouse-binding.service';
+import { WarehousePlatformBindingService } from './services/warehouse-platform-binding.service';
 import {
-  StoreWarehouseBindingController,
   WarehouseBinController,
   WarehouseController,
+  WarehousePlatformBindingController,
 } from './controllers/warehouse.controller';
 
-/** Warehouse + bins + store bindings (spec §95 module layout). */
+/** Warehouse + bins + platform warehouse bindings (spec §95; 用户指示 2026-09-17). */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([WarehouseEntity, WarehouseBinEntity, StoreWarehouseBindingEntity]),
+    TypeOrmModule.forFeature([WarehouseEntity, WarehouseBinEntity, WarehousePlatformBindingEntity]),
     StoreModule,
     OperationLogModule,
   ],
-  controllers: [WarehouseController, WarehouseBinController, StoreWarehouseBindingController],
+  controllers: [WarehouseController, WarehouseBinController, WarehousePlatformBindingController],
   providers: [
     WarehouseService,
     WarehouseBinService,
-    StoreWarehouseBindingService,
+    WarehousePlatformBindingService,
     WarehouseRepository,
   ],
-  exports: [WarehouseService, WarehouseBinService, StoreWarehouseBindingService],
+  exports: [WarehouseService, WarehouseBinService, WarehousePlatformBindingService],
 })
 export class WarehouseModule {}

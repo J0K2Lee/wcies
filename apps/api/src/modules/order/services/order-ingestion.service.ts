@@ -13,7 +13,7 @@ import {
 import { ReservationService } from '../../inventory/services/reservation.service';
 import { InsufficientStockError } from '../../inventory/errors/inventory.errors';
 import { ExceptionService } from '../../exception/services/exception.service';
-import { StoreWarehouseBindingService } from '../../warehouse/services/store-warehouse-binding.service';
+import { WarehousePlatformBindingService } from '../../warehouse/services/warehouse-platform-binding.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { NormalizedOrderInput } from '../dto/order.dto';
 import { OrderEntity } from '../entities/order.entity';
@@ -64,7 +64,7 @@ export class OrderIngestionService {
     private readonly storeService: StoreService,
     private readonly resolver: ListingResolverService,
     private readonly reservationService: ReservationService,
-    private readonly bindingService: StoreWarehouseBindingService,
+    private readonly bindingService: WarehousePlatformBindingService,
     private readonly exceptionService: ExceptionService,
     private readonly orderRepo: OrderRepository,
     private readonly itemRepo: OrderItemRepository,
@@ -461,14 +461,15 @@ export class OrderIngestionService {
   }
 
   /**
-   * Store -> first ACTIVE inventory-source binding warehouse (priority ASC;
-   * ties prefer non-FBO modes because FBO stock is platform-managed,
-   * orders.md §4.6). Multi-warehouse decisions belong to a later sprint.
+   * Store -> first ACTIVE platform-binding warehouse (priority ASC; ties
+   * prefer non-FBO modes because FBO stock is platform-managed, orders.md
+   * §4.6; 用户指示 2026-09-17：仓库解析改走「仓库绑定平台仓库」).
+   * Multi-warehouse decisions belong to a later sprint.
    */
   private async resolveWarehouse(storeId: string): Promise<string | null> {
-    const page = await this.bindingService.list({ storeId, page: 1, pageSize: 100 });
-    const candidates = page.items
-      .filter((binding) => binding.status === 'ACTIVE' && binding.isInventorySource)
+    const bindings = await this.bindingService.listActiveByStore(storeId);
+    const candidates = bindings
+      .map((entry) => entry.binding)
       .sort((a, b) => {
         const byPriority = a.priority - b.priority;
         if (byPriority !== 0) {

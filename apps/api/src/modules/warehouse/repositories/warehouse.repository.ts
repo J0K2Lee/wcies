@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DeepPartial, QueryDeepPartialEntity, Repository } from 'typeorm';
+import { DeepPartial, Repository } from 'typeorm';
 import { WarehouseEntity } from '../entities/warehouse.entity';
 import { WarehouseBinEntity } from '../entities/warehouse-bin.entity';
-import { StoreWarehouseBindingEntity } from '../entities/store-warehouse-binding.entity';
+import { WarehousePlatformBindingEntity } from '../entities/warehouse-platform-binding.entity';
 
 export interface WarehouseListFilters {
   keyword?: string;
@@ -14,17 +14,17 @@ export interface WarehouseListFilters {
 export interface WarehouseRowWithCounts {
   warehouse: WarehouseEntity;
   binCount: number;
-  boundStoreCount: number;
+  boundPlatformWarehouseCount: number;
 }
 
-export interface BindingListFilters {
+export interface PlatformBindingListFilters {
+  warehouseId: string;
   storeId?: string;
-  warehouseId?: string;
   status?: string;
 }
 
-export interface BindingRowWithRefs {
-  binding: StoreWarehouseBindingEntity;
+export interface PlatformBindingRowWithRefs {
+  binding: WarehousePlatformBindingEntity;
   storeName: string;
   storeCode: string;
   platformCode: string;
@@ -40,8 +40,8 @@ export class WarehouseRepository {
     private readonly warehouseRepository: Repository<WarehouseEntity>,
     @InjectRepository(WarehouseBinEntity)
     private readonly binRepository: Repository<WarehouseBinEntity>,
-    @InjectRepository(StoreWarehouseBindingEntity)
-    private readonly bindingRepository: Repository<StoreWarehouseBindingEntity>,
+    @InjectRepository(WarehousePlatformBindingEntity)
+    private readonly platformBindingRepository: Repository<WarehousePlatformBindingEntity>,
   ) {}
 
   // ---- Warehouse ----
@@ -64,11 +64,11 @@ export class WarehouseRepository {
       .addSelect(
         (sub) =>
           sub
-            .select('COUNT(DISTINCT binding.store_id)')
-            .from('store_warehouse_bindings', 'binding')
+            .select('COUNT(binding.id)')
+            .from('warehouse_platform_bindings', 'binding')
             .where('binding.warehouse_id = wh.id')
             .andWhere("binding.status = 'ACTIVE'"),
-        'bound_store_count',
+        'bound_platform_wh_count',
       );
 
     if (filters.keyword !== undefined && filters.keyword !== '') {
@@ -94,7 +94,7 @@ export class WarehouseRepository {
     const rows: WarehouseRowWithCounts[] = rawList.map((raw, index) => ({
       warehouse: entities[index] as WarehouseEntity,
       binCount: Number(raw['bin_count'] ?? 0),
-      boundStoreCount: Number(raw['bound_store_count'] ?? 0),
+      boundPlatformWarehouseCount: Number(raw['bound_platform_wh_count'] ?? 0),
     }));
     return { rows, total };
   }
@@ -123,7 +123,7 @@ export class WarehouseRepository {
     const rows = await this.warehouseRepository.query<Array<Record<string, string | number>>>(
       `SELECT
         (SELECT COUNT(*) FROM warehouse_bins WHERE warehouse_id = $1) AS warehouse_bins,
-        (SELECT COUNT(*) FROM store_warehouse_bindings WHERE warehouse_id = $1) AS store_warehouse_bindings,
+        (SELECT COUNT(*) FROM warehouse_platform_bindings WHERE warehouse_id = $1) AS warehouse_platform_bindings,
         (SELECT COUNT(*) FROM inventory_balances WHERE warehouse_id = $1) AS inventory_balances,
         (SELECT COUNT(*) FROM inventory_safety_stocks WHERE warehouse_id = $1) AS inventory_safety_stocks,
         (SELECT COUNT(*) FROM inventory_reservations WHERE warehouse_id = $1) AS inventory_reservations,
@@ -247,14 +247,14 @@ export class WarehouseRepository {
     await this.binRepository.delete({ id });
   }
 
-  // ---- Bindings ----
+  // ---- Platform bindings（仓库绑定平台仓库） ----
 
-  async listBindingsWithRefs(
-    filters: BindingListFilters,
+  async listPlatformBindingsWithRefs(
+    filters: PlatformBindingListFilters,
     limit: number,
     offset: number,
-  ): Promise<{ rows: BindingRowWithRefs[]; total: number }> {
-    const qb = this.bindingRepository
+  ): Promise<{ rows: PlatformBindingRowWithRefs[]; total: number }> {
+    const qb = this.platformBindingRepository
       .createQueryBuilder('binding')
       .innerJoin('stores', 'store', 'store.id = binding.store_id')
       .innerJoin('platforms', 'platform', 'platform.id = store.platform_id')
@@ -265,17 +265,16 @@ export class WarehouseRepository {
       .addSelect('wh.warehouse_code', 'warehouse_code')
       .addSelect('wh.name', 'warehouse_name');
 
+    qb.andWhere('binding.warehouse_id = :warehouseId', { warehouseId: filters.warehouseId });
     if (filters.storeId !== undefined) {
       qb.andWhere('binding.store_id = :storeId', { storeId: filters.storeId });
-    }
-    if (filters.warehouseId !== undefined) {
-      qb.andWhere('binding.warehouse_id = :warehouseId', { warehouseId: filters.warehouseId });
     }
     if (filters.status !== undefined) {
       qb.andWhere('binding.status = :status', { status: filters.status });
     }
 
-    qb.orderBy('binding.createdAt', 'DESC').skip(offset).take(limit);
+    qb.orderBy('binding.priority', 'ASC').addOrderBy('binding.createdAt', 'ASC');
+    qb.skip(offset).take(limit);
 
     const [{ raw: rawRows, entities }, total] = await Promise.all([
       qb.getRawAndEntities(),
@@ -283,8 +282,8 @@ export class WarehouseRepository {
     ]);
     const rawList = rawRows as Array<Record<string, unknown>>;
 
-    const rows: BindingRowWithRefs[] = rawList.map((raw, index) => ({
-      binding: entities[index] as StoreWarehouseBindingEntity,
+    const rows: PlatformBindingRowWithRefs[] = rawList.map((raw, index) => ({
+      binding: entities[index] as WarehousePlatformBindingEntity,
       storeName: String(raw['store_name'] as string),
       storeCode: String(raw['store_code'] as string),
       platformCode: String(raw['platform_code'] as string),
@@ -294,35 +293,59 @@ export class WarehouseRepository {
     return { rows, total };
   }
 
-  async findBindingById(id: string): Promise<StoreWarehouseBindingEntity | null> {
-    return this.bindingRepository.findOneBy({ id });
-  }
-
-  async findBinding(
+  /** 店铺维度查询（订单摄入解析仓库用）：ACTIVE 绑定 + ACTIVE 仓库。 */
+  async listActiveBindingsForStore(
     storeId: string,
-    warehouseId: string,
-    fulfillmentMode: string,
-  ): Promise<StoreWarehouseBindingEntity | null> {
-    return this.bindingRepository.findOneBy({ storeId, warehouseId, fulfillmentMode });
+  ): Promise<Array<{ binding: WarehousePlatformBindingEntity; warehouse: WarehouseEntity }>> {
+    const rows = await this.platformBindingRepository
+      .createQueryBuilder('binding')
+      .innerJoinAndMapOne(
+        'binding.warehouse',
+        WarehouseEntity,
+        'wh',
+        'wh.id = binding.warehouse_id',
+      )
+      .where('binding.store_id = :storeId', { storeId })
+      .andWhere("binding.status = 'ACTIVE'")
+      .andWhere("wh.status = 'ACTIVE'")
+      .orderBy('binding.priority', 'ASC')
+      .addOrderBy('binding.createdAt', 'ASC')
+      .getMany();
+    return rows.map((binding) => ({
+      binding,
+      warehouse: (
+        binding as WarehousePlatformBindingEntity & {
+          warehouse?: WarehouseEntity;
+        }
+      ).warehouse as WarehouseEntity,
+    }));
   }
 
-  async insertBinding(
-    binding: Partial<StoreWarehouseBindingEntity>,
-  ): Promise<StoreWarehouseBindingEntity> {
-    const created = this.bindingRepository.create(
-      binding as unknown as DeepPartial<StoreWarehouseBindingEntity>,
+  async findPlatformBindingById(id: string): Promise<WarehousePlatformBindingEntity | null> {
+    return this.platformBindingRepository.findOneBy({ id });
+  }
+
+  async findPlatformBinding(
+    storeId: string,
+    platformWarehouseId: string,
+  ): Promise<WarehousePlatformBindingEntity | null> {
+    return this.platformBindingRepository.findOneBy({ storeId, platformWarehouseId });
+  }
+
+  async countPlatformBindingsByWarehouse(warehouseId: string): Promise<number> {
+    return this.platformBindingRepository.count({ where: { warehouseId } });
+  }
+
+  async insertPlatformBinding(
+    binding: Partial<WarehousePlatformBindingEntity>,
+  ): Promise<WarehousePlatformBindingEntity> {
+    const created = this.platformBindingRepository.create(
+      binding as unknown as DeepPartial<WarehousePlatformBindingEntity>,
     );
-    return this.bindingRepository.save(created);
+    return this.platformBindingRepository.save(created);
   }
 
-  async updateBinding(id: string, patch: Partial<StoreWarehouseBindingEntity>): Promise<void> {
-    await this.bindingRepository.update(
-      { id },
-      patch as unknown as QueryDeepPartialEntity<StoreWarehouseBindingEntity>,
-    );
-  }
-
-  async deleteBinding(id: string): Promise<void> {
-    await this.bindingRepository.delete({ id });
+  async deletePlatformBinding(id: string): Promise<void> {
+    await this.platformBindingRepository.delete({ id });
   }
 }

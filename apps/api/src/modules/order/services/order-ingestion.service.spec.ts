@@ -10,7 +10,7 @@ import { StoreService } from '../../store/services/store.service';
 import { ListingResolverService } from '../../listing/services/listing-resolver.service';
 import { ReservationService } from '../../inventory/services/reservation.service';
 import { ExceptionService } from '../../exception/services/exception.service';
-import { StoreWarehouseBindingService } from '../../warehouse/services/store-warehouse-binding.service';
+import { WarehousePlatformBindingService } from '../../warehouse/services/warehouse-platform-binding.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { ListingSkuResolveFailedError } from '../../listing/errors/listing-errors';
 import { InsufficientStockError } from '../../inventory/errors/inventory.errors';
@@ -93,18 +93,17 @@ function build(input: {
     }),
   } as unknown as ReservationService;
   const bindingService = {
-    list: vi.fn().mockResolvedValue({
-      items: [
-        {
+    listActiveByStore: vi.fn().mockResolvedValue([
+      {
+        binding: {
           status: 'ACTIVE',
-          isInventorySource: true,
           priority: 100,
           warehouseId: 'wh-1',
         },
-      ],
-      meta: { total: 1 },
-    }),
-  } as unknown as StoreWarehouseBindingService;
+        warehouseType: 'SELF',
+      },
+    ]),
+  } as unknown as WarehousePlatformBindingService;
   const exceptionService = {
     createInTx: vi.fn().mockResolvedValue({ id: 'exc-1' }),
     resolveByReferenceInTx: vi.fn().mockResolvedValue(undefined),
@@ -246,11 +245,15 @@ describe('OrderIngestionService (task §11-§24)', () => {
       reserveStock: vi.fn().mockResolvedValue({ id: 'rsv-2' }),
     } as unknown as ReservationService;
     const bindingService = {
-      list: vi.fn().mockResolvedValue({
-        items: [{ status: 'ACTIVE', isInventorySource: true, priority: 1, warehouseId: 'wh-1' }],
-        meta: {},
-      }),
-    } as unknown as StoreWarehouseBindingService;
+      listActiveByStore: vi
+        .fn()
+        .mockResolvedValue([
+          {
+            binding: { status: 'ACTIVE', priority: 1, warehouseId: 'wh-1' },
+            warehouseType: 'SELF',
+          },
+        ]),
+    } as unknown as WarehousePlatformBindingService;
     const exceptionService = {
       createInTx: vi.fn().mockResolvedValue({ id: 'exc' }),
     } as unknown as ExceptionService;

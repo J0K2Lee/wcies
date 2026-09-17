@@ -50,8 +50,8 @@ export class WarehouseBinBatchInvalidError extends DomainError {
 }
 
 /** Store/platform/fulfillment-mode/warehouse-type combination rejected (task §45). */
-export class StoreWarehouseBindingInvalidError extends DomainError {
-  readonly code = 'STORE_WAREHOUSE_BINDING_INVALID';
+export class WarehousePlatformBindingInvalidError extends DomainError {
+  readonly code = 'WAREHOUSE_PLATFORM_BINDING_INVALID';
   readonly httpStatus = 422;
 
   constructor(message: string, details: Record<string, unknown> = {}) {
@@ -59,12 +59,12 @@ export class StoreWarehouseBindingInvalidError extends DomainError {
   }
 }
 
-export class StoreWarehouseBindingNotFoundError extends DomainError {
-  readonly code = 'STORE_WAREHOUSE_BINDING_NOT_FOUND';
+export class WarehousePlatformBindingNotFoundError extends DomainError {
+  readonly code = 'WAREHOUSE_PLATFORM_BINDING_NOT_FOUND';
   readonly httpStatus = 404;
 
   constructor(id: string) {
-    super(`Store warehouse binding not found: ${id}`, { id });
+    super(`Warehouse platform binding not found: ${id}`, { id });
   }
 }
 
@@ -84,14 +84,5 @@ export class BinInUseError extends DomainError {
 
   constructor(sources: string[]) {
     super(`该记录已被引用（${sources.join('、')}），只能停用不能删除`, { sources });
-  }
-}
-
-export class BindingInUseError extends DomainError {
-  readonly code = 'BINDING_IN_USE';
-  readonly httpStatus = 409;
-
-  constructor() {
-    super('该记录已被引用，只能停用不能删除', {});
   }
 }

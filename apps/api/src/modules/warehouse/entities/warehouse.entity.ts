@@ -8,8 +8,14 @@ import {
 
 /**
  * Physical or platform warehouse (task §35/§36).
- * SELF / PLATFORM / THIRD_PARTY / RETURN_TEMP only - no VIRTUAL, no groups.
- * Stores relate N:M via store_warehouse_bindings, never warehouse.store_id.
+ * SELF / SEMI_MANAGED / PLATFORM / THIRD_PARTY / RETURN_TEMP only - no
+ * VIRTUAL, no groups. Platform warehouses relate via warehouse_platform_
+ * bindings (仓库绑定平台仓库，用户指示 2026-09-17), never warehouse.store_id.
+ *
+ * 类型 ↔ 履约模式兼容（服务层校验，platform.constants）：
+ *   SELF / THIRD_PARTY  → 自管模式（OZON rFBS / FBS）
+ *   SEMI_MANAGED        → 半托管（OZON FBP）
+ *   PLATFORM（托管仓）  → 平台履约（OZON FBO）；且只允许绑定一个平台仓库
  */
 @Entity('warehouses')
 export class WarehouseEntity {
@@ -56,7 +62,13 @@ export class WarehouseEntity {
   updatedAt!: Date;
 }
 
-export const WAREHOUSE_TYPES = ['SELF', 'PLATFORM', 'THIRD_PARTY', 'RETURN_TEMP'] as const;
+export const WAREHOUSE_TYPES = [
+  'SELF',
+  'SEMI_MANAGED',
+  'PLATFORM',
+  'THIRD_PARTY',
+  'RETURN_TEMP',
+] as const;
 export type WarehouseType = (typeof WAREHOUSE_TYPES)[number];
 
 export const WAREHOUSE_STATUSES = ['ACTIVE', 'INACTIVE'] as const;

@@ -18,7 +18,6 @@ import {
   ApiOkNoDataEnvelope,
   ApiOkPagedEnvelope,
 } from '../../../common/swagger/api-envelope';
-import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
 import { CurrentOperator } from '../../../common/decorators/current-operator.decorator';
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import {
@@ -26,12 +25,11 @@ import {
   BatchCreateBinsResponseDto,
   BinListQueryDto,
   BinResponseDto,
-  BindingListQueryDto,
-  BindingResponseDto,
-  CreateBindingRequestDto,
   CreateBinRequestDto,
+  CreatePlatformBindingRequestDto,
   CreateWarehouseRequestDto,
-  UpdateBindingRequestDto,
+  PlatformBindingListQueryDto,
+  PlatformBindingResponseDto,
   UpdateBinRequestDto,
   UpdateWarehouseRequestDto,
   WarehouseListItemDto,
@@ -40,7 +38,7 @@ import {
 } from '../dto/warehouse.dto';
 import { WarehouseService } from '../services/warehouse.service';
 import { WarehouseBinService } from '../services/warehouse-bin.service';
-import { StoreWarehouseBindingService } from '../services/store-warehouse-binding.service';
+import { WarehousePlatformBindingService } from '../services/warehouse-platform-binding.service';
 
 @ApiTags('warehouses')
 @Controller()
@@ -228,92 +226,49 @@ export class WarehouseBinController {
   }
 }
 
-@ApiTags('store-warehouse-bindings')
+@ApiTags('warehouse-platform-bindings')
 @Controller()
-export class StoreWarehouseBindingController {
-  constructor(private readonly bindingService: StoreWarehouseBindingService) {}
+export class WarehousePlatformBindingController {
+  constructor(private readonly bindingService: WarehousePlatformBindingService) {}
 
-  @Get('warehouse-bindings')
-  @ApiOperation({ summary: 'List bindings across stores (paged, filterable)' })
-  @ApiOkPagedEnvelope(BindingResponseDto)
+  @Get('warehouses/:warehouseId/platform-bindings')
+  @ApiOperation({ summary: '列出仓库已绑定的平台仓库（分页）' })
+  @ApiOkPagedEnvelope(PlatformBindingResponseDto)
   async list(
-    @Query() query: BindingListQueryDto,
-  ): Promise<{ success: true; data: BindingResponseDto[]; meta: PageMeta }> {
-    const { items, meta } = await this.bindingService.list(query);
-    return okPage(items, meta);
-  }
-
-  @Get('stores/:storeId/warehouse-bindings')
-  @ApiOperation({ summary: 'List bindings of a store' })
-  @ApiOkPagedEnvelope(BindingResponseDto)
-  async listByStore(
-    @Param('storeId') storeId: string,
-    @Query() query: PaginationQueryDto,
-  ): Promise<{ success: true; data: BindingResponseDto[]; meta: PageMeta }> {
-    const { items, meta } = await this.bindingService.listByStore(storeId, {
+    @Param('warehouseId') warehouseId: string,
+    @Query() query: PlatformBindingListQueryDto,
+  ): Promise<{ success: true; data: PlatformBindingResponseDto[]; meta: PageMeta }> {
+    const { items, meta } = await this.bindingService.listByWarehouse({
+      warehouseId,
+      storeId: query.storeId,
+      status: query.status,
       page: query.page,
       pageSize: query.pageSize,
     });
     return okPage(items, meta);
   }
 
-  @Post('stores/:storeId/warehouse-bindings')
-  @ApiOperation({ summary: 'Bind a warehouse to a store with a fulfillment mode' })
-  @ApiOkEnvelope(BindingResponseDto)
+  @Post('warehouses/:warehouseId/platform-bindings')
+  @ApiOperation({ summary: '绑定平台仓库到内部仓库（校验类型↔履约模式、托管仓单绑定）' })
+  @ApiOkEnvelope(PlatformBindingResponseDto)
   async create(
-    @Param('storeId') storeId: string,
-    @Body() dto: CreateBindingRequestDto,
+    @Param('warehouseId') warehouseId: string,
+    @Body() dto: CreatePlatformBindingRequestDto,
     @CurrentOperator() operator: OperatorContext,
-  ): Promise<{ success: true; data: BindingResponseDto }> {
-    return ok(await this.bindingService.create(storeId, dto, operator));
+  ): Promise<{ success: true; data: PlatformBindingResponseDto }> {
+    return ok(await this.bindingService.create(warehouseId, dto, operator));
   }
 
-  @Patch('stores/:storeId/warehouse-bindings/:id')
-  @ApiOperation({ summary: 'Update a binding' })
-  @ApiOkEnvelope(BindingResponseDto)
-  async update(
-    @Param('storeId') storeId: string,
-    @Param('id') bindingId: string,
-    @Body() dto: UpdateBindingRequestDto,
-    @CurrentOperator() operator: OperatorContext,
-  ): Promise<{ success: true; data: BindingResponseDto }> {
-    return ok(await this.bindingService.update(storeId, bindingId, dto, operator));
-  }
-
-  @Post('stores/:storeId/warehouse-bindings/:id/disable')
+  @Delete('warehouses/:warehouseId/platform-bindings/:bindingId')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Disable a binding' })
-  @ApiOkEnvelope(BindingResponseDto)
-  async disable(
-    @Param('storeId') storeId: string,
-    @Param('id') bindingId: string,
-    @CurrentOperator() operator: OperatorContext,
-  ): Promise<{ success: true; data: BindingResponseDto }> {
-    return ok(await this.bindingService.setStatus(storeId, bindingId, 'DISABLED', operator));
-  }
-
-  @Post('stores/:storeId/warehouse-bindings/:id/enable')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Enable a binding' })
-  @ApiOkEnvelope(BindingResponseDto)
-  async enable(
-    @Param('storeId') storeId: string,
-    @Param('id') bindingId: string,
-    @CurrentOperator() operator: OperatorContext,
-  ): Promise<{ success: true; data: BindingResponseDto }> {
-    return ok(await this.bindingService.setStatus(storeId, bindingId, 'ACTIVE', operator));
-  }
-
-  @Delete('stores/:storeId/warehouse-bindings/:id')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Delete a store-warehouse binding' })
+  @ApiOperation({ summary: '解除平台仓库绑定' })
   @ApiOkNoDataEnvelope()
-  async removeBinding(
-    @Param('storeId') storeId: string,
-    @Param('id') bindingId: string,
+  async remove(
+    @Param('warehouseId') warehouseId: string,
+    @Param('bindingId') bindingId: string,
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true }> {
-    await this.bindingService.remove(storeId, bindingId, operator);
+    await this.bindingService.remove(warehouseId, bindingId, operator);
     return ok({});
   }
 }

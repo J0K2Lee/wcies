@@ -9,6 +9,7 @@ import { InternalDomainError } from '../../common/errors/common-errors';
  */
 const WAREHOUSE_CODE_PREFIX = {
   SELF: 'ZG',
+  SEMI_MANAGED: 'BT',
   PLATFORM: 'PT',
   THIRD_PARTY: 'SF',
   RETURN_TEMP: 'TH',

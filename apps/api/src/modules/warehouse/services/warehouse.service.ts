@@ -202,7 +202,7 @@ export class WarehouseService {
     return {
       ...this.toResponse(row.warehouse),
       binCount: row.binCount,
-      boundStoreCount: row.boundStoreCount,
+      boundPlatformWarehouseCount: row.boundPlatformWarehouseCount,
     };
   }
 

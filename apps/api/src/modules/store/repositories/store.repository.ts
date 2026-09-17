@@ -53,7 +53,7 @@ export class StoreRepository {
         (sub) =>
           sub
             .select('COUNT(binding.id)')
-            .from('store_warehouse_bindings', 'binding')
+            .from('warehouse_platform_bindings', 'binding')
             .where('binding.store_id = store.id')
             .andWhere('binding.status = :bindingActive', { bindingActive: 'ACTIVE' }),
         'binding_count',
@@ -117,7 +117,7 @@ export class StoreRepository {
     const rows = await this.repository.query<Array<Record<string, string | number>>>(
       `SELECT
         (SELECT COUNT(*) FROM platform_credentials WHERE store_id = $1) AS platform_credentials,
-        (SELECT COUNT(*) FROM store_warehouse_bindings WHERE store_id = $1) AS store_warehouse_bindings,
+        (SELECT COUNT(*) FROM warehouse_platform_bindings WHERE store_id = $1) AS warehouse_platform_bindings,
         (SELECT COUNT(*) FROM platform_listings WHERE store_id = $1) AS platform_listings,
         (SELECT COUNT(*) FROM orders WHERE store_id = $1) AS orders,
         (SELECT COUNT(*) FROM system_exceptions WHERE store_id = $1) AS system_exceptions,
