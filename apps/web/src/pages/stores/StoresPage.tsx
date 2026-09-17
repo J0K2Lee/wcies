@@ -13,6 +13,7 @@ import {
   Space,
   Switch,
   Tooltip,
+  Typography,
 } from 'antd';
 import {
   CloudSyncOutlined,
@@ -144,6 +145,51 @@ type Envelope<T> = { data: T; meta: { total: number } };
 /** Sprint 9 T2: staleness threshold for the order-sync freshness marker. */
 const ORDER_SYNC_STALE_MS = 15 * 60 * 1000;
 
+/**
+ * 平台 → 主 API 凭证所需字段（用户建议 #14）。纯展示用静态映射：
+ * OZON 走 Client ID + API Key（adapter 已接入，见 ozon.adapter.ts 的
+ * `expected { clientId, apiKey }`）；WB / YANDEX 的 adapter 尚未接入，
+ * 单 API Key 只是前端占位描述，以平台实际开通信息为准。
+ */
+interface PlatformCredentialSpec {
+  /** 提示区文案：该平台需要哪些凭证字段。 */
+  hint: string;
+  /** true = 凭证表单需要 Client ID + API Key 两个字段。 */
+  needsClientId: boolean;
+}
+
+const PLATFORM_CREDENTIAL_SPECS: Record<string, PlatformCredentialSpec> = {
+  OZON: {
+    hint: '所需凭证：Client ID + API Key。创建后可继续配置凭证。',
+    needsClientId: true,
+  },
+  WB: {
+    hint: '所需凭证：API 密钥（后端适配器尚未接入，以平台实际开通信息为准）。',
+    needsClientId: false,
+  },
+  YANDEX: {
+    hint: '所需凭证：API 密钥（后端适配器尚未接入，以平台实际开通信息为准）。',
+    needsClientId: false,
+  },
+};
+
+const GENERIC_CREDENTIAL_SPEC: PlatformCredentialSpec = {
+  hint: '所需凭证：API 凭证（以平台实际开通信息为准）。',
+  needsClientId: false,
+};
+
+function credentialSpecForPlatform(
+  platformCode: string | null | undefined,
+): PlatformCredentialSpec {
+  if (platformCode !== undefined && platformCode !== null && platformCode !== '') {
+    const spec = PLATFORM_CREDENTIAL_SPECS[platformCode];
+    if (spec !== undefined) {
+      return spec;
+    }
+  }
+  return GENERIC_CREDENTIAL_SPEC;
+}
+
 /** Latest job per store per sync type, derived once from the recent-jobs query. */
 function buildLatestJobMap(jobs: SyncJobLite[]): Map<string, SyncJobLite> {
   const map = new Map<string, SyncJobLite>();
@@ -191,6 +237,10 @@ export function StoresPage() {
   // may null out detailId while the modal is open - the submission must use
   // the store it was opened for (modal chain fix).
   const [credentialStoreId, setCredentialStoreId] = useState<string | null>(null);
+  // Platform code snapshot taken alongside the id: drives the per-platform
+  // credential field labels (user suggestion #14). Kept in state because a
+  // freshly created store may not be in `rows` yet when the modal opens.
+  const [credentialPlatformCode, setCredentialPlatformCode] = useState<string | null>(null);
   // null = create a new credential; an id = replace that credential's payload.
   const [editingCredentialId, setEditingCredentialId] = useState<string | null>(null);
   const [form] = Form.useForm();
@@ -268,6 +318,16 @@ export function StoresPage() {
     () => rows.find((row) => row.id === detailId) ?? null,
     [rows, detailId],
   );
+  // Create modal: the credential hint follows the chosen platform. Derived
+  // from the form's platformId (options only exist once platforms load).
+  const createPlatformOptions = platforms.data?.data ?? [];
+  const watchedCreatePlatformId = Form.useWatch('platformId', form);
+  const createPlatformCode = useMemo(
+    () =>
+      createPlatformOptions.find((platform) => platform.id === watchedCreatePlatformId)?.code ??
+      null,
+    [createPlatformOptions, watchedCreatePlatformId],
+  );
 
   const refreshStore = (id: string | null) => {
     void queryClient.invalidateQueries({ queryKey: ['stores'] });
@@ -279,29 +339,41 @@ export function StoresPage() {
   };
 
   const createMutation = useMutation({
-    mutationFn: (values: Record<string, unknown>) => apiPost('/api/v1/stores', values),
-    onSuccess: () => {
+    mutationFn: (values: Record<string, unknown>) => apiPost<StoreRow>('/api/v1/stores', values),
+    onSuccess: (created) => {
       void message.success('店铺已创建');
       setCreateOpen(false);
       form.resetFields();
       refreshStore(null);
+      // 用户建议 #14: creation flows straight into credential setup so the
+      // user does not have to find the new row first. Cancelling there does
+      // NOT undo the store - it is already created at this point.
+      setDetailId(created.id);
+      setSelectedId(created.id);
+      openCredentialModalFor(created.id, created.platformCode);
     },
     onError: (error: Error) => void message.error(error.message),
   });
 
   const credentialMutation = useMutation({
     mutationFn: (values: {
-      clientId: string;
+      clientId?: string;
       apiKey: string;
       storeId: string;
       credentialId?: string;
-    }) =>
-      values.credentialId === undefined
+    }) => {
+      // Per-platform payload (user suggestion #14): platforms whose MAIN_API
+      // needs only an API key must not submit an empty clientId — the payload
+      // keys are decided by the adapter contract, OZON = { clientId, apiKey }.
+      const payload = credentialSpecForPlatform(credentialPlatformCode).needsClientId
+        ? { clientId: values.clientId ?? '', apiKey: values.apiKey }
+        : { apiKey: values.apiKey };
+      return values.credentialId === undefined
         ? apiPost(
             '/api/v1/stores/{storeId}/credentials',
             {
               credentialType: 'MAIN_API',
-              payload: { clientId: values.clientId, apiKey: values.apiKey },
+              payload,
             },
             { storeId: values.storeId },
           )
@@ -309,10 +381,11 @@ export function StoresPage() {
             '/api/v1/stores/{storeId}/credentials/{id}',
             {
               credentialType: 'MAIN_API',
-              payload: { clientId: values.clientId, apiKey: values.apiKey },
+              payload,
             },
             { storeId: values.storeId, id: values.credentialId },
-          ),
+          );
+    },
     onSuccess: (_data, variables) => {
       void message.success(
         variables.credentialId === undefined ? '凭证已加密保存' : '凭证已更新（重新加密）',
@@ -351,19 +424,26 @@ export function StoresPage() {
     onError: (error: Error) => void message.error(error.message),
   });
 
-  const openCredentialModal = (storeId: string) => {
+  /** Opens the credential modal for a known store + its platform code (field labels follow the platform). */
+  const openCredentialModalFor = (storeId: string, platformCode: string | null) => {
     setCredentialStoreId(storeId);
+    setCredentialPlatformCode(platformCode);
     setEditingCredentialId(null);
     credentialForm.resetFields();
     setCredentialOpen(true);
   };
 
+  const openCredentialModal = (storeId: string) => {
+    // Manual opens come from the store list / drawer: resolve the platform
+    // from the loaded rows so the field labels stay platform-aware.
+    const store = rows.find((row) => row.id === storeId) ?? null;
+    openCredentialModalFor(storeId, store !== null ? store.platformCode : null);
+  };
+
   /** Editing re-encrypts a replacement payload (the stored secret never leaves the server). */
   const openEditCredentialModal = (storeId: string, credentialId: string) => {
-    setCredentialStoreId(storeId);
+    openCredentialModalFor(storeId, detailRow !== null ? detailRow.platformCode : null);
     setEditingCredentialId(credentialId);
-    credentialForm.resetFields();
-    setCredentialOpen(true);
   };
 
   const submitCredential = () => {
@@ -969,12 +1049,23 @@ export function StoresPage() {
           </p>
           <Form.Item name="platformId" label="平台" rules={[{ required: true }]}>
             <Select
-              options={(platforms.data?.data ?? []).map((platform) => ({
+              options={createPlatformOptions.map((platform) => ({
                 value: platform.id,
                 label: platform.name,
               }))}
             />
           </Form.Item>
+          {(() => {
+            const spec = credentialSpecForPlatform(createPlatformCode);
+            return (
+              <Typography.Text
+                type="secondary"
+                style={{ display: 'block', fontSize: 12.5, marginBottom: 12 }}
+              >
+                {spec.hint}
+              </Typography.Text>
+            );
+          })()}
           <Form.Item name="name" label="店铺名称" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
@@ -1005,6 +1096,7 @@ export function StoresPage() {
           if (!open) {
             credentialForm.resetFields();
             setEditingCredentialId(null);
+            setCredentialPlatformCode(null);
           }
         }}
         onCancel={() => setCredentialOpen(false)}
@@ -1025,20 +1117,36 @@ export function StoresPage() {
           );
         })()}
         <Form form={credentialForm} layout="vertical">
-          <Form.Item
-            name="clientId"
-            label="Client ID"
-            rules={[{ required: true, message: '请输入 Client ID' }]}
-          >
-            <Input placeholder="OZON 后台的 Client ID" />
-          </Form.Item>
-          <Form.Item
-            name="apiKey"
-            label="API Key"
-            rules={[{ required: true, message: '请输入 API Key' }]}
-          >
-            <Input.Password placeholder="加密存储，不会回显" />
-          </Form.Item>
+          {(() => {
+            // 字段标签按平台联动（用户建议 #14）：OZON 需要 Client ID + API Key，
+            // 其他平台只显示单个 API Key 输入（clientId 隐藏且不提交）。
+            const spec = credentialSpecForPlatform(credentialPlatformCode);
+            return (
+              <>
+                {spec.needsClientId && (
+                  <Form.Item
+                    name="clientId"
+                    label="Client ID"
+                    rules={[{ required: true, message: '请输入 Client ID' }]}
+                  >
+                    <Input placeholder="OZON 后台的 Client ID" />
+                  </Form.Item>
+                )}
+                <Form.Item
+                  name="apiKey"
+                  label="API Key"
+                  extra={
+                    spec.needsClientId
+                      ? undefined
+                      : '后端适配器尚未接入该平台，字段要求以平台实际开通信息为准。'
+                  }
+                  rules={[{ required: true, message: '请输入 API Key' }]}
+                >
+                  <Input.Password placeholder="加密存储，不会回显" />
+                </Form.Item>
+              </>
+            );
+          })()}
         </Form>
       </Modal>
 
