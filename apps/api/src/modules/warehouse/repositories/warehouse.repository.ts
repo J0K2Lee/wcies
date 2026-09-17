@@ -18,7 +18,7 @@ export interface WarehouseRowWithCounts {
 }
 
 export interface PlatformBindingListFilters {
-  warehouseId: string;
+  warehouseId?: string;
   storeId?: string;
   status?: string;
 }
@@ -265,7 +265,9 @@ export class WarehouseRepository {
       .addSelect('wh.warehouse_code', 'warehouse_code')
       .addSelect('wh.name', 'warehouse_name');
 
-    qb.andWhere('binding.warehouse_id = :warehouseId', { warehouseId: filters.warehouseId });
+    if (filters.warehouseId !== undefined) {
+      qb.andWhere('binding.warehouse_id = :warehouseId', { warehouseId: filters.warehouseId });
+    }
     if (filters.storeId !== undefined) {
       qb.andWhere('binding.store_id = :storeId', { storeId: filters.storeId });
     }

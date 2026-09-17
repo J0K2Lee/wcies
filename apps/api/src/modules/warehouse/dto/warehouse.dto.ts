@@ -449,9 +449,10 @@ export class CreatePlatformBindingRequestDto {
 }
 
 export class PlatformBindingListQueryDto extends PaginationQueryDto {
-  @ApiProperty({ format: 'uuid' })
+  @ApiPropertyOptional({ format: 'uuid', description: '按仓库过滤' })
+  @IsOptional()
   @IsUUID()
-  warehouseId!: string;
+  warehouseId?: string;
 
   @ApiPropertyOptional({ format: 'uuid' })
   @IsOptional()

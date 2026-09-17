@@ -132,8 +132,12 @@ interface CredentialRow {
   updatedAt: string;
 }
 
-interface BindingRow {
+/** 仓库绑定平台仓库（用户指示 2026-09-17）：店铺详情展示「绑定了该店铺平台仓库的仓库」摘要。 */
+interface PlatformBindingRow {
   id: string;
+  platformWarehouseId: string;
+  platformWarehouseName: string | null;
+  remarkName: string | null;
   warehouseCode: string;
   warehouseName: string;
   fulfillmentMode: string;
@@ -302,10 +306,10 @@ export function StoresPage() {
     { storeId: detailId ?? '' },
     detailId !== null,
   );
-  const bindings = useApiQuery<Envelope<BindingRow[]>>(
-    '/api/v1/stores/{storeId}/warehouse-bindings',
+  const platformBindings = useApiQuery<Envelope<PlatformBindingRow[]>>(
+    '/api/v1/stores/{storeId}/platform-bindings',
     { page: 1, pageSize: 50 },
-    ['store-bindings', detailId],
+    ['store-platform-bindings', detailId],
     { storeId: detailId ?? '' },
     detailId !== null,
   );
@@ -977,7 +981,7 @@ export function StoresPage() {
               <Button
                 size="small"
                 onClick={() => {
-                  void navigate(`/store-bindings?storeId=${detailRow.id}`);
+                  void navigate('/warehouses');
                 }}
               >
                 管理绑定
@@ -995,8 +999,8 @@ export function StoresPage() {
             overview={overview}
             credentials={credentials.data?.data ?? []}
             credentialsLoading={credentials.isLoading}
-            bindings={bindings.data?.data ?? []}
-            bindingsLoading={bindings.isLoading}
+            bindings={platformBindings.data?.data ?? []}
+            bindingsLoading={platformBindings.isLoading}
             onValidate={(id) => validateMutation.mutate(id)}
             validating={validateMutation.isPending}
             onEditCredential={(id) =>
@@ -1213,7 +1217,7 @@ function StoreDetailBody({
   overview: SyncOverview | undefined;
   credentials: CredentialRow[];
   credentialsLoading: boolean;
-  bindings: BindingRow[];
+  bindings: PlatformBindingRow[];
   bindingsLoading: boolean;
   onValidate: (credentialId: string) => void;
   validating: boolean;
@@ -1536,20 +1540,25 @@ function StoreDetailBody({
         <div
           style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary, marginBottom: 10 }}
         >
-          仓库绑定
+          平台仓库绑定
         </div>
-        <DataTable<BindingRow>
+        <DataTable<PlatformBindingRow>
           rowKey="id"
           size="small"
           loading={bindingsLoading}
           dataSource={bindings}
           pagination={false}
-          emptyTitle="暂无仓库绑定"
-          emptyDescription="店铺尚未绑定履约仓库"
+          emptyTitle="暂无平台仓库绑定"
+          emptyDescription="内部仓库尚未绑定本店铺的平台仓库（去仓库管理页绑定）"
           columns={[
-            { title: '仓库', dataIndex: 'warehouseCode', width: 100 },
-            { title: '名称', dataIndex: 'warehouseName' },
-            { title: '履约模式', dataIndex: 'fulfillmentMode', width: 130 },
+            { title: '平台仓库 ID', dataIndex: 'platformWarehouseId', width: 170 },
+            {
+              title: '名称',
+              render: (_: unknown, row: PlatformBindingRow) =>
+                row.remarkName ?? row.platformWarehouseName ?? '—',
+            },
+            { title: '所属仓库', dataIndex: 'warehouseName' },
+            { title: '履约模式', dataIndex: 'fulfillmentMode', width: 110 },
             {
               title: '状态',
               dataIndex: 'status',

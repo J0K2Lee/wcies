@@ -49,8 +49,8 @@ export class WarehousePlatformBindingService {
     private readonly operationLog: OperationLogService,
   ) {}
 
-  async listByWarehouse(
-    query: { warehouseId: string; storeId?: string; status?: string } & {
+  async list(
+    query: { warehouseId?: string; storeId?: string; status?: string } & {
       page: number;
       pageSize: number;
     },

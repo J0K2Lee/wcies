@@ -12,7 +12,6 @@ import { ListingsPage } from '../pages/listings/ListingsPage';
 import { WarehousesPage } from '../pages/warehouses/WarehousesPage';
 import { BinsPage } from '../pages/warehouses/BinsPage';
 import { StoresPage } from '../pages/stores/StoresPage';
-import { StoreBindingsPage } from '../pages/stores/StoreBindingsPage';
 import { ImportPage } from '../pages/import/ImportPage';
 import { InventoryPage } from '../pages/inventory/InventoryPage';
 import { InventoryTransactionsPage } from '../pages/inventory/InventoryTransactionsPage';
@@ -54,7 +53,6 @@ export function App() {
           <Route path="/warehouses" element={<WarehousesPage />} />
           <Route path="/bins" element={<BinsPage />} />
           <Route path="/stores" element={<StoresPage />} />
-          <Route path="/store-bindings" element={<StoreBindingsPage />} />
           <Route path="/import" element={<ImportPage />} />
           <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/inventory/transactions" element={<InventoryTransactionsPage />} />

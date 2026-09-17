@@ -100,10 +100,7 @@ const MENU_ITEMS = [
     key: 'store-group',
     label: '店铺',
     icon: <ShopOutlined />,
-    children: [
-      { key: '/stores', label: '店铺管理' },
-      { key: '/store-bindings', label: '店仓绑定' },
-    ],
+    children: [{ key: '/stores', label: '店铺管理' }],
   },
   {
     key: 'warehouse-ops-group',

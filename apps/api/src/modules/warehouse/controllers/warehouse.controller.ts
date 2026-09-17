@@ -238,9 +238,25 @@ export class WarehousePlatformBindingController {
     @Param('warehouseId') warehouseId: string,
     @Query() query: PlatformBindingListQueryDto,
   ): Promise<{ success: true; data: PlatformBindingResponseDto[]; meta: PageMeta }> {
-    const { items, meta } = await this.bindingService.listByWarehouse({
+    const { items, meta } = await this.bindingService.list({
       warehouseId,
       storeId: query.storeId,
+      status: query.status,
+      page: query.page,
+      pageSize: query.pageSize,
+    });
+    return okPage(items, meta);
+  }
+
+  @Get('stores/:storeId/platform-bindings')
+  @ApiOperation({ summary: '列出店铺关联的平台仓库绑定（跨仓库，分页）' })
+  @ApiOkPagedEnvelope(PlatformBindingResponseDto)
+  async listByStore(
+    @Param('storeId') storeId: string,
+    @Query() query: PlatformBindingListQueryDto,
+  ): Promise<{ success: true; data: PlatformBindingResponseDto[]; meta: PageMeta }> {
+    const { items, meta } = await this.bindingService.list({
+      storeId,
       status: query.status,
       page: query.page,
       pageSize: query.pageSize,
