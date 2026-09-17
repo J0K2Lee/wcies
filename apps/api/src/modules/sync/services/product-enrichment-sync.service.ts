@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { OzonAdapter } from '../../integration/ozon/ozon.adapter';
 import { OzonProductAttributesItem } from '../../integration/ozon/types/api.types';
+import { PlatformCapabilityUnsupportedError } from '../../integration/integration.errors';
 import { ListingService } from '../../listing/services/listing.service';
 import { SyncJobEntity } from '../entities/sync-job.entity';
 import { SyncJobRepository } from '../repositories/sync-job.repository';
@@ -37,7 +38,13 @@ export class ProductEnrichmentSyncService {
     try {
       const { store, adapter } = await this.contextService.resolveSyncableStore(syncJob.storeId);
       if (adapter.platformCode !== 'OZON') {
-        throw new Error(`product enrichment is OZON-only for now (got ${adapter.platformCode})`);
+        // WB cards / Yandex offer-mappings carry characteristics natively -
+        // no separate enrichment endpoint exists (plan §P4, 2026-09-18).
+        throw new PlatformCapabilityUnsupportedError(
+          adapter.platformCode,
+          '商品属性增强同步',
+          '该平台商品数据自带属性/规格，无需独立增强同步',
+        );
       }
       const context = await this.contextService.buildStoreContext(store);
 

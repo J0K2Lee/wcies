@@ -39,3 +39,21 @@ export class StoreCredentialMalformedError extends DomainError {
     });
   }
 }
+
+/**
+ * The platform has no adapter capability for the requested operation (e.g.
+ * WB warehouse catalog before its data source is verified). Explicitly NOT
+ * supported - never guessed, never degraded to fake data (AGENTS.md §88).
+ */
+export class PlatformCapabilityUnsupportedError extends DomainError {
+  readonly code = 'PLATFORM_CAPABILITY_UNSUPPORTED';
+  readonly httpStatus = 422;
+
+  constructor(platformCode: string, capability: string, reason: string) {
+    super(`平台 ${platformCode} 暂不支持 ${capability}：${reason}`, {
+      platformCode,
+      capability,
+      reason,
+    });
+  }
+}

@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { QUEUE_NAMES } from '../../infrastructure/queue/queue.constants';
 import { IntegrationModule } from '../integration/integration.module';
 import { OzonModule } from '../integration/ozon/ozon.module';
+import { YandexModule } from '../integration/yandex/yandex.module';
 import { ListingModule } from '../listing/listing.module';
 import { OrderModule } from '../order/order.module';
 import { PlatformModule } from '../platform/platform.module';
@@ -56,6 +57,7 @@ import {
     ),
     IntegrationModule,
     OzonModule,
+    YandexModule,
     StoreModule,
     PlatformModule,
     ListingModule,

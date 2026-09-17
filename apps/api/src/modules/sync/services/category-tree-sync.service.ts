@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { OzonCategoryTreeService } from '../../integration/ozon/ozon-category-tree.service';
+import { PlatformCapabilityUnsupportedError } from '../../integration/integration.errors';
 import { SyncJobEntity } from '../entities/sync-job.entity';
 import { SyncJobRepository } from '../repositories/sync-job.repository';
 import { SyncContextService } from './sync-context.service';
@@ -13,6 +14,10 @@ import { errorCodeOf, errorMessageOf } from './listing-sync.service';
  * global, so the cached node set is keyed by the store's PLATFORM (any OZON
  * store's credentials refresh the same rows). Recorded on the SyncJob ledger
  * like every sync (AGENTS.md §43/§44); no cursor - a run is one full pull.
+ *
+ * OZON-only by design (2026-09-18): Yandex's tree endpoint carries a
+ * deprecation notice and offers carry their own category (first release
+ * skips the full tree); WB's tree assembly is low priority (plan §P4).
  */
 @Injectable()
 export class CategoryTreeSyncService {
@@ -27,7 +32,11 @@ export class CategoryTreeSyncService {
     try {
       const { store, adapter } = await this.contextService.resolveSyncableStore(syncJob.storeId);
       if (adapter.platformCode !== 'OZON') {
-        throw new Error(`category tree sync is OZON-only for now (got ${adapter.platformCode})`);
+        throw new PlatformCapabilityUnsupportedError(
+          adapter.platformCode,
+          '类目树同步',
+          '首发范围仅 OZON（Yandex 类目接口有弃用倾向、商品自带类目；WB 构树低优先级）',
+        );
       }
       const context = await this.contextService.buildStoreContext(store);
       const result = await this.treeService.syncTree(context, store.platformId);
