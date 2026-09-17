@@ -1,8 +1,19 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { App as AntdApp, Button, Drawer, Form, Input, InputNumber, Modal, Select } from 'antd';
+import {
+  App as AntdApp,
+  Button,
+  Drawer,
+  Form,
+  Image,
+  Input,
+  InputNumber,
+  Modal,
+  Select,
+  Switch,
+} from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
-import { apiPost, useApiQuery } from '../../api/hooks';
+import { apiGet, apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime } from '../../utils/format';
 import {
   colors,
@@ -51,6 +62,7 @@ interface PurchaseOrderItem {
   quantity: string;
   unitCost: string | null;
   receivedQuantity: string;
+  remark: string | null;
 }
 
 interface PurchaseOrderDetail extends PurchaseOrderRow {
@@ -60,15 +72,63 @@ interface PurchaseOrderDetail extends PurchaseOrderRow {
 interface ItemFormValues {
   skuId: string;
   quantity: number;
-  unitCost?: number;
+  unitCost?: string | null;
+  remark?: string;
 }
 
 interface PoFormValues {
   supplierId?: string;
   sourceNote?: string;
-  expectedAt?: string;
+  orderedAt?: string;
   remark?: string;
+  receiptWarehouseId?: string;
   items: ItemFormValues[];
+}
+
+interface SkuImageEnvelope {
+  data: Array<{ id: string; url: string; isPrimary: boolean; sortOrder: number }>;
+}
+
+interface SupplierFormValues {
+  name: string;
+  contactName?: string;
+  contactPhone?: string;
+}
+
+interface SupplierOption {
+  id: string;
+  code: string;
+  name: string;
+}
+
+interface CostLine {
+  quantity?: string | number | null;
+  unitCost?: string | number | null;
+}
+
+function lineSubtotal(item: CostLine): number | null {
+  if (item.unitCost === undefined || item.unitCost === null || item.unitCost === '') return null;
+  return Number(item.quantity ?? 0) * Number(item.unitCost);
+}
+
+function OrderTotal({ items }: { items: CostLine[] }) {
+  const missingCount = items.filter((item) => lineSubtotal(item) === null).length;
+  const total = items.reduce((sum, item) => sum + (lineSubtotal(item) ?? 0), 0);
+  return (
+    <div style={{ marginTop: 16, textAlign: 'right' }}>
+      <strong>本单合计：{total.toFixed(4)}</strong>
+      {missingCount > 0 && (
+        <small style={{ marginLeft: 12, color: colors.textSecondary }}>
+          {missingCount} 行未填成本未计入
+        </small>
+      )}
+    </div>
+  );
+}
+
+function localNow(): string {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 }
 
 const STATUS_META: Record<
@@ -93,6 +153,10 @@ export function PurchaseOrdersPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [form] = Form.useForm<PoFormValues>();
+  const [showImages, setShowImages] = useState(false);
+  const [supplierCreateOpen, setSupplierCreateOpen] = useState(false);
+  const [createdSupplier, setCreatedSupplier] = useState<SupplierOption | null>(null);
+  const formItems = Form.useWatch('items', form) as ItemFormValues[] | undefined;
 
   const list = useApiQuery<Envelope<PurchaseOrderRow[]>>(
     '/api/v1/purchase-orders',
@@ -105,11 +169,15 @@ export function PurchaseOrdersPage() {
     ['purchase-orders', page, keyword, status],
   );
 
-  const suppliers = useApiQuery<Envelope<Array<{ id: string; code: string; name: string }>>>(
+  const suppliers = useApiQuery<Envelope<SupplierOption[]>>(
     '/api/v1/suppliers',
     { page: 1, pageSize: 100, status: 'ACTIVE' },
     ['suppliers-for-po'],
   );
+
+  const warehouses = useApiQuery<
+    Envelope<Array<{ id: string; warehouseCode: string; name: string }>>
+  >('/api/v1/warehouses', {}, ['warehouses-for-po']);
 
   const detail = useApiQuery<{ data: PurchaseOrderDetail }>(
     '/api/v1/purchase-orders/{id}',
@@ -125,31 +193,76 @@ export function PurchaseOrdersPage() {
     [rows, selectedId],
   );
   const detailRow = detail.data?.data ?? null;
+  const supplierOptions = [
+    ...(createdSupplier !== null &&
+    !(suppliers.data?.data ?? []).some((supplier) => supplier.id === createdSupplier.id)
+      ? [createdSupplier]
+      : []),
+    ...(suppliers.data?.data ?? []),
+  ];
 
   const createMutation = useMutation({
-    mutationFn: (values: PoFormValues) =>
-      apiPost<{ poNo: string }>('/api/v1/purchase-orders', {
+    mutationFn: async (values: PoFormValues) => {
+      const po = await apiPost<{ id: string; poNo: string }>('/api/v1/purchase-orders', {
         supplierId: values.supplierId,
         sourceNote: values.sourceNote,
         // datetime-local has no zone: interpret in the operator's local zone.
-        expectedAt:
-          values.expectedAt !== undefined && values.expectedAt !== ''
-            ? new Date(values.expectedAt).toISOString()
+        orderedAt:
+          values.orderedAt !== undefined && values.orderedAt !== ''
+            ? new Date(values.orderedAt).toISOString()
             : undefined,
         remark: values.remark,
+        ...(values.receiptWarehouseId !== undefined && values.receiptWarehouseId !== ''
+          ? { receipt: { warehouseId: values.receiptWarehouseId } }
+          : {}),
         items: values.items.map((item) => ({
           skuId: item.skuId,
           quantity: String(item.quantity),
           ...(item.unitCost !== undefined && item.unitCost !== null
             ? { unitCost: String(item.unitCost) }
             : {}),
+          ...(item.remark !== undefined && item.remark !== '' ? { remark: item.remark } : {}),
         })),
-      }),
-    onSuccess: (result: { poNo: string }) => {
-      void message.success(`采购单 ${result.poNo} 已登记`);
+      });
+      const receipt = values.receiptWarehouseId ?? '';
+      if (receipt === '') {
+        return { po, draftReceiptNo: null, receiptLookupFailed: false };
+      }
+      // §10: the draft receipt is generated in the same transaction as the
+      // PO, so if the lookup here fails do NOT tell the operator to register
+      // the order again — surface the uncertainty instead.
+      try {
+        const found = await apiGet<Array<{ id: string; receiptNo: string }>>(
+          '/api/v1/purchase-receipts',
+          { purchaseOrderId: po.id, page: 1, pageSize: 1 },
+        );
+        return {
+          po,
+          draftReceiptNo: found.data[0]?.receiptNo ?? null,
+          receiptLookupFailed: found.data[0] === undefined,
+        };
+      } catch {
+        return { po, draftReceiptNo: null, receiptLookupFailed: true };
+      }
+    },
+    onSuccess: ({ po, draftReceiptNo, receiptLookupFailed }) => {
+      if (draftReceiptNo !== null) {
+        void message.success(
+          `采购单 ${po.poNo} 已创建，收货草稿 ${draftReceiptNo} 已同步生成（确认收货后才入库）`,
+        );
+      } else if (receiptLookupFailed) {
+        void message.warning(
+          `采购单 ${po.poNo} 已创建；收货草稿应已同步生成，但查询草稿号失败，请到收货单页确认`,
+        );
+      } else {
+        void message.success(`采购单 ${po.poNo} 已登记`);
+      }
       setCreateOpen(false);
       form.resetFields();
+      setCreatedSupplier(null);
+      setShowImages(false);
       void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['purchase-receipts'] });
     },
     onError: (error: Error) => void message.error(error.message),
   });
@@ -163,6 +276,27 @@ export function PurchaseOrdersPage() {
       void queryClient.invalidateQueries({ queryKey: ['purchase-order-detail'] });
     },
     onError: (error: Error) => void message.error(error.message),
+  });
+
+  const createSupplierMutation = useMutation({
+    mutationFn: (values: SupplierFormValues) =>
+      apiPost<{ id: string; code: string; name: string }>('/api/v1/suppliers', {
+        name: values.name.trim(),
+        ...(values.contactName !== undefined && values.contactName.trim() !== ''
+          ? { contactName: values.contactName.trim() }
+          : {}),
+        ...(values.contactPhone !== undefined && values.contactPhone.trim() !== ''
+          ? { contactPhone: values.contactPhone.trim() }
+          : {}),
+      }),
+    onSuccess: (supplier) => {
+      void message.success(`供应商 ${supplier.code} 已创建`);
+      void queryClient.invalidateQueries({ queryKey: ['suppliers-for-po'] });
+      form.setFieldValue('supplierId', supplier.id);
+      setCreatedSupplier({ id: supplier.id, code: supplier.code, name: supplier.name });
+      setSupplierCreateOpen(false);
+    },
+    onError: (error: Error) => void message.error(`创建供应商失败: ${error.message}`),
   });
 
   // ---- Context rail ----
@@ -202,7 +336,7 @@ export function PurchaseOrdersPage() {
               label="明细"
               value={`${selectedRow.itemCount} 行 / 共 ${Number(selectedRow.totalQuantity)} 件`}
             />
-            <ContextMetric label="下单时间" value={fmtDateTime(selectedRow.orderedAt)} />
+            <ContextMetric label="采购时间" value={fmtDateTime(selectedRow.orderedAt)} />
             <ContextMetric
               label="预计到货"
               value={selectedRow.expectedAt === null ? '—' : fmtDateTime(selectedRow.expectedAt)}
@@ -253,7 +387,8 @@ export function PurchaseOrdersPage() {
             icon={<PlusOutlined />}
             onClick={() => {
               form.resetFields();
-              form.setFieldsValue({ items: [{ quantity: 1 }] });
+              form.setFieldsValue({ orderedAt: localNow(), items: [{ quantity: 1 }] });
+              setShowImages(false);
               setCreateOpen(true);
             }}
           >
@@ -337,7 +472,7 @@ export function PurchaseOrdersPage() {
                 `${row.itemCount} 行 / ${Number(row.totalQuantity)} 件`,
             },
             {
-              title: '下单时间',
+              title: '采购时间',
               dataIndex: 'orderedAt',
               key: 'orderedAt',
               width: 130,
@@ -373,7 +508,7 @@ export function PurchaseOrdersPage() {
             <ContextSection title="采购单信息">
               <ContextMetric label="供应商" value={detailRow.supplierName ?? '—'} />
               <ContextMetric label="货源说明" value={detailRow.sourceNote ?? '—'} />
-              <ContextMetric label="下单时间" value={fmtDateTime(detailRow.orderedAt)} />
+              <ContextMetric label="采购时间" value={fmtDateTime(detailRow.orderedAt)} />
               <ContextMetric
                 label="预计到货"
                 value={detailRow.expectedAt === null ? '—' : fmtDateTime(detailRow.expectedAt)}
@@ -386,7 +521,16 @@ export function PurchaseOrdersPage() {
                 dataSource={detailRow.items}
                 pagination={false}
                 emptyTitle="无明细"
+                scroll={{ x: 860 }}
                 columns={[
+                  {
+                    title: '图片',
+                    key: 'image',
+                    width: 64,
+                    render: (_: unknown, row: PurchaseOrderItem) => (
+                      <SkuThumbnail skuId={row.skuId} />
+                    ),
+                  },
                   {
                     title: 'SKU',
                     key: 'sku',
@@ -423,6 +567,16 @@ export function PurchaseOrdersPage() {
                     align: 'right' as const,
                   },
                   {
+                    title: '小计',
+                    key: 'subtotal',
+                    width: 100,
+                    align: 'right' as const,
+                    render: (_: unknown, row: PurchaseOrderItem) => {
+                      const subtotal = lineSubtotal(row);
+                      return subtotal === null ? '—' : subtotal.toFixed(4);
+                    },
+                  },
+                  {
                     title: '关联订单',
                     dataIndex: 'orderNo',
                     key: 'orderNo',
@@ -431,6 +585,7 @@ export function PurchaseOrdersPage() {
                   },
                 ]}
               />
+              <OrderTotal items={detailRow.items} />
             </SectionCard>
           </>
         )}
@@ -446,27 +601,43 @@ export function PurchaseOrdersPage() {
         okText="登记"
         cancelText="取消"
         confirmLoading={createMutation.isPending}
-        width={680}
+        width={980}
         destroyOnHidden
       >
         <Form form={form} layout="vertical" preserve={false}>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <Form.Item name="supplierId" label="固定供应商（可选）" style={{ flex: 1 }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 24 }}>
+            <Form.Item
+              name="supplierId"
+              label="固定供应商（可选）"
+              style={{ flex: 1, marginBottom: 0 }}
+            >
               <Select
                 allowClear
                 placeholder="选择可复用供应商"
                 showSearch
                 optionFilterProp="label"
-                options={(suppliers.data?.data ?? []).map((supplier) => ({
+                options={supplierOptions.map((supplier) => ({
                   value: supplier.id,
                   label: `${supplier.code} · ${supplier.name}`,
                 }))}
               />
             </Form.Item>
-            <Form.Item name="expectedAt" label="预计到货（可选）" style={{ flex: 1 }}>
-              <Input type="datetime-local" />
-            </Form.Item>
+            <Button
+              icon={<PlusOutlined />}
+              onClick={() => setSupplierCreateOpen(true)}
+              style={{ alignSelf: 'flex-end' }}
+            >
+              新建供应商
+            </Button>
           </div>
+          <Form.Item
+            name="orderedAt"
+            label="采购时间"
+            rules={[{ required: true, message: '请选择采购时间' }]}
+            tooltip="默认当前时间，可改为实际下单时间（支持补录过去日期）"
+          >
+            <Input type="datetime-local" />
+          </Form.Item>
           <Form.Item
             name="sourceNote"
             label="货源说明（一次性网购填这里，不建供应商）"
@@ -477,6 +648,33 @@ export function PurchaseOrdersPage() {
           <Form.Item name="remark" label="备注">
             <Input maxLength={2000} />
           </Form.Item>
+          <Form.Item
+            name="receiptWarehouseId"
+            label="同时生成收货单草稿（可选）"
+            extra="选择收货仓库后同步生成草稿，确认收货后才入库；清空则仅登记采购单。"
+          >
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder="选择收货仓库"
+              loading={warehouses.isLoading}
+              options={(warehouses.data?.data ?? []).map((warehouse) => ({
+                value: warehouse.id,
+                label: `${warehouse.warehouseCode} · ${warehouse.name}`,
+              }))}
+            />
+          </Form.Item>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+            <strong>采购明细</strong>
+            <Switch
+              size="small"
+              checked={showImages}
+              onChange={setShowImages}
+              aria-label="显示图片"
+            />
+            <span>显示图片</span>
+          </div>
           <Form.List name="items">
             {(fields, { add, remove }) => (
               <>
@@ -490,7 +688,7 @@ export function PurchaseOrdersPage() {
                       rules={[{ required: true, message: '请选择 SKU' }]}
                       style={{ flex: 1, marginBottom: 0 }}
                     >
-                      <SkuSelect />
+                      <SkuSelect showImages={showImages} />
                     </Form.Item>
                     <Form.Item
                       name={[field.name, 'quantity']}
@@ -503,8 +701,28 @@ export function PurchaseOrdersPage() {
                       name={[field.name, 'unitCost']}
                       style={{ width: 120, marginBottom: 0 }}
                     >
-                      <InputNumber min={0} placeholder="单位成本" style={{ width: '100%' }} />
+                      <InputNumber<string>
+                        stringMode
+                        min="0"
+                        precision={4}
+                        placeholder="单位成本"
+                        style={{ width: '100%' }}
+                      />
                     </Form.Item>
+                    <Form.Item
+                      name={[field.name, 'remark']}
+                      style={{ width: 160, marginBottom: 0 }}
+                    >
+                      <Input
+                        placeholder="备注"
+                        maxLength={2000}
+                        aria-label={`第 ${field.name + 1} 行备注`}
+                      />
+                    </Form.Item>
+                    <div style={{ width: 110, textAlign: 'right' }}>
+                      <small style={{ color: colors.textSecondary }}>小计</small>
+                      <div>{lineSubtotal(formItems?.[field.name] ?? {})?.toFixed(4) ?? '—'}</div>
+                    </div>
                     <Button
                       type="text"
                       danger
@@ -526,32 +744,131 @@ export function PurchaseOrdersPage() {
               </>
             )}
           </Form.List>
+          <OrderTotal items={formItems ?? []} />
         </Form>
       </Modal>
+      <SupplierQuickCreateModal
+        open={supplierCreateOpen}
+        pending={createSupplierMutation.isPending}
+        onClose={() => setSupplierCreateOpen(false)}
+        onCreate={(values) => createSupplierMutation.mutate(values)}
+      />
     </div>
   );
 }
 
-/** SKU picker with server-side keyword search over the master data. */
-function SkuSelect(props: { value?: string; onChange?: (value: string) => void }) {
-  const [keyword, setKeyword] = useState('');
-  const skus = useApiQuery<Envelope<Array<{ id: string; skuCode: string; nameZh: string }>>>(
-    '/api/v1/skus',
-    { page: 1, pageSize: 20, ...(keyword ? { keyword } : {}) },
-    ['skus-for-po', keyword],
+const IMAGE_FALLBACK = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="#f0f0f0"/><text x="20" y="24" text-anchor="middle" fill="#888" font-size="10">无图</text></svg>')}`;
+
+/** Reuse the list URL; only fetch images when a selected SKU is not in that list. */
+function SkuThumbnail({ skuId, url }: { skuId?: string; url?: string | null }) {
+  const images = useApiQuery<SkuImageEnvelope>(
+    '/api/v1/skus/{skuId}/images',
+    {},
+    ['po-sku-images', skuId],
+    { skuId: skuId ?? '' },
+    Boolean(skuId) && url === undefined,
   );
+  const sorted = [...(images.data?.data ?? [])].sort(
+    (a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.sortOrder - b.sortOrder,
+  );
+  const src = url === undefined ? sorted[0]?.url : url;
   return (
-    <Select
-      {...props}
-      showSearch
-      filterOption={false}
-      placeholder="搜索 SKU 编码 / 名称"
-      onSearch={setKeyword}
-      options={(skus.data?.data ?? []).map((sku) => ({
-        value: sku.id,
-        label: `${sku.skuCode} · ${sku.nameZh}`,
-      }))}
-      loading={skus.isLoading}
+    <Image
+      width={40}
+      height={40}
+      src={src || IMAGE_FALLBACK}
+      fallback={IMAGE_FALLBACK}
+      alt="SKU 图片"
+      preview={Boolean(src)}
+      style={{ objectFit: 'contain', background: colors.primarySoft }}
     />
+  );
+}
+
+function SupplierQuickCreateModal({
+  open,
+  pending,
+  onClose,
+  onCreate,
+}: {
+  open: boolean;
+  pending: boolean;
+  onClose: () => void;
+  onCreate: (values: SupplierFormValues) => void;
+}) {
+  const [supplierForm] = Form.useForm<SupplierFormValues>();
+  return (
+    <Modal
+      title="新建供应商"
+      open={open}
+      zIndex={1100}
+      onCancel={onClose}
+      onOk={() => supplierForm.submit()}
+      okText="创建并选中"
+      cancelText="取消"
+      confirmLoading={pending}
+      afterOpenChange={(isOpen) => {
+        if (!isOpen) supplierForm.resetFields();
+      }}
+      destroyOnHidden
+    >
+      <p style={{ color: colors.textSecondary }}>供应商编码无需填写，创建后自动生成。</p>
+      <Form form={supplierForm} layout="vertical" preserve={false} onFinish={onCreate}>
+        <Form.Item
+          name="name"
+          label="名称"
+          rules={[{ required: true, whitespace: true, message: '请输入供应商名称' }]}
+        >
+          <Input maxLength={200} />
+        </Form.Item>
+        <Form.Item name="contactName" label="联系人（可选）">
+          <Input maxLength={100} />
+        </Form.Item>
+        <Form.Item name="contactPhone" label="电话（可选）">
+          <Input maxLength={100} />
+        </Form.Item>
+      </Form>
+    </Modal>
+  );
+}
+
+/** SKU picker with server-side keyword search over the master data. */
+function SkuSelect({
+  showImages,
+  ...props
+}: {
+  showImages: boolean;
+  value?: string;
+  onChange?: (value: string) => void;
+}) {
+  const [keyword, setKeyword] = useState('');
+  const skus = useApiQuery<
+    Envelope<Array<{ id: string; skuCode: string; nameZh: string; primaryImageUrl: string | null }>>
+  >('/api/v1/skus', { page: 1, pageSize: 20, ...(keyword ? { keyword } : {}) }, [
+    'skus-for-po',
+    keyword,
+  ]);
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+      {showImages && (
+        <SkuThumbnail
+          skuId={props.value}
+          url={skus.data?.data.find((sku) => sku.id === props.value)?.primaryImageUrl}
+        />
+      )}
+      <Select
+        {...props}
+        style={{ flex: 1, minWidth: 0 }}
+        showSearch
+        filterOption={false}
+        placeholder="搜索 SKU 编码 / 名称"
+        onSearch={setKeyword}
+        options={(skus.data?.data ?? []).map((sku) => ({
+          value: sku.id,
+          label: `${sku.skuCode} · ${sku.nameZh}`,
+        }))}
+        loading={skus.isLoading}
+      />
+    </div>
   );
 }
