@@ -74,7 +74,7 @@ export class PurchaseOrderController {
   @ApiOkEnvelope(PurchaseOrderDetailDto)
   async cancel(
     @Param('id') id: string,
-    @Body() body: { reason?: string },
+    @Body() body: { reason?: string } = {},
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true; data: PurchaseOrderDetailDto }> {
     return ok(await this.poService.cancel(id, operator, body.reason));

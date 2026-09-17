@@ -5,7 +5,8 @@
 > 所有涉及采购/收货的代码修改，必须以本文档为准。
 >
 > 规则来源：Sprint 7 任务书、决策 `docs/decisions/0013`、用户 2026-09-12 确认
-> （Q1 引用类型 / Q2 移动平均 / Q4 暂存方案 A）。
+> （Q1 引用类型 / Q2 移动平均 / Q4 暂存方案 A）；用户 2026-09-17 人工测试建议
+> （#6 人工指定采购时间 / #10 创建时可选生成收货草稿及取消联动）。
 
 ---
 
@@ -45,7 +46,7 @@ po_no           业务编号 PO%06d（集中式序号表，作用域 purchase_or
 supplier_id     供应商（可空）
 source_note     货源说明（可空，一次性网购）
 status          状态机（见 3.2）
-ordered_at      下单时间
+ordered_at      下单（采购）时间；创建时可人工指定，缺省为创建时刻
 expected_at     预计到货（可空，人工填）
 remark / created_by / created_at / updated_at
 ```
@@ -76,6 +77,9 @@ ORDERED → PARTIALLY_RECEIVED → RECEIVED
    时允许；取消不触碰库存。已 `RECEIVED` 或 `PARTIALLY_RECEIVED` 的单不可取消
    （`PURCHASE_ORDER_INVALID_STATE`）。
 5. 状态迁移由收货确认/取消操作驱动；禁止随意手改状态。
+6. 取消采购单时，在**同一事务**内将其关联的全部 `DRAFT` 收货单置为 `CANCELLED`，
+   并逐单记录取消日志。草稿从未碰库存，联动取消无库存影响；已 `RECEIVED` 的收货单
+   不会被此操作触及（可取消的采购单必然无任何收货）。规则来源：用户 2026-09-17 人工测试建议。
 
 ## 3.3 创建与修改
 
@@ -84,6 +88,15 @@ ORDERED → PARTIALLY_RECEIVED → RECEIVED
    （`PURCHASE_ORDER_INVALID_STATE`）。
 3. 明细 `sku_id` 必须是已存在的内部 SKU；`order_item_id` 可空（备货采购）。
 4. `quantity` 必须为正数（最多 3 位小数）。
+5. 创建时可人工指定 `ordered_at`（采购时间），缺省为创建时刻。
+6. 创建时可同时传入可选收货参数 `receipt`：仓库 `warehouseId` 必填，默认库位
+   `defaultBinId` 可选；不传则原行为不变。系统在创建采购单的**同一事务**内，按全部
+   明细的未收数量生成一张关联 `DRAFT` 收货单，逐行预填 `sku / quantity / unit_cost /
+   purchase_order_item_id`，继承供应商与货源，语义与既有 `generateFromPo` 一致；备注为
+   `从采购单 {poNo} 创建时自动生成`。仓库不存在则返回 `WAREHOUSE_NOT_FOUND`，整单不落库；
+   草稿创建失败则采购单与草稿整体回滚，并分别记录成功创建的单据日志。
+   **自动生成的只是独立草稿，不入账库存、不更新成本；仍可独立编辑，确认收货仍走 §4.3。**
+   本节第 5、6 条规则来源：用户 2026-09-17 人工测试建议。
 
 ## 3.4 防重复采购（后端强制）
 
@@ -260,6 +273,7 @@ Operation Log
 | `PURCHASE_RECEIPT_NOT_FOUND` | 收货单不存在 |
 | `PURCHASE_RECEIPT_INVALID_STATE` | 收货单状态不允许该操作 |
 | `PURCHASE_RECEIPT_EMPTY` | 收货单无明细不可确认 |
+| `WAREHOUSE_NOT_FOUND` | 收货仓库不存在（含创建采购单时可选自动生成草稿） |
 
 统一错误信封（AGENTS.md §66）。
 
@@ -280,6 +294,7 @@ Operation Log
 以下变更必须先修改本文档：
 
 - 采购单/收货单新增或删除状态；
+- 改变采购时间默认值/人工指定语义、创建时生成草稿或取消联动规则；
 - 改变确认收货的事务/幂等/成本规则；
 - 改变防重复采购规则；
 - 改变订单行采购状态派生规则；

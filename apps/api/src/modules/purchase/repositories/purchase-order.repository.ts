@@ -37,6 +37,20 @@ export class PurchaseOrderRepository {
     return this.dataSource.getRepository(PurchaseOrderEntity).findOneBy({ id });
   }
 
+  async lockById(manager: EntityManager, id: string): Promise<PurchaseOrderEntity | null> {
+    return manager.getRepository(PurchaseOrderEntity).findOne({
+      where: { id },
+      lock: { mode: 'pessimistic_write' },
+    });
+  }
+
+  async findItemsInTx(manager: EntityManager, poId: string): Promise<PurchaseOrderItemEntity[]> {
+    return manager.getRepository(PurchaseOrderItemEntity).find({
+      where: { poId },
+      order: { createdAt: 'ASC', id: 'ASC' },
+    });
+  }
+
   /**
    * The live (non-cancelled) purchase item linked to an order line, if any.
    * Anti-duplicate-ordering relies on this staying consistent with the

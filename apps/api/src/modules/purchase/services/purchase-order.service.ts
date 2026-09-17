@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
+import { WarehouseService } from '../../warehouse/services/warehouse.service';
+import { WarehouseNotFoundError } from '../../warehouse/errors/warehouse-errors';
+import { PurchaseReceiptRepository } from '../repositories/purchase-receipt.repository';
+import { PurchaseReceiptEntity } from '../entities/purchase-receipt.entity';
 import { PageMeta } from '@wcies/shared';
 import {
   OperatorContext,
@@ -30,6 +34,7 @@ import {
   PurchaseOrderItemInputDto,
   PurchaseOrderListItemDto,
   PurchaseOrderListQueryDto,
+  ReceivingOptionDto,
   UpdatePurchaseOrderRequestDto,
 } from '../dto/purchase-order.dto';
 import { offsetOf } from '../../../common/dto/pagination.dto';
@@ -51,6 +56,8 @@ export class PurchaseOrderService {
     private readonly orderService: OrderService,
     private readonly businessCode: BusinessCodeService,
     private readonly operationLog: OperationLogService,
+    private readonly receiptRepository: PurchaseReceiptRepository,
+    private readonly warehouseService: WarehouseService,
   ) {}
 
   // --------------------------------------------------------------------------
@@ -64,7 +71,14 @@ export class PurchaseOrderService {
     await this.assertHeaderRefs(dto.supplierId);
     await this.assertItemsValid(dto.items);
 
-    const created = await this.dataSource.transaction(async (manager) => {
+    if (
+      dto.receipt &&
+      (await this.warehouseService.getEntityById(dto.receipt.warehouseId)) === null
+    ) {
+      throw new WarehouseNotFoundError(dto.receipt.warehouseId);
+    }
+
+    const { created, receipt } = await this.dataSource.transaction(async (manager) => {
       // Anti-duplicate guard INSIDE the creation flow (purchase.md §3.4):
       // a live PO item linked to the same order line refuses this create.
       for (const item of dto.items) {
@@ -80,14 +94,14 @@ export class PurchaseOrderService {
         }
       }
       const poNo = await this.businessCode.nextPurchaseOrderNo();
-      return this.repository.insertWithItems(
+      const created = await this.repository.insertWithItems(
         manager,
         {
           poNo,
           supplierId: dto.supplierId ?? null,
           sourceNote: dto.sourceNote?.trim() || null,
           status: 'ORDERED',
-          orderedAt: new Date(),
+          orderedAt: dto.orderedAt == null ? new Date() : new Date(dto.orderedAt),
           expectedAt: dto.expectedAt ?? null,
           remark: dto.remark ?? null,
           createdBy: operator.userId,
@@ -100,8 +114,27 @@ export class PurchaseOrderService {
           remark: item.remark ?? null,
         })),
       );
+      const receipt = dto.receipt
+        ? await this.createReceiptDraft(manager, created, dto.receipt, operator)
+        : null;
+      return { created, receipt };
     });
 
+    if (receipt !== null) {
+      await this.operationLog.record({
+        entityType: 'PURCHASE_RECEIPT',
+        entityId: receipt.id,
+        entityCode: receipt.receiptNo,
+        action: 'CREATE',
+        changes: {
+          receiptNo: { from: null, to: receipt.receiptNo },
+          generatedFrom: { from: null, to: created.poNo },
+          warehouseId: { from: null, to: receipt.warehouseId },
+          itemCount: { from: null, to: dto.items.length },
+        },
+        operator,
+      });
+    }
     await this.operationLog.record({
       entityType: ENTITY_TYPE,
       entityId: created.id,
@@ -203,9 +236,41 @@ export class PurchaseOrderService {
         status: existing.status,
       });
     }
-    await this.dataSource.transaction(async (manager) => {
+    const cancelledDrafts = await this.dataSource.transaction(async (manager) => {
+      // Confirm locks receipt before updating PO. Keep that order to avoid
+      // deadlocks, then recheck PO facts after any concurrent confirm finishes.
+      const drafts = await this.receiptRepository.findDraftsByPurchaseOrderId(manager, id);
+      const locked = await this.repository.lockById(manager, id);
+      if (locked === null) throw new PurchaseOrderNotFoundError(id);
+      const items = await this.repository.findItemsInTx(manager, id);
+      if (
+        locked.status !== 'ORDERED' ||
+        items.some((item) => parseQty(item.receivedQuantity) > 0n)
+      ) {
+        throw new PurchaseOrderInvalidStateError('采购单已发生收货或状态已改变，不能取消', {
+          poNo: locked.poNo,
+          status: locked.status,
+        });
+      }
+      for (const draft of drafts) {
+        await this.receiptRepository.updateHeader(manager, draft.id, { status: 'CANCELLED' });
+      }
       await this.repository.updateHeader(manager, id, { status: 'CANCELLED' });
+      return drafts;
     });
+    for (const draft of cancelledDrafts) {
+      await this.operationLog.record({
+        entityType: 'PURCHASE_RECEIPT',
+        entityId: draft.id,
+        entityCode: draft.receiptNo,
+        action: 'CANCEL',
+        changes: {
+          status: { from: 'DRAFT', to: 'CANCELLED' },
+          cancelledWithPurchaseOrder: { from: null, to: existing.poNo },
+        },
+        operator,
+      });
+    }
     await this.operationLog.record({
       entityType: ENTITY_TYPE,
       entityId: id,
@@ -213,6 +278,7 @@ export class PurchaseOrderService {
       action: 'CANCEL',
       changes: {
         status: { from: existing.status, to: 'CANCELLED' },
+        cancelledReceiptCount: { from: null, to: cancelledDrafts.length },
         ...(reason ? { reason: { from: null, to: reason } } : {}),
       },
       operator,
@@ -363,6 +429,39 @@ export class PurchaseOrderService {
   // --------------------------------------------------------------------------
   // Internals
   // --------------------------------------------------------------------------
+
+  private async createReceiptDraft(
+    manager: EntityManager,
+    po: PurchaseOrderEntity,
+    option: ReceivingOptionDto,
+    operator: OperatorContext,
+  ): Promise<PurchaseReceiptEntity> {
+    // Read newly inserted lines through this manager, never another connection.
+    const items = await this.repository.findItemsInTx(manager, po.id);
+    const receiptNo = await this.businessCode.nextPurchaseReceiptNo();
+    return this.receiptRepository.insertWithItems(
+      manager,
+      {
+        receiptNo,
+        purchaseOrderId: po.id,
+        supplierId: po.supplierId,
+        sourceNote: po.sourceNote,
+        warehouseId: option.warehouseId,
+        status: 'DRAFT',
+        remark: `从采购单 ${po.poNo} 创建时自动生成`,
+        createdBy: operator.userId,
+      },
+      items.map((item) => ({
+        purchaseOrderItemId: item.id,
+        skuId: item.skuId,
+        quantity: formatQty(parseQty(item.quantity) - parseQty(item.receivedQuantity)),
+        unitCost: item.unitCost,
+        binId: option.defaultBinId ?? null,
+        serialNumbers: null,
+        remark: null,
+      })),
+    );
+  }
 
   private async assertHeaderRefs(supplierId?: string): Promise<void> {
     if (supplierId === undefined) {

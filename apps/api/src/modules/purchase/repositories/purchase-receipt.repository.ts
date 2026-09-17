@@ -36,6 +36,18 @@ export class PurchaseReceiptRepository {
     return this.dataSource.getRepository(PurchaseReceiptEntity).findOneBy({ id });
   }
 
+  /** Lock matching drafts before cancellation, in the same order as confirmation. */
+  async findDraftsByPurchaseOrderId(
+    manager: EntityManager,
+    purchaseOrderId: string,
+  ): Promise<PurchaseReceiptEntity[]> {
+    return manager.getRepository(PurchaseReceiptEntity).find({
+      where: { purchaseOrderId, status: 'DRAFT' },
+      order: { id: 'ASC' },
+      lock: { mode: 'pessimistic_write' },
+    });
+  }
+
   /** Row lock inside the confirm transaction (status re-check, §4.3). */
   async lockById(runner: QueryRunner, id: string): Promise<PurchaseReceiptEntity | null> {
     const rows = (await runner.query(`SELECT * FROM purchase_receipts WHERE id = $1 FOR UPDATE`, [

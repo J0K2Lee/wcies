@@ -41,7 +41,28 @@ export class PurchaseOrderItemInputDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) remark?: string;
 }
 
+export class ReceivingOptionDto {
+  @ApiProperty({ description: '收货仓库' }) @IsUUID() warehouseId!: string;
+  @ApiPropertyOptional({ description: '默认收货库位' })
+  @IsOptional()
+  @IsUUID()
+  defaultBinId?: string;
+}
+
 export class CreatePurchaseOrderRequestDto {
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
+    description: '采购时间（可空=当前时刻）',
+  })
+  @IsOptional()
+  @IsDateString()
+  orderedAt?: string;
+  @ApiPropertyOptional({ type: ReceivingOptionDto, description: '同时生成独立收货草稿（不入库）' })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ReceivingOptionDto)
+  receipt?: ReceivingOptionDto;
   @ApiPropertyOptional({ description: '固定供应商（可空）' })
   @IsOptional()
   @IsUUID()

@@ -84,6 +84,144 @@ afterAll(async () => {
   await api.stop();
 });
 
+describe('PO creation with optional receiving draft (2026-09-17 T1)', () => {
+  async function createPoWithDraft(label: string) {
+    const skuId = await newSku(label);
+    const orderedAt = '2026-09-01T04:30:00.000Z';
+    const po = await client.post<{
+      id: string;
+      poNo: string;
+      orderedAt: string;
+      items: Array<{ id: string }>;
+    }>('/api/v1/purchase-orders', {
+      orderedAt,
+      sourceNote: `${PREFIX} ${label}`,
+      receipt: { warehouseId, defaultBinId: binA01 },
+      items: [{ skuId, quantity: '10', unitCost: '12.3400' }],
+    });
+    expect(po.status).toBe(200);
+    expect(po.body.data.orderedAt).toBe(orderedAt);
+    const list = await client.get<Array<{ id: string }>>(
+      `/api/v1/purchase-receipts?purchaseOrderId=${po.body.data.id}`,
+    );
+    expect(list.body.data).toHaveLength(1);
+    const receipt = await client.get<ReceiptDetail & { sourceNote: string; remark: string }>(
+      `/api/v1/purchase-receipts/${list.body.data[0]!.id}`,
+    );
+    return { skuId, po: po.body.data, receipt: receipt.body.data };
+  }
+
+  it('persists an independent numbered DRAFT with correct prefilled lines and no inventory', async () => {
+    const { skuId, po, receipt } = await createPoWithDraft('AUTO1');
+    expect(receipt.status).toBe('DRAFT');
+    expect(receipt.receiptNo).toMatch(/^PR\d{6,}$/);
+    expect(receipt.purchaseOrderId).toBe(po.id);
+    expect(receipt.sourceNote).toBe(`${PREFIX} AUTO1`);
+    expect(receipt.remark).toBe(`从采购单 ${po.poNo} 创建时自动生成`);
+    expect(receipt.items).toHaveLength(1);
+    expect(receipt.items[0]).toMatchObject({
+      skuId,
+      purchaseOrderItemId: po.items[0]!.id,
+      quantity: '10.000',
+      unitCost: '12.3400',
+      binId: binA01,
+      serialNumbers: null,
+    });
+    expect(await balanceOf(skuId)).toEqual([]);
+    expect(await skuAverageCost(skuId)).toBeNull();
+  });
+
+  it('cancels all linked drafts without stock and prevents their confirmation', async () => {
+    const { skuId, po, receipt } = await createPoWithDraft('AUTO2');
+    const extra = await client.post<ReceiptDetail>(`/api/v1/purchase-receipts/from-po/${po.id}`, {
+      warehouseId,
+      defaultBinId: binA01,
+    });
+    expect(extra.status).toBe(200);
+    const cancelled = await client.post<{ status: string }>(
+      `/api/v1/purchase-orders/${po.id}/cancel`,
+      {},
+    );
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.body.data.status).toBe('CANCELLED');
+    for (const id of [receipt.id, extra.body.data.id]) {
+      const detail = await client.get<ReceiptDetail>(`/api/v1/purchase-receipts/${id}`);
+      expect(detail.body.data.status).toBe('CANCELLED');
+      const confirm = await client.post(`/api/v1/purchase-receipts/${id}/confirm`);
+      expect(confirm.body.error?.code).toBe('PURCHASE_RECEIPT_INVALID_STATE');
+    }
+    expect(await balanceOf(skuId)).toEqual([]);
+  });
+
+  it('allows independent draft editing and confirmation, accruing partial receipt and stock', async () => {
+    const { skuId, po, receipt } = await createPoWithDraft('AUTO3');
+    const edited = await client.patch<ReceiptDetail>(`/api/v1/purchase-receipts/${receipt.id}`, {
+      items: [
+        {
+          skuId,
+          purchaseOrderItemId: po.items[0]!.id,
+          quantity: '4',
+          unitCost: '12.3400',
+          binId: binA02,
+        },
+      ],
+    });
+    expect(edited.status).toBe(200);
+    expect(await balanceOf(skuId)).toEqual([]);
+    const confirmed = await client.post<ReceiptDetail>(
+      `/api/v1/purchase-receipts/${receipt.id}/confirm`,
+    );
+    expect(confirmed.status).toBe(200);
+    expect(confirmed.body.data.status).toBe('RECEIVED');
+    expect((await balanceOf(skuId))[0]?.onHandQty).toBe('4.000');
+    const poAfter = await client.get<{
+      status: string;
+      items: Array<{ receivedQuantity: string }>;
+    }>(`/api/v1/purchase-orders/${po.id}`);
+    expect(poAfter.body.data.status).toBe('PARTIALLY_RECEIVED');
+    expect(poAfter.body.data.items[0]?.receivedQuantity).toBe('4.000');
+    const cancellation = await client.post(`/api/v1/purchase-orders/${po.id}/cancel`, {});
+    expect(cancellation.body.error?.code).toBe('PURCHASE_ORDER_INVALID_STATE');
+    const unchanged = await client.get<ReceiptDetail>(`/api/v1/purchase-receipts/${receipt.id}`);
+    expect(unchanged.body.data.status).toBe('RECEIVED');
+  });
+
+  it('unknown receiving warehouse leaves no PO persisted', async () => {
+    const sourceNote = `${PREFIX} AUTO-invalid-warehouse`;
+    const skuId = await newSku('AUTO4');
+    const created = await client.post('/api/v1/purchase-orders', {
+      sourceNote,
+      receipt: { warehouseId: '00000000-0000-4000-8000-000000000001' },
+      items: [{ skuId, quantity: '1' }],
+    });
+    expect(created.body.error?.code).toBe('WAREHOUSE_NOT_FOUND');
+    const list = await client.get<Array<{ id: string }>>(
+      `/api/v1/purchase-orders?keyword=${encodeURIComponent(sourceNote)}`,
+    );
+    expect(list.body.data).toEqual([]);
+  });
+
+  it('draft insertion failure rolls back PO header and items', async () => {
+    const sourceNote = `${PREFIX} AUTO-invalid-bin`;
+    const skuId = await newSku('AUTO5');
+    const created = await client.post('/api/v1/purchase-orders', {
+      sourceNote,
+      receipt: { warehouseId, defaultBinId: '00000000-0000-4000-8000-000000000001' },
+      items: [{ skuId, quantity: '1' }],
+    });
+    expect(created.status).toBeGreaterThanOrEqual(400);
+    const list = await client.get<Array<{ id: string }>>(
+      `/api/v1/purchase-orders?keyword=${encodeURIComponent(sourceNote)}`,
+    );
+    expect(list.body.data).toEqual([]);
+    const receipts = await client.get<Array<{ id: string }>>(
+      `/api/v1/purchase-receipts?keyword=${encodeURIComponent(sourceNote)}`,
+    );
+    expect(receipts.body.data).toEqual([]);
+    expect(await balanceOf(skuId)).toEqual([]);
+  });
+});
+
 describe('purchase receipt confirmation (Sprint 7 T4)', () => {
   it('books stock with PURCHASE_RECEIPT ledger rows; repeat confirm is idempotent (T4.5-1/2/3)', async () => {
     const skuA = await newSku('C1A');
