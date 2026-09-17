@@ -10,8 +10,16 @@
  * prices, shipments) are intentionally NOT part of this contract yet.
  */
 
-/** Known platform codes. Extend only when a new platform is actually integrated. */
-export const PLATFORM_CODES = ['OZON', 'WILDBERRIES', 'YANDEX_MARKET'] as const;
+/**
+ * Known platform codes. Extend only when a new platform is actually integrated.
+ *
+ * Values align with the DB seed / platform constants
+ * (apps/api/src/modules/platform/constants/platform.constants.ts) - the
+ * adapter registry keys off the DB `platforms.code`, so a mismatch here makes
+ * `resolveSyncableStore` fail with STORE_NOT_FOUND (WB/Yandex adapters,
+ * 2026-09-18).
+ */
+export const PLATFORM_CODES = ['OZON', 'WB', 'YANDEX'] as const;
 export type PlatformCode = (typeof PLATFORM_CODES)[number];
 
 /**
