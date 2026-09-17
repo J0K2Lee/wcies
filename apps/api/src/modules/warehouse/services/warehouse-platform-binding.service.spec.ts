@@ -79,7 +79,7 @@ function buildService(opts: {
 const dto = {
   storeId: 'store-1',
   platformWarehouseId: '1020005000770362',
-  fulfillmentMode: 'OZON_FBO',
+  fulfillmentMode: 'OZON_FBO' as const,
   remarkName: '俄东主仓',
 };
 
@@ -98,27 +98,27 @@ describe('WarehousePlatformBindingService validation (用户指示 2026-09-17)',
   it('binds OZON_RFBS / OZON_FBS platform warehouses to SELF (自管仓) warehouses', async () => {
     const { service } = buildService({ platformCode: 'OZON', warehouseType: 'SELF' });
     await expect(
-      service.create('wh-1', { ...dto, fulfillmentMode: 'OZON_RFBS' }, operator),
-    ).resolves.toMatchObject({ fulfillmentMode: 'OZON_RFBS' });
+      service.create('wh-1', { ...dto, fulfillmentMode: 'OZON_RFBS' as const }, operator),
+    ).resolves.toMatchObject({ fulfillmentMode: 'OZON_RFBS' as const });
     await expect(
-      service.create('wh-1', { ...dto, fulfillmentMode: 'OZON_FBS' }, operator),
-    ).resolves.toMatchObject({ fulfillmentMode: 'OZON_FBS' });
+      service.create('wh-1', { ...dto, fulfillmentMode: 'OZON_FBS' as const }, operator),
+    ).resolves.toMatchObject({ fulfillmentMode: 'OZON_FBS' as const });
   });
 
   it('binds OZON_FBP only to SEMI_MANAGED (半托管) warehouses', async () => {
     const semi = buildService({ platformCode: 'OZON', warehouseType: 'SEMI_MANAGED' });
     await expect(
-      semi.service.create('wh-1', { ...dto, fulfillmentMode: 'OZON_FBP' }, operator),
-    ).resolves.toMatchObject({ fulfillmentMode: 'OZON_FBP' });
+      semi.service.create('wh-1', { ...dto, fulfillmentMode: 'OZON_FBP' as const }, operator),
+    ).resolves.toMatchObject({ fulfillmentMode: 'OZON_FBP' as const });
 
     const self = buildService({ platformCode: 'OZON', warehouseType: 'SELF' });
     await expect(
-      self.service.create('wh-1', { ...dto, fulfillmentMode: 'OZON_FBP' }, operator),
+      self.service.create('wh-1', { ...dto, fulfillmentMode: 'OZON_FBP' as const }, operator),
     ).rejects.toMatchObject({ code: 'WAREHOUSE_PLATFORM_BINDING_INVALID' });
 
     const platform = buildService({ platformCode: 'OZON', warehouseType: 'PLATFORM' });
     await expect(
-      platform.service.create('wh-1', { ...dto, fulfillmentMode: 'OZON_FBP' }, operator),
+      platform.service.create('wh-1', { ...dto, fulfillmentMode: 'OZON_FBP' as const }, operator),
     ).rejects.toMatchObject({ code: 'WAREHOUSE_PLATFORM_BINDING_INVALID' });
   });
 

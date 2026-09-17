@@ -235,3 +235,58 @@ export interface OzonProductAttributesResponse {
    */
   readonly result: readonly OzonProductAttributesItem[];
 }
+
+// ---------------------------------------------------------------------------
+// POST /v2/warehouse/list · /v1/fbp/warehouse/list · /v1/warehouse/ozon/list
+// (仓库绑定平台仓库；2026-09-17 实测验证，见 docs/integrations/ozon.md)
+// ---------------------------------------------------------------------------
+
+/** POST /v2/warehouse/list item - seller's own FBS / rFBS warehouses. */
+export interface OzonSellerWarehouse {
+  readonly warehouse_id: number;
+  readonly name?: string;
+  /** true = rFBS (realFBS 自发货), false = FBS (发货至 OZON 分拣中心). */
+  readonly is_rfbs?: boolean;
+  readonly warehouse_type?: string;
+  /** new|created|disabled|blocked|disabled_due_to_limit|error */
+  readonly status?: string;
+  readonly address_info?: { readonly address?: string; readonly [key: string]: unknown };
+  readonly [key: string]: unknown;
+}
+
+export interface OzonSellerWarehouseListResponse {
+  readonly warehouses: readonly OzonSellerWarehouse[];
+}
+
+/** POST /v1/fbp/warehouse/list item - FBP 平台国内合作仓（半托管）. */
+export interface OzonFbpWarehouse {
+  readonly id: number;
+  readonly name?: string;
+  readonly partner_name?: string;
+  readonly is_bonded?: boolean;
+  readonly timezone_name?: string;
+  readonly address_detailing?: {
+    readonly city?: string;
+    readonly [key: string]: unknown;
+  };
+  readonly [key: string]: unknown;
+}
+
+export interface OzonFbpWarehouseListResponse {
+  readonly warehouses: readonly OzonFbpWarehouse[];
+}
+
+/** POST /v1/warehouse/ozon/list item - OZON 自有仓目录（FBO 履约中心）. */
+export interface OzonOwnWarehouse {
+  readonly warehouse_id: number;
+  readonly name?: string;
+  readonly short_name?: string;
+  readonly address?: string;
+  readonly is_active?: boolean;
+  readonly warehouse_type?: string;
+  readonly [key: string]: unknown;
+}
+
+export interface OzonOwnWarehouseListResponse {
+  readonly warehouses: readonly OzonOwnWarehouse[];
+}

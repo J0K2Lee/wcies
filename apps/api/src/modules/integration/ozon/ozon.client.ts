@@ -3,10 +3,13 @@ import {
   OzonErrorBody,
   OzonFbsPostingGetResponse,
   OzonFbsPostingListResponse,
+  OzonFbpWarehouseListResponse,
+  OzonOwnWarehouseListResponse,
   OzonProductAttributesResponse,
   OzonProductInfoListResponse,
   OzonProductListResponse,
   OzonRfbsReturnListResponse,
+  OzonSellerWarehouseListResponse,
 } from './types/api.types';
 import { PlatformErrorDetail } from '@wcies/platform-contracts';
 import { PlatformApiError, PlatformMalformedResponseError } from '../platform-error';
@@ -198,6 +201,44 @@ export class OzonClient {
       endpoint: '/v4/product/info/attributes',
       storeId,
       body: { filter: { product_id: [...productIds] }, limit: 1000 },
+    });
+  }
+
+  /**
+   * Seller's own FBS / rFBS warehouses（仓库绑定平台仓库；2026-09-17 live
+   * verified）。/v1/warehouse/list 已被平台标记 obsolete，必须用 v2。
+   * is_rfbs=true → rFBS（realFBS），false → FBS（发货至 OZON 分拣中心）。
+   */
+  async sellerWarehouseList(
+    auth: OzonAuth,
+    storeId: string,
+  ): Promise<OzonSellerWarehouseListResponse> {
+    return this.request<OzonSellerWarehouseListResponse>(auth, {
+      endpoint: '/v2/warehouse/list',
+      storeId,
+      body: {},
+    });
+  }
+
+  /** FBP 平台国内合作仓列表（半托管；2026-09-17 live verified）。 */
+  async fbpWarehouseList(auth: OzonAuth, storeId: string): Promise<OzonFbpWarehouseListResponse> {
+    return this.request<OzonFbpWarehouseListResponse>(auth, {
+      endpoint: '/v1/fbp/warehouse/list',
+      storeId,
+      body: {},
+    });
+  }
+
+  /** OZON 自有履约仓目录（FBO；按类型过滤，2026-09-17 live verified）。 */
+  async ozonWarehouseList(
+    auth: OzonAuth,
+    storeId: string,
+    warehouseTypes: readonly string[],
+  ): Promise<OzonOwnWarehouseListResponse> {
+    return this.request<OzonOwnWarehouseListResponse>(auth, {
+      endpoint: '/v1/warehouse/ozon/list',
+      storeId,
+      body: { warehouse_types: [...warehouseTypes] },
     });
   }
 

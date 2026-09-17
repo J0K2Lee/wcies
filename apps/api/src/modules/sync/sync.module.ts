@@ -24,8 +24,10 @@ import { SyncDispatchService } from './services/sync-dispatch.service';
 import { SyncFailureAlertService } from './services/sync-failure-alert.service';
 import { SyncJobService } from './services/sync-job.service';
 import { WebhookIngestService, WebhookProcessService } from './services/webhook.service';
+import { PlatformWarehouseQueryService } from './services/platform-warehouse-query.service';
 import { SyncController } from './controllers/sync.controller';
 import { OzonWebhookController } from './controllers/ozon-webhook.controller';
+import { PlatformWarehouseController } from './controllers/platform-warehouse.controller';
 import {
   CategoryTreeSyncProcessor,
   ListingSyncProcessor,
@@ -60,7 +62,7 @@ import {
     OrderModule,
     ExceptionModule,
   ],
-  controllers: [SyncController, OzonWebhookController],
+  controllers: [SyncController, OzonWebhookController, PlatformWarehouseController],
   providers: [
     SyncJobRepository,
     SyncCursorRepository,
@@ -69,6 +71,7 @@ import {
     SyncDispatchService,
     SyncFailureAlertService,
     SyncJobService,
+    PlatformWarehouseQueryService,
     ListingSyncService,
     OrderSyncService,
     CategoryTreeSyncService,
