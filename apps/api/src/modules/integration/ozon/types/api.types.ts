@@ -45,6 +45,9 @@ export interface OzonProductInfoItem {
   readonly sku?: number;
   readonly is_archived?: boolean;
   readonly is_autoarchived?: boolean;
+  /** v3 product info/list arrays (verified 2026-09-17). */
+  readonly primary_image?: readonly string[];
+  readonly images?: readonly string[];
   readonly currency_code?: string;
   readonly [key: string]: unknown;
 }

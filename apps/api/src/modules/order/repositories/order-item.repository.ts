@@ -45,6 +45,7 @@ export class OrderItemRepository {
         platformSkuId: (row['platform_sku_id'] as string | null) ?? null,
         sellerSku: (row['seller_sku'] as string | null) ?? null,
         offerId: (row['offer_id'] as string | null) ?? null,
+        platformImageUrl: (row['platform_image_url'] as string | null) ?? null,
         listingSkuId: (row['listing_sku_id'] as string | null) ?? null,
         skuId: (row['sku_id'] as string | null) ?? null,
         warehouseId: (row['warehouse_id'] as string | null) ?? null,
@@ -62,6 +63,50 @@ export class OrderItemRepository {
         skuName: (row['sku_name'] as string | null) ?? '',
       };
     });
+  }
+
+  async findMissingPlatformImages(
+    storeId: string,
+    orderId?: string,
+  ): Promise<
+    Array<{
+      id: string;
+      orderId: string;
+      platformSkuId: string | null;
+    }>
+  > {
+    const query = this.dataSource
+      .getRepository(OrderItemEntity)
+      .createQueryBuilder('item')
+      .innerJoin('item.order', 'order')
+      .select(['item.id', 'item.orderId', 'item.platformSkuId'])
+      .where('order.storeId = :storeId', { storeId })
+      .andWhere('item.skuId IS NULL AND item.platformImageUrl IS NULL');
+    if (orderId !== undefined) query.andWhere('item.orderId = :orderId', { orderId });
+    return query.orderBy('item.id', 'ASC').getMany();
+  }
+
+  /** Compare-and-set prevents a concurrent mapping/backfill from being overwritten. */
+  async savePlatformImages(
+    storeId: string,
+    images: readonly { orderItemId: string; imageUrl: string }[],
+  ): Promise<string[]> {
+    if (images.length === 0) return [];
+    const rows = await this.dataSource.query<Array<{ id: string }>>(
+      `WITH updated AS (
+         UPDATE order_items i SET platform_image_url = v.image_url, updated_at = NOW()
+         FROM jsonb_to_recordset($2::jsonb) AS v(id uuid, image_url text), orders o
+         WHERE i.id = v.id AND i.order_id = o.id AND o.store_id = $1::uuid
+           AND i.sku_id IS NULL AND i.platform_image_url IS NULL RETURNING i.id
+       ) SELECT id FROM updated`,
+      [
+        storeId,
+        JSON.stringify(
+          images.map((image) => ({ id: image.orderItemId, image_url: image.imageUrl })),
+        ),
+      ],
+    );
+    return rows.map((row) => row.id);
   }
 
   async updateMapping(

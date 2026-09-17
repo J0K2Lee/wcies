@@ -138,6 +138,40 @@ export class OrderService {
     return { items, meta: { page: page.page, pageSize: page.pageSize, total } };
   }
 
+  /** Public facts-only read for sync/backfill; no adapter dependency. */
+  async listMissingPlatformImages(
+    storeId: string,
+    orderId?: string,
+  ): Promise<
+    Array<{
+      id: string;
+      orderId: string;
+      platformSkuId: string | null;
+    }>
+  > {
+    return this.itemRepo.findMissingPlatformImages(storeId, orderId);
+  }
+
+  /** Public store-scoped batch write; never mutates mapping or inventory. */
+  async savePlatformImages(
+    storeId: string,
+    images: readonly { orderItemId: string; imageUrl: string }[],
+    operator: OperatorContext,
+  ): Promise<number> {
+    const updated = await this.itemRepo.savePlatformImages(storeId, images);
+    for (const id of updated) {
+      await this.operationLog.record({
+        entityType: 'ORDER_ITEM',
+        entityId: id,
+        entityCode: id,
+        action: 'UPDATE',
+        changes: { platformImageUrl: { from: null, to: 'PLATFORM_IMAGE_ATTACHED' } },
+        operator,
+      });
+    }
+    return updated.length;
+  }
+
   async getDetail(id: string): Promise<OrderDetailDto> {
     const order = await this.getOrderOrThrow(id);
     const [store, items, history, platformStatusHistory, interceptions] = await Promise.all([
@@ -187,7 +221,8 @@ export class OrderService {
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           totalPrice: item.totalPrice,
-          imageUrl: null as string | null,
+          imageUrl: item.skuId === null ? (item.platformImageUrl ?? null) : null,
+          imageSource: null as 'INTERNAL' | 'PLATFORM' | null,
           fulfillmentStatus: item.fulfillmentStatus,
           mappingStatus: item.mappingStatus,
           // Derived procurement state (purchase.md §3.5) - NULL for unmapped
@@ -220,10 +255,11 @@ export class OrderService {
       dto.procurementState = procurementStates[dto.id] ?? null;
     }
 
-    // 行图片 = 内部 SKU 主图（签名 URL）；未映射行没有 SKU，保持 null。
+    // Mapping switches authority to the internal SKU, even if it has no image.
     const imageUrls = await this.resolvePrimaryImages(items);
     for (const dto of itemDtos) {
-      dto.imageUrl = dto.skuId === null ? null : (imageUrls.get(dto.skuId) ?? null);
+      if (dto.skuId !== null) dto.imageUrl = imageUrls.get(dto.skuId) ?? null;
+      dto.imageSource = dto.imageUrl === null ? null : dto.skuId === null ? 'PLATFORM' : 'INTERNAL';
     }
 
     const pickingTasks = await this.pickingState.listTasksForOrder(order.id);

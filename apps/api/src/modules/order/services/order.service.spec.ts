@@ -144,6 +144,7 @@ function makeItem(overrides: Partial<OrderItemEntity>): OrderItemEntity {
     quantity: '1.000',
     unitPrice: null,
     totalPrice: null,
+    platformImageUrl: null,
     fulfillmentStatus: 'PENDING',
     mappingStatus: 'MAPPED',
     reservationId: null,

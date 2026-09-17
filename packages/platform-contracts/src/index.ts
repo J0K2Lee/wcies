@@ -245,6 +245,12 @@ export interface PlatformWebhookEvent {
 export interface PlatformAdapter {
   readonly platformCode: PlatformCode;
 
+  /** Optional read-only public product image lookup, scoped to a store. */
+  fetchProductImages?(
+    context: StoreContext,
+    platformSkuIds: readonly string[],
+  ): Promise<ReadonlyMap<string, string | null>>;
+
   /** Throws a PlatformError when credentials are invalid (safe read only). */
   validateCredential(context: PlatformCredentialContext): Promise<void>;
 

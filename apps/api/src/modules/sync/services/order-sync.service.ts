@@ -97,6 +97,63 @@ export class OrderSyncService {
     return { ingested, duplicates, failed };
   }
 
+  /** Shared with the dev backfill. Failures never alter ingestion/cursor outcomes. */
+  async enrichPlatformImages(
+    storeId: string,
+    orderId?: string,
+    dryRun = false,
+  ): Promise<{ candidates: number; wouldUpdate: number; updated: number; failed: boolean }> {
+    let candidates = 0;
+    let wouldUpdate = 0;
+    try {
+      const rows = await this.orderService.listMissingPlatformImages(storeId, orderId);
+      candidates = rows.length;
+      if (candidates === 0) return { candidates, wouldUpdate, updated: 0, failed: false };
+      const { store, adapter } = await this.contextService.resolveSyncableStore(storeId);
+      const ids = [
+        ...new Set(rows.flatMap((row) => (row.platformSkuId ? [row.platformSkuId] : []))),
+      ];
+      if (adapter.fetchProductImages === undefined || ids.length === 0) {
+        this.logger.warn('platform order images unavailable', {
+          module: 'sync',
+          storeId,
+          orderId,
+          candidates,
+        });
+        return { candidates, wouldUpdate, updated: 0, failed: false };
+      }
+      const context = await this.contextService.buildStoreContext(store);
+      const images = await adapter.fetchProductImages(context, ids);
+      const updates = rows.flatMap((row) => {
+        const imageUrl = row.platformSkuId === null ? null : images.get(row.platformSkuId);
+        return imageUrl ? [{ orderItemId: row.id, imageUrl }] : [];
+      });
+      wouldUpdate = updates.length;
+      if (wouldUpdate < candidates) {
+        this.logger.warn('platform order images missing', {
+          module: 'sync',
+          storeId,
+          orderId,
+          missingCount: candidates - wouldUpdate,
+        });
+      }
+      const updated =
+        dryRun || updates.length === 0
+          ? 0
+          : await this.orderService.savePlatformImages(storeId, updates, SYSTEM_OPERATOR);
+      return { candidates, wouldUpdate, updated, failed: false };
+    } catch (error: unknown) {
+      // Do not echo URLs, credentials, raw responses or arbitrary error messages.
+      this.logger.warn('platform order image enrichment failed', {
+        module: 'sync',
+        storeId,
+        orderId,
+        code: error instanceof DomainError ? error.code : 'IMAGE_ENRICHMENT_FAILED',
+      });
+      return { candidates, wouldUpdate, updated: 0, failed: true };
+    }
+  }
+
   private async run(syncJob: SyncJobEntity): Promise<OrderSyncOutcome> {
     const { store, adapter } = await this.contextService.resolveSyncableStore(syncJob.storeId);
     const context = await this.contextService.buildStoreContext(store);
@@ -194,6 +251,8 @@ export class OrderSyncService {
     };
     try {
       const result = await this.ingestionService.ingest(input, SYSTEM_OPERATOR);
+      // Best-effort after commit; both polling and webhook share this path.
+      await this.enrichPlatformImages(storeId, result.orderId);
       if (result.alreadyIngested) {
         // Sprint 9 T1: a known order is compared-and-updated instead of a
         // blind skip - status/deadline/rawData facts, platform_status_history,

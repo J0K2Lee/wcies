@@ -111,11 +111,12 @@ export class OzonClient {
     auth: OzonAuth,
     storeId: string,
     offerIds: readonly string[],
+    skuIds?: readonly number[],
   ): Promise<OzonProductInfoListResponse> {
     return this.request<OzonProductInfoListResponse>(auth, {
       endpoint: '/v3/product/info/list',
       storeId,
-      body: { offer_id: [...offerIds] },
+      body: skuIds === undefined ? { offer_id: [...offerIds] } : { sku: [...skuIds] },
     });
   }
 

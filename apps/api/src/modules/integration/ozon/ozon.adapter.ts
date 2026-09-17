@@ -16,6 +16,7 @@ import {
   mapRfbsReturn,
   mapWebhookPayload,
 } from './ozon.mapper';
+import { mapProductImages } from './ozon-product-image.mapper';
 import { StoreCredentialMalformedError } from '../integration.errors';
 import {
   OzonProductAttributesResponse,
@@ -62,6 +63,30 @@ export class OzonAdapter implements PlatformAdapter {
       parseAuth(context.credential, context.storeId),
       context.storeId,
     );
+  }
+
+  async fetchProductImages(
+    context: StoreContext,
+    platformSkuIds: readonly string[],
+  ): Promise<ReadonlyMap<string, string | null>> {
+    const ids = [...new Set(platformSkuIds)];
+    const result = new Map<string, string | null>(ids.map((id) => [id, null]));
+    if (ids.length === 0) return result;
+    // Avoid rounding int64 identifiers: unsupported unsafe numbers stay absent.
+    const valid = ids.filter((id) => /^[1-9]\d*$/.test(id) && Number.isSafeInteger(Number(id)));
+    const auth = parseAuth(context.credential, context.storeId);
+    for (let start = 0; start < valid.length; start += PRODUCT_INFO_BATCH) {
+      const batch = valid.slice(start, start + PRODUCT_INFO_BATCH);
+      const response = await this.client.productInfoList(
+        auth,
+        context.storeId,
+        [],
+        batch.map(Number),
+      );
+      const images = mapProductImages(response, context.storeId);
+      for (const id of batch) result.set(id, images.get(id) ?? null);
+    }
+    return result;
   }
 
   async fetchListings(

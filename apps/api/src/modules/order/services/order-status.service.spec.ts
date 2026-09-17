@@ -26,6 +26,7 @@ function makeItem(
     quantity: '1.000',
     unitPrice: null,
     totalPrice: null,
+    platformImageUrl: null,
     fulfillmentStatus,
     mappingStatus,
     reservationId: null,

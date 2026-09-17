@@ -67,6 +67,17 @@ Request：`{offer_id: string[]}`（也接受 `product_id[]` / `sku[]`）；Respo
 用于补充 `name`（标题）与 `sku`（OZON SKU id）。每批 100（保守值；官方上限未在本规范中找到明确数字，**未验证**）。
 实测：按 offer_id 精确匹配，1324 个 offer 全部返回；offer_id 含 CJK/特殊字符可正常匹配。
 
+#### 未映射订单行图片（T5，验证日期 2026-09-17）
+
+- 依据本地英文规范 `v3GetProductInfoListResponseItem`：`primary_image: string[]`、`images: string[]`。
+- 复用现有 client 的同一端点，以订单 `platformSkuId` 作为 `sku[]`（数字）读取，店铺内去重、100/批；不使用 offer_id 猜 SKU 映射。
+- 纯 mapper 取 `primary_image[0]`，缺失/空/非法 URL 则取 `images[0]`，仍不可用则 null。只接受无 userinfo 的 HTTP(S) URL，不下载、不抓网页、不探测 CDN。
+- 无法安全转换的 int64 SKU 不舍入、不请求，保持无图；响应重复 SKU 或结构错误拒绝猜测匹配。
+- 轮询与 webhook 共同在订单摄入提交后做 best-effort 富化，仅处理 `sku_id IS NULL AND platform_image_url IS NULL` 的行。失败/缺图 warn，不影响同步结果；重复摄入可重试缺图。
+- 通过 OrderService 公开接口保存平台直链；写入同时校验店铺、仍未映射、仍无图，避免覆盖并发映射或回填。映射后仅展示内部 SKU 主图。
+- 订单列表展开/右侧预览复用详情接口的 `imageUrl` / `imageSource`；列表汇总接口没有商品行，不新增重复图片事实。
+- 开发历史回填：`scripts/backfill-order-platform-images.ts`，先 build API；默认 dry-run 仍通过真实 adapter 只读取图，输出 candidates/wouldUpdate/updated/failed。必须显式 development/test、localhost/127.0.0.1 的 `wcies_dev`；dry-run 数据库连接额外只读且不启动 worker。`--apply --backup-confirmed` 只在先备份并审查 dry-run 后手工执行，不调用平台写 API。
+
 ### 字段映射（Mapper）
 
 | OZON | WCIES |

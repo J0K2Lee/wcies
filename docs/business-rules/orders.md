@@ -159,6 +159,8 @@ FAILED    无法解析（skuId = NULL，禁止猜测 SKU）
 
 映射失败行创建 `ORDER_SKU_MAPPING_FAILED` 异常，不阻塞其他行继续 Reservation。
 
+未映射行可展示同步时保存的公开平台直链图（`platform_image_url`）；映射后以内部 SKU 主图为准，即使内部无图也不回退平台图。响应 `imageSource` 为 `INTERNAL` / `PLATFORM` / null（无图）。图片富化失败或平台无图只记 warn，不改变摄入结果、库存、映射或订单状态（T5，2026-09-17）。
+
 ---
 
 # 7. Order ERP 状态机

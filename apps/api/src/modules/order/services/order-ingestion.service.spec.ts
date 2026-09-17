@@ -51,6 +51,7 @@ function makeItem(
     quantity: '2.000',
     unitPrice: null,
     totalPrice: null,
+    platformImageUrl: null,
     fulfillmentStatus: 'PENDING',
     mappingStatus: 'PENDING',
     reservationId: null,

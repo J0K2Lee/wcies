@@ -45,6 +45,10 @@ export class OrderItemEntity {
   @Column({ type: 'varchar', length: 255, name: 'offer_id', nullable: true })
   offerId!: string | null;
 
+  /** Public platform CDN URL; display-only, never an internal SKU identity. */
+  @Column({ type: 'text', name: 'platform_image_url', nullable: true })
+  platformImageUrl: string | null = null;
+
   @Column({ type: 'uuid', name: 'listing_sku_id', nullable: true })
   listingSkuId!: string | null;
 
