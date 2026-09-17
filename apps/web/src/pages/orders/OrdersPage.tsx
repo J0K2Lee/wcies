@@ -563,6 +563,113 @@ export function OrdersPage() {
   );
   const railDetail = selectedId !== null ? detailQuery.data?.data : undefined;
 
+  /**
+   * 行内展开（用户指示 2026-09-17）：选中行即展开，分行显示订单 SKU——
+   * 主图组（Image.PreviewGroup 点击放大翻看）、offer_id、数量、单价、小计。
+   * 数据复用右栏已共享的 detail 查询（§68），展开不产生额外请求。
+   */
+  const expandedItemsColumns = (currency: string | null | undefined) => [
+    {
+      title: '主图',
+      key: 'image',
+      width: 64,
+      render: (_: unknown, row: OrderItem) =>
+        row.imageUrl === null ? (
+          <div
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 6,
+              background: colors.neutralBg,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: colors.textTertiary,
+              fontSize: 11,
+            }}
+          >
+            无图
+          </div>
+        ) : (
+          <Image
+            src={row.imageUrl}
+            width={44}
+            height={44}
+            style={{ objectFit: 'cover', borderRadius: 6, cursor: 'zoom-in' }}
+          />
+        ),
+    },
+    {
+      title: 'SKU',
+      key: 'sku',
+      render: (_: unknown, row: OrderItem) =>
+        row.skuId === null ? (
+          <div>
+            <StatusBadge
+              tone="purple"
+              label="无法映射"
+              hint="缺少 SKU 映射，去 SKU 映射补齐后重试"
+            />
+            <div style={{ fontSize: 12, color: colors.textTertiary, marginTop: 2 }}>
+              {row.platformSkuId ?? row.sellerSku ?? `第 ${row.lineNo} 行`}
+            </div>
+          </div>
+        ) : (
+          <div>
+            <div style={{ fontWeight: 550 }}>{row.skuCode}</div>
+            <div style={{ fontSize: 12.5, color: colors.textSecondary }}>{row.skuName}</div>
+          </div>
+        ),
+    },
+    {
+      title: 'Offer ID',
+      key: 'offerId',
+      width: 170,
+      render: (_: unknown, row: OrderItem) => (
+        <span style={{ fontSize: 12.5, wordBreak: 'break-all' as const }}>
+          {row.offerId ?? '—'}
+        </span>
+      ),
+    },
+    {
+      title: '数量',
+      dataIndex: 'quantity',
+      key: 'quantity',
+      width: 70,
+      align: 'right' as const,
+      render: (value: string) => Number(value),
+    },
+    {
+      title: '单价',
+      dataIndex: 'unitPrice',
+      key: 'unitPrice',
+      width: 110,
+      align: 'right' as const,
+      render: (value: string | null) => fmtMoney(value, currency),
+    },
+    {
+      title: '小计',
+      dataIndex: 'totalPrice',
+      key: 'totalPrice',
+      width: 110,
+      align: 'right' as const,
+      render: (value: string | null) => fmtMoney(value, currency),
+    },
+    {
+      title: '履约状态',
+      dataIndex: 'fulfillmentStatus',
+      key: 'fulfillmentStatus',
+      width: 110,
+      render: (value: string) => (
+        <StatusBadge
+          tone={FULFILLMENT_STATUS_META[value]?.tone ?? 'neutral'}
+          label={FULFILLMENT_STATUS_META[value]?.label ?? value}
+          showDot={false}
+        />
+      ),
+    },
+  ];
+
   /** 快速建档：按订单行标识反查商品链接（storeId 来自列表行，单击选中即有）。 */
   const openQuickOnboard = useCallback(
     (item: OrderItem, storeId: string) => {
@@ -640,8 +747,8 @@ export function OrdersPage() {
       defaultCollapsed: true,
       header: (
         <EntitySummary
-          title={selectedRow.orderNo}
-          subtitle={null}
+          title={selectedRow.platformOrderId}
+          subtitle={`内部单号 ${selectedRow.orderNo}`}
           badge={
             <StatusBadge
               tone={statusMeta.tone}
@@ -824,7 +931,7 @@ export function OrdersPage() {
                 onClick={() => {
                   // 取消订单 = L2：modal.confirm + danger ok。
                   modal.confirm({
-                    title: `取消订单 ${selectedRow.orderNo}？`,
+                    title: `取消订单 ${selectedRow.platformOrderId}？`,
                     content: '已占用行将释放库存；已拣货行将创建拦截任务（不自动恢复库存）。',
                     okText: '取消订单',
                     okButtonProps: { danger: true },
@@ -1129,6 +1236,38 @@ export function OrdersPage() {
             showTotal: (total) => `共 ${total} 单`,
             onChange: setPage,
           }}
+          expandable={{
+            // 选中即展开（用户指示 2026-09-17）：行点击选择驱动展开/收起，
+            // 不显示独立展开列；内容复用 railDetail（已缓存详情）。
+            expandedRowKeys: selectedId === null ? [] : [selectedId],
+            showExpandColumn: false,
+            expandedRowRender: (record: OrderListItem) => {
+              if (detailQuery.isLoading) {
+                return (
+                  <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+                    商品明细加载中…
+                  </span>
+                );
+              }
+              if (railDetail === undefined || railDetail.id !== record.id) {
+                return (
+                  <span style={{ fontSize: 12.5, color: colors.textTertiary }}>暂无商品明细</span>
+                );
+              }
+              return (
+                <Image.PreviewGroup>
+                  <DataTable<OrderItem>
+                    size="small"
+                    rowKey="id"
+                    dataSource={railDetail.items}
+                    pagination={false}
+                    emptyTitle="无商品行"
+                    columns={expandedItemsColumns(record.currency)}
+                  />
+                </Image.PreviewGroup>
+              );
+            },
+          }}
           onRow={(record) => ({
             onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
             onDoubleClick: () => setDetailId(record.id),
@@ -1140,7 +1279,19 @@ export function OrdersPage() {
           emptyTitle="暂无订单"
           emptyDescription="当前筛选下没有订单，可摄入测试订单验证流程。"
           columns={[
-            { title: '订单号', dataIndex: 'orderNo', key: 'orderNo', width: 130 },
+            {
+              title: '订单号',
+              key: 'platformOrderId',
+              width: 170,
+              render: (_: unknown, row: OrderListItem) => (
+                <div>
+                  <div style={{ fontWeight: 550, wordBreak: 'break-all' }}>
+                    {row.platformOrderId}
+                  </div>
+                  <div style={{ fontSize: 12, color: colors.textTertiary }}>{row.orderNo}</div>
+                </div>
+              ),
+            },
             {
               title: '平台 / 店铺',
               key: 'platform',
@@ -1273,7 +1424,7 @@ export function OrdersPage() {
         size={880}
         title={
           detail !== undefined && (
-            <span style={{ fontSize: 16, fontWeight: 650 }}>{detail.orderNo}</span>
+            <span style={{ fontSize: 16, fontWeight: 650 }}>{detail.platformOrderId}</span>
           )
         }
         extra={
@@ -1309,6 +1460,7 @@ export function OrdersPage() {
               <InfoGrid
                 items={[
                   { label: '平台订单号', children: detail.platformOrderId },
+                  { label: '内部单号', children: detail.orderNo },
                   { label: '履约模式', children: detail.fulfillmentMode ?? '—' },
                   { label: '币种', children: detail.currency ?? '—' },
                   { label: '下单时间', children: fmtDateTime(detail.orderedAt) },
@@ -1642,7 +1794,7 @@ export function OrdersPage() {
       </Modal>
 
       <Modal
-        title={`标记外部履约：${externalTarget?.orderNo ?? ''}`}
+        title={`标记外部履约：${externalTarget?.platformOrderId ?? ''}`}
         open={externalTarget !== null}
         onCancel={() => setExternalTarget(null)}
         onOk={() => {
