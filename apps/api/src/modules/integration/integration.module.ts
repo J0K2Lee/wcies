@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { PlatformAdapterRegistry } from './platform-adapter.registry';
 import { OzonModule } from './ozon/ozon.module';
+import { WildberriesModule } from './wildberries/wb.module';
 
 /**
  * Platform integration root (Sprint 5 task §7).
@@ -11,7 +12,7 @@ import { OzonModule } from './ozon/ozon.module';
  */
 @Global()
 @Module({
-  imports: [OzonModule],
+  imports: [OzonModule, WildberriesModule],
   providers: [PlatformAdapterRegistry],
   exports: [PlatformAdapterRegistry],
 })
