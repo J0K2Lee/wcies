@@ -1,0 +1,201 @@
+import { describe, expect, it } from 'vitest';
+import {
+  mapOfferMappingToListing,
+  mapOrderToOrder,
+  mapReturnToReturn,
+  mapWebhookPayload,
+  yxFulfillmentModeOf,
+  yxStageOf,
+  YandexMappingError,
+} from './yandex.mapper';
+import { YxOrder, YxOfferMapping, YxReturnItem } from './types/api.types';
+
+/**
+ * Yandex mapper unit tests: status/substatus vocabulary, programType
+ * fulfillment facts, identifier rules (offerId feeds sellerSku - Decision
+ * 0016) and webhook notification classification.
+ */
+
+describe('yxStageOf (docs §3 vocabulary)', () => {
+  it('maps the verified status set onto logistics stages', () => {
+    expect(yxStageOf('PLACING', null)).toBe('AWAITING_SHIPMENT');
+    expect(yxStageOf('RESERVED', null)).toBe('AWAITING_SHIPMENT');
+    expect(yxStageOf('UNPAID', null)).toBe('AWAITING_SHIPMENT');
+    expect(yxStageOf('PROCESSING', 'READY_TO_SHIP')).toBe('AWAITING_SHIPMENT');
+    expect(yxStageOf('PROCESSING', 'SHIPPED')).toBe('IN_TRANSIT');
+    expect(yxStageOf('DELIVERY', null)).toBe('IN_TRANSIT');
+    expect(yxStageOf('PICKUP', null)).toBe('IN_TRANSIT');
+    expect(yxStageOf('DELIVERED', null)).toBe('DELIVERED');
+    expect(yxStageOf('RETURNED', null)).toBe('DELIVERED');
+    expect(yxStageOf('CANCELLED', 'USER_NOT_PAID')).toBe('CANCELLED');
+  });
+
+  it('leaves ambiguous statuses unclassified instead of guessing', () => {
+    expect(yxStageOf('PENDING', null)).toBeNull();
+    expect(yxStageOf('UNKNOWN', null)).toBeNull();
+    expect(yxStageOf(null, null)).toBeNull();
+  });
+});
+
+describe('yxFulfillmentModeOf (programType fact)', () => {
+  it('maps FBY to external fulfillment and FBS/DBS to seller fulfillment', () => {
+    expect(yxFulfillmentModeOf('FBY')).toBe('FBY');
+    expect(yxFulfillmentModeOf('FBS')).toBe('FBS');
+    expect(yxFulfillmentModeOf('DBS')).toBe('FBS');
+  });
+
+  it('refuses to guess unverified programs', () => {
+    expect(yxFulfillmentModeOf('EXPRESS')).toBeNull();
+    expect(yxFulfillmentModeOf('LAAS')).toBeNull();
+    expect(yxFulfillmentModeOf(undefined)).toBeNull();
+  });
+});
+
+describe('mapOrderToOrder', () => {
+  const base: YxOrder = {
+    orderId: 5510001,
+    campaignId: 1001,
+    programType: 'FBS',
+    status: 'PROCESSING',
+    substatus: 'READY_TO_SHIP',
+    creationDate: '2026-09-16T09:30:00Z',
+    updateDate: '2026-09-16T10:00:00Z',
+    items: [
+      { offerId: 'SKU-A', count: 2 },
+      { offerId: 'SKU-B', count: 1 },
+    ],
+    delivery: { type: 'DELIVERY', shipment: { shipmentDate: '2026-09-18T18:00:00Z' } },
+  };
+
+  it('maps identity, fulfillment fact and sellerSku-based lines', () => {
+    const order = mapOrderToOrder(base);
+    expect(order.platformOrderId).toBe('5510001');
+    expect(order.platformStatus).toBe('PROCESSING');
+    expect(order.platformStage).toBe('AWAITING_SHIPMENT');
+    expect(order.platformCancelled).toBe(false);
+    expect(order.fulfillmentMode).toBe('FBS');
+    expect(order.shipmentDeadline?.toISOString()).toBe('2026-09-18T18:00:00.000Z');
+    expect(order.items).toHaveLength(2);
+    expect(order.items[0]).toMatchObject({
+      platformSkuId: null,
+      offerId: 'SKU-A',
+      sellerSku: 'SKU-A',
+      quantity: '2',
+      unitPrice: null,
+    });
+  });
+
+  it('treats CANCELLED as platform cancellation', () => {
+    const order = mapOrderToOrder({ ...base, status: 'CANCELLED', substatus: 'USER_NOT_PAID' });
+    expect(order.platformCancelled).toBe(true);
+    expect(order.platformStage).toBe('CANCELLED');
+  });
+
+  it('rejects orders without the business key / status / items', () => {
+    expect(() => mapOrderToOrder({ ...base, orderId: undefined })).toThrow(YandexMappingError);
+    expect(() => mapOrderToOrder({ ...base, status: undefined })).toThrow(YandexMappingError);
+    expect(() => mapOrderToOrder({ ...base, items: [] })).toThrow(YandexMappingError);
+    expect(() =>
+      mapOrderToOrder({
+        ...base,
+        items: [{ count: 1 }],
+      }),
+    ).toThrow(YandexMappingError);
+  });
+});
+
+describe('mapOfferMappingToListing', () => {
+  it('uses marketSku as platform identity and campaign publish state', () => {
+    const entry: YxOfferMapping = {
+      offer: {
+        offerId: 'SKU-A',
+        name: 'Тестовый товар',
+        campaigns: [{ campaignId: 1001, status: 'PUBLISHED' }],
+      },
+      mapping: { marketSku: 987654, marketCategoryName: 'Test' },
+    };
+    const listing = mapOfferMappingToListing(entry, '1001');
+    expect(listing.platformProductId).toBe('987654');
+    expect(listing.platformStatus).toBe('PUBLISHED');
+    expect(listing.skus[0]).toMatchObject({
+      platformSkuId: '987654',
+      offerId: 'SKU-A',
+      sellerSku: 'SKU-A',
+    });
+  });
+
+  it('falls back to offerId identity for unmapped offers', () => {
+    const entry: YxOfferMapping = { offer: { offerId: 'SKU-RAW' } };
+    const listing = mapOfferMappingToListing(entry, '1001');
+    expect(listing.platformProductId).toBe('SKU-RAW');
+    expect(listing.skus[0]?.platformSkuId).toBeNull();
+    expect(listing.skus[0]?.sellerSku).toBe('SKU-RAW');
+  });
+
+  it('rejects entries without an offerId', () => {
+    expect(() => mapOfferMappingToListing({ offer: {} }, '1001')).toThrow(YandexMappingError);
+  });
+});
+
+describe('mapReturnToReturn', () => {
+  it('maps the return facts with tolerant degradation', () => {
+    const item: YxReturnItem = {
+      id: 90001,
+      orderId: 5510001,
+      refundStatus: 'REFUNDED',
+      shipmentStatus: 'READY_FOR_REFUND',
+      createdAt: '2026-09-17T00:00:00Z',
+      items: [{ marketSku: 987654, shopSku: 'SKU-A', count: 1 }],
+    };
+    const record = mapReturnToReturn(item);
+    expect(record.platformReturnId).toBe('90001');
+    expect(record.platformOrderId).toBe('5510001');
+    expect(record.state).toBe('READY_FOR_REFUND');
+    expect(record.refundState).toBe('REFUNDED');
+    expect(record.platformSkuId).toBe('987654');
+    expect(record.offerId).toBe('SKU-A');
+  });
+
+  it('rejects records without an id', () => {
+    expect(() => mapReturnToReturn({ refundStatus: 'REFUNDED' })).toThrow(YandexMappingError);
+  });
+});
+
+describe('mapWebhookPayload (docs §4 vocabulary)', () => {
+  it('classifies order events with the orderId hint', () => {
+    const events = mapWebhookPayload({
+      notificationType: 'ORDER_STATUS_UPDATED',
+      campaignId: 1001,
+      orderId: 5510001,
+      status: 'PROCESSING',
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.eventType).toBe('POSTING_STATE_CHANGED');
+    expect(events[0]?.platformOrderIds).toEqual(['5510001']);
+  });
+
+  it('maps creation / cancellation to their contract types', () => {
+    expect(mapWebhookPayload({ notificationType: 'ORDER_CREATED', orderId: 1 })[0]?.eventType).toBe(
+      'NEW_POSTING',
+    );
+    expect(
+      mapWebhookPayload({ notificationType: 'ORDER_CANCELLED', orderId: 1 })[0]?.eventType,
+    ).toBe('POSTING_CANCELLED');
+  });
+
+  it('records PING and return events without order actions', () => {
+    expect(mapWebhookPayload({ notificationType: 'PING' })[0]?.eventType).toBe('PING');
+    const returnEvent = mapWebhookPayload({
+      notificationType: 'ORDER_RETURN_CREATED',
+      campaignId: 1001,
+      orderId: 5,
+    })[0];
+    expect(returnEvent?.eventType).toBe('UNKNOWN');
+    expect(returnEvent?.platformOrderIds).toEqual([]);
+  });
+
+  it('rejects payloads without notificationType', () => {
+    expect(() => mapWebhookPayload({ orderId: 1 })).toThrow(YandexMappingError);
+    expect(() => mapWebhookPayload('nope')).toThrow(YandexMappingError);
+  });
+});
