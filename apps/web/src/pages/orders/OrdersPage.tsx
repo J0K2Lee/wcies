@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   App as AntdApp,
   Button,
@@ -9,6 +9,7 @@ import {
   InputNumber,
   Modal,
   Select,
+  Switch,
   Tabs,
   Timeline,
   Tooltip,
@@ -27,6 +28,7 @@ import {
   ERP_STATUS_META,
   FilterChips,
   FULFILLMENT_STATUS_META,
+  FULFILLMENT_MODE_LABEL,
   FilterBar,
   InfoGrid,
   PageHeader,
@@ -86,6 +88,11 @@ interface OrderItem {
   unitPrice: string | null;
   totalPrice: string | null;
   imageUrl: string | null;
+  /**
+   * 主图来源（T8 建议#4）：INTERNAL = 内部 SKU 主图；PLATFORM = 未映射行
+   * 回退的平台公开图片直链。用于「平台图」角标区分，与内部主图不混淆。
+   */
+  imageSource: 'INTERNAL' | 'PLATFORM' | null;
   fulfillmentStatus: string;
   mappingStatus: string;
   /** Derived procurement state (purchase.md §3.5); NULL for unmapped lines. */
@@ -271,6 +278,24 @@ const PROCUREMENT_META: Record<string, { tone: 'danger' | 'info' | 'success'; la
   ARRIVED: { tone: 'success', label: '已到货' },
 };
 
+/**
+ * 履约模式 chip 文案（T8 建议#1）：FBS → FBS、RFBS → rFBS、FBP → FBP，
+ * 其余（含未知新值）原样展示；null 不展示。共享包的 FULFILLMENT_MODE_LABEL
+ * 是「自管仓 · FBS」完整文案，列表内用短 chip。
+ */
+function fulfillmentModeChip(mode: string | null): { short: string; hint: string } | null {
+  if (mode === null) {
+    return null;
+  }
+  if (mode === 'RFBS' || mode.endsWith('_RFBS')) {
+    return { short: 'rFBS', hint: mode };
+  }
+  if (mode.includes('_')) {
+    return { short: mode.slice(mode.lastIndexOf('_') + 1), hint: mode };
+  }
+  return { short: FULFILLMENT_MODE_LABEL[mode] ?? mode, hint: mode };
+}
+
 function fmtDateTime(value: string): string {
   return new Date(value).toLocaleString('zh-CN', { hour12: false });
 }
@@ -331,7 +356,7 @@ function deadlineBadge(deadline: string | null): {
 }
 
 export function OrdersPage() {
-  const { message, modal } = AntdApp.useApp();
+  const { message, modal, notification } = AntdApp.useApp();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
@@ -353,6 +378,9 @@ export function OrdersPage() {
   const [externalForm] = Form.useForm<{ reason: string }>();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [showImages, setShowImages] = useState(false);
+  const [arrivedRetryId, setArrivedRetryId] = useState<string | null>(null);
+  const arrivedRetryLock = useRef(false);
   const [ingestOpen, setIngestOpen] = useState(false);
   const [ingestJson, setIngestJson] = useState(
     JSON.stringify(
@@ -493,6 +521,101 @@ export function OrdersPage() {
     onError: (error: Error) => message.error(`重试失败：${error.message}`),
   });
 
+  // Reuse the existing detail query and its exact key; never retry from list counts.
+  const retryArrivedItems = async (orderId: string) => {
+    try {
+      const queryKey = ['order-detail', orderId];
+      await queryClient.refetchQueries({ queryKey, exact: true }, { throwOnError: true });
+      const current = queryClient.getQueryData<Envelope<OrderDetail>>(queryKey)?.data;
+      if (current === undefined || current.id !== orderId) {
+        message.error('订单明细不可用，请重新展开订单后重试');
+        return;
+      }
+      const items = current.items.filter(
+        (item) => item.fulfillmentStatus === 'BACKORDERED' && item.procurementState === 'ARRIVED',
+      );
+      let succeeded = 0;
+      let backordered = 0;
+      const failures: Array<{ id: string; label: string; message: string }> = [];
+      for (const item of items) {
+        try {
+          const result = await apiPost<{ reserved: boolean; fulfillmentStatus: string }>(
+            '/api/v1/orders/items/{itemId}/retry-allocation',
+            {},
+            { itemId: item.id },
+          );
+          if (result.reserved) {
+            succeeded += 1;
+          } else if (result.fulfillmentStatus === 'BACKORDERED') {
+            backordered += 1;
+          } else {
+            failures.push({
+              id: item.id,
+              label: `第 ${item.lineNo} 行`,
+              message: '未完成分配，请刷新明细核实当前状态',
+            });
+          }
+        } catch (error: unknown) {
+          failures.push({
+            id: item.id,
+            label: `第 ${item.lineNo} 行（${item.skuCode || item.offerId || item.id}）`,
+            message: error instanceof Error ? error.message : '请求失败，请稍后重试',
+          });
+        }
+      }
+      notification.open({
+        type: failures.length > 0 ? 'error' : backordered > 0 ? 'warning' : 'success',
+        title: `成功 ${succeeded} / 仍缺货 ${backordered} / 失败 ${failures.length}`,
+        description: (
+          <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+            <div>
+              订单 {current.platformOrderId}
+              {items.length === 0 ? '：当前没有已到货的缺货行，无需重试' : ''}
+            </div>
+            {failures.map((failure) => (
+              <div key={failure.id}>
+                {failure.label}：{failure.message}
+              </div>
+            ))}
+          </div>
+        ),
+        duration: failures.length > 0 ? 0 : 6,
+      });
+    } catch (error: unknown) {
+      message.error(`加载订单明细失败：${error instanceof Error ? error.message : '请稍后重试'}`);
+    } finally {
+      await Promise.all(
+        ['orders', 'orders-count', 'order-detail', 'exceptions'].map((key) =>
+          queryClient.invalidateQueries({ queryKey: [key] }),
+        ),
+      );
+    }
+  };
+
+  const confirmArrivedRetry = (row: OrderListItem) => {
+    if (arrivedRetryLock.current || retryMutation.isPending) {
+      return;
+    }
+    arrivedRetryLock.current = true;
+    setArrivedRetryId(row.id);
+    const dialog = modal.confirm({
+      title: '重新尝试分配',
+      content: `该订单有 ${row.backorderedArrivedCount} 行货已到货，对其缺货行重新尝试分配？`,
+      okText: '重新分配',
+      cancelText: '取消',
+      maskClosable: false,
+      keyboard: false,
+      onOk: async () => {
+        dialog.update({ cancelButtonProps: { disabled: true }, closable: false });
+        await retryArrivedItems(row.id);
+      },
+      afterClose: () => {
+        arrivedRetryLock.current = false;
+        setArrivedRetryId(null);
+      },
+    });
+  };
+
   // ---- 快速建档（就地复用 SKU映射 的建档弹窗，不再跳转工作台） ----
   // 订单行只有平台标识：先在当前店铺反查所在商品链接（kw 命中变体级标识），
   // 再让共享弹窗按标识预选变体。
@@ -572,7 +695,7 @@ export function OrdersPage() {
     {
       title: '主图',
       key: 'image',
-      width: 64,
+      width: showImages ? 92 : 64,
       render: (_: unknown, row: OrderItem) =>
         row.imageUrl === null ? (
           <div
@@ -591,12 +714,20 @@ export function OrdersPage() {
             无图
           </div>
         ) : (
-          <Image
-            src={row.imageUrl}
-            width={44}
-            height={44}
-            style={{ objectFit: 'cover', borderRadius: 6, cursor: 'zoom-in' }}
-          />
+          <Tooltip title={row.imageSource === 'PLATFORM' ? '平台图' : undefined}>
+            <span style={{ display: 'inline-block' }}>
+              <Image
+                src={row.imageUrl}
+                width={showImages ? 72 : 44}
+                height={showImages ? 72 : 44}
+                style={{
+                  objectFit: showImages ? 'contain' : 'cover',
+                  borderRadius: 6,
+                  cursor: 'zoom-in',
+                }}
+              />
+            </span>
+          </Tooltip>
         ),
     },
     {
@@ -988,13 +1119,17 @@ export function OrdersPage() {
             无图
           </div>
         ) : (
-          <Image
-            src={row.imageUrl}
-            width={40}
-            height={40}
-            style={{ objectFit: 'cover', borderRadius: 6 }}
-            preview={{ mask: false }}
-          />
+          <Tooltip title={row.imageSource === 'PLATFORM' ? '平台图' : undefined}>
+            <span style={{ display: 'inline-block' }}>
+              <Image
+                src={row.imageUrl}
+                width={40}
+                height={40}
+                style={{ objectFit: 'cover', borderRadius: 6 }}
+                preview={{ mask: false }}
+              />
+            </span>
+          </Tooltip>
         ),
     },
     {
@@ -1255,16 +1390,29 @@ export function OrdersPage() {
                 );
               }
               return (
-                <Image.PreviewGroup>
-                  <DataTable<OrderItem>
-                    size="small"
-                    rowKey="id"
-                    dataSource={railDetail.items}
-                    pagination={false}
-                    emptyTitle="无商品行"
-                    columns={expandedItemsColumns(record.currency)}
-                  />
-                </Image.PreviewGroup>
+                <div onClick={(event) => event.stopPropagation()}>
+                  <div style={{ marginBottom: 8 }}>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <Switch
+                        size="small"
+                        checked={showImages}
+                        onChange={setShowImages}
+                        aria-label="显示图片"
+                      />
+                      显示图片
+                    </label>
+                  </div>
+                  <Image.PreviewGroup>
+                    <DataTable<OrderItem>
+                      size="small"
+                      rowKey="id"
+                      dataSource={railDetail.items}
+                      pagination={false}
+                      emptyTitle="无商品行"
+                      columns={expandedItemsColumns(record.currency)}
+                    />
+                  </Image.PreviewGroup>
+                </div>
               );
             },
           }}
@@ -1290,14 +1438,6 @@ export function OrdersPage() {
                   </div>
                   <div style={{ fontSize: 12, color: colors.textTertiary }}>{row.orderNo}</div>
                 </div>
-              ),
-            },
-            {
-              title: '平台 / 店铺',
-              key: 'platform',
-              width: 190,
-              render: (_: unknown, row: OrderListItem) => (
-                <PlatformTag code={row.platformCode} suffix={row.storeName} />
               ),
             },
             {
@@ -1341,11 +1481,28 @@ export function OrdersPage() {
                       <Tooltip
                         title={`缺货行中采购已到货 ${row.backorderedArrivedCount} 行，可「重新尝试分配」`}
                       >
-                        <StatusBadge
-                          tone="success"
-                          label={`已到货 ${row.backorderedArrivedCount}`}
-                          showDot={false}
-                        />
+                        {railDetail?.id === row.id && detailQuery.isSuccess ? (
+                          <Button
+                            size="small"
+                            loading={arrivedRetryId === row.id}
+                            disabled={arrivedRetryId !== null || retryMutation.isPending}
+                            style={{ color: colors.success }}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              confirmArrivedRetry(row);
+                            }}
+                            onDoubleClick={(event) => event.stopPropagation()}
+                          >
+                            已到货 {row.backorderedArrivedCount}
+                          </Button>
+                        ) : (
+                          <StatusBadge
+                            tone="success"
+                            label={`已到货 ${row.backorderedArrivedCount}`}
+                            hint="请先展开订单加载明细，再点击重新分配"
+                            showDot={false}
+                          />
+                        )}
                       </Tooltip>
                     )}
                     {row.reservedCount > 0 && (
@@ -1392,6 +1549,34 @@ export function OrdersPage() {
                   )}
                 </span>
               ),
+            },
+            {
+              title: '平台 / 店铺',
+              key: 'platform',
+              width: 190,
+              render: (_: unknown, row: OrderListItem) => {
+                const mode = fulfillmentModeChip(row.fulfillmentMode);
+                return (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      gap: 6,
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <PlatformTag code={row.platformCode} suffix={row.storeName} />
+                    {mode !== null && (
+                      <StatusBadge
+                        tone="neutral"
+                        label={mode.short}
+                        hint={mode.hint}
+                        showDot={false}
+                      />
+                    )}
+                  </span>
+                );
+              },
             },
             {
               title: '时限',
