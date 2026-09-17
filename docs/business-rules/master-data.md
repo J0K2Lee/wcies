@@ -73,7 +73,7 @@
 
 ## 6. 仓库 / 库位
 
-1. Warehouse Type：`SELF / PLATFORM / THIRD_PARTY / RETURN_TEMP`（无 VIRTUAL，无 Warehouse Group）。
+1. Warehouse Type：`SELF / SEMI_MANAGED / PLATFORM / THIRD_PARTY / RETURN_TEMP`（无 VIRTUAL，无 Warehouse Group）。SEMI_MANAGED（半托管，编码前缀 BT）2026-09-17 加入，对应 OZON FBP 模式。
 2. 库位唯一键：`warehouse_id + bin_code`；不同仓库允许相同 bin_code。
 3. Bin 表禁止 `sku_id` 列：SKU↔Bin 是 N:M，经库存记录关联（inventory.md §54）。
 4. 库位编码格式（2026-09-11 起，决策 0010）：`{仓库编码}-{货架}-{层}[-{位}]`，如 `ZG-01-A05-1`。货架号**至少补零两位**（保证字典序 = 实地行走顺序）；层号不补零；仓库编码前缀一并写入，使标签离仓后仍可辨认归属。编码写入后不可修改（`UpdateBinRequestDto` 不含 `binCode`）。
@@ -84,17 +84,39 @@
 9. 批量建位在插入前一次性校验**库内**重复编码并整体拒绝（409 + 冲突清单），不产生部分插入。库区筛选经 `GET /warehouses/:id/bins?zone=` 与 `GET /warehouses/:id/bins/zones`。
 10. Excel 导入（`master-data-import.handlers.ts`）是例外路径：它提供**完整 bin_code**，服务端按原样存入，不对描述列做规范化，避免与文件给定的编码不一致。
 
-## 7. 店仓绑定
+## 7. 仓库绑定平台仓库（2026-09-17 重构，取代店仓绑定）
 
-1. Store N:M Warehouse，通过 `store_warehouse_bindings`；禁止 `warehouse.store_id`。
-2. 履约模式规范值：`OZON_RFBS/OZON_FBS/OZON_FBO/OZON_FBP/WB_FBS/WB_FBW/YANDEX_FBS/YANDEX_FBY`（typed constant，数据库 VARCHAR）。
-   另有**一层仅用于展示的业务类别**（决策 `docs/decisions/0009`，不落库，由模式派生）：`自管仓 SELF_MANAGED = RFBS/FBS`、`半托管 SEMI_MANAGED = FBP`、`托管仓 MANAGED = FBO/FBW/FBY`。
-   存储值必须保持平台专属：`orders.md §4.6` 的"非 FBO 优先"由 `fulfillmentMode.includes('FBO')` 实现，改成通用枚举会使该冻结规则静默失效（AGENTS.md §97）。
-   新增平台时：常量表加值 + 类别映射加一行，前端自动生效。
-3. Service 层校验（不在数据库硬编码）：
-   - 履约模式前缀平台 === 店铺平台（WB 店铺 + OZON_FBO 拒绝，`STORE_WAREHOUSE_BINDING_INVALID`）；**前端下拉框按店铺平台过滤可选模式**；
-   - 仓库类型匹配：FBO/FBY/FBW → PLATFORM 仓；FBS/RFBS/FBP → SELF/THIRD_PARTY 仓。
-4. 平台履约语义只存在于 Binding/Adapter/常量，不得进入 Inventory Core（AGENTS.md §31）。
+> 本节由原「店仓绑定」重构而来（用户指示 2026-09-17）：绑定主体不再是
+> 店铺↔仓库，而是**物理仓库 ↔ 平台仓库**（如 OZON `warehouse_id
+> 1020005000770362`）。平台仓库永远归属某个店铺，因此同一物理仓库可通过
+> 多条绑定服务多个店铺的多平台仓库。
+
+1. 数据模型：`warehouse_platform_bindings`（`warehouse_id + store_id +
+   platform_warehouse_id + platform_warehouse_name + fulfillment_mode +
+   remark_name + priority + status`）。唯一键 `store_id +
+   platform_warehouse_id`——一个平台仓库至多映射到一个内部仓库。
+   旧表 `store_warehouse_bindings` 已移除（Migration
+   20260917_005/006：含平台仓库 ID 的旧绑定行已搬运，其余不迁移）。
+2. 履约模式规范值：`OZON_RFBS/OZON_FBS/OZON_FBO/OZON_FBP/WB_FBS/WB_FBW/
+   YANDEX_FBS/YANDEX_FBY`（typed constant，数据库 VARCHAR）。
+   业务类别仅用于展示（决策 0009，不落库）：`自管仓 SELF_MANAGED =
+   RFBS/FBS`、`半托管 SEMI_MANAGED = FBP`、`托管仓 MANAGED = FBO/FBW/FBY`。
+3. **仓库类型 ↔ 履约模式兼容**（Service 层校验，`WAREHOUSE_PLATFORM_BINDING_INVALID`）：
+   - 自管模式（rFBS/FBS）→ `SELF / THIRD_PARTY` 仓库；
+   - FBP → `SEMI_MANAGED`（半托管）仓库；
+   - FBO/FBW/FBY → `PLATFORM`（托管仓）仓库；
+   - 履约模式平台必须与店铺平台一致（WB 店铺 + OZON_FBO 拒绝）。
+4. **托管仓（PLATFORM）只能绑定一个平台仓库**（用户指示 2026-09-17）。
+5. 平台仓库目录实时查询平台 API（不落地缓存，绑定快照存表）：
+   - OZON：`/v2/warehouse/list`（is_rfbs 区分 rFBS/FBS）、
+     `/v1/fbp/warehouse/list`（FBP）、`/v1/warehouse/ozon/list`
+     （FBO，FULL_FILLMENT 过滤）；见 `docs/integrations/ozon.md`。
+   - 其它平台返回 `PLATFORM_WAREHOUSE_QUERY_UNSUPPORTED`。
+6. 订单摄入解析仓库：店铺 → ACTIVE 绑定（priority ASC，非 FBO 优先，
+   orders.md §4.6）→ 内部仓库。不再有 is_inventory_source 开关——
+   ACTIVE 绑定即库存来源候选。
+7. 平台履约语义只存在于 Binding/Adapter/常量，不得进入 Inventory Core
+   （AGENTS.md §31）。
 
 ## 8. Listing 与映射（AGENTS.md 冻结规则 §101）
 

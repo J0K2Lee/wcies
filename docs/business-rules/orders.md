@@ -72,7 +72,8 @@ referenceId   = orderItem.id
 ```
 
 5. 禁止 OrderModule 直接修改 `inventory_balances` / `reserved_qty`（AGENTS.md §10/§19）。
-6. 仓库选择：Sprint 3 使用该店铺 `store_warehouse_bindings` 中 `is_inventory_source = true` 的 ACTIVE 绑定里 `priority` 最小的仓库；同优先级时非 FBO 模式优先（FBO 平台仓库存由平台管理）；多仓决策属于未来 Shipment/Allocator 阶段。
+6. 仓库选择：Sprint 3 使用该店铺 `warehouse_platform_bindings`（仓库绑定平台仓库，2026-09-17 取代店仓绑定，master-data.md §7）中 ACTIVE 绑定里 `priority` 最小的仓库；同优先级时非 FBO 模式优先（FBO 平台仓库存由平台管理）；多仓决策属于未来 Shipment/Allocator 阶段。
+7. **外部履约不占库存**（用户指示 2026-09-17）：订单履约模式为 FBO/FBP（含短码及 WB_FBW/YANDEX_FBY，判定 `isExternalFulfillmentMode`）时，订单行映射成功后直接置 `EXTERNAL_FULFILLED`——不解析内部仓库、不创建 Reservation、不进入拣货流程；发货时限异常不评估。业务状态随平台事件自动流转（见 §7a.3）。
 
 ---
 
@@ -85,6 +86,26 @@ referenceId   = orderItem.id
 3. 创建 `ORDER_OUT_OF_STOCK` 异常。
 4. 禁止创建负库存；禁止自动取消平台订单。
 5. 其他库存充足的行正常 RESERVED，其 Reservation 保留。
+
+## 缺货口径（2026-09-17 修复）
+
+「缺货」的行级事实口径 = `mapping_status = 'MAPPED'` 且
+`fulfillment_status IN ('BACKORDERED','PENDING')`——与订单 rollup
+「PENDING 视为缺货」一致。缺货筛选（goodsState=BACKORDERED）、自动重新
+分配、待采购管线均按此口径。摄入时「无法分配仓库」的已映射行直接置
+BACKORDERED（不再停留 PENDING）；历史卡行由 Migration 20260917_007 归位。
+
+## 自动重新分配（用户指示 2026-09-17）
+
+任何入库类库存流水（`INITIAL_STOCK / RECEIVE / TRANSFER_IN`）产生后，
+`OrderAutoReallocationService`（经 `InventoryStockListenerRegistry` 进程内
+注册，无模块环）自动对该 SKU「已映射但未持有库存」的行按先进先出重试预留：
+
+1. 复用 `allocateMappedItem`（幂等键 `ORDER_RESERVE:<orderItemId>`，并发安全）。
+2. 成功：行转 RESERVED、关闭该行 OPEN `ORDER_OUT_OF_STOCK` 异常、重算 rollup。
+3. 失败（仍不足）：保持缺货，不重复刷异常。
+4. 失败自吞：重分配失败不得影响库存主流程（AGENTS.md §10）。
+5. 人工重试（含「已到货」批量重试）继续走 `POST /orders/items/:itemId/retry-allocation`。
 
 ## Backorder 重试
 
@@ -139,12 +160,14 @@ FAILED
 # 6. OrderItem 库存履约状态
 
 ```text
-PENDING        已保存，尚未尝试分配
-RESERVED       已创建 InventoryReservation
-BACKORDERED    映射成功但库存不足
-PICKED         已完成拣货（pickedQty == requiredQty）
-SHIPPED        已随 Shipment 正式出库（Sprint 4；该行全部数量已离开库存）
-RELEASED       订单取消后的取消终态
+PENDING             已保存，尚未尝试分配
+RESERVED            已创建 InventoryReservation
+BACKORDERED         映射成功但库存不足
+PICKED              已完成拣货（pickedQty == requiredQty）
+SHIPPED             已随 Shipment 正式出库（Sprint 4；该行全部数量已离开库存）
+RELEASED            订单取消后的取消终态
+EXTERNAL_FULFILLED  外部履约（2026-09-17）：FBO/FBP 等平台仓库持货发货的行，
+                    不占内部库存、不拣货；业务状态随平台事件流转（§7a.3）
 ```
 
 严格区分 Order ERP 状态与 OrderItem 履约状态；行状态是库存事实，订单状态是业务汇总。
@@ -184,6 +207,9 @@ EXCEPTION
 不包含 DELIVERED / RETURNED（后续 Sprint 再加入）。
 
 ## 汇总规则（清晰模型）
+
+EXTERNAL_FULFILLED 行不属于内部可履约行（与 RELEASED 同样被 rollup 排除）：
+全部行 EXTERNAL_FULFILLED 的订单保持当前状态，等平台事件推进（下条）。
 
 任一订单行履约状态变化后，按以下优先级重算订单状态：
 
@@ -230,6 +256,12 @@ EXCEPTION
 ORDER_SYNC 再遇到已存在的订单（窗口重叠再投递，或定向回读刷新）时，
 从「跳过」改为「对比更新」：
 
+0. **外部履约自动流转**（用户指示 2026-09-17）：订单履约模式为 FBO/FBP
+   （`isExternalFulfillmentMode`，兼容长短两种存储形态）且平台阶段进入
+   `IN_TRANSIT / DELIVERED`、ERP 尚未 SHIPPED/CANCELLED 时，订单经
+   `OrderStatusService.transition` 自动转 `SHIPPED`（历史原因
+   「平台履约流转：平台仓库已发货」）；不评估发货时限异常。此类订单的履约
+   流程在平台侧完成，不阻塞、不依赖内部发货单。
 1. **只更新平台事实字段**：`platform_status` / `shipment_deadline` / `raw_data`。
    绝不直接改 `erp_status`（§1）。平台未提供的字段（NULL 输入）保持库内原值，
    历史上 `platform_status IS NULL` 的行不得被「看起来空」而清理或改写。

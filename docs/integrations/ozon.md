@@ -29,6 +29,7 @@
 | 真实凭证实测 | 真实 Smoke Test（只读：凭证验证 + Listing + 订单拉取 + 手动同步 + 幂等复测），单店 | 2026-09-09 |
 | `/v1/description-category/tree`（ZH_HANS + RU） | 真实 API 冒烟（只读），单店（Sprint 8.5 T0） | 2026-09-14 |
 | `/v4/product/info/attributes` | 真实 API 冒烟（只读），单店（Sprint 8.5 T0） | 2026-09-14 |
+| **仓库目录三端点**：`/v2/warehouse/list`（is_rfbs 区分 rFBS/FBS）、`/v1/fbp/warehouse/list`（FBP 合作仓）、`/v1/warehouse/ozon/list`（FBO 履约仓，`warehouse_types:["FULL_FILLMENT"]`，实测返回 172 个） | 真实 API 实测（只读）；`/v1/warehouse/list` 已被平台判 obsolete 必须用 v2；`/v1/warehouse/fbo/list` 是按 search 词搜索供给点的接口（search minLength 4，非枚举）不可用作目录；`/v1/warehouse/fbo/seller/list` 实测返回空 | **2026-09-17** |
 
 ## 1. Credential 结构
 
@@ -532,6 +533,30 @@ Request：`{filter: {product_id[] | offer_id[] | sku[]}, limit ≤ 1000}`（**fi
 涉及 14 个类目。
 ⚠ **图片字段为单元素 JSON 数组**：真实数据中 `primary_image`/`color_image` 形如
 `["https://…"]`（规范声明为 string，又一处规范≠真实；T8 走查发现，读取需兼容两种形态）。
+
+## 9b. 仓库目录 API（仓库绑定平台仓库，2026-09-17 实测）
+
+用户指示（2026-09-17）：绑定主体是**物理仓库 ↔ 平台仓库**（不再是店仓绑定，
+master-data.md §7）。平台仓库分类与履约模式对应：
+
+| 分类 | 履约模式 | 目录端点 | 关键字段 |
+|---|---|---|---|
+| 自管仓 | realFBS（OZON_RFBS） | `POST /v2/warehouse/list` | `warehouses[].is_rfbs = true` |
+| 自管仓 | FBS（OZON_FBS） | `POST /v2/warehouse/list` | `warehouses[].is_rfbs = false` |
+| 半托管 | FBP（OZON_FBP） | `POST /v1/fbp/warehouse/list` | `warehouses[].{id,name,partner_name}` |
+| 托管仓 | FBO（OZON_FBO） | `POST /v1/warehouse/ozon/list`，body `{"warehouse_types":["FULL_FILLMENT"]}` | `warehouses[].{warehouse_id,name,is_active}` |
+
+实测备注（2026-09-17，真实凭据只读调用）：
+
+- `/v1/warehouse/list` 返回 `{"code":9,"message":"obsolete method cannot be used"}`——**必须用 v2**。
+- `/v2/warehouse/list` 响应 `{warehouses:[{warehouse_id,name,is_rfbs,warehouse_type:"rfbs"|…,status,address_info,…}]}`；`status`：new/created/disabled/blocked/disabled_due_to_limit/error。
+- `/v1/fbp/warehouse/list` 返回平台国内合作仓目录（Xingyuan/CEL 等），响应 `{warehouses:[{id,name,partner_name,is_bonded,address_detailing,supply_types}]}`。
+- `/v1/warehouse/ozon/list` 是 OZON 自有仓**总目录**（全量 172 个 FULL_FILLMENT 仓，含 inactive）；`warehouse_types` 必填（蛇形命名，缺省 400）。
+- `/v1/warehouse/fbo/list` 是「按名称搜索供给点」接口（`search` 必填且 minLength 4），**不能枚举**，不用作 FBO 目录。
+- `/v1/warehouse/fbo/seller/list` 实测返回 `{warehouses:[]}`。
+- WCIES 侧归一化入口：`GET /api/v1/stores/:storeId/platform-warehouses`
+  （实时聚合三个端点，返回 `{platformWarehouseId,name,fulfillmentMode,category,status,address,partnerName,isActive}`）；
+  仅 OZON 实现，其它平台返回 `PLATFORM_WAREHOUSE_QUERY_UNSUPPORTED`。
 
 ## 10. 已知限制 / 坑
 
