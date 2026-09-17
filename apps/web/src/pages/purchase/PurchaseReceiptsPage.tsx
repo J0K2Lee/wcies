@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { App as AntdApp, Button, Drawer, Form, Input, InputNumber, Modal, Select } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
@@ -69,6 +69,8 @@ interface ResolvedBarcode {
   matchedBarcode: string;
   barcodeType: string;
   serialTracking: boolean;
+  suggestedUnitCost: string | null;
+  suggestedUnitCostSource: 'MOVING_AVERAGE' | null;
 }
 
 /** One editable receipt line (draft stage). */
@@ -76,8 +78,9 @@ interface EditorItem {
   skuId: string;
   label: string;
   serialTracking: boolean;
-  quantity: number;
+  quantity: number | null;
   unitCost?: number;
+  suggestedUnitCostSource?: ResolvedBarcode['suggestedUnitCostSource'];
   binId?: string;
   serialNumbersText?: string;
   purchaseOrderItemId?: string;
@@ -91,15 +94,69 @@ const STATUS_META: Record<string, { tone: 'info' | 'success' | 'neutral'; label:
 
 type Envelope<T> = { data: T; meta: { total: number } };
 
+function finiteNumber(value: string | number | null | undefined): number | undefined {
+  if (value === null || value === undefined || String(value).trim() === '') return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function lineSubtotal(item: {
+  quantity: string | number | null;
+  unitCost?: string | number | null;
+}): number | undefined {
+  const quantity = finiteNumber(item.quantity);
+  const cost = finiteNumber(item.unitCost);
+  if (quantity === undefined || quantity <= 0 || cost === undefined || cost < 0) return undefined;
+  return finiteNumber(quantity * cost);
+}
+
+function ReceiptTotal({
+  title,
+  items,
+}: {
+  title: string;
+  items: Array<{ quantity: string | number | null; unitCost?: string | number | null }>;
+}) {
+  const subtotals = items.map(lineSubtotal).filter((value) => value !== undefined);
+  const missing = items.filter((item) => finiteNumber(item.unitCost) === undefined).length;
+  return (
+    <div style={{ padding: '12px 0', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+      <strong>
+        {title}：
+        {subtotals.length === 0 ? '—' : subtotals.reduce((sum, value) => sum + value, 0).toFixed(4)}
+      </strong>
+      {missing > 0 && (
+        <span style={{ fontSize: 12.5, color: colors.warning }}>
+          {missing} 行未填单位成本，合计仅含已填成本行
+        </span>
+      )}
+    </div>
+  );
+}
+
+function needsBin(items: Array<{ binId?: string | null }>, binCount: number): boolean {
+  return binCount > 0 && items.some((item) => !item.binId);
+}
+
 /** Barcode -> SKU through the generated client (never handwritten fetch, §72). */
-async function resolveBarcode(barcode: string): Promise<ResolvedBarcode | null> {
-  const { data, error } = await apiClient.GET('/api/v1/barcodes/{barcode}/resolve', {
-    params: { path: { barcode } },
-  });
-  if (error !== undefined) {
+async function resolveBarcode(
+  barcode: string,
+  reportError: (text: string) => void,
+): Promise<ResolvedBarcode | null> {
+  try {
+    const { data, error } = await apiClient.GET('/api/v1/barcodes/{barcode}/resolve', {
+      params: { path: { barcode } },
+    });
+    if (error !== undefined) {
+      const envelope = error as { error?: { message?: string } };
+      reportError(envelope.error?.message ?? '条码解析失败，请稍后重试');
+      return null;
+    }
+    return data.data as ResolvedBarcode;
+  } catch (error) {
+    reportError(error instanceof Error ? error.message : '条码解析失败，请检查网络后重试');
     return null;
   }
-  return data.data as ResolvedBarcode;
 }
 
 export function PurchaseReceiptsPage() {
@@ -141,7 +198,7 @@ export function PurchaseReceiptsPage() {
 
   // One cached detail query shared by the rail (edit entry) and the drawer,
   // keyed on whichever receipt is focused (Phase 2 task §68 pattern).
-  const focusId = selectedId ?? detailId;
+  const focusId = detailId ?? selectedId;
   const detail = useApiQuery<{ data: ReceiptDetail }>(
     '/api/v1/purchase-receipts/{id}',
     {},
@@ -152,12 +209,16 @@ export function PurchaseReceiptsPage() {
 
   const rows = list.data?.data ?? [];
   const selectedRow = useMemo(
-    () => rows.find((row) => row.id === selectedId) ?? null,
-    [rows, selectedId],
+    () =>
+      (detail.data?.data.id === selectedId ? detail.data.data : null) ??
+      rows.find((row) => row.id === selectedId) ??
+      null,
+    [rows, selectedId, detail.data],
   );
   // The drawer renders only the receipt it was opened for, never the merely
   // selected one (focusId also feeds the rail's edit entry).
-  const detailRow = detailId !== null ? (detail.data?.data ?? null) : null;
+  const detailRow =
+    detailId !== null && detail.data?.data.id === detailId ? detail.data.data : null;
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['purchase-receipts'] });
@@ -168,12 +229,17 @@ export function PurchaseReceiptsPage() {
 
   const itemsToPayload = (editorItems: EditorItem[]) =>
     editorItems
-      .filter((item) => item.skuId !== '')
+      .filter(
+        (item) =>
+          item.skuId !== '' &&
+          finiteNumber(item.quantity) !== undefined &&
+          Number(item.quantity) > 0,
+      )
       .map((item) => ({
         skuId: item.skuId,
         ...(item.purchaseOrderItemId ? { purchaseOrderItemId: item.purchaseOrderItemId } : {}),
         quantity: String(item.quantity),
-        ...(item.unitCost !== undefined && item.unitCost !== null
+        ...(finiteNumber(item.unitCost) !== undefined && Number(item.unitCost) >= 0
           ? { unitCost: String(item.unitCost) }
           : {}),
         ...(item.binId ? { binId: item.binId } : {}),
@@ -200,6 +266,7 @@ export function PurchaseReceiptsPage() {
       setCreateOpen(false);
       setItems([]);
       invalidate();
+      setSelectedId(result.id);
       setDetailId(result.id);
     },
     onError: (error: Error) => void message.error(error.message),
@@ -269,10 +336,94 @@ export function PurchaseReceiptsPage() {
       void message.success(`已从采购单生成收货单 ${result.receiptNo}（草稿）`);
       setFromPoOpen(false);
       invalidate();
+      setSelectedId(result.id);
       setDetailId(result.id);
     },
     onError: (error: Error) => void message.error(error.message),
   });
+
+  const openEditor = useCallback((receipt: ReceiptDetail) => {
+    setItems(
+      receipt.items.map((item) => ({
+        skuId: item.skuId,
+        label: `${item.skuCode} · ${item.skuName}`,
+        serialTracking: item.serialNumbers !== null,
+        quantity: Number(item.quantity),
+        unitCost: item.unitCost === null ? undefined : Number(item.unitCost),
+        binId: item.binId ?? undefined,
+        serialNumbersText: item.serialNumbers?.join('\n') ?? '',
+        purchaseOrderItemId: item.purchaseOrderItemId ?? undefined,
+      })),
+    );
+    setEditing(receipt);
+  }, []);
+
+  const [checkingReceipt, setCheckingReceipt] = useState(false);
+  const requestConfirm = useCallback(
+    async (receipt: ReceiptRow) => {
+      setCheckingReceipt(true);
+      try {
+        // Read the exact receipt and current bins before any irreversible request.
+        const result = await apiClient.GET('/api/v1/purchase-receipts/{id}', {
+          params: { path: { id: receipt.id } },
+        });
+        if (result.error !== undefined) {
+          const error = result.error as { error: { message: string } };
+          void message.error(error.error.message);
+          return;
+        }
+        const current = result.data.data as ReceiptDetail;
+        if (current.status !== 'DRAFT') {
+          void message.warning('该收货单已不是草稿，请刷新后查看');
+          return;
+        }
+        const bins = await apiClient.GET('/api/v1/warehouses/{warehouseId}/bins', {
+          params: { path: { warehouseId: current.warehouseId }, query: { page: 1, pageSize: 100 } },
+        });
+        if (bins.error !== undefined) {
+          const error = bins.error as { error: { message: string } };
+          void message.error(error.error.message);
+          return;
+        }
+        if (needsBin(current.items, bins.data.data.length)) {
+          void message.warning('该仓库已有库位，请先编辑明细为每行选择库位（可一键建暂存位）');
+          openEditor(current);
+          return;
+        }
+        modal.confirm({
+          title: `确认收货 ${current.receiptNo}？`,
+          content: '确认后库存立即入账且不可撤销。SN 商品的序列号将写入库存序列表。',
+          okText: '确认收货',
+          okButtonProps: { danger: true },
+          cancelText: '返回',
+          onOk: () => {
+            confirmMutation.mutate(current.id);
+          },
+        });
+      } catch (error) {
+        void message.error(error instanceof Error ? error.message : '读取收货单或库位失败，请重试');
+      } finally {
+        setCheckingReceipt(false);
+      }
+    },
+    [message, modal, openEditor, confirmMutation.mutate],
+  );
+
+  const requestCancel = useCallback(
+    (receipt: ReceiptRow) => {
+      modal.confirm({
+        title: `取消收货单 ${receipt.receiptNo}？`,
+        content: '草稿取消不影响库存。',
+        okText: '取消草稿',
+        okButtonProps: { danger: true },
+        cancelText: '返回',
+        onOk: () => {
+          cancelMutation.mutate(receipt.id);
+        },
+      });
+    },
+    [modal, cancelMutation.mutate],
+  );
 
   // ---- Context rail ----
   const railContent = useMemo<ContextRailContent>(() => {
@@ -333,19 +484,9 @@ export function PurchaseReceiptsPage() {
                   type="primary"
                   block
                   style={{ marginTop: 8 }}
-                  loading={confirmMutation.isPending}
+                  loading={confirmMutation.isPending || checkingReceipt}
                   onClick={() => {
-                    // 确认收货 = L2（UI 规范 §7）：modal.confirm + danger ok。
-                    modal.confirm({
-                      title: `确认收货 ${selectedRow.receiptNo}？`,
-                      content: '确认后库存立即入账且不可撤销。SN 商品的序列号将写入库存序列表。',
-                      okText: '确认收货',
-                      okButtonProps: { danger: true },
-                      cancelText: '返回',
-                      onOk: () => {
-                        confirmMutation.mutate(selectedRow.id);
-                      },
-                    });
+                    void requestConfirm(selectedRow);
                   }}
                 >
                   确认收货
@@ -354,24 +495,9 @@ export function PurchaseReceiptsPage() {
                   block
                   style={{ marginTop: 8 }}
                   loading={detail.isLoading}
+                  disabled={detail.data?.data.id !== selectedRow.id}
                   onClick={() => {
-                    const detailData = detail.data?.data;
-                    if (detailData === null || detailData === undefined) {
-                      return;
-                    }
-                    setItems(
-                      detailData.items.map((item) => ({
-                        skuId: item.skuId,
-                        label: `${item.skuCode} · ${item.skuName}`,
-                        serialTracking: item.serialNumbers !== null,
-                        quantity: Number(item.quantity),
-                        unitCost: item.unitCost === null ? undefined : Number(item.unitCost),
-                        binId: item.binId ?? undefined,
-                        serialNumbersText: item.serialNumbers?.join('\n') ?? '',
-                        purchaseOrderItemId: item.purchaseOrderItemId ?? undefined,
-                      })),
-                    );
-                    setEditing(detailData);
+                    if (detail.data?.data.id === selectedRow.id) openEditor(detail.data.data);
                   }}
                 >
                   编辑明细
@@ -380,19 +506,8 @@ export function PurchaseReceiptsPage() {
                   block
                   danger
                   style={{ marginTop: 8 }}
-                  onClick={() => {
-                    // 取消草稿 = L2：modal.confirm + danger ok。
-                    modal.confirm({
-                      title: `取消收货单 ${selectedRow.receiptNo}？`,
-                      content: '草稿取消不影响库存。',
-                      okText: '取消草稿',
-                      okButtonProps: { danger: true },
-                      cancelText: '返回',
-                      onOk: () => {
-                        cancelMutation.mutate(selectedRow.id);
-                      },
-                    });
-                  }}
+                  loading={cancelMutation.isPending}
+                  onClick={() => requestCancel(selectedRow)}
                 >
                   取消草稿
                 </Button>
@@ -407,8 +522,12 @@ export function PurchaseReceiptsPage() {
     list.data,
     detail.data,
     confirmMutation.isPending,
-    cancelMutation.mutate,
-    modal,
+    cancelMutation.isPending,
+    detail.isLoading,
+    checkingReceipt,
+    openEditor,
+    requestConfirm,
+    requestCancel,
   ]);
   useContextRail(railContent);
 
@@ -573,6 +692,29 @@ export function PurchaseReceiptsPage() {
             />
           )
         }
+        footer={
+          detailRow?.status === 'DRAFT' ? (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <Button onClick={() => openEditor(detailRow)}>编辑明细</Button>
+              <Button
+                type="primary"
+                loading={checkingReceipt || confirmMutation.isPending}
+                onClick={() => {
+                  void requestConfirm(detailRow);
+                }}
+              >
+                确认收货
+              </Button>
+              <Button
+                danger
+                loading={cancelMutation.isPending}
+                onClick={() => requestCancel(detailRow)}
+              >
+                取消草稿
+              </Button>
+            </div>
+          ) : null
+        }
         styles={{ body: { padding: 20 } }}
         destroyOnHidden
       >
@@ -626,6 +768,13 @@ export function PurchaseReceiptsPage() {
                       value === null ? '—' : Number(value).toFixed(4),
                   },
                   {
+                    title: '小计',
+                    key: 'subtotal',
+                    width: 110,
+                    align: 'right' as const,
+                    render: (_: unknown, row: ReceiptItem) => lineSubtotal(row)?.toFixed(4) ?? '—',
+                  },
+                  {
                     title: '入库库位',
                     key: 'bin',
                     width: 130,
@@ -644,6 +793,7 @@ export function PurchaseReceiptsPage() {
                 ]}
               />
             </SectionCard>
+            <ReceiptTotal title="本单合计" items={detailRow.items} />
           </>
         )}
       </Drawer>
@@ -657,6 +807,26 @@ export function PurchaseReceiptsPage() {
           setItems([]);
         }}
         onOk={() => {
+          if (
+            items.some(
+              (item) =>
+                item.skuId !== '' &&
+                (finiteNumber(item.quantity) === undefined || Number(item.quantity) <= 0),
+            )
+          ) {
+            void message.warning('请为每行明细填写有效的正数数量');
+            return;
+          }
+          if (
+            items.some(
+              (item) =>
+                item.unitCost !== undefined &&
+                (finiteNumber(item.unitCost) === undefined || item.unitCost < 0),
+            )
+          ) {
+            void message.warning('单位成本须为有效的非负数，或留空');
+            return;
+          }
           if (itemsToPayload(items).length === 0) {
             void message.warning('请至少添加一行明细');
             return;
@@ -665,8 +835,10 @@ export function PurchaseReceiptsPage() {
           // explicit binId - surface it here instead of failing at confirm.
           if (
             editorWarehouseId !== undefined &&
-            (binsForWarehouse.data?.data?.length ?? 0) > 0 &&
-            items.some((item) => item.skuId !== '' && item.binId === undefined)
+            needsBin(
+              items.filter((item) => item.skuId !== ''),
+              binsForWarehouse.data?.data.length ?? 0,
+            )
           ) {
             void message.warning('该仓库已有库位，请为每行明细选择库位（可建暂存位）');
             return;
@@ -827,7 +999,9 @@ function ReceiptItemsEditor({
       return generated.barcode;
     },
     onSuccess: async (barcodeToResolve, variables) => {
-      const resolved = await resolveBarcode(barcodeToResolve);
+      const resolved = await resolveBarcode(barcodeToResolve, (text) => {
+        void message.warning(text);
+      });
       setBindBarcode(null);
       setBindSku(undefined);
       if (resolved === null) {
@@ -840,6 +1014,8 @@ function ReceiptItemsEditor({
           skuId: resolved.skuId,
           label: `${resolved.skuCode} · ${resolved.skuName}`,
           serialTracking: resolved.serialTracking,
+          unitCost: finiteNumber(resolved.suggestedUnitCost),
+          suggestedUnitCostSource: resolved.suggestedUnitCostSource,
           quantity: 1,
           serialNumbersText: '',
         },
@@ -874,7 +1050,9 @@ function ReceiptItemsEditor({
     }
     setScanning(true);
     try {
-      const resolved = await resolveBarcode(trimmed);
+      const resolved = await resolveBarcode(trimmed, (text) => {
+        void message.warning(text);
+      });
       if (resolved === null) {
         setBindBarcode(trimmed); // Unknown: offer on-the-spot binding (D13).
         return;
@@ -884,7 +1062,9 @@ function ReceiptItemsEditor({
       if (existing !== undefined) {
         setItems(
           items.map((item) =>
-            item.skuId === resolved.skuId ? { ...item, quantity: item.quantity + 1 } : item,
+            item.skuId === resolved.skuId
+              ? { ...item, quantity: (finiteNumber(item.quantity) ?? 0) + 1 }
+              : item,
           ),
         );
       } else {
@@ -894,6 +1074,8 @@ function ReceiptItemsEditor({
             skuId: resolved.skuId,
             label: `${resolved.skuCode} · ${resolved.skuName}`,
             serialTracking: resolved.serialTracking,
+            unitCost: finiteNumber(resolved.suggestedUnitCost),
+            suggestedUnitCostSource: resolved.suggestedUnitCostSource,
             quantity: 1,
             serialNumbersText: '',
           },
@@ -958,32 +1140,49 @@ function ReceiptItemsEditor({
                 <span style={{ minWidth: 220, fontSize: 13 }}>{item.label}</span>
               )}
               <InputNumber
-                min={1}
+                min={0.001}
+                precision={3}
+                aria-label="收货数量"
+                status={item.quantity === null || item.quantity <= 0 ? 'error' : undefined}
                 value={item.quantity}
                 onChange={(value) =>
                   setItems(
-                    items.map((row, i) => (i === index ? { ...row, quantity: value ?? 1 } : row)),
+                    items.map((row, i) =>
+                      i === index ? { ...row, quantity: finiteNumber(value) ?? null } : row,
+                    ),
                   )
                 }
                 suffix="件"
                 style={{ width: 120 }}
               />
-              <InputNumber
-                min={0}
-                value={item.unitCost}
-                placeholder="单位成本"
-                status={
-                  item.unitCost === undefined || item.unitCost === null ? 'warning' : undefined
-                }
-                onChange={(value) =>
-                  setItems(
-                    items.map((row, i) =>
-                      i === index ? { ...row, unitCost: value ?? undefined } : row,
-                    ),
-                  )
-                }
-                style={{ width: 120 }}
-              />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <InputNumber
+                  min={0}
+                  precision={4}
+                  aria-label="单位成本"
+                  value={item.unitCost}
+                  placeholder="单位成本"
+                  status={
+                    item.unitCost === undefined || item.unitCost === null ? 'warning' : undefined
+                  }
+                  onChange={(value) =>
+                    setItems(
+                      items.map((row, i) =>
+                        i === index
+                          ? { ...row, unitCost: finiteNumber(value), suggestedUnitCostSource: null }
+                          : row,
+                      ),
+                    )
+                  }
+                  style={{ width: 120 }}
+                />
+                {item.suggestedUnitCostSource === 'MOVING_AVERAGE' && (
+                  <span style={{ fontSize: 12, color: colors.textSecondary }}>建议：移动加权</span>
+                )}
+              </div>
+              <span style={{ minWidth: 110, fontSize: 13 }}>
+                小计：{lineSubtotal(item)?.toFixed(4) ?? '—'}
+              </span>
               <Select
                 allowClear
                 placeholder="库位（可空）"
@@ -1025,6 +1224,7 @@ function ReceiptItemsEditor({
           ))}
         </div>
       )}
+      <ReceiptTotal title="本次入库合计" items={items.filter((item) => item.skuId !== '')} />
       {items.length > 0 &&
         items.some((item) => item.unitCost === undefined || item.unitCost === null) && (
           <span style={{ fontSize: 12.5, color: colors.warning }}>
