@@ -3681,6 +3681,13 @@ export interface components {
             barcodeType: string;
             /** @example false */
             serialTracking: boolean;
+            /**
+             * @description 建议单位成本（移动加权），未知时为 null
+             * @example 12.3400
+             */
+            suggestedUnitCost: string | null;
+            /** @enum {string|null} */
+            suggestedUnitCostSource: "MOVING_AVERAGE" | null;
         };
         WarehouseListItemDto: {
             /** Format: uuid */
@@ -4845,6 +4852,10 @@ export interface components {
              * @example 214.0000
              */
             totalPrice?: Record<string, never> | null;
+            /** @description 已映射行使用内部 SKU 主图签名 URL；未映射行使用平台公开图片直链 */
+            imageUrl?: string | null;
+            /** @enum {string|null} */
+            imageSource: "INTERNAL" | "PLATFORM" | null;
             /** @enum {string} */
             fulfillmentStatus: "PENDING" | "RESERVED" | "BACKORDERED" | "PICKED" | "SHIPPED" | "RELEASED";
             /** @enum {string} */
@@ -5387,6 +5398,12 @@ export interface components {
             updatedAt: string;
             items: components["schemas"]["PurchaseOrderItemDto"][];
         };
+        ReceivingOptionDto: {
+            /** @description 收货仓库 */
+            warehouseId: string;
+            /** @description 默认收货库位 */
+            defaultBinId?: string;
+        };
         PurchaseOrderItemInputDto: {
             skuId: string;
             /** @description 为哪张订单行采购（可空 = 备货采购） */
@@ -5401,6 +5418,13 @@ export interface components {
             remark?: string;
         };
         CreatePurchaseOrderRequestDto: {
+            /**
+             * Format: date-time
+             * @description 采购时间（可空=当前时刻）
+             */
+            orderedAt?: string;
+            /** @description 同时生成独立收货草稿（不入库） */
+            receipt?: components["schemas"]["ReceivingOptionDto"];
             /** @description 固定供应商（可空） */
             supplierId?: string;
             /**
@@ -6048,7 +6072,7 @@ export interface components {
             occurredAt?: string;
             /** @description 关联店铺 */
             storeId?: string;
-            /** @description 关联供应商（采购付款必填） */
+            /** @description 关联供应商（可空，采购付款亦可空） */
             supplierId?: string;
             /** @description 关联订单（销售收入/退款必填） */
             orderId?: string;

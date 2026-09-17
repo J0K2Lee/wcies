@@ -12321,6 +12321,17 @@
           "serialTracking": {
             "type": "boolean",
             "example": false
+          },
+          "suggestedUnitCost": {
+            "type": "string",
+            "nullable": true,
+            "example": "12.3400",
+            "description": "建议单位成本（移动加权），未知时为 null"
+          },
+          "suggestedUnitCostSource": {
+            "type": "string",
+            "enum": ["MOVING_AVERAGE"],
+            "nullable": true
           }
         },
         "required": [
@@ -12329,7 +12340,9 @@
           "skuName",
           "matchedBarcode",
           "barcodeType",
-          "serialTracking"
+          "serialTracking",
+          "suggestedUnitCost",
+          "suggestedUnitCostSource"
         ]
       },
       "WarehouseListItemDto": {
@@ -15372,6 +15385,16 @@
             "example": "214.0000",
             "description": "行金额 = 单价 × 数量；无价为 null"
           },
+          "imageUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "已映射行使用内部 SKU 主图签名 URL；未映射行使用平台公开图片直链"
+          },
+          "imageSource": {
+            "type": "string",
+            "nullable": true,
+            "enum": ["INTERNAL", "PLATFORM"]
+          },
           "fulfillmentStatus": {
             "type": "string",
             "enum": ["PENDING", "RESERVED", "BACKORDERED", "PICKED", "SHIPPED", "RELEASED"]
@@ -15428,6 +15451,7 @@
           "skuName",
           "warehouseId",
           "quantity",
+          "imageSource",
           "fulfillmentStatus",
           "mappingStatus",
           "reservationId",
@@ -16946,6 +16970,20 @@
         },
         "required": ["id", "poNo", "status", "orderedAt", "createdAt", "updatedAt", "items"]
       },
+      "ReceivingOptionDto": {
+        "type": "object",
+        "properties": {
+          "warehouseId": {
+            "type": "string",
+            "description": "收货仓库"
+          },
+          "defaultBinId": {
+            "type": "string",
+            "description": "默认收货库位"
+          }
+        },
+        "required": ["warehouseId"]
+      },
       "PurchaseOrderItemInputDto": {
         "type": "object",
         "properties": {
@@ -16974,6 +17012,19 @@
       "CreatePurchaseOrderRequestDto": {
         "type": "object",
         "properties": {
+          "orderedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "采购时间（可空=当前时刻）"
+          },
+          "receipt": {
+            "description": "同时生成独立收货草稿（不入库）",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReceivingOptionDto"
+              }
+            ]
+          },
           "supplierId": {
             "type": "string",
             "description": "固定供应商（可空）"
@@ -18919,7 +18970,7 @@
           },
           "supplierId": {
             "type": "string",
-            "description": "关联供应商（采购付款必填）"
+            "description": "关联供应商（可空，采购付款亦可空）"
           },
           "orderId": {
             "type": "string",
