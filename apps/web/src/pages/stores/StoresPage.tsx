@@ -150,9 +150,9 @@ const ORDER_SYNC_STALE_MS = 15 * 60 * 1000;
 
 /**
  * 平台 → 主 API 凭证所需字段（用户建议 #14）。纯展示用静态映射：
- * OZON 走 Client ID + API Key（adapter 已接入，见 ozon.adapter.ts 的
- * `expected { clientId, apiKey }`）；WB / YANDEX 的 adapter 尚未接入，
- * 单 API Key 只是前端占位描述，以平台实际开通信息为准。
+ * OZON 走 Client ID + API Key；WB / YANDEX 均为单 API Key（2026-09-18
+ * 起后端适配器已接入：wb.adapter.ts / yandex.adapter.ts）。YANDEX 凭证
+ * 可选携带 campaignId（一个 Api-Key 覆盖整个柜面时用于多店铺定位）。
  */
 interface PlatformCredentialSpec {
   /** 提示区文案：该平台需要哪些凭证字段。 */
@@ -174,12 +174,12 @@ const PLATFORM_CREDENTIAL_SPECS: Record<string, PlatformCredentialSpec> = {
     showsSellerId: true,
   },
   WB: {
-    hint: '所需凭证：API 密钥（后端适配器尚未接入，以平台实际开通信息为准）。',
+    hint: '所需凭证：API 令牌（卖家后台创建，180 天有效期，到期需换发）。',
     needsClientId: false,
     showsSellerId: false,
   },
   YANDEX: {
-    hint: '所需凭证：API 密钥（后端适配器尚未接入，以平台实际开通信息为准）。',
+    hint: '所需凭证：API 密钥（卖家后台直接创建，永久有效；令牌覆盖多店铺时可额外指定 Campaign ID）。',
     needsClientId: false,
     showsSellerId: false,
   },
@@ -1146,11 +1146,7 @@ export function StoresPage() {
                 <Form.Item
                   name="credentialApiKey"
                   label="API Key"
-                  extra={
-                    spec.needsClientId
-                      ? undefined
-                      : '后端适配器尚未接入该平台，字段要求以平台实际开通信息为准。'
-                  }
+                  extra={spec.needsClientId ? undefined : '加密存储，不会回显。'}
                   rules={[{ required: true, message: '请输入 API Key' }]}
                 >
                   <Input.Password placeholder="加密存储，不会回显" />
@@ -1209,11 +1205,7 @@ export function StoresPage() {
                 <Form.Item
                   name="apiKey"
                   label="API Key"
-                  extra={
-                    spec.needsClientId
-                      ? undefined
-                      : '后端适配器尚未接入该平台，字段要求以平台实际开通信息为准。'
-                  }
+                  extra={spec.needsClientId ? undefined : '加密存储，不会回显。'}
                   rules={[{ required: true, message: '请输入 API Key' }]}
                 >
                   <Input.Password placeholder="加密存储，不会回显" />

@@ -1,6 +1,8 @@
 # Yandex Market 集成方案（Read-First 调研）
 
-> 状态：**调研完成，未实现**（registry 仅注册 OZON 适配器）。
+> 状态：**已实现（2026-09-18，read-first 范围）**——`apps/api/src/modules/integration/yandex/`（client/adapter/mapper/cursors/module + 契约测试 + 仓库目录服务）与 webhook 链 `POST /api/v1/webhooks/yandex/stores/:storeCode`（IP 白名单 + PING 秒回 + 定向回读）。
+> 未实现（按 §8 T0 结论）：FBY 平台仓自动化（手动录入）、全量类目树、历史订单补录（30 天前）。状态×substatus 映射表待 T0 用真实样本校准。
+> T0 冒烟脚本：`scripts/yandex-t0-smoke.ts`（只读，需 dev 库配置 ACTIVE YANDEX MAIN_API 凭证；多 campaign 令牌凭证需带 campaignId）。
 >
 > 事实来源：Yandex Market Partner API 官方文档 `https://yandex.ru/dev/market/partner-api/doc/en/`（各方法页以官方 markdown 源直接核对，含 llms.txt 索引）——**验证日期 2026-09-18**。未核实项显式标注，不进入生产假设（AGENTS.md §88）。
 

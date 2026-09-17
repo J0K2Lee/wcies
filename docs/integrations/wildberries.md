@@ -1,6 +1,8 @@
 # Wildberries 集成方案（Read-First 调研）
 
-> 状态：**调研完成，未实现**（registry 仅注册 OZON 适配器，`apps/api/src/modules/integration/` 下无 WB 子模块）。
+> 状态：**已实现（2026-09-18，read-first 范围）**——`apps/api/src/modules/integration/wildberries/`（client/adapter/mapper/cursors/module + 契约测试），注册于 `PlatformAdapterRegistry`。
+> 实现范围 = 凭证验证 / Listing 同步（cards/list 游标）/ 订单同步（v3 + statistics 双源状态机）；webhook、订单定向回读、退货拉取按 §5/§8 结论**未实现**（规格未核实，T0 后补）。映射表歧义值（`postponed_delivery` 等）置 null 待 T0 校准。
+> T0 冒烟脚本：`scripts/wb-t0-smoke.ts`（只读，需 dev 库配置 ACTIVE WB MAIN_API 凭证）。
 >
 > 事实来源与验证日期：
 > 1. WB 官方文档中文镜像 `dev.wildberries.cn`（官方站，可直接访问；俄文主站 `dev.wildberries.ru` 有反爬，WebFetch 返回 498）——**验证日期 2026-09-18**；

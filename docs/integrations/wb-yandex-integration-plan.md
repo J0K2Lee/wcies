@@ -2,7 +2,7 @@
 
 > 配套文档：`wildberries.md`、`yandex.md`（各平台 API 事实 + 逐项核对 + T0 清单）。
 > 基准：OZON 当前实现范围（见下）——本方案目标是**与 OZON 能力面一致的一次性交付**。
-> 调研日期 2026-09-18；未动代码。
+> 调研日期 2026-09-18；**同日交付完成（P0-P5 全部落地，见文末交付记录）**。
 
 ## 0. 核实结论
 
@@ -52,3 +52,17 @@
 ## 5. 明确不在本方案范围（与 OZON 一致的边界）
 
 渠道库存推送 / Allocator、价格与促销写操作、订单改状态/发货写操作、财务报表拉取、评价与聊天——OZON 也未实现，属后续独立 Sprint；本方案不引入。
+
+## 6. 交付记录（2026-09-18）
+
+| 阶段 | 结果 |
+|---|---|
+| P0 | `PLATFORM_CODES` 对齐 `['OZON','WB','YANDEX']`（contracts） |
+| P1-WB | `modules/integration/wildberries/`：四域 client（content 域 200 解封装、marketplace 4XX ×10 惩罚、statistics 1 req/min 车道）+ 双源订单游标状态机 + mapper（wbStatus 阶段表、FBS/DBS→WB_FBS、DBW→WB_FBW、条码→platformSkuId、article→sellerSku）+ module 注册 |
+| P1-YX | `modules/integration/yandex/`：client（420→RATE_LIMITED、全局 4 并发信号量、Api-Key）+ campaign 身份解析（单 campaign 隐式 / 多 campaign 凭证显式 campaignId）+ business orders 窗口机 + offer-mappings / returns / webhook 事件映射 + module 注册 |
+| P2 | 零改动复用：SyncJob 单飞、sync_cursors 隔离、调度器按店铺开关、失败告警均为平台无关；LISTING_SYNC/ORDER_SYNC 即刻生效 |
+| P3 | Yandex webhook 链全量落地（见 yandex.md 状态头）；WB 按结论不实现 webhook，轮询为主链路 |
+| P4 | 平台分发：仓库目录 OZON/YANDEX 接入、WB 显式 `PLATFORM_CAPABILITY_UNSUPPORTED`；类目树/属性增强保持 OZON-only（Yandex/WB 商品自带数据）；Yandex 退货拉取接入（`fetchReturns`） |
+| P5 | 共享契约测试套件 `integration/adapter.contract.ts`（OZON/WB/YANDEX 三平台同套断言）+ mapper/client/adapter 单测；T0 脚本 `scripts/wb-t0-smoke.ts`、`scripts/yandex-t0-smoke.ts`；`.env.example` 补平台客户端覆盖项 |
+
+**待 T0 后跟进**（真实凭据冒烟校准，见各平台文档 §8）：WB webhook / 定向回读 / 退货 / 平台仓数据源；Yandex 状态×substatus 样本校准、FBY 仓接口、分页参数大小写实测；WB `postponed_delivery` 等歧义状态归类。
