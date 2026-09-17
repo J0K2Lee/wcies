@@ -159,26 +159,36 @@ interface PlatformCredentialSpec {
   hint: string;
   /** true = 凭证表单需要 Client ID + API Key 两个字段。 */
   needsClientId: boolean;
+  /**
+   * Seller ID 是否作为主数据字段展示（用户指示 2026-09-18）：Seller ID 是
+   * OZON 语境的概念；WB / YANDEX 的身份体系不同（WB 仅 API Token，YANDEX
+   * 用 Campaign/Business ID），不显示该字段。店铺实体字段保留（§99）。
+   */
+  showsSellerId: boolean;
 }
 
 const PLATFORM_CREDENTIAL_SPECS: Record<string, PlatformCredentialSpec> = {
   OZON: {
     hint: '所需凭证：Client ID + API Key。创建后可继续配置凭证。',
     needsClientId: true,
+    showsSellerId: true,
   },
   WB: {
     hint: '所需凭证：API 密钥（后端适配器尚未接入，以平台实际开通信息为准）。',
     needsClientId: false,
+    showsSellerId: false,
   },
   YANDEX: {
     hint: '所需凭证：API 密钥（后端适配器尚未接入，以平台实际开通信息为准）。',
     needsClientId: false,
+    showsSellerId: false,
   },
 };
 
 const GENERIC_CREDENTIAL_SPEC: PlatformCredentialSpec = {
   hint: '所需凭证：API 凭证（以平台实际开通信息为准）。',
   needsClientId: false,
+  showsSellerId: false,
 };
 
 function credentialSpecForPlatform(
@@ -331,6 +341,8 @@ export function StoresPage() {
       null,
     [createPlatformOptions, watchedCreatePlatformId],
   );
+  // 创建表单的平台规格（凭证字段 + Seller ID 可见性）随所选平台联动。
+  const createCredentialSpec = credentialSpecForPlatform(createPlatformCode);
 
   const refreshStore = (id: string | null) => {
     void queryClient.invalidateQueries({ queryKey: ['stores'] });
@@ -1075,9 +1087,14 @@ export function StoresPage() {
             <Input />
           </Form.Item>
           <Space wrap>
-            <Form.Item name="sellerId" label="Seller ID">
-              <Input style={{ width: 180 }} />
-            </Form.Item>
+            {/* Seller ID 是 OZON 语境概念（用户指示 2026-09-18）：仅 OZON 显示；
+                WB / YANDEX 身份体系不同，不显示。币种是通用店铺属性，俄区
+                平台默认 RUB。 */}
+            {createCredentialSpec.showsSellerId && (
+              <Form.Item name="sellerId" label="Seller ID">
+                <Input style={{ width: 180 }} />
+              </Form.Item>
+            )}
             <Form.Item name="defaultCurrency" label="币种" initialValue="RUB">
               <Select
                 style={{ width: 100 }}
@@ -1093,7 +1110,7 @@ export function StoresPage() {
             // 选平台即出现对应凭证输入框（用户指示 2026-09-18）：创建与
             // API Key 配置一步完成。字段形态按平台联动——OZON 需要
             // Client ID + API Key，其他平台只显示 API Key（与凭证弹窗一致）。
-            const spec = credentialSpecForPlatform(createPlatformCode);
+            const spec = createCredentialSpec;
             if (watchedCreatePlatformId === undefined || watchedCreatePlatformId === null) {
               return (
                 <p style={{ color: colors.textTertiary, fontSize: 12.5, marginBottom: 0 }}>
