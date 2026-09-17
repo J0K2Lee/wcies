@@ -109,3 +109,27 @@ export function cookieHeader(response: Response): string {
   const raw = response.headers.getSetCookie?.() ?? [];
   return raw.map((line) => line.split(';')[0]).join('; ');
 }
+
+import { randomUUID } from 'node:crypto';
+
+/**
+ * 仓库绑定平台仓库（2026-09-17 模型，master-data.md §7）的测试便捷调用：
+ * 每次调用生成唯一的平台仓库 ID（唯一键 store_id + platform_warehouse_id）。
+ * 返回绑定 id，供解绑/断言使用。
+ */
+export async function bindPlatformWarehouse(
+  client: {
+    post: (path: string, body?: unknown) => Promise<{ body: { data?: { id: string } } }>;
+  },
+  storeId: string,
+  warehouseId: string,
+  fulfillmentMode = 'OZON_RFBS',
+): Promise<{ id: string; platformWarehouseId: string }> {
+  const platformWarehouseId = `pw-${randomUUID().slice(0, 12)}`;
+  const res = await client.post(`/api/v1/warehouses/${warehouseId}/platform-bindings`, {
+    storeId,
+    platformWarehouseId,
+    fulfillmentMode,
+  });
+  return { id: res.body.data?.id ?? '', platformWarehouseId };
+}

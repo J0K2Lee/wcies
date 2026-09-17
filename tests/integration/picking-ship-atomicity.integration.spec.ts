@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
-import { spawnApiEntry, waitForHttp, ManagedProcess } from './helpers';
+import { spawnApiEntry, waitForHttp, ManagedProcess, bindPlatformWarehouse } from './helpers';
 import { ApiClient, runPrefix } from './sprint1.helpers';
 
 // @nestjs/* live in apps/api's dependency scope (pnpm), so the in-process
@@ -118,13 +118,8 @@ beforeAll(async () => {
     warehouseType: 'SELF',
   });
   warehouseId = warehouse.body.data.id;
-  const binding = await client.post(`/api/v1/stores/${storeId}/warehouse-bindings`, {
-    warehouseId,
-    fulfillmentMode: 'OZON_FBS',
-    isInventorySource: true,
-    priority: 1,
-  });
-  expect(binding.body.error).toBeUndefined();
+  const binding = await bindPlatformWarehouse(client, storeId, warehouseId, 'OZON_FBS');
+  expect(binding.id).not.toBe('');
   const bins = await client.post<{ bins: Array<{ binCode: string; id: string }> }>(
     `/api/v1/warehouses/${warehouseId}/bins/batch`,
     { zone: 'A', rackStart: 1, rackCount: 1, levelsPerRack: 1 },

@@ -143,37 +143,37 @@ async function main(): Promise<void> {
     }
     log('SZ01 bins ready (zone A, 5 racks x 4 levels = 20)');
 
-    // ---- Bindings (task §90): guard against duplicates manually (no DB
-    // unique constraint by design - same pair may exist with other modes) ----
+    // ---- Platform warehouse bindings (仓库绑定平台仓库, 2026-09-17 模型；
+    //      master-data.md §7)。唯一键 (store_id, platform_warehouse_id)。----
     const ozonAId = await storeId('OZON-A');
-    const bindingExists = async (
+    const platformBindingExists = async (
       storeId_: string,
-      warehouseId: string,
-      mode: string,
+      platformWarehouseId: string,
     ): Promise<boolean> => {
       const found = await client.query(
-        `SELECT 1 FROM store_warehouse_bindings
-          WHERE store_id = $1 AND warehouse_id = $2 AND fulfillment_mode = $3`,
-        [storeId_, warehouseId, mode],
+        `SELECT 1 FROM warehouse_platform_bindings
+          WHERE store_id = $1 AND platform_warehouse_id = $2`,
+        [storeId_, platformWarehouseId],
       );
       return found.rowCount !== null && found.rowCount > 0;
     };
-    if (!(await bindingExists(ozonAId, szId, 'OZON_RFBS'))) {
+    if (!(await platformBindingExists(ozonAId, '123456'))) {
       await client.query(
-        `INSERT INTO store_warehouse_bindings
-           (store_id, warehouse_id, fulfillment_mode, platform_warehouse_id, is_inventory_push_enabled)
-         VALUES ($1, $2, 'OZON_RFBS', '123456', true)`,
-        [ozonAId, szId],
+        `INSERT INTO warehouse_platform_bindings
+           (warehouse_id, store_id, platform_warehouse_id, fulfillment_mode)
+         VALUES ($1, $2, '123456', 'OZON_RFBS')`,
+        [szId, ozonAId],
       );
     }
-    if (!(await bindingExists(ozonAId, fboId, 'OZON_FBO'))) {
+    if (!(await platformBindingExists(ozonAId, '6011554024000'))) {
       await client.query(
-        `INSERT INTO store_warehouse_bindings (store_id, warehouse_id, fulfillment_mode)
-         VALUES ($1, $2, 'OZON_FBO')`,
-        [ozonAId, fboId],
+        `INSERT INTO warehouse_platform_bindings
+           (warehouse_id, store_id, platform_warehouse_id, fulfillment_mode)
+         VALUES ($1, $2, '6011554024000', 'OZON_FBO')`,
+        [fboId, ozonAId],
       );
     }
-    log('OZON-A bindings ready (RFBS->SZ01, FBO->platform warehouse)');
+    log('OZON-A platform bindings ready (RFBS->SZ01, FBO->platform warehouse)');
 
     // ---- Product + SKUs + barcodes (task §87) ----
     const brandId = (

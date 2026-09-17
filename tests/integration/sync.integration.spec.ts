@@ -1,8 +1,14 @@
+import {
+  bindPlatformWarehouse,
+  spawnApiEntry,
+  waitForHttp,
+  waitForOutput,
+  ManagedProcess,
+} from './helpers';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { createServer, Server } from 'node:http';
 import { AddressInfo } from 'node:net';
-import { spawnApiEntry, waitForHttp, waitForOutput, ManagedProcess } from './helpers';
 import { ApiClient, runPrefix } from './sprint1.helpers';
 
 /**
@@ -396,10 +402,7 @@ beforeAll(async () => {
   binA01 = bins.body.data.bins.find((b) => b.binCode.endsWith('A01-1'))?.id ?? '';
 
   for (const storeId of [storeA, storeB]) {
-    await client.post(`/api/v1/stores/${storeId}/warehouse-bindings`, {
-      warehouseId,
-      fulfillmentMode: 'OZON_RFBS',
-    });
+    await bindPlatformWarehouse(client, storeId, warehouseId, 'OZON_RFBS');
   }
 }, 180_000);
 

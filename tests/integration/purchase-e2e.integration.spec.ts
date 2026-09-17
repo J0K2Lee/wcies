@@ -1,6 +1,6 @@
+import { bindPlatformWarehouse, spawnApiEntry, waitForHttp, ManagedProcess } from './helpers';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { spawnApiEntry, waitForHttp, ManagedProcess } from './helpers';
 import { ApiClient, runPrefix } from './sprint1.helpers';
 
 /**
@@ -172,10 +172,7 @@ beforeAll(async () => {
     { zone: 'A', rackStart: 1, rackCount: 1, levelsPerRack: 1 },
   );
   binA01 = bins.body.data.bins[0]?.id ?? '';
-  await client.post(`/api/v1/stores/${storeId}/warehouse-bindings`, {
-    warehouseId,
-    fulfillmentMode: 'OZON_RFBS',
-  });
+  await bindPlatformWarehouse(client, storeId, warehouseId, 'OZON_RFBS');
 });
 
 afterAll(async () => {
@@ -287,14 +284,21 @@ describe('chain B: sell-first, buy-later (task §14 链路B, the main mode)', ()
     line = await orderLine(order.orderId);
     expect(line.procurementState).toBe('ARRIVED');
 
-    // 4. Manual retry allocation (receiving NEVER auto-assigns orders).
+    // 4. 库存增加后自动重新分配（用户指示 2026-09-17）：收货确认产生
+    //    RECEIVE 流水后，缺货行由 OrderAutoReallocationService 自动转
+    //    RESERVED（异步监听器，轮询等待）；此前「收货绝不自动分配」的
+    //    假设已被该规则取代。
+    line = await orderLine(order.orderId);
+    for (let i = 0; i < 30 && line.fulfillmentStatus !== 'RESERVED'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      line = await orderLine(order.orderId);
+    }
+    expect(line.fulfillmentStatus).toBe('RESERVED');
+    // 行已持有库存：手动重试被状态守卫正确拒绝（409）。
     const retry = await client.post<{ reserved: boolean }>(
       `/api/v1/orders/items/${order.orderItemId}/retry-allocation`,
     );
-    expect(retry.status).toBe(200);
-    expect(retry.body.data.reserved).toBe(true);
-    line = await orderLine(order.orderId);
-    expect(line.fulfillmentStatus).toBe('RESERVED');
+    expect(retry.status).toBe(409);
     expect(
       (await openExceptionsOf('ORDER_ITEM', order.orderItemId)).every(
         (e) => e.status !== 'OPEN' || e.exceptionType !== 'ORDER_OUT_OF_STOCK',

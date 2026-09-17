@@ -1,6 +1,6 @@
+import { bindPlatformWarehouse, spawnApiEntry, waitForHttp, ManagedProcess } from './helpers';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { spawnApiEntry, waitForHttp, ManagedProcess } from './helpers';
 import { ApiClient, runPrefix } from './sprint1.helpers';
 
 /**
@@ -68,10 +68,7 @@ beforeAll(async () => {
   );
   binBId = binsB.body.data.bins[0]!.id;
 
-  await client.post(`/api/v1/stores/${storeId}/warehouse-bindings`, {
-    warehouseId: warehouseAId,
-    fulfillmentMode: 'OZON_RFBS',
-  });
+  await bindPlatformWarehouse(client, storeId, warehouseAId, 'OZON_RFBS');
 }, 180_000);
 
 afterAll(async () => {

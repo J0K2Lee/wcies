@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { spawnApiEntry, waitForHttp, ManagedProcess } from './helpers';
+import { randomUUID } from 'node:crypto';
+import { bindPlatformWarehouse, spawnApiEntry, waitForHttp, ManagedProcess } from './helpers';
 import { ApiClient, runPrefix } from './sprint1.helpers';
 
 /**
@@ -192,7 +193,7 @@ describe('warehouses + bins (task §81)', () => {
   });
 });
 
-describe('store warehouse bindings (task §83)', () => {
+describe('warehouse platform bindings (仓库绑定平台仓库, 2026-09-17)', () => {
   let ozonStoreId = '';
   let ozonStore2Id = '';
   let wbStoreId = '';
@@ -242,57 +243,73 @@ describe('store warehouse bindings (task §83)', () => {
     fboId = warehouses.body.data.find((wh) => wh.warehouseCode === `${PREFIX}-FBO`)?.id ?? '';
   });
 
-  it('binds one store to TWO warehouses (RFBS -> SZ, FBO -> FBO warehouse, task §83)', async () => {
-    const rfbs = await client.post<{ fulfillmentMode: string }>(
-      `/api/v1/stores/${ozonStoreId}/warehouse-bindings`,
-      { warehouseId: szId, fulfillmentMode: 'OZON_RFBS', platformWarehouseId: '88877' },
-    );
-    expect(rfbs.body.data.fulfillmentMode).toBe('OZON_RFBS');
+  it('binds one warehouse to platform warehouses of multiple stores (用户指示 2026-09-17)', async () => {
+    const rfbs = await bindPlatformWarehouse(client, ozonStoreId, szId, 'OZON_RFBS');
+    expect(rfbs.id).not.toBe('');
 
+    const fbsSameStore = await bindPlatformWarehouse(client, ozonStore2Id, szId, 'OZON_FBS');
+    expect(fbsSameStore.id).not.toBe('');
+  });
+
+  it('binds an FBO platform warehouse to the PLATFORM (托管仓) warehouse', async () => {
     const fbo = await client.post<{ fulfillmentMode: string }>(
-      `/api/v1/stores/${ozonStoreId}/warehouse-bindings`,
-      { warehouseId: fboId, fulfillmentMode: 'OZON_FBO' },
+      `/api/v1/warehouses/${fboId}/platform-bindings`,
+      {
+        storeId: ozonStoreId,
+        platformWarehouseId: `pw-fbo-${randomUUID().slice(0, 8)}`,
+        fulfillmentMode: 'OZON_FBO',
+      },
     );
     expect(fbo.body.data.fulfillmentMode).toBe('OZON_FBO');
   });
 
-  it('rejects WB store + OZON_FBO (platform mismatch, task §45/§83)', async () => {
-    const bad = await client.post(`/api/v1/stores/${wbStoreId}/warehouse-bindings`, {
-      warehouseId: fboId,
+  it('rejects a SECOND platform warehouse on a 托管仓 (single binding, 用户指示 2026-09-17)', async () => {
+    const bad = await client.post(`/api/v1/warehouses/${fboId}/platform-bindings`, {
+      storeId: ozonStore2Id,
+      platformWarehouseId: `pw-fbo-2-${randomUUID().slice(0, 8)}`,
       fulfillmentMode: 'OZON_FBO',
     });
     expect(bad.status).toBe(422);
-    expect(bad.body.error?.code).toBe('STORE_WAREHOUSE_BINDING_INVALID');
+    expect(bad.body.error?.code).toBe('WAREHOUSE_PLATFORM_BINDING_INVALID');
+  });
+
+  it('rejects WB store + OZON_FBO (platform mismatch, task §45/§83)', async () => {
+    const bad = await client.post(`/api/v1/warehouses/${szId}/platform-bindings`, {
+      storeId: wbStoreId,
+      platformWarehouseId: `pw-${randomUUID().slice(0, 8)}`,
+      fulfillmentMode: 'OZON_FBO',
+    });
+    expect(bad.status).toBe(422);
+    expect(bad.body.error?.code).toBe('WAREHOUSE_PLATFORM_BINDING_INVALID');
   });
 
   it('rejects OZON_FBO against a SELF warehouse (type mismatch)', async () => {
-    const bad = await client.post(`/api/v1/stores/${ozonStoreId}/warehouse-bindings`, {
-      warehouseId: szId,
+    const bad = await client.post(`/api/v1/warehouses/${szId}/platform-bindings`, {
+      storeId: ozonStoreId,
+      platformWarehouseId: `pw-${randomUUID().slice(0, 8)}`,
       fulfillmentMode: 'OZON_FBO',
+    });
+    expect(bad.status).toBe(422);
+  });
+
+  it('rejects OZON_FBP against a SELF warehouse (半托管 needs SEMI_MANAGED 仓)', async () => {
+    const bad = await client.post(`/api/v1/warehouses/${szId}/platform-bindings`, {
+      storeId: ozonStoreId,
+      platformWarehouseId: `pw-${randomUUID().slice(0, 8)}`,
+      fulfillmentMode: 'OZON_FBP',
     });
     expect(bad.status).toBe(422);
   });
 
   it('shares ONE warehouse across MULTIPLE stores (task §83)', async () => {
-    const shared = await client.post<{ warehouseCode: string }>(
-      `/api/v1/stores/${ozonStore2Id}/warehouse-bindings`,
-      { warehouseId: szId, fulfillmentMode: 'OZON_FBS' },
-    );
-    expect(shared.body.data.warehouseCode).toBe(`${PREFIX}-SZ`);
+    const wbSelf = await bindPlatformWarehouse(client, wbStoreId, szId, 'WB_FBS');
+    expect(wbSelf.id).not.toBe('');
 
-    const wbSelf = await client.post<{ fulfillmentMode: string }>(
-      `/api/v1/stores/${wbStoreId}/warehouse-bindings`,
-      { warehouseId: szId, fulfillmentMode: 'WB_FBS' },
-    );
-    expect(wbSelf.body.data.fulfillmentMode).toBe('WB_FBS');
-  });
-
-  it('shows bound store count on the warehouse list (task §69)', async () => {
     const list = await client.get<
-      Array<{ warehouseCode: string; binCount: number; boundStoreCount: number }>
+      Array<{ warehouseCode: string; boundPlatformWarehouseCount: number }>
     >(`/api/v1/warehouses?keyword=${PREFIX}`);
     const sz = list.body.data.find((wh) => wh.warehouseCode === `${PREFIX}-SZ`);
-    expect(sz?.binCount).toBe(20);
-    expect(sz?.boundStoreCount).toBe(3);
+    // OZ-A RFBS + OZ-B FBS + WB_FBS = 3 条 ACTIVE 平台仓库绑定
+    expect(sz?.boundPlatformWarehouseCount).toBe(3);
   });
 });

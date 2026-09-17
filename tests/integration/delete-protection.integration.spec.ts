@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from 'pg';
-import { spawnApiEntry, waitForHttp, ManagedProcess } from './helpers';
+import { spawnApiEntry, waitForHttp, ManagedProcess, bindPlatformWarehouse } from './helpers';
 import { ApiClient, runPrefix } from './sprint1.helpers';
 
 /**
@@ -89,10 +89,7 @@ describe('store / binding delete', () => {
       name: `${PREFIX} 绑定仓`,
       warehouseType: 'SELF',
     });
-    const binding = await client.post<IdDto>(`/api/v1/stores/${storeId}/warehouse-bindings`, {
-      warehouseId: warehouse.body.data.id,
-      fulfillmentMode: 'OZON_RFBS',
-    });
+    const binding = await bindPlatformWarehouse(client, storeId, warehouse.body.data.id);
 
     // A store with a binding is IN_USE.
     const storeRejected = await client.del(`/api/v1/stores/${storeId}`);
@@ -101,7 +98,7 @@ describe('store / binding delete', () => {
 
     // Binding has no inbound references -> deletable.
     const bindingDeleted = await client.del(
-      `/api/v1/stores/${storeId}/warehouse-bindings/${binding.body.data.id}`,
+      `/api/v1/warehouses/${warehouse.body.data.id}/platform-bindings/${binding.id}`,
     );
     expect(bindingDeleted.status).toBe(200);
 
