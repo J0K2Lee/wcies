@@ -500,6 +500,59 @@ function deadlineBadge(deadline: string | null): {
   return { tone: 'neutral', label: `剩 ${span}`, exact };
 }
 
+/**
+ * 展开行内容（用户指示 2026-09-18 bug 修复）：每个展开行自带订单详情查询
+ * ——与右栏/抽屉共用同一 `['order-detail', orderId]` 缓存键，互不重复请求。
+ * 此前展开内容依赖「当前选中订单」的详情，「默认展开所有订单行」开启时
+ * 未选中任何行导致全部显示「暂无商品明细」。
+ */
+function ExpandedOrderItems({
+  order,
+  columns,
+  selectedItem,
+  onItemRowClick,
+}: {
+  order: OrderListItem;
+  columns: Array<ColumnsType<OrderItem>[number]>;
+  selectedItem: OrderItem | null;
+  onItemRowClick: (item: OrderItem) => void;
+}) {
+  const detailQuery = useApiQuery<Envelope<OrderDetail> & { data: OrderDetail }>(
+    '/api/v1/orders/{id}',
+    {},
+    ['order-detail', order.id],
+    { id: order.id },
+  );
+  if (detailQuery.isLoading) {
+    return <span style={{ fontSize: 12.5, color: colors.textTertiary }}>商品明细加载中…</span>;
+  }
+  const detail = detailQuery.data?.data;
+  if (detail === undefined || detail.id !== order.id) {
+    return <span style={{ fontSize: 12.5, color: colors.textTertiary }}>暂无商品明细</span>;
+  }
+  return (
+    <Image.PreviewGroup>
+      <DataTable<OrderItem>
+        size="small"
+        rowKey="id"
+        dataSource={detail.items}
+        pagination={false}
+        emptyTitle="无商品行"
+        columns={columns}
+        onRow={(item) => ({
+          // 点击展开行 → 侧边栏显示该 SKU 信息（用户指示 2026-09-17）；
+          // 同时选中所属订单，供右栏详情查询使用。
+          onClick: () => onItemRowClick(item),
+          style: {
+            cursor: 'pointer',
+            background: selectedItem?.id === item.id ? colors.primarySoft : undefined,
+          },
+        })}
+      />
+    </Image.PreviewGroup>
+  );
+}
+
 export function OrdersPage() {
   const { message, modal, notification } = AntdApp.useApp();
   const queryClient = useQueryClient();
@@ -1908,43 +1961,24 @@ export function OrdersPage() {
             // 视图设置「默认展开所有订单行」时整页展开，点击仅选中（侧边栏）。
             expandedRowKeys: expandedRowKeys,
             showExpandColumn: false,
-            expandedRowRender: (record: OrderListItem) => {
-              if (detailQuery.isLoading) {
-                return (
-                  <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
-                    商品明细加载中…
-                  </span>
-                );
-              }
-              if (railDetail === undefined || railDetail.id !== record.id) {
-                return (
-                  <span style={{ fontSize: 12.5, color: colors.textTertiary }}>暂无商品明细</span>
-                );
-              }
-              return (
-                <div onClick={(event) => event.stopPropagation()}>
-                  <Image.PreviewGroup>
-                    <DataTable<OrderItem>
-                      size="small"
-                      rowKey="id"
-                      dataSource={railDetail.items}
-                      pagination={false}
-                      emptyTitle="无商品行"
-                      columns={expandedColumns}
-                      onRow={(item) => ({
-                        // 点击展开行 → 侧边栏显示该 SKU 信息（用户指示 2026-09-17）。
-                        onClick: () =>
-                          setSelectedItemId(item.id === selectedItemId ? null : item.id),
-                        style: {
-                          cursor: 'pointer',
-                          background: item.id === selectedItemId ? colors.primarySoft : undefined,
-                        },
-                      })}
-                    />
-                  </Image.PreviewGroup>
-                </div>
-              );
-            },
+            expandedRowRender: (record: OrderListItem) => (
+              <div onClick={(event) => event.stopPropagation()}>
+                <ExpandedOrderItems
+                  order={record}
+                  columns={expandedColumns}
+                  selectedItem={
+                    selectedItemId !== null && railDetail !== undefined
+                      ? (railDetail.items.find((item) => item.id === selectedItemId) ?? null)
+                      : null
+                  }
+                  onItemRowClick={(item) => {
+                    setSelectedItemId(item.id === selectedItemId ? null : item.id);
+                    // 选中所属订单：右栏 SKU 视图的详情来自该订单的缓存查询。
+                    setSelectedId(record.id);
+                  }}
+                />
+              </div>
+            ),
           }}
           onRow={(record) => ({
             onClick: () => {
