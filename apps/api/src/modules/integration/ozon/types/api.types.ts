@@ -80,6 +80,8 @@ export interface OzonFbsPosting {
   readonly order_number?: string;
   readonly status: string;
   readonly substatus?: string;
+  /** Logistics flow: v3 English spec + real postings, verified 2026-09-17. */
+  readonly integration_type_flow?: string | null;
   /** Дата и время начала обработки отправления (UTC ISO). */
   readonly in_process_at?: string;
   /**

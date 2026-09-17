@@ -16,6 +16,7 @@ import {
   OzonRfbsReturn,
 } from './types/api.types';
 import { DomainError } from '../../../common/errors/domain.error';
+import { mapOzonFulfillmentMode } from './ozon-fulfillment-mode.mapper';
 
 /**
  * OZON DTO -> WCIES unified model mapper (Sprint 5 task §7/§33).
@@ -163,7 +164,7 @@ export function mapPostingToOrder(posting: OzonFbsPosting): PlatformOrderRaw {
     platformCancelled: posting.status === OZON_POSTING_STATUS_CANCELLED,
     platformStage,
     platformStageChangedAt,
-    fulfillmentMode: 'FBS',
+    fulfillmentMode: mapOzonFulfillmentMode(posting.integration_type_flow),
     orderedAt,
     shipmentDeadline,
     currency,

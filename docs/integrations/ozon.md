@@ -116,7 +116,32 @@ Request：`{posting_number: string, with:{}}`；Response：`{result: <posting>}`
 | `products[].currency_code` | `orders.currency`（取第一行） |
 | （整体） | `orders.raw_data`（完整 posting 原文）+ 每行 `order_items.raw_data` |
 
-- `fulfillmentMode` 固定 `FBS`（本 Sprint 只接 FBS 订单；FBO/FBP 未来 Sprint）。
+### 物流渠道映射（T4，2026-09-17 冻结）
+
+`integration_type_flow` 是 `fulfillmentMode`（`orders.fulfillment_mode`）的**唯一事实来源**，
+在 OZON Mapper 归一化；订单核心只保存事实，不解释平台履约语义，不修改 ERP 状态或库存。
+
+| `integration_type_flow` 原值 | `fulfillmentMode` |
+|---|---|
+| `FBP` | `FBP` |
+| `ozon` | `FBS` |
+| `aggregator` / `non_integrated` / `3pl_tracking` | `RFBS` |
+| `hybrid` / `hybrid_aggregator` / 其他未知字符串 | 原样存储，不做本地解释、不转换大小写 |
+| 缺失 / null / 空字符串 | null，不猜测 |
+
+- **验证日期 2026-09-17，依据：本地 v3 英文规范 + 生产 183 单 raw_data 实测（aggregator/FBP）**；
+  实测 `aggregator` ×146、`FBP` ×31，其余不据此推断。
+- `/v3/posting/fbs/list|get` 响应规范及实测均没有 `scheme` 字段；
+  `tpl_integration_type` 虽可出现，也不作为回退来源。
+- 新摄入订单缺失渠道时保存 null；已摄入订单刷新时输入 undefined/null **保留库内原值**，
+  只有非 null 且不同的渠道事实才写入。
+- FBO 订单走独立 `/v2/posting/fbo/list`，当前未接入；不能因当前端点名称或其他字段猜测 FBO。
+  FBO/FBP 专用端点仍属未来 Sprint，但当前 FBS 端点实际返回的 `FBP` 流事实必须保存。
+- 历史回填脚本 `scripts/backfill-order-fulfillment-mode.ts` 与在线 mapper 复用同一映射函数。
+  仅扫描 OZON 店铺中含 `integration_type_flow` 且渠道为 null/旧 `FBS` 的订单；
+  缺失/空值及相同结果跳过，保留已有事实。默认 dry-run，`--apply` 事务写入；
+  必须显式 development/test 且数据库名为 `wcies_dev`，拒绝生产，执行写入前先备份。
+  输出总候选数、更新数、预计更新数及跳过数。
 - 订单取消/状态回写：**本 Sprint 不做**（Read-first，§4 禁止写操作）。
 
 ### 平台阶段映射（双轴任务 T1，2026-09-15 冻结）
@@ -504,7 +529,7 @@ Request：`{filter: {product_id[] | offer_id[] | sku[]}, limit ≤ 1000}`（**fi
 3. `/v3/product/list` 无 has_more —— 必须用「页满 + last_id 变化」推断；last_id 不变时务必停止，否则死循环。
 4. Webhook 无签名 + 仅店铺级 URL：绝不能在 webhook 请求内做写操作；一切事实以 API 回读为准。
 5. OZON 文档站点 antibot 较强，抓取验证需搜索缓存/开源实现交叉核对，禁止凭记忆写字段。
-6. FBO/FBP 订单、价格/库存推送、平台发货写操作：本 Sprint 明确禁止（Read-first）。
+6. FBO/FBP 专用订单端点、价格/库存推送、平台发货写操作：本 Sprint 不接入（Read-first）；当前 FBS 端点已返回的 `FBP` 渠道事实按 §3 保存。
 
 ## 11. 环境变量
 

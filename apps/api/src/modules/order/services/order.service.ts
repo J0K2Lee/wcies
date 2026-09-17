@@ -528,7 +528,7 @@ export class OrderService {
    * Compare-and-update the platform FACTS of an already-ingested order and
    * propagate consequences (Sprint 9 T1, orders.md §7a):
    *
-   * - only platform_status / shipment_deadline / raw_data are written -
+   * - only platform status / deadline / raw data / stage / channel facts are written -
    *   NEVER erp_status directly (AGENTS.md §38);
    * - a platform_status transition appends platform_status_history;
    * - platform cancellation runs the EXISTING cancel() chain (Reserved ->
@@ -563,6 +563,10 @@ export class OrderService {
     // (docs §2.4) - never the other way around.
     const newStage = input.platformStage ?? null;
     const stageChanged = newStage !== null && newStage !== order.platformStage;
+    // Missing platform facts must never erase a previously observed channel.
+    const newFulfillmentMode = input.fulfillmentMode ?? null;
+    const fulfillmentModeChanged =
+      newFulfillmentMode !== null && newFulfillmentMode !== order.fulfillmentMode;
     const newDeadline = toInstantOrNull(input.shipmentDeadline);
     const deadlineChanged = !sameInstant(newDeadline, order.shipmentDeadline ?? null);
     // Key-order-insensitive comparison: PG jsonb normalizes key order on the
@@ -572,7 +576,7 @@ export class OrderService {
       canonicalJson(input.rawData ?? null) !== canonicalJson(order.rawData ?? null);
 
     let cancelled = false;
-    if (statusChanged || deadlineChanged || rawChanged || stageChanged) {
+    if (statusChanged || deadlineChanged || rawChanged || stageChanged || fulfillmentModeChanged) {
       const effectiveDeadline = newDeadline ?? order.shipmentDeadline ?? null;
       const effectiveRawData = input.rawData ?? order.rawData ?? null;
       await this.dataSource.transaction(async (runner) => {
@@ -580,6 +584,7 @@ export class OrderService {
           platformStatus: newStatus ?? oldStatus,
           shipmentDeadline: effectiveDeadline,
           rawData: effectiveRawData,
+          ...(fulfillmentModeChanged ? { fulfillmentMode: newFulfillmentMode } : {}),
           ...(stageChanged
             ? {
                 platformStage: newStage,
@@ -652,7 +657,8 @@ export class OrderService {
     });
     return {
       applied: true,
-      changed: statusChanged || deadlineChanged || rawChanged || stageChanged,
+      changed:
+        statusChanged || deadlineChanged || rawChanged || stageChanged || fulfillmentModeChanged,
       cancelled,
     };
   }
@@ -974,6 +980,8 @@ export interface OrderPlatformFactsInput {
   platformOrderId: string;
   /** Raw platform status string; null = the platform did not deliver one. */
   platformStatus: string | null;
+  /** Mapper-derived channel fact; undefined/null keeps the stored value. */
+  fulfillmentMode?: string | null;
   /** Mapper-derived flag - platform vocabulary never leaks into core (§31). */
   platformCancelled: boolean;
   /**

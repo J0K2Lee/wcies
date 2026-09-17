@@ -158,6 +158,7 @@ export class OrderRepository {
       rawData: Record<string, unknown> | null;
       platformStage?: string | null;
       platformStageChangedAt?: Date | null;
+      fulfillmentMode?: string | null;
     },
   ): Promise<void> {
     const update: Record<string, unknown> = {
@@ -166,6 +167,9 @@ export class OrderRepository {
       rawData: patch.rawData,
       updatedAt: new Date(),
     };
+    if (patch.fulfillmentMode !== undefined && patch.fulfillmentMode !== null) {
+      update.fulfillmentMode = patch.fulfillmentMode;
+    }
     if (patch.platformStage !== undefined) {
       update.platformStage = patch.platformStage;
       update.platformStageChangedAt = patch.platformStageChangedAt ?? new Date();

@@ -108,7 +108,7 @@ describe('mapPostingToOrder', () => {
     const order = mapPostingToOrder(POSTING);
     expect(order.platformOrderId).toBe('00077059-0001-1');
     expect(order.platformStatus).toBe('awaiting_packaging');
-    expect(order.fulfillmentMode).toBe('FBS');
+    expect(order.fulfillmentMode).toBeNull();
     expect(order.orderedAt.toISOString()).toBe('2026-09-08T10:15:30.000Z');
     expect(order.currency).toBe('RUB');
     expect(order.items).toHaveLength(1);
@@ -121,6 +121,34 @@ describe('mapPostingToOrder', () => {
     // Raw posting preserved verbatim (task §23).
     expect(order.rawData).toEqual(POSTING);
     expect(item?.rawData).toEqual(POSTING.products[0]);
+  });
+
+  it.each([
+    ['FBP', 'FBP'],
+    ['ozon', 'FBS'],
+    ['aggregator', 'RFBS'],
+    ['non_integrated', 'RFBS'],
+    ['3pl_tracking', 'RFBS'],
+    ['hybrid', 'hybrid'],
+    ['hybrid_aggregator', 'hybrid_aggregator'],
+    ['future_flow', 'future_flow'],
+    ['OZON', 'OZON'],
+    ['__proto__', '__proto__'],
+    ['', null],
+    [null, null],
+    [undefined, null],
+  ])('maps integration_type_flow %s to fulfillmentMode %s', (flow, expected) => {
+    const posting = { ...POSTING, integration_type_flow: flow };
+    const order = mapPostingToOrder(posting);
+    expect(order.fulfillmentMode).toBe(expected);
+    expect(order.rawData).toEqual(posting);
+  });
+
+  it('does not fall back to tpl_integration_type or scheme', () => {
+    expect(
+      mapPostingToOrder({ ...POSTING, tpl_integration_type: 'aggregator', scheme: 'FBO' })
+        .fulfillmentMode,
+    ).toBeNull();
   });
 
   it('normalizes, tolerates and never fabricates unit prices (finance.md §2)', () => {

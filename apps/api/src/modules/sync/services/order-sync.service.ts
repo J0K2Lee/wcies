@@ -305,6 +305,7 @@ export class OrderSyncService {
       platformOrderId: order.platformOrderId,
       platformStatus: order.platformStatus ?? null,
       platformCancelled: order.platformCancelled === true,
+      fulfillmentMode: order.fulfillmentMode ?? null,
       platformStage: order.platformStage ?? null,
       platformStageChangedAt: order.platformStageChangedAt ?? null,
       // Webhook-only hint: the event payload's changed_state_date, used as

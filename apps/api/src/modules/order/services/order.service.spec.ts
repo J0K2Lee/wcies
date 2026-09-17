@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DataSource } from 'typeorm';
-import { OrderService } from './order.service';
+import { OrderPlatformFactsInput, OrderService } from './order.service';
 import { OrderRepository } from '../repositories/order.repository';
 import { OrderItemRepository } from '../repositories/order-item.repository';
 import { OrderStatusHistoryRepository } from '../repositories/order-status-history.repository';
@@ -23,6 +23,111 @@ import { OrderEntity } from '../entities/order.entity';
 import { OrderItemEntity } from '../entities/order-item.entity';
 
 const OPERATOR = { userId: null, username: 'test' };
+
+describe('OrderService.applySyncedPlatformFacts - fulfillmentMode', () => {
+  const facts: OrderPlatformFactsInput = {
+    storeId: 'store-1',
+    platformOrderId: 'posting-1',
+    platformStatus: 'awaiting_packaging',
+    platformCancelled: false,
+    platformStage: null,
+    platformStageChangedAt: null,
+    shipmentDeadline: null,
+    rawData: null,
+    source: 'ORDER_SYNC',
+  };
+
+  function build(storedMode: string | null = 'FBS') {
+    const order = {
+      id: 'order-1',
+      orderNo: 'ORD00000001',
+      storeId: facts.storeId,
+      erpStatus: 'PENDING',
+      platformStatus: facts.platformStatus,
+      platformStage: null,
+      platformStageChangedAt: null,
+      shipmentDeadline: null,
+      rawData: null,
+      fulfillmentMode: storedMode,
+    };
+    const orderRepo = {
+      findByStoreAndPlatformOrder: vi.fn().mockResolvedValue(order),
+      updatePlatformFacts: vi.fn().mockResolvedValue(undefined),
+      markPlatformFactsChecked: vi.fn().mockResolvedValue(undefined),
+    };
+    const history = { insert: vi.fn() };
+    const service = new OrderService(
+      {
+        transaction: vi.fn((work: (manager: unknown) => Promise<unknown>) => work({})),
+      } as unknown as DataSource,
+      orderRepo as unknown as OrderRepository,
+      {} as OrderItemRepository,
+      {} as OrderStatusHistoryRepository,
+      history as unknown as PlatformStatusHistoryRepository,
+      {} as OrderStatusService,
+      { evaluate: vi.fn() } as unknown as OrderDeadlineExceptionService,
+      { evaluate: vi.fn() } as unknown as OrderTrackingStallService,
+      {} as OrderIngestionService,
+      {} as ReservationService,
+      {} as InventoryQueryService,
+      {} as ExceptionService,
+      {} as StoreService,
+      {} as SkuImageService,
+      {} as OperationLogService,
+      {} as AppLoggerService,
+      {} as OrderPickingStatePort,
+      {} as OrderInterceptionPort,
+      {} as OrderProcurementPort,
+    );
+    return { service, orderRepo, history };
+  }
+
+  it.each(['FBS', null])(
+    'updates a changed channel from %s without an ERP transition',
+    async (stored) => {
+      const { service, orderRepo, history } = build(stored);
+      const result = await service.applySyncedPlatformFacts(
+        { ...facts, fulfillmentMode: 'RFBS' },
+        OPERATOR,
+      );
+      expect(result).toEqual({ applied: true, changed: true, cancelled: false });
+      expect(orderRepo.updatePlatformFacts).toHaveBeenCalledWith(expect.anything(), 'order-1', {
+        platformStatus: facts.platformStatus,
+        shipmentDeadline: null,
+        rawData: null,
+        fulfillmentMode: 'RFBS',
+      });
+      expect(history.insert).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([undefined, null, 'FBS'])(
+    'does not rewrite a missing or unchanged channel (%s)',
+    async (fulfillmentMode) => {
+      const { service, orderRepo } = build();
+      const result = await service.applySyncedPlatformFacts(
+        { ...facts, fulfillmentMode },
+        OPERATOR,
+      );
+      expect(result.changed).toBe(false);
+      expect(orderRepo.updatePlatformFacts).not.toHaveBeenCalled();
+      expect(orderRepo.markPlatformFactsChecked).toHaveBeenCalled();
+    },
+  );
+
+  it.each([undefined, null])(
+    'preserves the channel during another fact update (%s)',
+    async (fulfillmentMode) => {
+      const { service, orderRepo } = build();
+      await service.applySyncedPlatformFacts(
+        { ...facts, fulfillmentMode, rawData: { refreshed: true } },
+        OPERATOR,
+      );
+      const patch = orderRepo.updatePlatformFacts.mock.calls[0]?.[2];
+      expect(patch).not.toHaveProperty('fulfillmentMode');
+    },
+  );
+});
 
 function makeItem(overrides: Partial<OrderItemEntity>): OrderItemEntity {
   return {
