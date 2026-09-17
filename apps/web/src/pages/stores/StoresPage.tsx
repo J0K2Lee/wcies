@@ -13,7 +13,6 @@ import {
   Space,
   Switch,
   Tooltip,
-  Typography,
 } from 'antd';
 import {
   CloudSyncOutlined,
@@ -343,18 +342,31 @@ export function StoresPage() {
   };
 
   const createMutation = useMutation({
-    mutationFn: (values: Record<string, unknown>) => apiPost<StoreRow>('/api/v1/stores', values),
-    onSuccess: (created) => {
-      void message.success('店铺已创建');
+    // 创建 + 凭证一步完成（用户指示 2026-09-18）：表单内联的凭证字段不进
+    // 店铺 payload，店铺创建成功后立即用同一份输入配置 MAIN_API 凭证。
+    // 凭证保存失败不回滚店铺（店铺已存在事实），提示到详情页补配。
+    mutationFn: async (values: Record<string, unknown>) => {
+      const { credentialClientId, credentialApiKey, ...storePayload } = values;
+      const created = await apiPost<StoreRow>('/api/v1/stores', storePayload);
+      if (typeof credentialApiKey === 'string' && credentialApiKey !== '') {
+        const payload = credentialSpecForPlatform(createPlatformCode).needsClientId
+          ? { clientId: (credentialClientId as string) ?? '', apiKey: credentialApiKey }
+          : { apiKey: credentialApiKey };
+        await apiPost(
+          '/api/v1/stores/{storeId}/credentials',
+          { credentialType: 'MAIN_API', payload },
+          { storeId: created.id },
+        );
+      }
+      return created;
+    },
+    onSuccess: (created, values) => {
+      void message.success(values.credentialApiKey ? '店铺已创建，凭证已加密保存' : '店铺已创建');
       setCreateOpen(false);
       form.resetFields();
-      refreshStore(null);
-      // 用户建议 #14: creation flows straight into credential setup so the
-      // user does not have to find the new row first. Cancelling there does
-      // NOT undo the store - it is already created at this point.
+      refreshStore(created.id);
       setDetailId(created.id);
       setSelectedId(created.id);
-      openCredentialModalFor(created.id, created.platformCode);
     },
     onError: (error: Error) => void message.error(error.message),
   });
@@ -1059,17 +1071,6 @@ export function StoresPage() {
               }))}
             />
           </Form.Item>
-          {(() => {
-            const spec = credentialSpecForPlatform(createPlatformCode);
-            return (
-              <Typography.Text
-                type="secondary"
-                style={{ display: 'block', fontSize: 12.5, marginBottom: 12 }}
-              >
-                {spec.hint}
-              </Typography.Text>
-            );
-          })()}
           <Form.Item name="name" label="店铺名称" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
@@ -1088,6 +1089,58 @@ export function StoresPage() {
               />
             </Form.Item>
           </Space>
+          {(() => {
+            // 选平台即出现对应凭证输入框（用户指示 2026-09-18）：创建与
+            // API Key 配置一步完成。字段形态按平台联动——OZON 需要
+            // Client ID + API Key，其他平台只显示 API Key（与凭证弹窗一致）。
+            const spec = credentialSpecForPlatform(createPlatformCode);
+            if (watchedCreatePlatformId === undefined || watchedCreatePlatformId === null) {
+              return (
+                <p style={{ color: colors.textTertiary, fontSize: 12.5, marginBottom: 0 }}>
+                  选择平台后，此处将显示该平台的凭证输入框（MAIN_API，加密存储，不回显）。
+                </p>
+              );
+            }
+            return (
+              <>
+                <div
+                  style={{
+                    fontSize: 13.5,
+                    fontWeight: 600,
+                    color: colors.textPrimary,
+                    margin: '8px 0 4px',
+                  }}
+                >
+                  平台凭证（MAIN_API）
+                </div>
+                <p style={{ color: colors.textTertiary, fontSize: 12.5, marginBottom: 12 }}>
+                  {spec.hint} 密钥加密存储，不会回显；创建成功即完成配置。
+                </p>
+                {spec.needsClientId && (
+                  <Form.Item
+                    name="credentialClientId"
+                    label="Client ID"
+                    preserve={false}
+                    rules={[{ required: true, message: '请输入 Client ID' }]}
+                  >
+                    <Input placeholder="OZON 后台的 Client ID" />
+                  </Form.Item>
+                )}
+                <Form.Item
+                  name="credentialApiKey"
+                  label="API Key"
+                  extra={
+                    spec.needsClientId
+                      ? undefined
+                      : '后端适配器尚未接入该平台，字段要求以平台实际开通信息为准。'
+                  }
+                  rules={[{ required: true, message: '请输入 API Key' }]}
+                >
+                  <Input.Password placeholder="加密存储，不会回显" />
+                </Form.Item>
+              </>
+            );
+          })()}
         </Form>
       </Modal>
 
