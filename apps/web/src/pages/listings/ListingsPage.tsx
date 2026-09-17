@@ -1,24 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-  App,
-  Alert,
-  Button,
-  Checkbox,
-  Cascader,
-  Drawer,
-  Form,
-  Image,
-  Input,
-  InputNumber,
-  Modal,
-  Radio,
-  Select,
-  Space,
-} from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { App, Alert, Button, Drawer, Form, Input, Modal, Select, Space } from 'antd';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { apiDelete, apiPatch, apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
-import { printTasksBrowser } from '../../printing/print-browser';
 import {
   ACTIVE_STATUS_LABEL,
   ActionMenu,
@@ -43,10 +27,7 @@ import {
   labelOf,
   useContextRail,
 } from '../../design-system';
-import {
-  BrandQuickCreateModal,
-  CategoryQuickCreateModal,
-} from '../../components/QuickCreateModals';
+import { ListingOnboardModal } from '../../components/ListingOnboardModal';
 
 interface ListingRow {
   id: string;
@@ -92,89 +73,6 @@ interface ListingDetail {
   skus: ListingSkuRow[];
 }
 
-/** Sprint 8 T1 onboarding result - enough to print the label on the spot. */
-interface OnboardResult {
-  listingId: string;
-  mappingId: string;
-  product: { id: string; productCode: string; nameZh: string };
-  sku: { id: string; skuCode: string; nameZh: string };
-  barcode: string | null;
-  productCreated: boolean;
-}
-
-/** Sprint 8.5: one feed powering the enhanced onboarding dialog. */
-interface OnboardContextVariant {
-  id: string;
-  mappingStatus: string;
-  platformSkuId: string | null;
-  offerId: string | null;
-  sellerSku: string | null;
-  skuCode: string | null;
-  productId: string | null;
-  productCode: string | null;
-  primaryImage: string | null;
-  colorImage: string | null;
-  descriptionCategoryId: string | null;
-  descriptionTypeId: string | null;
-  suggestedCategoryId: string | null;
-  weightG: number | null;
-  lengthMm: number | null;
-  widthMm: number | null;
-  heightMm: number | null;
-}
-
-interface OnboardContext {
-  listingId: string;
-  title: string | null;
-  defaultAttachProductId: string | null;
-  defaultAttachProductCode: string | null;
-  defaultAttachProductName: string | null;
-  variants: OnboardContextVariant[];
-}
-
-interface CategoryNode {
-  id: string;
-  nameZh: string;
-  nameRu: string | null;
-  level: number;
-  sortOrder: number;
-  status: string;
-  children: CategoryNode[];
-}
-
-interface CategoryOption {
-  value: string;
-  label: string;
-  children?: CategoryOption[];
-}
-
-interface BrandItem {
-  id: string;
-  name: string;
-  nameZh: string | null;
-  status: string;
-}
-
-/**
- * Variant-aware name prefill (Sprint 8.5 T7, revised in 8.5R1): the variant's
- * Offer ID LEADS - it is the string operators see on the platform and use to
- * tell variants apart. The listing title (usually Russian) is only the
- * fallback; platform SKU id / seller SKU are the last resort so variants can
- * never collapse into indistinguishable duplicates.
- */
-function buildVariantName(title: string | null, variant: OnboardContextVariant): string {
-  const offer = variant.offerId?.trim() ?? '';
-  if (offer !== '') {
-    return offer;
-  }
-  const base = title?.trim() ?? '';
-  const discriminator = variant.sellerSku ?? variant.platformSkuId;
-  if (discriminator !== null && discriminator !== '') {
-    return base === '' ? discriminator : `${base} / ${discriminator}`;
-  }
-  return base;
-}
-
 const listingStatusBadge = (value: string) => (
   <StatusBadge
     tone={value === 'ACTIVE' ? 'success' : 'neutral'}
@@ -210,16 +108,11 @@ export function ListingsPage() {
   const [skuKeyword, setSkuKeyword] = useState('');
   const debouncedSkuKeyword = useDebouncedValue(skuKeyword);
   // Sprint 8 T1: quick onboarding (Product + SKU + optional barcode + mapping
-  // in one transaction) from an unmapped listing / variant row.
+  // in one transaction) from an unmapped listing / variant row. The dialog
+  // itself is the shared ListingOnboardModal component.
   const [onboardListingId, setOnboardListingId] = useState<string | null>(null);
   const [onboardVariantId, setOnboardVariantId] = useState<string | null>(null);
-  const [onboardResult, setOnboardResult] = useState<OnboardResult | null>(null);
-  /** Sprint 8.5 T2: 'attach' pins the listing's onboarded product; 'new' forces a fresh one. */
-  const [onboardMode, setOnboardMode] = useState<'attach' | 'new'>('new');
-  /** After 保存并下一变体: the product just created is pinned for the next variant. */
-  const [onboardPinnedProductId, setOnboardPinnedProductId] = useState<string | null>(null);
-  const [onboardForm] = Form.useForm();
-  const [printCopies, setPrintCopies] = useState(1);
+
   // Sprint 8.5 T3 tools: tree sync + one-click import.
   const [categoryToolsOpen, setCategoryToolsOpen] = useState(false);
   const [toolsStoreId, setToolsStoreId] = useState<string | null>(null);
@@ -239,9 +132,6 @@ export function ListingsPage() {
       level3Count: number;
     }>;
   } | null>(null);
-  // Brand / category quick-create (shared modals, G9) - open flags only.
-  const [brandModalOpen, setBrandModalOpen] = useState(false);
-  const [categoryCreateOpen, setCategoryCreateOpen] = useState(false);
   /** Listing delete confirm (L2 shared modal) — only identity fields needed. */
   const [deletingListing, setDeletingListing] = useState<{
     id: string;
@@ -298,93 +188,6 @@ export function ListingsPage() {
     {},
     ['listing-mapping-stats'],
   );
-  // Context feed for the onboarding dialog (Sprint 8.5): images, platform
-  // category keys + suggestions, v4-prefilled dims, attach target.
-  const onboardContextQuery = useApiQuery<{ data: OnboardContext }>(
-    '/api/v1/listings/{id}/onboard-context',
-    {},
-    ['listing-onboard-context', onboardListingId],
-    { id: onboardListingId ?? '' },
-    onboardListingId !== null,
-  );
-  const onboardCtx = onboardContextQuery.data?.data;
-  const onboardUnmapped = useMemo(
-    () => (onboardCtx?.variants ?? []).filter((variant) => variant.mappingStatus === 'UNMAPPED'),
-    [onboardCtx],
-  );
-  const onboardSelectedVariantId =
-    onboardVariantId ?? (onboardUnmapped.length > 0 ? (onboardUnmapped[0]?.id ?? null) : null);
-  const onboardSelectedVariant = useMemo(
-    () =>
-      (onboardCtx?.variants ?? []).find((variant) => variant.id === onboardSelectedVariantId) ??
-      null,
-    [onboardCtx, onboardSelectedVariantId],
-  );
-  // Category tree + brands for the enhanced fields (Sprint 8.5 T3c/T4).
-  // Sprint 8.5R1: the lite endpoint (8k nodes) - the picker never reads the
-  // pruned columns, and the full tree cost megabytes per page open.
-  const categories = useApiQuery<{ data: CategoryNode[] }>(
-    '/api/v1/categories/tree-lite',
-    {},
-    ['categories'],
-    undefined,
-    onboardListingId !== null,
-  );
-  const brands = useApiQuery<{ data: BrandItem[] }>(
-    '/api/v1/brands',
-    { keyword: '' },
-    ['brands'],
-    undefined,
-    onboardListingId !== null,
-  );
-  const categoryPathById = useMemo(() => {
-    const pathById = new Map<string, string[]>();
-    const walk = (nodes: CategoryNode[], trail: string[]): void => {
-      for (const node of nodes) {
-        const path = [...trail, node.id];
-        pathById.set(node.id, path);
-        walk(node.children, path);
-      }
-    };
-    walk(categories.data?.data ?? [], []);
-    return pathById;
-  }, [categories.data]);
-  const categoryOptions = useMemo(() => {
-    const toOptions = (nodes: CategoryNode[]): CategoryOption[] =>
-      nodes.map((node) => ({
-        value: node.id,
-        label: node.nameRu !== null ? `${node.nameZh} (${node.nameRu})` : node.nameZh,
-        children: node.children.length > 0 ? toOptions(node.children) : undefined,
-      }));
-    return toOptions(categories.data?.data ?? []);
-  }, [categories.data]);
-  const brandOptions = (brands.data?.data ?? []).map((brand) => ({
-    value: brand.id,
-    label: brand.name,
-  }));
-
-  /**
-   * T2 attach resolution, mirrored from the backend default: a pinned
-   * product (save-and-next-variant) wins, else the attach radio's target
-   * when the listing already has an onboarded product. null = create new.
-   */
-  const onboardAttachTargetId =
-    onboardPinnedProductId !== null
-      ? onboardPinnedProductId
-      : onboardMode === 'attach'
-        ? (onboardCtx?.defaultAttachProductId ?? null)
-        : null;
-  /** T3c hint under the category cascader: exact-match suggestion or miss. */
-  const categoryExtraHint = (): string => {
-    const variant = onboardSelectedVariant;
-    if (variant === null || variant.descriptionCategoryId === null) {
-      return '该变体无平台类目信息，可人工选择三级分类。';
-    }
-    if (variant.suggestedCategoryId !== null) {
-      return '已按 OZON 类目映射自动选中（可改）：命中 (category, type) 复合键精确匹配。';
-    }
-    return '该 OZON 类目尚未映射：人工选择后勾选「记住此映射」，同类目后续自动命中（绝不按名称相似度猜）。';
-  };
   // Category-tools helpers: the OZON platform row + its stores.
   const ozonPlatform = (platforms.data?.data ?? []).find((platform) => platform.code === 'OZON');
   const ozonPlatformId = ozonPlatform?.id ?? null;
@@ -397,58 +200,6 @@ export function ListingsPage() {
     void queryClient.invalidateQueries({ queryKey: ['listing-detail'] });
     void queryClient.invalidateQueries({ queryKey: ['listing-mapping-stats'] });
   };
-
-  // Sprint 8 T1 + 8.5: one transaction on the backend - Product (or attach)
-  // + SKU + optional internal barcode + mapping (+ remember-category row).
-  // Any failure rolls back whole.
-  const onboardMutation = useMutation({
-    mutationFn: (input: {
-      listingId: string;
-      mappingId: string;
-      createNewProduct: boolean;
-      existingProductId?: string;
-      productNameZh?: string;
-      skuNameZh: string;
-      brandId?: string;
-      categoryId?: string;
-      rememberCategoryMapping: boolean;
-      generateBarcode: boolean;
-      weightG?: number;
-      lengthMm?: number;
-      widthMm?: number;
-      heightMm?: number;
-      latestPurchasePrice?: number;
-    }) =>
-      apiPost<OnboardResult>(
-        '/api/v1/listings/{listingId}/skus/{id}/onboard',
-        {
-          productNameZh: input.productNameZh,
-          skuNameZh: input.skuNameZh,
-          generateBarcode: input.generateBarcode,
-          createNewProduct: input.createNewProduct,
-          existingProductId: input.existingProductId,
-          brandId: input.brandId,
-          categoryId: input.categoryId,
-          rememberCategoryMapping: input.rememberCategoryMapping,
-          weightG: input.weightG,
-          lengthMm: input.lengthMm,
-          widthMm: input.widthMm,
-          heightMm: input.heightMm,
-          latestPurchasePrice: input.latestPurchasePrice,
-        },
-        { listingId: input.listingId, id: input.mappingId },
-      ),
-    onSuccess: (result) => {
-      setOnboardResult(result);
-      void message.success(
-        `建档并映射完成：${result.sku.skuCode}${result.barcode !== null ? `（条码 ${result.barcode}）` : ''}`,
-      );
-      refreshListings();
-      void queryClient.invalidateQueries({ queryKey: ['listing-onboard-context'] });
-      void queryClient.invalidateQueries({ queryKey: ['categories'] });
-    },
-    onError: (error: Error) => void message.error(`建档失败（已整体回滚）: ${error.message}`),
-  });
 
   // Sprint 8 T2: export the unmapped set (respects the current platform/store
   // filters) as an import-compatible Excel and download via signed URL.
@@ -511,113 +262,10 @@ export function ListingsPage() {
   });
 
   /** Opens quick-onboarding for an unmapped listing row (variant chosen inside). */
-  const openOnboard = (listingId: string) => {
-    setOnboardResult(null);
-    setOnboardVariantId(null);
-    setOnboardPinnedProductId(null);
-    setOnboardMode('new');
-    onboardForm.resetFields();
-    onboardForm.setFieldsValue({ generateBarcode: true, rememberCategoryMapping: true });
+  const openOnboard = (listingId: string, variantId: string | null = null) => {
+    setOnboardVariantId(variantId);
     setOnboardListingId(listingId);
   };
-
-  const closeOnboard = () => {
-    setOnboardListingId(null);
-    setOnboardVariantId(null);
-    setOnboardResult(null);
-    setOnboardPinnedProductId(null);
-    onboardForm.resetFields();
-  };
-
-  /**
-   * Prefills the editable fields for the currently selected variant: names
-   * from the variant's Offer ID (listing title as fallback), category from the
-   * composite-key suggestion, dims/weight from the v4 enrichment payload.
-   */
-  useEffect(() => {
-    if (onboardListingId === null || onboardResult !== null || onboardCtx === undefined) {
-      return;
-    }
-    const suggested = onboardSelectedVariant?.suggestedCategoryId ?? null;
-    const variantName =
-      onboardSelectedVariant === null
-        ? (onboardCtx.title ?? '')
-        : buildVariantName(onboardCtx.title, onboardSelectedVariant);
-    onboardForm.setFieldsValue({
-      productNameZh: onboardForm.getFieldValue('productNameZh') || variantName,
-      skuNameZh: variantName,
-      categoryPath: suggested !== null ? (categoryPathById.get(suggested) ?? undefined) : undefined,
-      weightG: onboardSelectedVariant?.weightG ?? undefined,
-      lengthMm: onboardSelectedVariant?.lengthMm ?? undefined,
-      widthMm: onboardSelectedVariant?.widthMm ?? undefined,
-      heightMm: onboardSelectedVariant?.heightMm ?? undefined,
-    });
-  }, [
-    onboardListingId,
-    onboardResult,
-    onboardCtx,
-    onboardSelectedVariant,
-    categoryPathById,
-    onboardForm,
-  ]);
-
-  /**
-   * Sprint 8.5 T7 保存并下一变体: after a successful submit, jump straight to
-   * the next UNMAPPED variant with the just-created product pinned, keeping
-   * the category/brand/barcode choices from the previous round.
-   */
-  const startNextVariant = () => {
-    if (onboardResult === null || onboardCtx === undefined) {
-      return;
-    }
-    const remaining = onboardCtx.variants.filter(
-      (variant) => variant.mappingStatus === 'UNMAPPED' && variant.id !== onboardResult.mappingId,
-    );
-    // The context is cached from before this submit; the just-mapped variant
-    // is excluded explicitly. If stale data still shows others, refetch wins.
-    const next =
-      remaining[0] ??
-      onboardUnmapped.find((variant) => variant.id !== onboardResult.mappingId) ??
-      null;
-    if (next === null) {
-      void message.info('该商品链接的变体已全部建档完成');
-      closeOnboard();
-      return;
-    }
-    const previous = {
-      categoryId: onboardForm.getFieldValue('categoryPath') as string[] | undefined,
-      brandId: onboardForm.getFieldValue('brandId') as string | undefined,
-      generateBarcode: onboardForm.getFieldValue('generateBarcode') !== false,
-      rememberCategoryMapping: onboardForm.getFieldValue('rememberCategoryMapping') !== false,
-    };
-    setOnboardResult(null);
-    setOnboardPinnedProductId(onboardResult.product.id);
-    setOnboardMode('attach');
-    setOnboardVariantId(next.id);
-    onboardForm.setFieldsValue({
-      productNameZh: onboardResult.product.nameZh,
-      generateBarcode: previous.generateBarcode,
-      rememberCategoryMapping: previous.rememberCategoryMapping,
-      brandId: previous.brandId,
-      categoryPath: previous.categoryId,
-      weightG: next.weightG ?? undefined,
-      lengthMm: next.lengthMm ?? undefined,
-      widthMm: next.widthMm ?? undefined,
-      heightMm: next.heightMm ?? undefined,
-      skuNameZh: buildVariantName(onboardCtx.title, next),
-      // The price belongs to the SKU being built: never carried over from the
-      // previous variant (unlike brand/category, which are product-level).
-      latestPurchasePrice: undefined,
-    });
-    void queryClient.invalidateQueries({ queryKey: ['listing-onboard-context'] });
-  };
-  /** Whether another UNMAPPED variant remains after the current result (T7). */
-  const hasNextVariant =
-    onboardResult !== null &&
-    onboardCtx !== undefined &&
-    onboardCtx.variants.some(
-      (variant) => variant.mappingStatus === 'UNMAPPED' && variant.id !== onboardResult.mappingId,
-    );
 
   const mapMutation = useMutation({
     mutationFn: (input: { listingId: string; mappingId: string; skuId: string }) =>
@@ -1362,16 +1010,7 @@ export function ListingsPage() {
                             style={{ paddingInline: 4 }}
                             onClick={() => {
                               if (row.mappingStatus === 'UNMAPPED') {
-                                setOnboardResult(null);
-                                setOnboardVariantId(row.id);
-                                setOnboardPinnedProductId(null);
-                                setOnboardMode('new');
-                                onboardForm.resetFields();
-                                onboardForm.setFieldsValue({
-                                  generateBarcode: true,
-                                  rememberCategoryMapping: true,
-                                });
-                                setOnboardListingId(listingDetail.id);
+                                openOnboard(listingDetail.id, row.id);
                               } else {
                                 setMapTarget(row);
                                 mapForm.resetFields();
@@ -1545,384 +1184,19 @@ export function ListingsPage() {
         />
       </Drawer>
 
-      {/* ---- Sprint 8 / 8.5: quick onboarding (one dialog, one transaction) ---- */}
-      <Modal
-        title={
-          onboardAttachTargetId !== null
-            ? '建档并映射（挂靠已有商品 + 新建SKU + 映射）'
-            : '建档并映射（新建商品 + SKU + 映射）'
-        }
+      {/* ---- 快速建档弹窗（Phase 3 提取为共享组件；订单页复用同一弹窗） ---- */}
+      <ListingOnboardModal
         open={onboardListingId !== null}
+        listingId={onboardListingId}
+        preferredVariantId={onboardVariantId}
+        chained
+        onClose={() => {
+          setOnboardListingId(null);
+          setOnboardVariantId(null);
+        }}
+        onCompleted={refreshListings}
         zIndex={1100}
-        width={680}
-        onCancel={closeOnboard}
-        footer={
-          onboardResult === null
-            ? [
-                <Button key="cancel" onClick={closeOnboard}>
-                  取消
-                </Button>,
-                <Button
-                  key="submit"
-                  type="primary"
-                  loading={onboardMutation.isPending}
-                  onClick={() => {
-                    if (onboardSelectedVariantId === null) {
-                      void message.warning('没有可建档的未映射变体');
-                      return;
-                    }
-                    void onboardForm.validateFields().then((values) => {
-                      if (onboardListingId === null) {
-                        return;
-                      }
-                      const categoryPath = values.categoryPath as string[] | undefined;
-                      onboardMutation.mutate({
-                        listingId: onboardListingId,
-                        mappingId: onboardSelectedVariantId,
-                        createNewProduct: onboardAttachTargetId === null,
-                        existingProductId:
-                          onboardAttachTargetId === null ? undefined : onboardAttachTargetId,
-                        productNameZh:
-                          onboardAttachTargetId === null
-                            ? (values.productNameZh as string)
-                            : undefined,
-                        skuNameZh: values.skuNameZh as string,
-                        brandId:
-                          onboardAttachTargetId === null
-                            ? (values.brandId as string | undefined)
-                            : undefined,
-                        categoryId:
-                          onboardAttachTargetId === null &&
-                          categoryPath !== undefined &&
-                          categoryPath.length === 3
-                            ? categoryPath[2]
-                            : undefined,
-                        rememberCategoryMapping: values.rememberCategoryMapping !== false,
-                        generateBarcode: values.generateBarcode !== false,
-                        weightG: values.weightG as number | undefined,
-                        lengthMm: values.lengthMm as number | undefined,
-                        widthMm: values.widthMm as number | undefined,
-                        heightMm: values.heightMm as number | undefined,
-                        latestPurchasePrice: values.latestPurchasePrice as number | undefined,
-                      });
-                    });
-                  }}
-                >
-                  建档并映射
-                </Button>,
-              ]
-            : [
-                ...(onboardResult?.barcode !== null && onboardResult !== null
-                  ? [
-                      <Button
-                        key="print"
-                        onClick={() =>
-                          printTasksBrowser([
-                            {
-                              type: 'SKU_LABEL',
-                              payload: {
-                                barcode: onboardResult.barcode ?? '',
-                                skuCode: onboardResult.sku.skuCode,
-                                skuName: onboardResult.sku.nameZh,
-                                copies: printCopies,
-                              },
-                            },
-                          ])
-                        }
-                      >
-                        打印标签
-                      </Button>,
-                    ]
-                  : []),
-                ...(hasNextVariant
-                  ? [
-                      <Button key="next" onClick={startNextVariant}>
-                        保存并下一变体
-                      </Button>,
-                    ]
-                  : []),
-                <Button key="done" type="primary" onClick={closeOnboard}>
-                  完成
-                </Button>,
-              ]
-        }
-      >
-        {onboardResult !== null ? (
-          <Space orientation="vertical" style={{ width: '100%' }} size="middle">
-            <Alert
-              type="success"
-              showIcon
-              title="建档、条码、映射已在一个事务中完成"
-              description={
-                onboardResult.productCreated
-                  ? '失败会整体回滚，不会留下「建了 SKU 但没映射」的半成品。商品图将从平台 CDN 异步转存到自有桶。'
-                  : '本次 SKU 挂靠到已有商品（同商品链接变体不裂变）。商品图将从平台 CDN 异步转存到自有桶。'
-              }
-            />
-            <InfoGrid
-              columns={2}
-              items={[
-                {
-                  label: '商品',
-                  children: `${onboardResult.product.productCode} ${onboardResult.product.nameZh}`,
-                },
-                { label: '内部SKU', children: onboardResult.sku.skuCode },
-                {
-                  label: '内部条码',
-                  children:
-                    onboardResult.barcode === null ? (
-                      <StatusBadge tone="neutral" label="未生成" showDot={false} />
-                    ) : (
-                      <span style={{ fontFamily: 'monospace' }}>{onboardResult.barcode}</span>
-                    ),
-                },
-                { label: '映射状态', children: <StatusBadge tone="success" label="已映射" /> },
-              ]}
-            />
-            {onboardResult.barcode !== null && (
-              <Space>
-                <span style={{ fontSize: 12.5, color: colors.textTertiary }}>打印份数</span>
-                <InputNumber
-                  min={1}
-                  max={99}
-                  value={printCopies}
-                  onChange={(value) => setPrintCopies(value ?? 1)}
-                  style={{ width: 80 }}
-                />
-              </Space>
-            )}
-            {hasNextVariant && (
-              <Alert
-                type="info"
-                showIcon
-                title="该商品链接还有未建档的变体"
-                description="点「保存并下一变体」继续：商品已锁定挂靠，类目/品牌/条码选择沿用，名称按下一变体预填。"
-              />
-            )}
-          </Space>
-        ) : (
-          <Form form={onboardForm} layout="vertical" preserve={false}>
-            {onboardUnmapped.length > 1 && (
-              <Form.Item label="要建档映射的变体（该商品链接有多个未映射变体）" required>
-                <Select
-                  value={onboardSelectedVariantId}
-                  onChange={(value) => {
-                    setOnboardVariantId(value);
-                    onboardForm.setFieldsValue({
-                      weightG: undefined,
-                      lengthMm: undefined,
-                      widthMm: undefined,
-                      heightMm: undefined,
-                      categoryPath: undefined,
-                      // Per-SKU value: never carried across variants.
-                      latestPurchasePrice: undefined,
-                    });
-                  }}
-                  options={onboardUnmapped.map((variant) => ({
-                    value: variant.id,
-                    label: `${variant.platformSkuId ?? '—'} / ${variant.offerId ?? variant.sellerSku ?? '—'}`,
-                  }))}
-                />
-              </Form.Item>
-            )}
-            {onboardUnmapped.length === 0 && !onboardContextQuery.isLoading && (
-              <Alert
-                type="warning"
-                showIcon
-                style={{ marginBottom: 12 }}
-                title="该商品链接没有未映射的变体"
-                description="可能刚刚已完成映射，请刷新列表后重试。"
-              />
-            )}
-            {onboardSelectedVariant?.primaryImage != null && (
-              <Space align="start" style={{ marginBottom: 12 }}>
-                <Image
-                  src={onboardSelectedVariant.primaryImage}
-                  alt="平台商品图"
-                  width={120}
-                  height={120}
-                  style={{
-                    objectFit: 'contain',
-                    borderRadius: 6,
-                    border: `1px solid ${colors.border}`,
-                  }}
-                />
-                <span style={{ fontSize: 12.5, color: colors.textTertiary, maxWidth: 320 }}>
-                  平台商品图预览（CDN
-                  直链，点击可放大）。建档成功后系统会把颜色图/首图异步转存到自有存储并设为商品主图。
-                </span>
-              </Space>
-            )}
-            {(onboardCtx?.defaultAttachProductId !== null &&
-              onboardCtx?.defaultAttachProductId !== undefined) ||
-            onboardPinnedProductId !== null ? (
-              <Form.Item label="多变体挂靠（同商品链接变体默认共用一个商品）" required>
-                <Radio.Group
-                  value={onboardMode}
-                  onChange={(event) => setOnboardMode(event.target.value as 'attach' | 'new')}
-                  disabled={onboardPinnedProductId !== null}
-                >
-                  <Radio value="attach">
-                    挂靠已有商品
-                    {onboardCtx?.defaultAttachProductCode != null &&
-                      `（${onboardCtx.defaultAttachProductCode} ${onboardCtx.defaultAttachProductName ?? ''}）`}
-                  </Radio>
-                  <Radio value="new">另建新商品（变体实为不同商品时使用）</Radio>
-                </Radio.Group>
-                {onboardPinnedProductId !== null && (
-                  <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
-                    连续建档模式：已锁定挂靠本次新建的商品。
-                  </span>
-                )}
-              </Form.Item>
-            ) : null}
-            {onboardAttachTargetId === null ? (
-              <>
-                <Form.Item
-                  name="productNameZh"
-                  label="商品名"
-                  rules={[{ required: true, message: '请填写商品名' }]}
-                >
-                  <Input maxLength={255} placeholder="默认取商品链接标题" />
-                </Form.Item>
-                <Form.Item
-                  name="brandId"
-                  label={
-                    <Space size={4}>
-                      品牌
-                      <Button
-                        type="link"
-                        size="small"
-                        style={{ padding: 0, height: 'auto' }}
-                        onClick={() => setBrandModalOpen(true)}
-                      >
-                        + 新建品牌
-                      </Button>
-                    </Space>
-                  }
-                >
-                  <Select
-                    allowClear
-                    showSearch
-                    optionFilterProp="label"
-                    placeholder="选择品牌（可搜可现场快建）"
-                    options={brandOptions}
-                  />
-                </Form.Item>
-                <Form.Item
-                  name="categoryPath"
-                  label={
-                    <Space size={4}>
-                      商品分类（三级）
-                      <Button
-                        type="link"
-                        size="small"
-                        style={{ padding: 0, height: 'auto' }}
-                        onClick={() => setCategoryCreateOpen(true)}
-                      >
-                        + 新建分类
-                      </Button>
-                    </Space>
-                  }
-                  extra={categoryExtraHint()}
-                  rules={[
-                    {
-                      validator: (_rule, value: string[] | undefined) =>
-                        value === undefined || value.length === 0
-                          ? Promise.resolve()
-                          : value.length === 3
-                            ? Promise.resolve()
-                            : Promise.reject(new Error('必须选择到三级分类')),
-                    },
-                  ]}
-                >
-                  <Cascader<CategoryOption>
-                    allowClear
-                    showSearch
-                    placeholder="选择三级分类（支持搜索中文名）"
-                    options={categoryOptions}
-                  />
-                </Form.Item>
-                {onboardSelectedVariant?.descriptionCategoryId != null && (
-                  <Form.Item
-                    name="rememberCategoryMapping"
-                    valuePropName="checked"
-                    initialValue={true}
-                  >
-                    <Checkbox>
-                      记住此映射（OZON 类目 {onboardSelectedVariant.descriptionCategoryId}:
-                      {onboardSelectedVariant.descriptionTypeId} →
-                      所选内部类目；同类目后续自动命中）
-                    </Checkbox>
-                  </Form.Item>
-                )}
-              </>
-            ) : (
-              <Alert
-                type="info"
-                showIcon
-                style={{ marginBottom: 12 }}
-                title={`挂靠已有商品：${onboardCtx?.defaultAttachProductCode ?? ''} ${
-                  onboardCtx?.defaultAttachProductName ?? ''
-                }`}
-                description="品牌/分类沿用该商品已有档案；本次只新建 SKU 并映射变体。"
-              />
-            )}
-            <Form.Item
-              name="skuNameZh"
-              label="SKU 名"
-              rules={[{ required: true, message: '请填写 SKU 名' }]}
-            >
-              <Input maxLength={255} placeholder="默认按变体标识预填" />
-            </Form.Item>
-            <Space wrap size="middle">
-              <Form.Item name="weightG" label="重量（g）" style={{ marginBottom: 0 }}>
-                <InputNumber min={0} placeholder="重量" style={{ width: 120 }} />
-              </Form.Item>
-              <Form.Item name="lengthMm" label="长（mm）" style={{ marginBottom: 0 }}>
-                <InputNumber min={0} placeholder="长" style={{ width: 110 }} />
-              </Form.Item>
-              <Form.Item name="widthMm" label="宽（mm）" style={{ marginBottom: 0 }}>
-                <InputNumber min={0} placeholder="宽" style={{ width: 110 }} />
-              </Form.Item>
-              <Form.Item name="heightMm" label="高（mm）" style={{ marginBottom: 0 }}>
-                <InputNumber min={0} placeholder="高" style={{ width: 110 }} />
-              </Form.Item>
-              <Form.Item
-                name="latestPurchasePrice"
-                label="最新采购价（CNY）"
-                style={{ marginBottom: 0 }}
-              >
-                <InputNumber
-                  min={0}
-                  step={0.01}
-                  placeholder="人工录入，可留空"
-                  style={{ width: 150 }}
-                />
-              </Form.Item>
-            </Space>
-            <span
-              style={{
-                fontSize: 12.5,
-                color: colors.textTertiary,
-                display: 'block',
-                marginTop: 4,
-              }}
-            >
-              尺寸/重量按平台 v4 属性预填（可改）；体积由后端按长×宽×高计算，不可直接填写。
-              采购价为本 SKU 的人工维护值，不影响由收货确认维护的移动加权平均成本。
-            </span>
-            <Form.Item
-              name="generateBarcode"
-              valuePropName="checked"
-              initialValue={true}
-              style={{ marginTop: 12 }}
-            >
-              <Checkbox>生成内部条码（W…，建档后可直接打印标签贴到实物上）</Checkbox>
-            </Form.Item>
-          </Form>
-        )}
-      </Modal>
+      />
 
       {/* ---- Listing 删除 = L2 统一 DeleteConfirmModal（G4） ---- */}
       <DeleteConfirmModal
@@ -1936,25 +1210,6 @@ export function ListingsPage() {
           }
         }}
         onCancel={() => setDeletingListing(null)}
-      />
-
-      {/* ---- Shared quick-create dialogs (G9); opened from the onboarding
-           modal (zIndex 1100), so they sit at 1200 (UI spec §8.3). ---- */}
-      <BrandQuickCreateModal
-        open={brandModalOpen}
-        zIndex={1200}
-        onClose={() => setBrandModalOpen(false)}
-        onCreated={(brandId) => {
-          onboardForm.setFieldValue('brandId', brandId);
-        }}
-      />
-      <CategoryQuickCreateModal
-        open={categoryCreateOpen}
-        zIndex={1200}
-        onClose={() => setCategoryCreateOpen(false)}
-        onCreated={(path) => {
-          onboardForm.setFieldValue('categoryPath', path);
-        }}
       />
 
       {/* ---- Sprint 8.5 T3: category tools (tree sync + one-click import) ---- */}

@@ -79,12 +79,15 @@
 
 ### 2.3 订单详情：去建档归位关联操作 + 行图片/价格（用户复验跟进，2026-09-17）
 
-- **去建档归位**：订单右栏风险区内的「去建档」小按钮移除，改建为「关联操作」ContextSection 内的 EntityLink 深链（规范 §4.2「单条处理入口（EntityLink）」），与异常中心「前往 SKU 映射」完全同格式。
-- **修复去建档目标**：T3 收敛行内按钮时误将目标写成 `/platform-mappings`（只读总览），本次回归修复为 `/listings?keyword=<平台标识>`（SKU映射工作台，快速建档所在）——abe4453 曾修正过同一处目标，T3 重构时未保留该结论。dev 实测点击后跳转 `/listings?keyword=5456434554` 且搜索框预填。
+- **去建档 → 就地快速建档**（用户复验：跳转太麻烦）：订单右栏风险区内的「去建档」小按钮移除；操作区新增主操作「快速建档」——按订单行平台标识（platformSkuId / offerId / sellerSku）在**当前店铺**反查未映射商品链接（`GET /listings?storeId&keyword&mappingState=UNMAPPED`，keyword 后端已覆盖变体级标识），就地打开建档弹窗并按标识预选对应变体，不再跳转工作台。
+- **共享建档弹窗**：把 SKU映射 页的「建档并映射」弹窗（Sprint 8/8.5 快速建档，约 740 行）提取为 `components/ListingOnboardModal.tsx` 自包含组件——上下文拉取、变体选择与预选（`preferredVariantId` / `matchIdentifiers`）、表单预填、类目/品牌/条码/尺寸/价格、类目品牌快建、提交与结果态、连续建档（`chained`）全在组件内；ListingsPage 与 OrdersPage 共用同一弹窗（订单页不启用连续建档）。ListingsPage 相应瘦身 740 行，行为不变。
+- **修复跳转目标（历史回归）**：T3 收敛行内按钮时曾把去建档目标写成 `/platform-mappings`（只读总览，abe4453 修正过同一处）；本次提取组件后该深链入口随之地被就地弹窗取代。
 - **行图片与价格**：订单详情「商品」表新增 图片（内部 SKU 主图签名 URL，未映射行显示「无图」占位）、单价、小计 三列（金额按订单币种经 `fmtMoney` 格式化）。
 - **后端小改动**（用户明确要求；非 Phase 3 原范围）：`OrderItemDto` 增加 `imageUrl` 字段——`OrderService` 经公开 `SkuImageService`（`OrderModule` 引入 `ProductModule`，遵循 AGENTS.md §9）按行 `skuId` 批量解析主图 signed URL；`unitPrice/totalPrice` 早已在 DTO 中，仅前端未展示。
 
-验证：dev 实测右栏结构（风险区「重试映射」+ 关联操作 EntityLink）、深链跳转与搜索预填、Drawer 图片缩略图与 ¥505.00 单价/小计（截图 `verify_orders_rail_entitylink.png`、`verify_orders_drawer_image_price.png`）；API 测试 222 项、web phase3 19 项、lint / typecheck / build / check:architecture 全绿。
+验证：dev 实测订单页「快速建档」→ 弹窗按 platformSkuId 精确预选订单行对应变体（商品名预填订单行 offer_id），提交后端到端成功（PN000002 + SKU000002001 + 条码，映射表 `5456434554 → MAPPED`）；列表页弹窗经共享组件打开正常（按 clicked 变体预填）；Drawer 图片缩略图与 ¥505.00 单价/小计（截图 `verify_orders_quick_onboard_modal.png`、`verify_orders_rail_entitylink.png`、`verify_orders_drawer_image_price.png`）。API+web 测试 252 项、lint / typecheck / build / check:architecture 全绿。
+
+> 环境备注：重试映射在 dev 实测返回 422「店铺没有可用的库存绑定仓库」——数据重置脚本清空后该店铺 0 个店仓绑定所致（业务规则的正确拒绝），与本次改动无关。
 
 ## 3. 截图回归（`gui-redesign-phase3-screenshots/`，本地留存，仓库 .gitignore 既定忽略 `gui-*-screenshots/`）
 

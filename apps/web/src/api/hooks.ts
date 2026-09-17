@@ -106,6 +106,22 @@ export function useApiQuery<
   });
 }
 
+/** Typed GET helper (one-off reads, e.g. lookups before opening a dialog). */
+export async function apiGet<TData>(
+  path: QueryKey,
+  params: Record<string, unknown> = {},
+): Promise<{ data: TData; meta: { total: number } }> {
+  const { data, error } = await apiClient.GET(path, { params: { query: params as never } });
+  if (error !== undefined) {
+    throw toApiError(error.error);
+  }
+  const envelope = data as { data: TData; meta?: { total: number } };
+  return {
+    data: envelope.data,
+    meta: envelope.meta ?? { total: Array.isArray(envelope.data) ? envelope.data.length : 0 },
+  };
+}
+
 /** Typed POST helper returning the unwrapped data or throwing. */
 export async function apiPost<TData>(
   path: QueryKey,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   App as AntdApp,
   Button,
@@ -15,15 +15,14 @@ import {
 } from 'antd';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
-import { ExportOutlined } from '@ant-design/icons';
-import { apiPost, useApiQuery } from '../../api/hooks';
+import { apiGet, apiPost, useApiQuery } from '../../api/hooks';
 import { fmtMoney } from '../../utils/format';
+import { ListingOnboardModal, OnboardMatchIdentifiers } from '../../components/ListingOnboardModal';
 import {
   ContextAction,
   ContextMetric,
   ContextSection,
   DataTable,
-  EntityLink,
   EntitySummary,
   ERP_STATUS_META,
   FilterChips,
@@ -113,6 +112,7 @@ interface OrderItem {
 interface OrderDetail {
   id: string;
   orderNo: string;
+  storeId: string;
   storeName: string;
   platformCode: string;
   platformOrderId: string;
@@ -493,6 +493,15 @@ export function OrdersPage() {
     onError: (error: Error) => message.error(`重试失败：${error.message}`),
   });
 
+  // ---- 快速建档（就地复用 SKU映射 的建档弹窗，不再跳转工作台） ----
+  // 订单行只有平台标识：先在当前店铺反查所在商品链接（kw 命中变体级标识），
+  // 再让共享弹窗按标识预选变体。
+  const [quickOnboard, setQuickOnboard] = useState<{
+    listingId: string;
+    match: OnboardMatchIdentifiers;
+  } | null>(null);
+  const [onboardLookupPending, setOnboardLookupPending] = useState(false);
+
   const createPickingMutation = useMutation({
     mutationFn: (orderId: string) =>
       apiPost<{ tasks: Array<{ pickingNo: string }> }>('/api/v1/picking-tasks', { orderId }),
@@ -553,6 +562,47 @@ export function OrdersPage() {
     [list, selectedId],
   );
   const railDetail = selectedId !== null ? detailQuery.data?.data : undefined;
+
+  /** 快速建档：按订单行标识反查商品链接（storeId 来自列表行，单击选中即有）。 */
+  const openQuickOnboard = useCallback(
+    (item: OrderItem, storeId: string) => {
+      const keyword = mappingSearchKeyword(item);
+      if (keyword === null || keyword.trim() === '') {
+        void message.warning(
+          '该订单行没有任何平台 SKU 标识（platformSkuId / sellerSku / offerId），无法定位',
+        );
+        return;
+      }
+      setOnboardLookupPending(true);
+      apiGet<Array<{ id: string }>>('/api/v1/listings', {
+        storeId,
+        keyword: keyword.trim(),
+        mappingState: 'UNMAPPED',
+        page: 1,
+        pageSize: 5,
+      })
+        .then((result) => {
+          const listing = result.data[0];
+          if (listing === undefined) {
+            void message.warning(
+              '未在本店铺找到该平台标识对应的未映射商品链接：请确认该变体已同步到本地',
+            );
+            return;
+          }
+          setQuickOnboard({
+            listingId: listing.id,
+            match: {
+              platformSkuId: item.platformSkuId,
+              offerId: item.offerId,
+              sellerSku: item.sellerSku,
+            },
+          });
+        })
+        .catch((error: Error) => void message.error(`定位商品链接失败：${error.message}`))
+        .finally(() => setOnboardLookupPending(false));
+    },
+    [message],
+  );
 
   // ---- Context rail: risk-first order preview (task §41-§42) ----
   const railContent = useMemo<ContextRailContent>(() => {
@@ -637,21 +687,6 @@ export function OrdersPage() {
               </div>
             </ContextSection>
           )}
-          {/* 关联操作：建档入口是深链（规范 §4.2 单条 EntityLink），与异常中心
-              「前往 SKU 映射」同一目标 /listings（快速建档工作台），不是只读总览。 */}
-          {failedMappingItems.length > 0 &&
-            mappingSearchKeyword(failedMappingItems[0]!) !== null && (
-              <ContextSection title="关联操作">
-                <EntityLink
-                  to={`/listings?keyword=${encodeURIComponent(
-                    mappingSearchKeyword(failedMappingItems[0]!) ?? '',
-                  )}`}
-                  icon={<ExportOutlined />}
-                  primary="映射失败行 · 去快捷建档"
-                  secondary={`自动搜索 ${mappingSearchKeyword(failedMappingItems[0]!)}`}
-                />
-              </ContextSection>
-            )}
           {selectedRow.mappingFailedCount === 0 && selectedRow.backorderedCount > 0 && (
             <ContextSection title="风险">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -755,6 +790,20 @@ export function OrdersPage() {
             <Button block onClick={() => setDetailId(selectedRow.id)}>
               查看详情
             </Button>
+            {/* 快速建档 = 操作区主操作（就地弹窗，不跳转工作台）。作用于第一个
+                可定位的映射失败行；弹窗内可切换该商品链接的其它未映射变体。 */}
+            {failedMappingItems.length > 0 &&
+              mappingSearchKeyword(failedMappingItems[0]!) !== null && (
+                <Button
+                  block
+                  type="primary"
+                  style={{ marginTop: 8 }}
+                  loading={onboardLookupPending}
+                  onClick={() => openQuickOnboard(failedMappingItems[0]!, selectedRow.storeId)}
+                >
+                  快速建档
+                </Button>
+              )}
             {selectedRow.erpStatus !== 'SHIPPED' && selectedRow.erpStatus !== 'CANCELLED' && (
               <Button
                 block
@@ -803,6 +852,8 @@ export function OrdersPage() {
     completedCount.data,
     cancelMutation.mutate,
     modal,
+    onboardLookupPending,
+    openQuickOnboard,
   ]);
   useContextRail(railContent);
 
@@ -1682,6 +1733,21 @@ export function OrdersPage() {
           />
         </div>
       </Modal>
+
+      {/* ---- 快速建档弹窗（与 SKU映射 页面共用同一组件） ---- */}
+      <ListingOnboardModal
+        open={quickOnboard !== null}
+        listingId={quickOnboard?.listingId ?? null}
+        matchIdentifiers={quickOnboard?.match ?? null}
+        onClose={() => setQuickOnboard(null)}
+        onCompleted={() => {
+          void queryClient.invalidateQueries({ queryKey: ['orders'] });
+          void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
+          void queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+          void message.info('已建档并映射：请点「重试映射」重新分配库存');
+        }}
+        zIndex={1100}
+      />
     </div>
   );
 }
