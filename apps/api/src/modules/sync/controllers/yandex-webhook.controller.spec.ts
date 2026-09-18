@@ -38,8 +38,11 @@ function makeController(options: {
 }
 
 describe('YandexWebhookController', () => {
-  it('answers PING inline with {version, name, time} and no ingest work', async () => {
+  it('answers PING inline with {version, name, time} and no ingest work (base and /notification alias share the handler)', async () => {
     const { controller, ingest, request } = makeController({});
+    // The route alias (@Post('notification')) maps to the same receive
+    // handler - verified by route registration in the app, the handler itself
+    // is path-agnostic.
     const ack = await controller.receive('YX-A', { notificationType: 'PING' }, request);
     expect(ack.version).toBe('1.0.0');
     expect(ack.name).toBe('WCIES');

@@ -35,7 +35,9 @@ const YANDEX_ACK_NAME = 'WCIES';
  * §4; plan §P3).
  *
  * The URL (including the per-store code) is what the seller configures in
- * the Market cabinet («API 通知»). Contract:
+ * the Market cabinet («API 通知») — and Yandex POSTs to `<URL>/notification`
+ * (calibrated against the cabinet's query log, 2026-09-18); both paths are
+ * served. Contract:
  * - PING must answer HTTP 200 `{version, name, time}` within 1 SECOND -
  *   answered inline, no persistence, no queue (the strict budget leaves no
  *   room for anything else);
@@ -61,6 +63,10 @@ export class YandexWebhookController {
     private readonly logger: AppLoggerService,
   ) {}
 
+  // T0 校准（2026-09-18，cabinet 查询日志实锤）：Yandex 不按原样 POST 你填的
+  // URL，而是在其后拼接 `/notification` 作为投递路径。两个路径都接受——
+  // 无论卖家在后台填的是裸 URL 还是带后缀的 URL 都能命中。（注意：Nest 不
+  // 支持在同一方法上叠两个 @Post —— 同名元数据互相覆盖，必须双方法委托。）
   @Post()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Yandex Market API 通知入口（IP 白名单 + PING 秒回 + raw event 入队）' })
@@ -80,6 +86,25 @@ export class YandexWebhookController {
     @Param('storeCode') storeCode: string,
     @Body() payload: unknown,
     @Req() request: { headers: Record<string, unknown>; socket?: { remoteAddress?: string } },
+  ): Promise<YandexWebhookAck> {
+    return this.handle(storeCode, payload, request);
+  }
+
+  /** 后台实际投递路径 = 卖家填写的 URL + `/notification`（校准实锤）。 */
+  @Post('notification')
+  @HttpCode(HttpStatus.OK)
+  async receiveNotification(
+    @Param('storeCode') storeCode: string,
+    @Body() payload: unknown,
+    @Req() request: { headers: Record<string, unknown>; socket?: { remoteAddress?: string } },
+  ): Promise<YandexWebhookAck> {
+    return this.handle(storeCode, payload, request);
+  }
+
+  private async handle(
+    storeCode: string,
+    payload: unknown,
+    request: { headers: Record<string, unknown>; socket?: { remoteAddress?: string } },
   ): Promise<YandexWebhookAck> {
     // `time` stamps when processing started, so capture it before any work.
     const startedAt = new Date();
