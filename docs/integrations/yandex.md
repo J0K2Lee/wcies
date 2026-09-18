@@ -10,8 +10,10 @@
 
 - **推荐：`Api-Key: <token>` 请求头**。卖家在 Market 卖家后台直接创建（无 OAuth 流程）、**永久有效**、可按方法组配置访问权限、覆盖柜面（business）下全部店铺。
 - 旧 OAuth2（`Authorization` 头，1 年期）已标注过时，不建议。
-- 凭证 payload 形态：`{ "apiKey": "<token>" }`（单字段）。
+- 凭证 payload 形态：`{ "apiKey": "<token>", "campaignId"?: "<id>" }`。
 - 两个关键 ID（均在路径参数中）：`businessId` = 柜面（business）ID；`campaignId` = 店铺（campaign）ID。**`GET /v2/campaigns` 一次返回该 token 可访问的全部店铺**（含两类 ID）→ 天然的 validateCredential 调用。
+  - **T0 校准（2026-09-18 live）**：真实响应里 businessId 是**嵌套对象** `business: {id, name}`，不是平铺的 `businessId`；每行还有 `clientId` / `placementType`（FBS/FBY）/ `apiAvailability`。
+  - **注意编号混淆**：卖家后台「API 通知」店铺下拉里显示的 `partnerId`（如 216881164）是另一套编号，**不出现在 API 响应中**——凭证 campaignId 必须用 API 返回的 `campaigns[].id`（如 149159324）。
 - Base URL：`https://api.partner.market.yandex.ru`。
 
 ## 2. 限流（已验证）

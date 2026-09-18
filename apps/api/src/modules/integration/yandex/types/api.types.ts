@@ -16,10 +16,17 @@
 export interface YxCampaign {
   /** Campaign (store) id. */
   readonly id?: number | string;
-  /** Business (柜面) id the campaign belongs to. */
+  /**
+   * Business (柜面) the campaign belongs to. REAL SHAPE (T0 校准 2026-09-18，
+   * live response)：business 是嵌套对象 `business: {id, name}` —— 不是文档
+   * 调研时假设的平铺 businessId。保留平铺键做兼容回退。
+   */
+  readonly business?: { readonly id?: number | string; readonly name?: string };
   readonly businessId?: number | string;
+  readonly clientId?: number | string;
   readonly name?: string;
   readonly domain?: string;
+  readonly placementType?: string;
   readonly [key: string]: unknown;
 }
 

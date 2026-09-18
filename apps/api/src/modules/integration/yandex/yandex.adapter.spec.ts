@@ -53,7 +53,7 @@ describe('YandexAdapter identity resolution', () => {
     const { adapter } = stub([
       {
         match: (url) => url.startsWith(`${BASE}/v2/campaigns`),
-        body: { campaigns: campaigns([{ id: 1001, businessId: 2002 }]) },
+        body: { campaigns: campaigns([{ id: 1001, business: { id: 2002, name: 'Shop' } }]) },
       },
       {
         match: (url) => url.includes('/offer-mappings'),
@@ -73,8 +73,8 @@ describe('YandexAdapter identity resolution', () => {
         match: (url) => url.startsWith(`${BASE}/v2/campaigns`),
         body: {
           campaigns: campaigns([
-            { id: 1001, businessId: 2002 },
-            { id: 1003, businessId: 2002 },
+            { id: 1001, business: { id: 2002, name: 'Shop' } },
+            { id: 1003, business: { id: 2002, name: 'Shop' } },
           ]),
         },
       },
@@ -84,13 +84,29 @@ describe('YandexAdapter identity resolution', () => {
     expect((error as { message: string }).message).toContain('campaignId');
   });
 
+  it('accepts the legacy flat businessId shape as a fallback', async () => {
+    const { adapter } = stub([
+      {
+        match: (url) => url.startsWith(`${BASE}/v2/campaigns`),
+        body: { campaigns: campaigns([{ id: 1001, businessId: 2002 }]) },
+      },
+      {
+        match: (url) => url.includes('/offer-mappings'),
+        body: { result: { offerMappings: [] } },
+      },
+    ]);
+    await expect(
+      adapter.validateCredential(toCredentialContext(CONTEXT.credential)),
+    ).resolves.toBeUndefined();
+  });
+
   it('honors an explicit campaignId and rejects an unknown one', async () => {
     const campaignsRoute = {
       match: (url: string) => url.startsWith(`${BASE}/v2/campaigns`),
       body: {
         campaigns: campaigns([
-          { id: 1001, businessId: 2002 },
-          { id: 1003, businessId: 2002 },
+          { id: 1001, business: { id: 2002, name: 'Shop' } },
+          { id: 1003, business: { id: 2002, name: 'Shop' } },
         ]),
       },
     };
@@ -115,7 +131,7 @@ describe('YandexAdapter order window walk', () => {
     const { adapter, fetchImpl } = stub([
       {
         match: (url) => url.startsWith(`${BASE}/v2/campaigns`),
-        body: { campaigns: campaigns([{ id: 1001, businessId: 2002 }]) },
+        body: { campaigns: campaigns([{ id: 1001, business: { id: 2002, name: 'Shop' } }]) },
       },
       {
         match: (url) => url.includes('/orders'),
@@ -148,7 +164,9 @@ describe('YandexAdapter order window walk', () => {
     const fetchImpl = vi.fn(async (input: string, init?: RequestInit) => {
       const url = String(input);
       if (url.startsWith(`${BASE}/v2/campaigns`)) {
-        return jsonResponse({ campaigns: campaigns([{ id: 1001, businessId: 2002 }]) });
+        return jsonResponse({
+          campaigns: campaigns([{ id: 1001, business: { id: 2002, name: 'Shop' } }]),
+        });
       }
       requests.push(url);
       if (typeof init?.body === 'string') {

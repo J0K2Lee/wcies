@@ -1175,7 +1175,7 @@ export function StoresPage() {
                     name="credentialCampaignId"
                     label="Campaign ID"
                     preserve={false}
-                    extra="一个 Api-Key 覆盖柜面下多个店铺时必填（卖家后台店铺列表里的 partnerId）；单店铺令牌可留空。"
+                    extra="一个 Api-Key 覆盖柜面下多个店铺时必填；填 API 的 campaign id（GET /v2/campaigns 返回的 id，不是后台通知页的 partnerId）。单店铺令牌可留空。"
                   >
                     <Input placeholder="如 216881164" />
                   </Form.Item>
@@ -1243,7 +1243,7 @@ export function StoresPage() {
                   <Form.Item
                     name="campaignId"
                     label="Campaign ID"
-                    extra="一个 Api-Key 覆盖柜面下多个店铺时必填（卖家后台店铺列表里的 partnerId）；单店铺令牌可留空。"
+                    extra="一个 Api-Key 覆盖柜面下多个店铺时必填；填 API 的 campaign id（GET /v2/campaigns 返回的 id，不是后台通知页的 partnerId）。单店铺令牌可留空。"
                   >
                     <Input placeholder="如 216881164" />
                   </Form.Item>

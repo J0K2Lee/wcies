@@ -258,10 +258,14 @@ export class YandexAdapter implements PlatformAdapter {
     if (explicit !== null) {
       const match = campaigns.find((campaign) => String(campaign.id ?? '') === explicit);
       if (match === undefined) {
+        // Ids are not secrets - listing them makes misconfiguration
+        // self-diagnosable (e.g. the cabinet UI's "partnerId" is a DIFFERENT
+        // numbering that never appears in the API response, T0 2026-09-18).
+        const available = campaigns.map((campaign) => String(campaign.id ?? '?')).join(', ');
         throw new StoreCredentialMalformedError(
           storeId,
           'YANDEX',
-          `credential campaignId ${explicit} 不在该 Api-Key 可访问的 campaign 列表中`,
+          `credential campaignId ${explicit} 不在该 Api-Key 可访问的 campaign 列表中（可用 id: ${available}）——注意要用 API 的 campaign id，不是卖家后台通知页显示的 partnerId`,
         );
       }
       return identityOf(match, storeId);
@@ -283,7 +287,9 @@ export class YandexAdapter implements PlatformAdapter {
 
 function identityOf(campaign: YxCampaign, storeId: string): YxIdentity {
   const campaignId = campaign.id;
-  const businessId = campaign.businessId;
+  // T0 校准（2026-09-18 live）：businessId 藏在嵌套的 business.id 里；平铺
+  // businessId 仅作老形状兼容回退。
+  const businessId = campaign.business?.id ?? campaign.businessId;
   if (
     (typeof campaignId !== 'string' && typeof campaignId !== 'number') ||
     (typeof businessId !== 'string' && typeof businessId !== 'number')
@@ -291,7 +297,7 @@ function identityOf(campaign: YxCampaign, storeId: string): YxIdentity {
     throw new StoreCredentialMalformedError(
       storeId,
       'YANDEX',
-      'campaign 记录缺少 campaignId/businessId',
+      'campaign 记录缺少 id / business.id（响应结构不符）',
     );
   }
   return { businessId: String(businessId), campaignId: String(campaignId) };
