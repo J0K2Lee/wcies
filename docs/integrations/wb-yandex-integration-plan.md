@@ -61,8 +61,8 @@
 | P1-WB | `modules/integration/wildberries/`：四域 client（content 域 200 解封装、marketplace 4XX ×10 惩罚、statistics 1 req/min 车道）+ 双源订单游标状态机 + mapper（wbStatus 阶段表、FBS/DBS→WB_FBS、DBW→WB_FBW、条码→platformSkuId、article→sellerSku）+ module 注册 |
 | P1-YX | `modules/integration/yandex/`：client（420→RATE_LIMITED、全局 4 并发信号量、Api-Key）+ campaign 身份解析（单 campaign 隐式 / 多 campaign 凭证显式 campaignId）+ business orders 窗口机 + offer-mappings / returns / webhook 事件映射 + module 注册 |
 | P2 | 零改动复用：SyncJob 单飞、sync_cursors 隔离、调度器按店铺开关、失败告警均为平台无关；LISTING_SYNC/ORDER_SYNC 即刻生效 |
-| P3 | Yandex webhook 链全量落地（见 yandex.md 状态头）；WB 按结论不实现 webhook，轮询为主链路 |
+| P3 | Yandex webhook 链全量落地（见 yandex.md 状态头）；WB 首发以轮询为主链路，**webhook 已于同日按官方文档补全**（wildberries.md §5b：API 订阅 + WEBHOOK 凭证 secret 验证 + 逐事件幂等落库，当前事件目录无订单事件） |
 | P4 | 平台分发：仓库目录 OZON/YANDEX 接入、WB 显式 `PLATFORM_CAPABILITY_UNSUPPORTED`；类目树/属性增强保持 OZON-only（Yandex/WB 商品自带数据）；Yandex 退货拉取接入（`fetchReturns`） |
 | P5 | 共享契约测试套件 `integration/adapter.contract.ts`（OZON/WB/YANDEX 三平台同套断言）+ mapper/client/adapter 单测；T0 脚本 `scripts/wb-t0-smoke.ts`、`scripts/yandex-t0-smoke.ts`；`.env.example` 补平台客户端覆盖项 |
 
-**待 T0 后跟进**（真实凭据冒烟校准，见各平台文档 §8）：WB webhook / 定向回读 / 退货 / 平台仓数据源；Yandex 状态×substatus 样本校准、FBY 仓接口、分页参数大小写实测；WB `postponed_delivery` 等歧义状态归类。
+**待 T0 后跟进**（真实凭据冒烟校准，见各平台文档 §8）：WB 定向回读 / 退货 / 平台仓数据源、webhook 创建响应的 secret 字段名与真实投递样例；Yandex 状态×substatus 样本校准、FBY 仓接口、分页参数大小写实测；WB `postponed_delivery` 等歧义状态归类。

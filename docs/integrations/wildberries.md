@@ -93,7 +93,23 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 | 类目树 | content `GET /content/v2/object/parent/all`（父类目）+ 子类目接口构树 | 端点已验证，树形聚合逻辑 T0 冒烟 |
 | 商品属性增强 | 卡片 `characteristics[]` 自带（无需独立增强同步） | 已验证 |
 | 平台仓库列表 | `GET /api/v3/warehouses` 是**卖家 FBS 自建仓 CRUD**，不是 WB 平台仓；WB_FBW 平台仓的数据源接口未确认 | **缺口 → T0**（临时替代：手动录入平台仓 ID + 备注名，绑定模型已支持 remark_name） |
-| webhook | 存在，细节未核实 | **T0 待验证** |
+| webhook | **已验证 + 已实现（2026-09-18）**：官方 webhooks-api 文档核对，见 §5b | 已实现 |
+
+## 5b. Webhook（已验证 2026-09-18，官方文档核对；已实现）
+
+- **订阅方式与 OZON/Yandex 不同：通过 API 创建**（webhooks-api.wildberries.ru），不是卖家后台 UI。鉴权 = seller token（Authorization）+ **WCIES 服务密钥**（`X-Client-Secret`，解决方案目录注册获得，env `WB_WEBHOOKS_SERVICE_SECRET`）；token 类别必须匹配事件类别。
+- **当前事件目录（无订单事件！）**：`report_generation_complete`（contentanalytics）、`card_creation_error`、`card_changed`（content）、`feedback_updated`（questionsandfeedback）。最新列表走 `GET /api/v1/event-scopes`。订单同步的兜底仍是轮询。
+- **投递格式**：`{sellerId, requestId, events[]}`，单请求最多 100 个事件；每个事件 `{id, time, test, type, scope, idempotencyKey, payload}`。幂等去重键 = `idempotencyKey`。
+- **真实性验证 = webhook secret**：创建 webhook 的响应中**仅此一次**返回 secret，之后不可查询（只能轮换）。WB 投递时把它放进 `Authorization` 头，接收方做比对（无签名、无 IP 白名单机制）。
+- **应答**：10 秒内 HTTP 200 即送达；否则按 10s→15min 递增重试，超限事件删除，长期失败 webhook 可能被停用。
+- **管理端点**：POST/GET/PUT/DELETE `/api/v1/webhooks`、`{id}/secret/refresh`、`/check`（URL 可达性）、`{id}/test/send`（`test:true` 事件探活）、events/deliveries/history 查询；全 API 共限 **1 req/s**。
+
+### 实现落点（2026-09-18）
+
+- 订阅管理：`sync/services/wb-webhook.service.ts` —— `POST/GET/DELETE /api/v1/stores/:storeId/webhooks/wb/subscription`；创建时 secret 加密落库为店铺 **WEBHOOK 凭证**（新增凭证类型，§28 预留），操作日志只记元数据（§29）；幂等（同 URL 已订阅直接返回）；secret 丢失/同 URL 多条一律 `WB_WEBHOOK_STATE_ERROR` 转人工，绝不盲删。
+- 入站接收：`POST /api/v1/webhooks/wb/stores/:storeCode`（`wb-webhook.controller.ts`）—— Authorization 头与 WEBHOOK 凭证 secret 时序安全比对（不匹配 401，投递失败在 WB delivery 日志可见）；信封经 adapter `processWebhook` 解析，**逐事件**落 `external_raw_events`（externalEventId = idempotencyKey ?? id），`test:true` 落 SKIPPED 不入队；其余与 OZON 链路同构（入 BullMQ，10 秒预算内秒回）。
+- 事件处理：`card_changed → ITEM_CHANGED`、其余（含未来新类型）→ `UNKNOWN`；处理器对二者的既有行为即「记录事实不动作」，与 OZON ITEM_CHANGED 一致。
+- 已知边界：创建响应 secret 字段名未在文档中写明（实现按 /secret/i 键扫描，T0 校准）；当前目录无订单事件，webhook 不驱动订单同步。
 
 ## 7. 代码级落地点（复用 OZON 骨架）
 
@@ -109,6 +125,6 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 2. `/content/v2/get/cards/list` 真实响应：cursor 回传行为、skus 与条码关系、分页终止条件。
 3. `/api/v3/orders`：next 游标起始/终止语义、30 天窗边界、wbStatus 实际值集。
 4. `/api/v1/supplier/orders`：lastChangeDate 游标行为、时区表现（UTC+3）、8 万行分页实测。
-5. WB webhooks：订阅端点/事件枚举/payload/签名（从知识库原文或后台 UI 确认）。
+5. ~~WB webhooks：订阅端点/事件枚举/payload/签名~~（已核实并实现，见 §5b）；剩余校准项：**创建响应 secret 字段名**、真实投递样例、`GET /api/v1/event-scopes` 最新事件目录、订单类事件是否上线。
 6. returns 域真实端点与规格。
 7. WB_FBW 平台仓数据源（有无可列平台仓的接口）。
