@@ -100,7 +100,7 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 | 商品图片 | 卡片 `photos` 自带 | 已验证（无需独立接口） |
 | 类目树 | content `GET /content/v2/object/parent/all`（父类目）+ 子类目接口构树 | 端点已验证，树形聚合逻辑 T0 冒烟 |
 | 商品属性增强 | 卡片 `characteristics[]` 自带（无需独立增强同步） | 已验证 |
-| 平台仓库列表 | `GET /api/v3/warehouses` 是**卖家 FBS 自建仓 CRUD**，不是 WB 平台仓；WB_FBW 平台仓的数据源接口未确认 | **缺口 → T0**（临时替代：手动录入平台仓 ID + 备注名，绑定模型已支持 remark_name） |
+| 平台仓库列表 | `GET /api/v3/warehouses` 是**卖家 FBS 自建仓 CRUD**，不是 WB 平台仓；唯一的历史候选 supplies-api `/api/v1/warehouses`（.ru 与 .cn 同样）已被平台**整体禁用**——实测 404 "This method is temporarily disabled"，官方 release-notes id=570 说明：2026-08-15 起「形成供应信息 / 供应费率」类 API 全部停用 | **缺口已定论（官方下线，非未找到）**：WB_FBW 绑定走手动录入平台仓 ID + 备注名（绑定弹窗已支持手动录入）；平台若重新开放该 API 可自动接入 |
 | webhook | **已验证 + 已实现（2026-09-18）**：官方 webhooks-api 文档核对，见 §5b | 已实现 |
 
 ## 5b. Webhook（已验证 2026-09-18，官方文档核对；已实现）
