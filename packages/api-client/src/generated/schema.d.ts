@@ -2604,6 +2604,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** Yandex Market 通知入口（投递路径别名：URL + /notification） */
         post: operations["YandexWebhookController_receiveNotification"];
         delete?: never;
         options?: never;
@@ -5091,6 +5092,14 @@ export interface components {
             shipmentDeadline?: string | null;
             /** @description 平台运单号（平台事实）；已组包后由平台返回，出库时自动填入发货单物流单号 */
             platformTrackingNo: string | null;
+            /**
+             * @description 该店铺平台是否支持订单履约写能力（获取运单号 / 打单）。前端据此显隐按钮，不猜测平台；后端同时以 PLATFORM_CAPABILITY_UNSUPPORTED 兜底。
+             * @example {
+             *       "prepareShipment": true,
+             *       "fetchShippingLabel": true
+             *     }
+             */
+            platformCapabilities: Record<string, never>;
             rawData: Record<string, never> | null;
             remark: string | null;
             /** @enum {string|null} */
@@ -6207,6 +6216,26 @@ export interface components {
             processedAt: string | null;
             errorCode: string | null;
             errorMessage: string | null;
+        };
+        WbWebhookSubscriptionDto: {
+            /** @description 平台侧是否存在本店铺的订阅 */
+            subscribed: boolean;
+            webhookId: string | null;
+            /** @description WCIES 注册到 WB 的回调 URL */
+            url: string;
+            enabled: boolean | null;
+            /** @description 已订阅的平台事件（scope/event 对） */
+            subscriptions: {
+                scope: string;
+                event: string;
+            }[];
+            /** @description 本地是否已保存用于验证入站推送的 WEBHOOK secret */
+            secretConfigured: boolean;
+        };
+        WbWebhookUnsubscribeResultDto: {
+            /** @description 平台侧删除的订阅数量 */
+            deleted: number;
+            url: string;
         };
         PlatformWarehouseOptionDto: {
             /** @example 1020005000770362 */
@@ -11902,11 +11931,24 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Yandex 约定的确认格式（非 WCIES envelope），与上方入口同一实现 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @example 1.0.0 */
+                        version: string;
+                        /** @example WCIES */
+                        name: string;
+                        /**
+                         * Format: date-time
+                         * @example 2026-09-18T15:30:00Z
+                         */
+                        time: string;
+                    };
+                };
             };
         };
     };
@@ -11951,7 +11993,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["WbWebhookSubscriptionDto"];
+                    };
+                };
             };
         };
     };
@@ -11966,11 +12014,17 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            201: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["WbWebhookSubscriptionDto"];
+                    };
+                };
             };
         };
     };
@@ -11989,7 +12043,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["WbWebhookUnsubscribeResultDto"];
+                    };
+                };
             };
         };
     };

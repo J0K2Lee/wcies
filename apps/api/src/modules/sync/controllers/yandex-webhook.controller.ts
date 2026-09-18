@@ -93,6 +93,19 @@ export class YandexWebhookController {
   /** 后台实际投递路径 = 卖家填写的 URL + `/notification`（校准实锤）。 */
   @Post('notification')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Yandex Market 通知入口（投递路径别名：URL + /notification）' })
+  @ApiOkResponse({
+    description: 'Yandex 约定的确认格式（非 WCIES envelope），与上方入口同一实现',
+    schema: {
+      type: 'object',
+      required: ['version', 'name', 'time'],
+      properties: {
+        version: { type: 'string', example: '1.0.0' },
+        name: { type: 'string', example: 'WCIES' },
+        time: { type: 'string', format: 'date-time', example: '2026-09-18T15:30:00Z' },
+      },
+    },
+  })
   async receiveNotification(
     @Param('storeCode') storeCode: string,
     @Body() payload: unknown,

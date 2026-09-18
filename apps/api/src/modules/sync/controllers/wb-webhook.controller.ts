@@ -17,7 +17,9 @@ import { CurrentOperator } from '../../../common/decorators/current-operator.dec
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { ok } from '../../../common/dto/api-response';
+import { ApiOkEnvelope } from '../../../common/swagger/api-envelope';
 import { WebhookIngestService } from '../services/webhook.service';
+import { WbWebhookSubscriptionDto, WbWebhookUnsubscribeResultDto } from '../dto/wb-webhook.dto';
 import {
   WbWebhookService,
   WbWebhookSubscriptionView,
@@ -116,6 +118,7 @@ export class WbWebhookManageController {
 
   @Get('subscription')
   @ApiOperation({ summary: '查询店铺的 WB webhook 订阅状态' })
+  @ApiOkEnvelope(WbWebhookSubscriptionDto)
   async status(
     @Param('storeId') storeId: string,
   ): Promise<{ success: true; data: WbWebhookSubscriptionView }> {
@@ -126,6 +129,7 @@ export class WbWebhookManageController {
   @ApiOperation({
     summary: '订阅 WB webhook（平台侧创建 + 一次性 secret 加密落库为 WEBHOOK 凭证）',
   })
+  @ApiOkEnvelope(WbWebhookSubscriptionDto)
   async subscribe(
     @Param('storeId') storeId: string,
     @CurrentOperator() operator: OperatorContext,
@@ -135,6 +139,7 @@ export class WbWebhookManageController {
 
   @Delete('subscription')
   @ApiOperation({ summary: '退订 WB webhook（按回调 URL 精确匹配删除）' })
+  @ApiOkEnvelope(WbWebhookUnsubscribeResultDto)
   async unsubscribe(
     @Param('storeId') storeId: string,
     @CurrentOperator() operator: OperatorContext,

@@ -9369,9 +9369,33 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "Yandex 约定的确认格式（非 WCIES envelope），与上方入口同一实现",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["version", "name", "time"],
+                  "properties": {
+                    "version": {
+                      "type": "string",
+                      "example": "1.0.0"
+                    },
+                    "name": {
+                      "type": "string",
+                      "example": "WCIES"
+                    },
+                    "time": {
+                      "type": "string",
+                      "format": "date-time",
+                      "example": "2026-09-18T15:30:00Z"
+                    }
+                  }
+                }
+              }
+            }
           }
         },
+        "summary": "Yandex Market 通知入口（投递路径别名：URL + /notification）",
         "tags": ["webhooks"]
       }
     },
@@ -9428,7 +9452,24 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/WbWebhookSubscriptionDto"
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "summary": "查询店铺的 WB webhook 订阅状态",
@@ -9447,8 +9488,25 @@
           }
         ],
         "responses": {
-          "201": {
-            "description": ""
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/WbWebhookSubscriptionDto"
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "summary": "订阅 WB webhook（平台侧创建 + 一次性 secret 加密落库为 WEBHOOK 凭证）",
@@ -9468,7 +9526,24 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/WbWebhookUnsubscribeResultDto"
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "summary": "退订 WB webhook（按回调 URL 精确匹配删除）",
@@ -15982,6 +16057,14 @@
             "nullable": true,
             "description": "平台运单号（平台事实）；已组包后由平台返回，出库时自动填入发货单物流单号"
           },
+          "platformCapabilities": {
+            "type": "object",
+            "description": "该店铺平台是否支持订单履约写能力（获取运单号 / 打单）。前端据此显隐按钮，不猜测平台；后端同时以 PLATFORM_CAPABILITY_UNSUPPORTED 兜底。",
+            "example": {
+              "prepareShipment": true,
+              "fetchShippingLabel": true
+            }
+          },
           "rawData": {
             "type": "object",
             "nullable": true
@@ -16048,6 +16131,7 @@
           "currency",
           "orderedAt",
           "platformTrackingNo",
+          "platformCapabilities",
           "rawData",
           "remark",
           "syncSource",
@@ -19220,6 +19304,68 @@
           "errorCode",
           "errorMessage"
         ]
+      },
+      "WbWebhookSubscriptionDto": {
+        "type": "object",
+        "properties": {
+          "subscribed": {
+            "type": "boolean",
+            "description": "平台侧是否存在本店铺的订阅"
+          },
+          "webhookId": {
+            "type": "string",
+            "nullable": true
+          },
+          "url": {
+            "type": "string",
+            "description": "WCIES 注册到 WB 的回调 URL"
+          },
+          "enabled": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "subscriptions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["scope", "event"],
+              "properties": {
+                "scope": {
+                  "type": "string"
+                },
+                "event": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "已订阅的平台事件（scope/event 对）"
+          },
+          "secretConfigured": {
+            "type": "boolean",
+            "description": "本地是否已保存用于验证入站推送的 WEBHOOK secret"
+          }
+        },
+        "required": [
+          "subscribed",
+          "webhookId",
+          "url",
+          "enabled",
+          "subscriptions",
+          "secretConfigured"
+        ]
+      },
+      "WbWebhookUnsubscribeResultDto": {
+        "type": "object",
+        "properties": {
+          "deleted": {
+            "type": "number",
+            "description": "平台侧删除的订阅数量"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": ["deleted", "url"]
       },
       "PlatformWarehouseOptionDto": {
         "type": "object",
