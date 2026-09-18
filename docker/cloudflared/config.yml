@@ -10,15 +10,16 @@ tunnel: 9274ae8c-1c6e-461a-897a-7168bf40107f
 credentials-file: /etc/cloudflared/credentials.json
 
 ingress:
-  # OZON 卖家后台要填的就是这条 URL —— storeCode 在路径里，
-  # 因此一个域名覆盖所有店铺，只需这一条规则：
-  #   https://ozon-hook.wulaoula.cn/api/v1/webhooks/ozon/stores/{storeCode}
+  # 平台 webhook 回调共用这一个主机名 —— storeCode 在路径里，一个域名覆盖
+  # 所有店铺、所有平台（OZON / WB / YANDEX，2026-09-18 起三平台入口同构）：
+  #   https://ozon-hook.wulaoula.cn/api/v1/webhooks/{platform}/stores/{storeCode}
   - hostname: ozon-hook.wulaoula.cn
     # ⚠ path 是【正则】(cloudflared 用 Go regexp 解析)，不是 glob/前缀。
     # 写成 /api/v1/webhooks/ozon/* 会只匹配 "ozon" 后跟若干个 / —— 即漏掉
     # /stores/{storeCode}。这里用锚定前缀 + .*$，在「子串搜索」与「整体匹配」
     # 两种语义下都成立，不依赖对 cloudflared 匹配方式的猜测。
-    path: ^/api/v1/webhooks/ozon/.*$
+    # (ozon|wb|yandex)：只放行已实现的平台 webhook 入口，其余路径仍 404。
+    path: ^/api/v1/webhooks/(ozon|wb|yandex)/.*$
     # API 跑在宿主机（pnpm dev:api）或 dev 容器都能命中：
     # dev 容器已把 3000 发布到宿主，host-gateway 保证可达。
     service: http://host.docker.internal:3000
