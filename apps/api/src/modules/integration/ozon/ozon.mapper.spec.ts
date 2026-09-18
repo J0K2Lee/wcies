@@ -151,6 +151,28 @@ describe('mapPostingToOrder', () => {
     ).toBeNull();
   });
 
+  describe('platform waybill number (2026-09-18)', () => {
+    it('maps a present tracking number', () => {
+      const order = mapPostingToOrder({ ...POSTING, tracking_number: 'OZ-TRACK-1' });
+      expect(order.platformTrackingNo).toBe('OZ-TRACK-1');
+    });
+
+    it('stays null while the platform has not assigned one', () => {
+      // Real behaviour (2026-09-18, 197 synced postings): OZON only assigns a
+      // tracking number once the order is assembled, so awaiting_packaging
+      // postings legitimately carry none.
+      expect(mapPostingToOrder({ ...POSTING, tracking_number: undefined }).platformTrackingNo).toBe(
+        null,
+      );
+      expect(mapPostingToOrder({ ...POSTING, tracking_number: null }).platformTrackingNo).toBe(
+        null,
+      );
+      expect(mapPostingToOrder({ ...POSTING, tracking_number: '   ' }).platformTrackingNo).toBe(
+        null,
+      );
+    });
+  });
+
   it('normalizes, tolerates and never fabricates unit prices (finance.md §2)', () => {
     const longFraction: OzonFbsPosting = {
       ...POSTING,

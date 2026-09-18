@@ -42,6 +42,11 @@ orders 1:N order_items
 
 1. Order ≠ Shipment ≠ Package（AGENTS.md §37）：`Order 1:N Shipment 1:N Package 1:N PackageItem`。
 2. `shipments` / `packages` / `package_items` / `package_item_serials` / `shipping_labels` 已于 Sprint 4 落地；禁止把 `orders.tracking_number` / `orders.package_id` 当作物流模型。
+   > **2026-09-18 补充（`orders.platform_tracking_no`，不是被禁的 `orders.tracking_number`）**：
+   > 发货流程需要展示平台自己分配的运单号（OZON `tracking_number`）。它是**平台事实**，
+   > 与 `platform_status` / `platform_stage` 同类：只读展示、出库时自动填入
+   > `shipments.tracking_number`（实现 orders.md §15A「未来由平台 Adapter 自动填入」的承诺）。
+   > 内部物流载体**仍然只有** Shipment / Package——本列不承担数量、包裹、行归属任何语义。
 3. 一个 Shipment 只属于一个 Warehouse（订单跨仓必须拆多张 Shipment，与 1 PickingTask = 1 Warehouse 一致）。
 4. Shipment 状态（仓库履约阶梯，禁止直接使用物流轨迹状态）：
 
@@ -750,13 +755,17 @@ READY_TO_SHIP → shipShipment() → SHIPPED
 单一数据库事务内完成：逐行 `shipStockPartialInTx`（Picked - N / On Hand - N /
 SN → SHIPPED）→ Packages → SHIPPED → Shipment → SHIPPED → OrderItems → SHIPPED。
 任一步失败整体回滚（不存在"Shipment=SHIPPED 但库存未扣"或反向状态）。
-人工可录入 `trackingNumber / carrierCode`（未来由平台 Adapter 自动填入）。
+人工可录入 `trackingNumber / carrierCode`；平台运单号自 2026-09-18 起由平台 Adapter
+自动填入（`orders.platform_tracking_no` → `shipments.tracking_number`，见 §15C）。
 
 ## 面单（Shipping Label）
 
-`shipping_labels` 为平台无关元数据：Sprint 4 仅支持 `MANUAL_UPLOAD`
-（经 ObjectStorageService 私有桶 + 短期签名 URL 查看/打印，支持 PDF/PNG/JPEG）；
-`PLATFORM_API` 为未来预留。
+`shipping_labels` 为平台无关元数据：Sprint 4 支持 `MANUAL_UPLOAD`
+（经 ObjectStorageService 私有桶 + 短期签名 URL 查看/打印，支持 PDF/PNG/JPEG）。
+
+2026-09-18 起 `PLATFORM_API` 正式启用：平台面单（OZON 官方 PDF）在**组包后、拣货前**
+即可获取，因此归属订单（`order_id`）而非发货单；`shipment_id` 因此可为空，
+DB CHECK 保证两者至少有一个非空。存储与查看规则与手工上传完全一致。
 
 ## Shipment / Package 行的作废（VOIDED）生命周期
 
@@ -820,6 +829,89 @@ PickingTaskItem 状态变化与 Inventory `Reserved → Picked` **必须原子�
 模块持有事务边界但**不掌握库存计算**。
 
 ---
+
+# 15C. 订单发货流程（2026-09-18，用户真实作业顺序）
+
+用户确认的真实日常流程（有可用库存、自动分配成功的订单）：
+
+```text
+① 获取运单号 → ② 拣货 → ③ 打单 → ④ 发货（通知平台）
+```
+
+对应实现（全部入口在订单页右栏操作区）：
+
+| 步骤 | 动作 | API | 是否写平台 |
+|---|---|---|---|
+| ① | 获取运单号 | `POST /orders/:id/prepare-shipment` | **是**（真实平台写） |
+| ② | 拣货 | 既有 `picking-tasks` 流程，**未改动** | 否 |
+| ③ | 打单 | `POST /orders/:id/shipping-label` | 否（只下载平台生成的文件） |
+| ④ | 发货 | `POST /orders/:id/ship` | 否（平台已在①被通知） |
+
+## ① 获取运单号 = 平台组包
+
+平台侧语义：OZON `POST /v4/posting/fbs/ship`（组包），把发货单从
+`awaiting_packaging` 推进到 `awaiting_deliver`，平台随即分配运单号。
+
+- **这是本次改造中唯一的订单生命周期平台写操作**。规范里其后再无面向卖家的
+  「标记已发货」写接口，因此 ④ 不重复写平台（用户 2026-09-18 确认「一次组包就够」）。
+- 实测依据（2026-09-18，真实库 197 单）：`awaiting_deliver`/`delivering` 的
+  **155 单全部有 `tracking_number`**，16 单 `awaiting_packaging` **全部没有**——
+  证实平台只在组包时分配运单号，这也解释了为什么「获取运单号」必须调组包接口。
+- **幂等**：先回读发货单，已组包（或平台返回已组包）时**完全不写平台**，只刷新本地事实。
+- **必须回读确认**：规范明确 200 不代表组包成功，需回读并检查 `substatus`；
+  未确认时抛 `PLATFORM_SHIP_NOT_CONFIRMED`，不得当成成功。
+- 组包后把平台事实（状态 / 阶段 / 时限 / 运单号 / raw_data）经平台 mapper
+  归一化后落库；**ERP 状态一律由 `OrderStatusService` 决定**（§38 不变）。
+- 平台未实现该能力时不猜测、不跳过：抛 `PLATFORM_CAPABILITY_UNSUPPORTED`，
+  前端据后端能力位隐藏按钮。
+
+## ③ 打单
+
+`shipping_labels` 仍是唯一的平台/发货单**面单统一入口**：
+
+- 平台面单在组包后即可取，此时**还没有内部 Shipment**（发货单只能由 PICKED 行创建），
+  因此 `shipping_labels.order_id` 记录订单归属，`shipment_id` 可为空
+  （DB CHECK：两者至少有一个非空）；既有手工上传行不受影响。
+- 来源 `source = PLATFORM_API`（Sprint 4 预留值的正式启用），文件仍走
+  `ObjectStorageService` 私有桶 + 短期签名 URL 查看/打印（§68 不变）。
+- 默认复用已存档面单，`refresh=true` 才重新向平台取（平台面单接口限流且全或无）。
+
+## ④ 发货 = 一键出库
+
+```text
+createShipmentsFromOrder（仅 PICKED 行，1 发货单 = 1 仓）
+→ ensureOpenPackage + packAllItems + sealPackage（单包裹快捷路径）
+→ ShipmentShipService.shipShipment（唯一扣库存的一步）
+→ OrderItem → SHIPPED → 订单 rollup
+```
+
+- **不是新阶梯，是既有阶梯的编排**：① ② ③ ④ 都不改变 §15A 的打包/出库规则，
+  库存仍只由 `shipStockPartialInTx` 扣减，`InventoryTransaction` 仍然一条不少。
+- **单选包裹**：一键路径把该发货单的全部待装数量装入一个包裹并封箱；
+  手工多包裹精细装箱能力保留不变，两者互不排斥
+  （已 READY_TO_SHIP 的发货单，一键发货直接出库，不再装箱）。
+- **并发（用户 2026-09-18 实测发现）**：全流程跨多个事务，单行锁无法覆盖，
+  因此按订单加 **PostgreSQL advisory lock**（§18 允许的「明确验证的等效并发控制」，
+  由集成测试证明：并发两次发货只扣一件库存）。包裹的「判断该不该开箱 + 开箱」
+  在发货单行锁内完成，避免开出空箱——空箱永远无法封箱，会让发货单卡在 PACKING。
+- **幂等**：复用已存在的有效发货单；`shipShipment` 重复调用不二次扣减；
+  重新发货的报告 `alreadyShipped`。
+- 订单上的平台运单号自动填入发货单 `trackingNumber`（已有值不覆盖）。
+
+## 异常
+
+- `ORDER_PLATFORM_SHIP_FAILED`（新增，HIGH，reference ORDER/orderId）：
+  ① 的平台写**真实失败**（5xx 类平台/基础设施故障，或平台受理但未确认组包）时创建；
+  下一次成功组包自动解除。
+- 4xx 类前置条件（平台状态不允许组包、组包进行中、平台未接入该能力）**不建异常**——
+  操作人当场看到原因即可，否则异常中心会被重复点击淹没。
+
+## 明确不做
+
+- 批量打单 / 打印子系统（只做订单级「取面单 → 签名 URL → 浏览器打开打印」）。
+- FBO / FBP 等外部履约订单的平台写（这些订单在摄入时即 `EXTERNAL_FULFILLED`，不进拣货）。
+- WB / Yandex 的对应平台写：仓库内尚无经核实的接口事实（§88），
+  待用户提供官方文档后按同一适配器契约补齐。
 
 # 16. 修改本文档的条件
 

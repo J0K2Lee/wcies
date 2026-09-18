@@ -221,6 +221,60 @@ export class PackingService {
   // --------------------------------------------------------------------------
 
   /**
+   * Returns the package the shipment's REMAINING demand should go into,
+   * creating one only when there is demand left to pack. Both the decision and
+   * the creation happen under the shipment row lock, so two concurrent
+   * outbound attempts cannot each open a box: an EMPTY live package would stay
+   * unsealable and keep the shipment from ever reaching READY_TO_SHIP.
+   *
+   * Returns null when nothing is left to pack (the shipment is fully packed).
+   */
+  async ensureOpenPackage(
+    shipmentId: string,
+    operator: OperatorContext,
+  ): Promise<{ packageId: string; packageNo: string; created: boolean } | null> {
+    const created = await this.dataSource.transaction(async (manager) => {
+      await this.lockShipmentForPacking(manager, shipmentId);
+      const packages = await this.packageRepo.listByShipmentIdTx(manager, shipmentId);
+      const reusable = packages.find(
+        (pkg) => pkg.status === 'OPEN' || pkg.status === 'REPACK_REQUIRED',
+      );
+      if (reusable !== undefined) {
+        return { packageId: reusable.id, packageNo: reusable.packageNo, created: false };
+      }
+      if (!(await this.hasUnpackedDemand(manager, shipmentId))) {
+        return null;
+      }
+      const packageNo = await this.packageRepo.nextPackageNo(manager);
+      const pkg = await this.packageRepo.insert(manager, { packageNo, shipmentId });
+      const shipment = await this.shipmentRepo.findById(shipmentId);
+      if (shipment?.status === 'READY_TO_PACK') {
+        await this.shipmentRepo.updateStatus(manager, shipmentId, { status: 'PACKING' });
+      }
+      return { packageId: pkg.id, packageNo: pkg.packageNo, created: true };
+    });
+
+    if (created !== null && created.created) {
+      await this.operationLog.record({
+        entityType: 'PACKAGE',
+        entityId: created.packageId,
+        entityCode: created.packageNo,
+        action: 'CREATE',
+        changes: { shipmentId: { from: null, to: shipmentId }, auto: { from: null, to: true } },
+        operator,
+      });
+    }
+    return created;
+  }
+
+  /** Is any ACTIVE line still short of its snapshot quantity? */
+  private async hasUnpackedDemand(manager: EntityManager, shipmentId: string): Promise<boolean> {
+    const items = await this.shipmentRepo.findItemsByShipmentIdTx(manager, shipmentId);
+    const totals = await this.packageRepo.packedTotalsByShipmentTx(manager, shipmentId);
+    return items.some((item) => (totals.get(item.orderItemId) ?? 0n) < parseQty(item.quantity));
+  }
+
+  /**
    * Packs the shipment's ENTIRE remaining demand into one existing OPEN /
    * REPACK_REQUIRED package in a single transaction - the packing step of the
    * one-click 发货 flow, where nobody scans barcodes by hand.
@@ -231,12 +285,13 @@ export class PackingService {
    * barcode loop is replaced by "take exactly what the snapshot still owes".
    * Packing still never touches stock.
    *
-   * Returns the quantities actually attached (empty when nothing was owed).
+   * Returns the number of order lines that received units (0 when nothing was
+   * owed) plus their ids.
    */
   async packAllItems(
     packageId: string,
     operator: OperatorContext,
-  ): Promise<{ packedQty: number; orderItemIds: string[] }> {
+  ): Promise<{ packedLineCount: number; orderItemIds: string[] }> {
     const pkg = await this.packageRepo.findById(packageId);
     if (pkg === null) {
       throw new PackageNotFoundError(packageId);
@@ -333,7 +388,7 @@ export class PackingService {
       },
       operator,
     });
-    return { packedQty: result.touched.length, orderItemIds: result.touched };
+    return { packedLineCount: result.touched.length, orderItemIds: result.touched };
   }
 
   // --------------------------------------------------------------------------

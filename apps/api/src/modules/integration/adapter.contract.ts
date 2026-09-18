@@ -38,6 +38,24 @@ export interface AdapterContractHarness {
    * hands over to its statistics phase before finishing. Default 2.
    */
   readonly orderPagesUntilDone?: number;
+  /**
+   * Set when the adapter implements the order-fulfillment write capabilities
+   * (`prepareShipment` / `fetchShippingLabel`, 2026-09-18). The suite then
+   * asserts the CONTRACT invariants only - idempotent already-prepared
+   * semantics and a label fetch that yields a file. Platform status
+   * vocabularies, request bodies and error texts stay in each adapter's own
+   * spec (they are exactly what this suite must not assume).
+   */
+  readonly shipmentFulfillment?: {
+    /** Platform order id the harness's scripted responses describe. */
+    readonly platformOrderId: string;
+    /** Scripts the transport so the platform reports the order ALREADY prepared. */
+    readonly scriptAlreadyPrepared: () => void;
+    /** Scripts "prepare succeeds and the platform reports it prepared". */
+    readonly scriptPrepareSuccess: () => void;
+    /** Scripts a retrievable shipping label. */
+    readonly scriptLabel: () => void;
+  };
 }
 
 export function runAdapterContractSuite(harness: AdapterContractHarness): void {
@@ -157,6 +175,61 @@ export function runAdapterContractSuite(harness: AdapterContractHarness): void {
       const secret = typeof rawSecret === 'string' ? rawSecret : '';
       const secretHead = secret.slice(0, 8);
       expect(secretHead === '' || !serialized.includes(secretHead)).toBe(true);
+    });
+
+    // ---------------------------------------------------------------------
+    // Order fulfillment capabilities (2026-09-18). Only platforms whose
+    // adapter declares them are exercised - absence means "unsupported", which
+    // is a legitimate contract state (AGENTS.md §88).
+    // ---------------------------------------------------------------------
+    const shipment = harness.shipmentFulfillment;
+    if (shipment === undefined) {
+      it('reports the order-fulfillment write capabilities as absent', () => {
+        // Widened view so the assertion reads the PROPERTY rather than
+        // detaching a method from its receiver.
+        const capabilities = adapter as {
+          prepareShipment?: unknown;
+          fetchShippingLabel?: unknown;
+        };
+        expect(capabilities.prepareShipment).toBeUndefined();
+        expect(capabilities.fetchShippingLabel).toBeUndefined();
+      });
+      return;
+    }
+
+    it('prepareShipment is a no-op that reports alreadyPrepared on a prepared order', async () => {
+      shipment.scriptAlreadyPrepared();
+      const result = await adapter.prepareShipment!(storeContext, {
+        platformOrderId: shipment.platformOrderId,
+      });
+      expect(result.platformOrderId).toBe(shipment.platformOrderId);
+      expect(result.alreadyPrepared).toBe(true);
+      expect(result.platformStatus).toBeTypeOf('string');
+    });
+
+    it('prepareShipment assembles the order and reports alreadyPrepared=false', async () => {
+      shipment.scriptPrepareSuccess();
+      const result = await adapter.prepareShipment!(storeContext, {
+        platformOrderId: shipment.platformOrderId,
+      });
+      expect(result.alreadyPrepared).toBe(false);
+      // Post-condition: the platform now reports the order as prepared, so a
+      // repeat call must be a no-op (the flow relies on this for retries).
+      const again = await adapter.prepareShipment!(storeContext, {
+        platformOrderId: shipment.platformOrderId,
+      });
+      expect(again.alreadyPrepared).toBe(true);
+    });
+
+    it('fetchShippingLabel returns a printable file', async () => {
+      shipment.scriptLabel();
+      const file = await adapter.fetchShippingLabel!(storeContext, {
+        platformOrderId: shipment.platformOrderId,
+      });
+      expect(file).not.toBeNull();
+      expect(file!.bytes.byteLength).toBeGreaterThan(0);
+      expect(file!.mimeType).toBeTypeOf('string');
+      expect(file!.fileName).toBeTypeOf('string');
     });
   });
 }

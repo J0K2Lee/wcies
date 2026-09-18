@@ -558,6 +558,75 @@ master-data.md §7）。平台仓库分类与履约模式对应：
   （实时聚合三个端点，返回 `{platformWarehouseId,name,fulfillmentMode,category,status,address,partnerName,isActive}`）；
   仅 OZON 实现，其它平台返回 `PLATFORM_WAREHOUSE_QUERY_UNSUPPORTED`。
 
+## 9c. 平台写操作：组包与面单（订单发货流程，2026-09-18）
+
+> ⚠ 本节是全仓库**唯一**的真实平台写能力（Read-first 边界在此定向解除，
+> 见 `docs/decisions/`）。库存/价格推送仍未接入。
+> 两个端点均为规范核对实现，**尚未对真实账号执行**（AGENTS.md §92 需用户显式授权），
+> 未验证项逐条标注；测试一律走脚本化传输，永不触达真实平台。
+
+### ① 组包 `POST /v4/posting/fbs/ship`
+
+| 项 | 事实 | 来源 |
+|---|---|---|
+| 语义 | 「Pack the order」：拆包并把发货单状态改为 `awaiting_deliver` | v3 英文规范 path 定义 |
+| 请求 | `{ posting_number, packages:[{ products:[{ product_id, quantity }] }] }` | 规范 `fbsv4FbsPostingShipV4Request` |
+| `product_id` | = OZON **SKU**（规范原文「Product identifier in the Ozon system, SKU」） | 规范字段描述 |
+| 响应 | `{ result:["<posting_number>"], additional_data:[...] }` | 规范 + 示例 |
+| ⚠ 坑 1 | **200 不代表组包成功**；规范要求回读 `/v3/posting/fbs/get` 并检查 `substatus`，`ship_failed` 需重试 | 规范描述段 |
+| ⚠ 坑 2 | 状态变更是**异步**的 | 同上 |
+| 幂等 | 已组包的发货单禁止重复提交；`POSTING_ALREADY_SHIPPED` / `HAS_INCORRECT_STATUS` 按**成功**处理 | 规范 Errors 表 |
+| 其他错误 | `TRANSITION_IS_NOT_POSSIBLE`、`POSTING_NOT_FOUND`、`POSTING_ALREADY_CANCELLED`、`HAS_INCORRECT_PRODUCT_QUANTITY` | 同上 |
+
+**实测依据（运单号何时出现）**——2026-09-18 对本地库 197 张已同步发货单统计
+`raw_data->>'tracking_number'`：
+
+| `platform_status` | 单数 | 有运单号 |
+|---|---|---|
+| `delivering` | 89 | **89** |
+| `awaiting_deliver` | 66 | **66** |
+| `awaiting_packaging` | 16 | **0** |
+| cancelled / 空 / 其他 | 26 | 1 |
+
+结论：**OZON 只在组包时才分配 `tracking_number`**。因此「获取运单号」必须先调
+组包接口——这是业务需求（用户指示）与接口事实互相印证的一处，不是实现选择。
+`tracking_number` 是 posting 顶层字段（`v3FbsPosting` / `v3FbsPostingDetail`），
+不受 `with` 参数控制。
+
+**实现**（`apps/api/src/modules/integration/ozon/ozon-shipment.service.ts`）：
+
+1. 先读 `/v3/posting/fbs/get`；
+2. 已组包（`awaiting_deliver` / `delivering` / `driver_pickup` /
+   `acceptance_in_progress` / `delivered`）→ 直接返回 `alreadyPrepared=true`，**不写平台**；
+3. 可组包判断优先看 `available_actions`（`ship` / `ship_async`），
+   否则只认 `awaiting_packaging`；其余状态（含 `cancelled`）显式报错，**不猜**；
+4. 写平台 → **回读** → 仍未组包则抛 `PLATFORM_SHIP_NOT_CONFIRMED`；
+5. 请求体由**平台回读结果**构造（全部商品装入一个包裹），不用本地行，避免与平台内容不一致。
+
+### ② 面单 `POST /v2/posting/fbs/package-label`
+
+| 项 | 事实 | 来源 |
+|---|---|---|
+| 语义 | 生成指定发货单的标签 PDF；**仅限 `awaiting_deliver`** | 规范描述段 |
+| 请求 | `{ posting_number: string[] }`（描述称 ≤20 个/次，schema 无 maxItems） | 规范 |
+| 前置 | 建议组包后 **45–60 秒**再请求 | 规范描述段 |
+| ⚠ 坑 | 规范**自相矛盾**：200 声明 `application/pdf`，schema 却是
+  `{content_type,file_name,file_content(base64)}` JSON 信封 | 规范 200 段 vs schema |
+| 错误 | 至少一个单失败则**全部不生成**；`The next postings aren't ready` = 面单未就绪；
+  `INVALID_ARGUMENT` / `label not allowed for delivered postings` = 状态不符 | 规范 Errors 表 |
+
+**实现**：传输层新增**原始字节模式**（`OzonClient.packageLabel`），按实际
+`Content-Type` 判定——JSON 信封则 base64 解码，其余按 PDF 字节直通。两种都接，
+因此**规范矛盾不影响上线**，但仍需真实测一次确认实际形态（见下）。
+
+### 待 T0 实测（拿到用户授权后逐项回填）
+
+1. `/v4/posting/fbs/ship` 真实请求/响应；已组包时的**真实错误文案与 HTTP 状态**；
+2. `substatus = ship_failed` 的传播时机（异步组包需多久）；
+3. `integration_type_flow = aggregator`（rFBS，本店 146/183 单）是否同样走本端点组包；
+4. `/v2/posting/fbs/package-label` 真实响应体是 PDF 字节还是 JSON base64；
+5. `available_actions` 在真实 `/v3/posting/fbs/get` 响应中是否出现、取值集合。
+
 ## 10. 已知限制 / 坑
 
 1. `ON CONFLICT` 部分唯一索引 + TypeORM `TableIndex({unique,where})` 会**静默丢 UNIQUE**（本 Sprint 踩过，已改 raw SQL；见 20260911_002/004）。

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { DataSource } from 'typeorm';
 import { OperatorContext, OperationLogService } from '../../operation-log/operation-log.service';
 import { OrderService } from '../../order/services/order.service';
 import { ShipmentEntity } from '../entities/shipment.entity';
@@ -29,6 +30,7 @@ import { QuickShipResultDto, QuickShipShipmentDto } from '../dto/shipment.dto';
 @Injectable()
 export class QuickShipService {
   constructor(
+    private readonly dataSource: DataSource,
     private readonly shipmentRepo: ShipmentRepository,
     private readonly packageRepo: PackageRepository,
     private readonly shipmentService: ShipmentService,
@@ -39,6 +41,17 @@ export class QuickShipService {
   ) {}
 
   async quickShipOrder(orderId: string, operator: OperatorContext): Promise<QuickShipResultDto> {
+    // Serialized per order: see withOrderLock. Without it two simultaneous
+    // 发货 requests both find no shipment, both try to create one and the
+    // loser dies on the ACTIVE-shipment-item unique index (verified by the
+    // concurrency integration test).
+    return this.withOrderLock(orderId, () => this.runQuickShip(orderId, operator));
+  }
+
+  private async runQuickShip(
+    orderId: string,
+    operator: OperatorContext,
+  ): Promise<QuickShipResultDto> {
     const order = await this.orderService.getOrderOrThrow(orderId);
     if (order.erpStatus === 'CANCELLED') {
       throw new ShipmentStateInvalidError('订单已取消，不能发货', { orderId });
@@ -102,15 +115,21 @@ export class QuickShipService {
     const packageNo =
       packageId === null ? null : ((await this.packageRepo.findById(packageId))?.packageNo ?? null);
 
+    // Prefer a tracking number somebody already put on the shipment (manual
+    // entry, previous ship attempt); otherwise fill in the platform waybill.
+    // Blank strings count as absent - `''` must not win over a real number.
+    const existingTracking =
+      shipment.trackingNumber === null ||
+      shipment.trackingNumber === undefined ||
+      shipment.trackingNumber === ''
+        ? null
+        : shipment.trackingNumber;
+
     const shipped = await this.shipService.shipShipment(
       shipment.id,
-      {
-        // Platform waybill first, explicit operator input would win if the
-        // shipment already carried one (ShipmentService.updateTracking).
-        ...(shipment.trackingNumber === null && platformTrackingNo !== null
-          ? { trackingNumber: platformTrackingNo }
-          : {}),
-      },
+      existingTracking === null && platformTrackingNo !== null
+        ? { trackingNumber: platformTrackingNo }
+        : {},
       operator,
     );
 
@@ -126,8 +145,8 @@ export class QuickShipService {
   /**
    * Makes the shipment fully packed and sealed with ONE parcel - the
    * single-package shortcut of the flow. Returns the package it used (null
-   * when the shipment was already READY_TO_SHIP, i.e. somebody packed it by
-   * hand and there is nothing left to do).
+   * when there was nothing left to pack, i.e. the shipment is already
+   * READY_TO_SHIP or somebody packed it by hand).
    */
   private async ensurePackedPackage(
     shipment: ShipmentEntity,
@@ -136,16 +155,45 @@ export class QuickShipService {
     if (shipment.status === 'READY_TO_SHIP') {
       return null;
     }
+    // The package is chosen/opened under the shipment row lock, so a
+    // concurrent outbound attempt cannot also open one (an empty live package
+    // would block READY_TO_SHIP forever).
+    const target = await this.packingService.ensureOpenPackage(shipment.id, operator);
+    if (target === null) {
+      return null;
+    }
+    await this.packingService.packAllItems(target.packageId, operator);
+    await this.packingService.sealPackage(target.packageId, {}, operator);
+    return target.packageId;
+  }
 
-    const packages = await this.packageRepo.listByShipmentId(shipment.id);
-    const reusable = packages.find(
-      (pkg) => pkg.status === 'OPEN' || pkg.status === 'REPACK_REQUIRED',
-    );
-    const packageId =
-      reusable?.id ?? (await this.packingService.createPackage(shipment.id, operator)).packageId;
-
-    await this.packingService.packAllItems(packageId, operator);
-    await this.packingService.sealPackage(packageId, {}, operator);
-    return packageId;
+  /**
+   * Runs `work` while holding a PostgreSQL advisory lock scoped to this order.
+   *
+   * The flow spans SEVERAL transactions (shipment creation, packing, sealing,
+   * shipping), so no single row lock can cover it - a session-scoped advisory
+   * lock is the "explicitly verified equivalent concurrency control" AGENTS.md
+   * §18 allows. A double-click therefore becomes a serialized replay instead
+   * of a duplicate-shipment crash, and the lock is released on the very
+   * connection that took it.
+   */
+  private async withOrderLock<T>(orderId: string, work: () => Promise<T>): Promise<T> {
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    try {
+      await runner.query('SELECT pg_advisory_lock($1, hashtext($2))', [
+        ORDER_LOCK_NAMESPACE,
+        orderId,
+      ]);
+      return await work();
+    } finally {
+      await runner
+        .query('SELECT pg_advisory_unlock($1, hashtext($2))', [ORDER_LOCK_NAMESPACE, orderId])
+        .catch(() => undefined);
+      await runner.release();
+    }
   }
 }
+
+/** Advisory-lock namespace so the key can never collide with another feature. */
+const ORDER_LOCK_NAMESPACE = 0x57434945 & 0x7fffffff; // "WCIE"

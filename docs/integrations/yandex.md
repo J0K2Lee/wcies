@@ -65,6 +65,7 @@
 | 商品图片/增强 | offer-mappings 自带 pictures/weightDimensions/characteristics 等价物 | 已验证（无需独立接口） |
 | 类目树 | `POST /v2/categories/tree`（整树一次返回 `{id,name,children}`；**官方已标弃用倾向**）；替代：offer-mappings 自带 `marketCategoryId/Name`（按商品自带，无需全树） | 已验证（建议：首发不做全树同步，走 offer 自带类目） |
 | 平台仓库列表 | `GET /v2/businesses/{businessId}/warehouses`（**覆盖 FBS/DBS/Express 卖家侧仓；FBY 平台仓未在返回结构中出现**） | 已验证 + **缺口**（见 §8） |
+| **发货流程平台写**（2026-09-18：OZON 已实现组包 `prepareShipment` + 面单 `fetchShippingLabel`，契约与前端能力位已就位） | **缺口：仓库内无经核实的写接口事实**。本文档只覆盖读侧：`status` 词表、`substatus`（`PROCESSING` 下含 `STARTED/READY_TO_SHIP/SHIPPED`）与 `delivery.tracks` 都是**订单响应里的读字段**；`ORDER_STATUS_UPDATED` 是**平台推给我们**的入站事件，不是我们回写平台 | **T0 待验证 / 待用户提供官方文档**。需要：(1) 订单状态回写端点（方法 + 路径 + 请求体 + 错误码，Yandex 侧通常形如 `campaigns/orders/status/update`，**但仓库内无此事实，不得按记忆实现**，§88）；(2) 面单/标签获取端点与响应形态；(3) 回写允许的前置状态。拿到后按同一可选方法契约补齐，不动订单核心、不改前端 |
 
 ## 7. 代码级落地点（复用 OZON 骨架）
 

@@ -13,13 +13,25 @@ import { AdapterContractHarness, listingItem, runAdapterContractSuite } from '..
 
 const STORE_CREDENTIAL = { clientId: '111222333', apiKey: 'unit-test-api-key' };
 
+/** Posting the shipment-capability contract tests operate on. */
+const SHIPMENT_ORDER_ID = 'SHIP-1';
+
 interface ScriptedRoute {
   /** Endpoint path prefix, e.g. '/v3/product/list'. */
   readonly endpoint: string;
   readonly status: number;
   readonly body: unknown;
   readonly headers?: Record<string, string>;
+  /** Literal body (label bytes / base64 envelope) instead of JSON.stringify. */
+  readonly rawBody?: string;
 }
+
+/** Statuses the scripted posting walks through (OZON seller API vocabulary). */
+const AWAITING_PACKAGING = 'awaiting_packaging';
+const AWAITING_DELIVER = 'awaiting_deliver';
+
+/** Scripted shipping-label PDF bytes (never a real label). */
+const LABEL_PDF = '%PDF-1.4 scripted label';
 
 function makeOzonHarness(): AdapterContractHarness {
   // Route-based fake server: adapters may fan one contract call out to
@@ -35,13 +47,33 @@ function makeOzonHarness(): AdapterContractHarness {
       { endpoint: '/v3/product/info/list', status: 200, body: { items: [] } },
     ],
   ]);
+  // The scripted posting's status is STATEFUL: /v4/posting/fbs/ship flips it
+  // to awaiting_deliver, which is what the adapter's post-write re-read must
+  // observe (the spec is explicit that a 200 alone proves nothing).
+  let postingStatus = AWAITING_PACKAGING;
   let callCount = 0;
   const fetchImpl = vi.fn(async (input: string) => {
     callCount += 1;
     const url = String(input);
+    if (url.includes('/v4/posting/fbs/ship')) {
+      postingStatus = AWAITING_DELIVER;
+      return new Response(JSON.stringify({ result: [SHIPMENT_ORDER_ID] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    // Built per request so it reflects the CURRENT scripted status: the
+    // adapter must observe the post-write state, and a route object built
+    // once would freeze the pre-write status.
+    if (url.includes('/v3/posting/fbs/get')) {
+      return new Response(JSON.stringify({ result: scriptedPosting() }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
     for (const [prefix, route] of routes) {
       if (url.includes(prefix)) {
-        return new Response(JSON.stringify(route.body), {
+        return new Response(route.rawBody ?? JSON.stringify(route.body), {
           status: route.status,
           headers: { 'Content-Type': 'application/json', ...route.headers },
         });
@@ -89,7 +121,38 @@ function makeOzonHarness(): AdapterContractHarness {
       routes.set(endpoint, { endpoint, status, body, headers });
     },
     calls: () => callCount,
+    shipmentFulfillment: {
+      platformOrderId: SHIPMENT_ORDER_ID,
+      scriptAlreadyPrepared: () => {
+        postingStatus = AWAITING_DELIVER;
+      },
+      scriptPrepareSuccess: () => {
+        postingStatus = AWAITING_PACKAGING;
+      },
+      scriptLabel: () => {
+        routes.set('/v2/posting/fbs/package-label', {
+          endpoint: '/v2/posting/fbs/package-label',
+          status: 200,
+          body: null,
+          // The spec declares application/pdf while documenting a JSON
+          // envelope; the contract suite only cares that A file comes back.
+          rawBody: LABEL_PDF,
+          headers: { 'Content-Type': 'application/pdf' },
+        });
+      },
+    },
   };
+
+  /** The scripted posting as of NOW - reflects every ship call so far. */
+  function scriptedPosting(): Record<string, unknown> {
+    return {
+      posting_number: SHIPMENT_ORDER_ID,
+      status: postingStatus,
+      tracking_number: postingStatus === AWAITING_DELIVER ? 'OZ-TRACK-1' : null,
+      in_process_at: '2026-09-08T10:15:30.000Z',
+      products: [{ offer_id: 'SKU-A', sku: 987654321, quantity: 1 }],
+    };
+  }
 }
 
 /** Maps a scripted body to the platform endpoint it belongs to. */

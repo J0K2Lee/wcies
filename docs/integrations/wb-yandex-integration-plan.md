@@ -53,6 +53,14 @@
 
 渠道库存推送 / Allocator、价格与促销写操作、订单改状态/发货写操作、财务报表拉取、评价与聊天——OZON 也未实现，属后续独立 Sprint；本方案不引入。
 
+> **2026-09-18 更新**：其中「订单改状态/发货写操作」已在
+> [决策 0018](../decisions/0018-订单发货流程平台组包与面单.md) 中**定向解除**——
+> 契约新增两个可选方法（`prepareShipment` / `fetchShippingLabel`），**目前仅 OZON 实现**
+> （见 `docs/integrations/ozon.md` §9c）。**WB / Yandex 仍未实现**：两平台在本仓库都
+> 没有经核实的发货写接口事实（AGENTS.md §88），缺口清单已登记在
+> `docs/integrations/wildberries.md` §6 与 `docs/integrations/yandex.md` §6 的能力表末行。
+> 其余各项（库存推送、价格、财务、评价聊天）边界不变。
+
 ## 6. 交付记录（2026-09-18）
 
 | 阶段 | 结果 |

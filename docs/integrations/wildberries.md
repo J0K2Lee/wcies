@@ -102,6 +102,7 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 | 商品属性增强 | 卡片 `characteristics[]` 自带（无需独立增强同步） | 已验证 |
 | 平台仓库列表 | `GET /api/v3/warehouses` 是**卖家 FBS 自建仓 CRUD**，不是 WB 平台仓；唯一的历史候选 supplies-api `/api/v1/warehouses`（.ru 与 .cn 同样）已被平台**整体禁用**——实测 404 "This method is temporarily disabled"，官方 release-notes id=570 说明：2026-08-15 起「形成供应信息 / 供应费率」类 API 全部停用 | **缺口已定论（官方下线，非未找到）**：WB_FBW 绑定走手动录入平台仓 ID + 备注名（绑定弹窗已支持手动录入）；平台若重新开放该 API 可自动接入 |
 | webhook | **已验证 + 已实现（2026-09-18）**：官方 webhooks-api 文档核对，见 §5b | 已实现 |
+| **发货流程平台写**（2026-09-18：OZON 已实现组包 `prepareShipment` + 面单 `fetchShippingLabel`，契约与前端能力位已就位） | **缺口：仓库内无经核实的写接口事实**。已知的只有：① `POST /api/v3/orders/status` 在本文档中明确是「状态批量**读取**」，不是回写；② supplies-api 已被平台整体停用（见上一行）；③ `supplierStatus` 词表 `new/confirm/complete/cancel` 存在，但**没有任何已核实的「把订单改为 confirm/complete」的端点规格**；④ §4 只提到「订单/供应单/面单 300 req/min」的**配额分类**，未给面单端点 | **T0 待验证 / 待用户提供官方文档**。需要：(1) 订单状态回写端点（方法 + 路径 + 请求体 + 错误码）；(2) 单订单面单/стикер 获取端点与响应形态；(3) 词表中「已发货」对应的确切取值与前置状态。拿到后按 `packages/platform-contracts` 的同一可选方法契约补齐，**不动订单核心、不改前端**（能力位自动放行） |
 
 ## 5b. Webhook（已验证 2026-09-18，官方文档核对；已实现）
 
