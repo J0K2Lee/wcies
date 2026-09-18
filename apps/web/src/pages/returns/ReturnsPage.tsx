@@ -28,6 +28,7 @@ import {
   SectionCard,
   StatusBadge,
   colors,
+  RelativeTime,
   useContextRail,
   ContextRailContent,
 } from '../../design-system';
@@ -88,10 +89,6 @@ interface ReturnBatchDetail extends ReturnBatchRow {
 
 const BATCH_STATUS_META = RETURN_BATCH_STATUS_META;
 const CONDITION_META = RETURN_CONDITION_META;
-
-function fmtDateTime(value: string): string {
-  return new Date(value).toLocaleString('zh-CN', { hour12: false });
-}
 
 export function ReturnsPage() {
   const { message, modal } = AntdApp.useApp();
@@ -492,7 +489,7 @@ export function ReturnsPage() {
                 dataIndex: 'platformCreatedAt',
                 key: 'platformCreatedAt',
                 width: 160,
-                render: (value: string | null) => (value === null ? '—' : fmtDateTime(value)),
+                render: (value: string | null) => <RelativeTime value={value} fallback="—" />,
               },
             ]}
           />
@@ -572,7 +569,7 @@ export function ReturnsPage() {
                   dataIndex: 'createdAt',
                   key: 'createdAt',
                   width: 160,
-                  render: (value: string) => fmtDateTime(value),
+                  render: (value: string) => <RelativeTime value={value} />,
                 },
               ]}
             />
@@ -650,6 +647,7 @@ export function ReturnsPage() {
                       tone={CONDITION_META[value]?.tone ?? 'neutral'}
                       label={CONDITION_META[value]?.label ?? value}
                       hint={value}
+                      showDot={false}
                     />
                   ),
                 },

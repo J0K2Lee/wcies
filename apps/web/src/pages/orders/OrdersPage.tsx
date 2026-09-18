@@ -18,7 +18,7 @@ import {
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import { apiGet, apiPost, useApiQuery } from '../../api/hooks';
-import { fmtMoney } from '../../utils/format';
+import { fmtDateTime, fmtMoney } from '../../utils/format';
 import { ListingOnboardModal, OnboardMatchIdentifiers } from '../../components/ListingOnboardModal';
 import {
   ContextAction,
@@ -41,6 +41,7 @@ import {
   SectionCard,
   StatusBadge,
   colors,
+  RelativeTime,
   useContextRail,
   ContextRailContent,
 } from '../../design-system';
@@ -462,10 +463,6 @@ function fulfillmentModeChip(mode: string | null): { short: string; hint: string
     return { short: mode.slice(mode.lastIndexOf('_') + 1), hint: mode };
   }
   return { short: mode, hint: mode };
-}
-
-function fmtDateTime(value: string): string {
-  return new Date(value).toLocaleString('zh-CN', { hour12: false });
 }
 
 /**
@@ -1112,6 +1109,7 @@ export function OrdersPage() {
                 tone="purple"
                 label="无法映射"
                 hint="缺少 SKU 映射，去 SKU 映射补齐后重试"
+                showDot={false}
               />
               <div style={{ fontSize: 12, color: colors.textTertiary, marginTop: 2 }}>
                 {row.platformSkuId ?? row.sellerSku ?? `第 ${row.lineNo} 行`}
@@ -1809,7 +1807,12 @@ export function OrdersPage() {
       key: 'sku',
       render: (_: unknown, row: OrderItem) =>
         row.skuId === null ? (
-          <StatusBadge tone="purple" label="无法映射" hint="缺少 SKU 映射，去 SKU 映射补随后重试" />
+          <StatusBadge
+            tone="purple"
+            label="无法映射"
+            hint="缺少 SKU 映射，去 SKU 映射补齐后重试"
+            showDot={false}
+          />
         ) : (
           <div>
             <div style={{ fontWeight: 550 }}>{row.skuCode}</div>
@@ -1851,6 +1854,7 @@ export function OrdersPage() {
         <StatusBadge
           tone={FULFILLMENT_STATUS_META[value]?.tone ?? 'neutral'}
           label={FULFILLMENT_STATUS_META[value]?.label ?? value}
+          showDot={false}
         />
       ),
     },
@@ -1868,7 +1872,7 @@ export function OrdersPage() {
           value === 'NOT_ORDERED' && row.fulfillmentStatus === 'BACKORDERED' && row.skuId !== null;
         return (
           <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-            <StatusBadge tone={meta.tone} label={meta.label} hint={value} />
+            <StatusBadge tone={meta.tone} label={meta.label} hint={value} showDot={false} />
             {registerable && (
               <Button
                 size="small"
@@ -1924,6 +1928,7 @@ export function OrdersPage() {
                 key={exception.exceptionNo}
                 tone="danger"
                 label={exception.exceptionType}
+                showDot={false}
               />
             ))}
           </span>
@@ -1958,7 +1963,11 @@ export function OrdersPage() {
           return (
             <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
               <span>{row.itemsCount} 行</span>
-              <StatusBadge tone="purple" label={`映射失败 ${row.mappingFailedCount}`} />
+              <StatusBadge
+                tone="purple"
+                label={`映射失败 ${row.mappingFailedCount}`}
+                showDot={false}
+              />
             </span>
           );
         }
@@ -2080,7 +2089,7 @@ export function OrdersPage() {
         return badge === null ? (
           '—'
         ) : (
-          <StatusBadge tone={badge.tone} label={badge.label} hint={badge.exact} />
+          <StatusBadge tone={badge.tone} label={badge.label} hint={badge.exact} showDot={false} />
         );
       },
     },
@@ -2096,7 +2105,7 @@ export function OrdersPage() {
       dataIndex: 'orderedAt',
       key: 'orderedAt',
       width: 150,
-      render: (value: string) => <span style={{ fontSize: 12.5 }}>{fmtDateTime(value)}</span>,
+      render: (value: string) => <RelativeTime value={value} />,
     },
   };
 
@@ -2479,6 +2488,7 @@ export function OrdersPage() {
                                             ? exception.exceptionType
                                             : `${exception.exceptionType}（已解决）`
                                         }
+                                        showDot={false}
                                       />
                                     ))}
                                   </span>

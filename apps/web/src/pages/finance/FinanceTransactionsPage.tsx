@@ -203,6 +203,7 @@ export function FinanceTransactionsPage() {
                 block
                 danger
                 style={{ marginTop: 8 }}
+                loading={reverseMutation.isPending}
                 onClick={() => {
                   // 冲正 = 作废类操作（UI 规范 §7 L2）：强确认 + danger。
                   modal.confirm({
@@ -225,7 +226,7 @@ export function FinanceTransactionsPage() {
         </>
       ),
     };
-  }, [selectedRow, list.data, modal, reverseMutation]);
+  }, [selectedRow, list.data, modal, reverseMutation.isPending]);
 
   useContextRail(railContent);
 

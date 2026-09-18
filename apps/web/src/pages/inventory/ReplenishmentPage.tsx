@@ -149,7 +149,7 @@ export function ReplenishmentPage() {
         </>
       ),
     };
-  }, [selectedRow, list.data, windowDays, coverDays, createPoMutation]);
+  }, [selectedRow, list.data, windowDays, coverDays, createPoMutation.isPending]);
 
   useContextRail(railContent);
 

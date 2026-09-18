@@ -233,6 +233,7 @@ export function NotificationsPage() {
                     tone={NOTIFICATION_STATUS_META[value]?.tone ?? 'neutral'}
                     label={NOTIFICATION_STATUS_META[value]?.label ?? value}
                     hint={value}
+                    showDot={false}
                   />
                 ),
               },

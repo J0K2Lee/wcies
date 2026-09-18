@@ -35,6 +35,7 @@ import {
   RiskIndicator,
   SectionCard,
   StatusBadge,
+  typography,
   useContextRail,
 } from '../../design-system';
 
@@ -283,7 +284,7 @@ export function ExceptionsPage() {
             <ContextMetric
               label="关联对象"
               value={
-                <span style={{ fontSize: 12, fontFamily: 'monospace' }}>
+                <span style={{ fontSize: 12, fontFamily: typography.monoFamily }}>
                   {selectedRow.referenceType} · {selectedRow.referenceId.slice(0, 8)}…
                 </span>
               }
@@ -415,6 +416,7 @@ export function ExceptionsPage() {
           tone={EXCEPTION_STATUS_META[value]?.tone ?? 'neutral'}
           label={EXCEPTION_STATUS_META[value]?.label ?? value}
           hint={value}
+          showDot={false}
         />
       ),
     },
@@ -618,7 +620,11 @@ export function ExceptionsPage() {
                     span: 2,
                     children: (
                       <span
-                        style={{ fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}
+                        style={{
+                          fontSize: 12,
+                          fontFamily: typography.monoFamily,
+                          wordBreak: 'break-all',
+                        }}
                       >
                         {detailRow.referenceType} · {detailRow.referenceId}
                       </span>

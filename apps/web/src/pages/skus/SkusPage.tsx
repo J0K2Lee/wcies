@@ -886,7 +886,7 @@ export function SkusPage() {
           })}
           scroll={{ x: 1080 }}
           emptyTitle="没有匹配的 SKU"
-          emptyDescription="调整筛选条件或新增 SKU。"
+          emptyDescription="调整筛选条件或新建 SKU。"
           columns={[
             {
               title: '商品',

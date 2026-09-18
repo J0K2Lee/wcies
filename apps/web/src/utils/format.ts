@@ -21,6 +21,13 @@ export function fmtDateTimeShort(iso: string): string {
   )}:${pad(d.getMinutes())}`;
 }
 
+/** Date-only label for period fields (对账期间等): 2026-09-08 */
+export function fmtDate(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 /** Relative label for recent events: 5 分钟前 / 3 小时前 / 2 天前. */
 export function relativeTime(iso: string): string {
   const time = new Date(iso).getTime();

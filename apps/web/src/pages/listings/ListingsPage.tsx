@@ -25,6 +25,7 @@ import {
   StatusSwitch,
   RailHint,
   labelOf,
+  typography,
   useContextRail,
 } from '../../design-system';
 import { ListingOnboardModal } from '../../components/ListingOnboardModal';
@@ -73,11 +74,12 @@ interface ListingDetail {
   skus: ListingSkuRow[];
 }
 
-const listingStatusBadge = (value: string) => (
+const listingStatusBadge = (value: string, showDot = true) => (
   <StatusBadge
     tone={value === 'ACTIVE' ? 'success' : 'neutral'}
     label={labelOf(ACTIVE_STATUS_LABEL, value)}
     hint={value}
+    showDot={showDot}
   />
 );
 
@@ -644,7 +646,7 @@ export function ListingsPage() {
                 dataIndex: 'platformProductId',
                 width: 160,
                 render: (value: string) => (
-                  <span style={{ fontFamily: 'monospace', fontSize: 12.5 }}>{value}</span>
+                  <span style={{ fontFamily: typography.monoFamily, fontSize: 12.5 }}>{value}</span>
                 ),
               },
               {
@@ -672,12 +674,12 @@ export function ListingsPage() {
                 width: 150,
                 render: (value: string, record: ListingRow) =>
                   value === 'MAPPED' ? (
-                    <StatusBadge tone="success" label="已映射" />
+                    <StatusBadge tone="success" label="已映射" showDot={false} />
                   ) : (
                     <Space size={4}>
-                      <StatusBadge tone="warning" label="未映射" />
+                      <StatusBadge tone="warning" label="未映射" showDot={false} />
                       {record.hasOrderException && (
-                        <StatusBadge tone="danger" label="订单异常" showDot />
+                        <StatusBadge tone="danger" label="订单异常" showDot={false} />
                       )}
                     </Space>
                   ),
@@ -686,7 +688,7 @@ export function ListingsPage() {
                 title: '状态',
                 dataIndex: 'status',
                 width: 90,
-                render: (value: string) => listingStatusBadge(value),
+                render: (value: string) => listingStatusBadge(value, false),
               },
               {
                 title: '更新时间',
@@ -925,7 +927,7 @@ export function ListingsPage() {
                   {
                     label: '平台商品 ID',
                     children: (
-                      <span style={{ fontFamily: 'monospace', fontSize: 12.5 }}>
+                      <span style={{ fontFamily: typography.monoFamily, fontSize: 12.5 }}>
                         {listingDetail.platformProductId}
                       </span>
                     ),
@@ -964,9 +966,9 @@ export function ListingsPage() {
                     width: 90,
                     render: (value: string) =>
                       value === 'MAPPED' ? (
-                        <StatusBadge tone="success" label="已映射" />
+                        <StatusBadge tone="success" label="已映射" showDot={false} />
                       ) : (
-                        <StatusBadge tone="warning" label="未映射" />
+                        <StatusBadge tone="warning" label="未映射" showDot={false} />
                       ),
                   },
                   {

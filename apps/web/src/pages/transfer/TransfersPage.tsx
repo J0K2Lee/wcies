@@ -227,6 +227,7 @@ export function TransfersPage() {
                   block
                   danger
                   style={{ marginTop: 8 }}
+                  loading={cancelMutation.isPending}
                   onClick={() => {
                     modal.confirm({
                       title: `取消调拨单 ${selectedRow.transferNo}？`,
@@ -248,7 +249,7 @@ export function TransfersPage() {
         </>
       ),
     };
-  }, [selectedRow, list.data, modal, confirmMutation, cancelMutation]);
+  }, [selectedRow, list.data, modal, confirmMutation.isPending, cancelMutation.isPending]);
 
   useContextRail(railContent);
 

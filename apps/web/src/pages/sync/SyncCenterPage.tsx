@@ -46,6 +46,7 @@ import {
   SectionCard,
   StatusBadge,
   SyncStatusBadge,
+  typography,
   useContextRail,
 } from '../../design-system';
 
@@ -338,7 +339,7 @@ export function SyncCenterPage() {
               <ContextMetric
                 label="事件 ID"
                 value={
-                  <span style={{ fontSize: 12, fontFamily: 'monospace' }}>
+                  <span style={{ fontSize: 12, fontFamily: typography.monoFamily }}>
                     {selectedEvent.id.slice(0, 8)}…
                   </span>
                 }
@@ -355,7 +356,7 @@ export function SyncCenterPage() {
               <ContextMetric
                 label="载荷哈希"
                 value={
-                  <span style={{ fontSize: 12, fontFamily: 'monospace' }}>
+                  <span style={{ fontSize: 12, fontFamily: typography.monoFamily }}>
                     {selectedEvent.payloadHash.slice(0, 10)}…
                   </span>
                 }
@@ -457,7 +458,7 @@ export function SyncCenterPage() {
             <ContextMetric
               label="任务 ID"
               value={
-                <span style={{ fontSize: 12, fontFamily: 'monospace' }}>
+                <span style={{ fontSize: 12, fontFamily: typography.monoFamily }}>
                   {selectedJob.id.slice(0, 8)}…
                 </span>
               }
@@ -555,7 +556,9 @@ export function SyncCenterPage() {
               {TRIGGER_TYPE_META[row.triggerType] ?? row.triggerType}
             </span>
           </div>
-          <div style={{ fontSize: 12, fontFamily: 'monospace', color: colors.textTertiary }}>
+          <div
+            style={{ fontSize: 12, fontFamily: typography.monoFamily, color: colors.textTertiary }}
+          >
             {row.id.slice(0, 8)}…
           </div>
         </div>
@@ -666,6 +669,21 @@ export function SyncCenterPage() {
             立即同步
           </Button>
         }
+        /* UI 规范 §2：Tabs 唯一合法位置是 PageHeader extra（与退货管理一致） */
+        extra={
+          <Tabs
+            activeKey={activeTab}
+            onChange={(key) => {
+              setActiveTab(key === 'events' ? 'events' : 'jobs');
+              setSelectedJobId(null);
+              setSelectedEventId(null);
+            }}
+            items={[
+              { key: 'jobs', label: '同步任务' },
+              { key: 'events', label: '事件订阅' },
+            ]}
+          />
+        }
       />
 
       <KpiRow>
@@ -746,152 +764,128 @@ export function SyncCenterPage() {
         />
       </FilterBar>
 
-      <Tabs
-        activeKey={activeTab}
-        onChange={(key) => {
-          setActiveTab(key === 'events' ? 'events' : 'jobs');
-          setSelectedJobId(null);
-          setSelectedEventId(null);
-        }}
-        items={[
-          {
-            key: 'jobs',
-            label: '同步任务',
-            children: (
-              <SectionCard flush>
-                {jobs.isError ? (
-                  <ErrorState
-                    description={(jobs.error as Error | null)?.message}
-                    onRetry={() => void queryClient.invalidateQueries({ queryKey: ['sync-jobs'] })}
-                    retrying={jobs.isFetching}
-                  />
-                ) : (
-                  <DataTable<SyncJobRow>
-                    rowKey="id"
-                    loading={jobs.isLoading}
-                    dataSource={rows}
-                    columns={jobColumns}
-                    emptyTitle="暂无同步任务"
-                    emptyDescription="点击右上角立即同步，或等待定时任务触发"
-                    pagination={{
-                      current: page,
-                      pageSize: 20,
-                      total: jobs.data?.meta.total ?? 0,
-                      onChange: setPage,
-                      showSizeChanger: false,
-                    }}
-                    onRow={(record) => ({
-                      onClick: () =>
-                        setSelectedJobId(record.id === selectedJobId ? null : record.id),
-                      onDoubleClick: () => setDetailJobId(record.id),
-                      style: {
-                        cursor: 'pointer',
-                        background: record.id === selectedJobId ? colors.primarySoft : undefined,
-                      },
-                    })}
-                  />
-                )}
-              </SectionCard>
-            ),
-          },
-          {
-            key: 'events',
-            label: '事件订阅',
-            children: (
-              <SectionCard flush>
-                <DataTable<RawEventRow>
-                  rowKey="id"
-                  loading={events.isLoading}
-                  dataSource={events.data?.data ?? []}
-                  emptyTitle="暂无事件推送"
-                  emptyDescription="平台事件推送（订单、商品变更等）将在这里显示"
-                  pagination={{
-                    current: eventPage,
-                    pageSize: 20,
-                    total: events.data?.meta.total ?? 0,
-                    onChange: setEventPage,
-                    showSizeChanger: false,
-                  }}
-                  onRow={(record) => ({
-                    // 事件行：单击选中（右栏详情与操作），双击打开报文 Drawer。
-                    onClick: () =>
-                      setSelectedEventId(selectedEventId === record.id ? null : record.id),
-                    onDoubleClick: () => setEventDetail(record),
-                    style: {
-                      cursor: 'pointer',
-                      background: selectedEventId === record.id ? colors.primarySoft : undefined,
-                    },
-                  })}
-                  columns={[
-                    {
-                      title: '平台',
-                      dataIndex: 'platform',
-                      key: 'platform',
-                      width: 100,
-                      render: (value: string) => <PlatformTag code={value} />,
-                    },
-                    {
-                      title: '事件类型',
-                      dataIndex: 'eventType',
-                      key: 'eventType',
-                      width: 150,
-                      render: (value: string) => {
-                        const meta = EVENT_TYPE_META[value] ?? {
-                          tone: 'neutral' as const,
-                          label: value,
-                        };
-                        return (
-                          <StatusBadge
-                            tone={meta.tone}
-                            label={meta.label}
-                            hint={value}
-                            showDot={false}
-                          />
-                        );
-                      },
-                    },
-                    {
-                      title: '状态',
-                      dataIndex: 'status',
-                      key: 'status',
-                      width: 96,
-                      render: (value: string) => {
-                        const meta = EVENT_STATUS_META[value] ?? {
-                          tone: 'neutral' as const,
-                          label: value,
-                        };
-                        return <StatusBadge tone={meta.tone} label={meta.label} hint={value} />;
-                      },
-                    },
-                    {
-                      title: '接收时间',
-                      dataIndex: 'receivedAt',
-                      key: 'receivedAt',
-                      width: 110,
-                      render: (value: string) => <RelativeTime value={value} />,
-                    },
-                    {
-                      title: '处理时间',
-                      dataIndex: 'processedAt',
-                      key: 'processedAt',
-                      width: 110,
-                      render: (value: string | null) => <RelativeTime value={value} />,
-                    },
-                    {
-                      title: '错误',
-                      key: 'error',
-                      ellipsis: true,
-                      render: (_: unknown, row: RawEventRow) => (
-                        <ErrorCell code={row.errorCode} message={row.errorMessage} />
-                      ),
-                    },
-                  ]}
-                />
-              </SectionCard>
-            ),
-          },
-        ]}
-      />
+      {activeTab === 'jobs' ? (
+        <SectionCard flush>
+          {jobs.isError ? (
+            <ErrorState
+              description={(jobs.error as Error | null)?.message}
+              onRetry={() => void queryClient.invalidateQueries({ queryKey: ['sync-jobs'] })}
+              retrying={jobs.isFetching}
+            />
+          ) : (
+            <DataTable<SyncJobRow>
+              rowKey="id"
+              loading={jobs.isLoading}
+              dataSource={rows}
+              columns={jobColumns}
+              emptyTitle="暂无同步任务"
+              emptyDescription="点击右上角立即同步，或等待定时任务触发"
+              pagination={{
+                current: page,
+                pageSize: 20,
+                total: jobs.data?.meta.total ?? 0,
+                onChange: setPage,
+                showSizeChanger: false,
+              }}
+              onRow={(record) => ({
+                onClick: () => setSelectedJobId(record.id === selectedJobId ? null : record.id),
+                onDoubleClick: () => setDetailJobId(record.id),
+                style: {
+                  cursor: 'pointer',
+                  background: record.id === selectedJobId ? colors.primarySoft : undefined,
+                },
+              })}
+            />
+          )}
+        </SectionCard>
+      ) : (
+        <SectionCard flush>
+          <DataTable<RawEventRow>
+            rowKey="id"
+            loading={events.isLoading}
+            dataSource={events.data?.data ?? []}
+            emptyTitle="暂无事件推送"
+            emptyDescription="平台事件推送（订单、商品变更等）将在这里显示"
+            pagination={{
+              current: eventPage,
+              pageSize: 20,
+              total: events.data?.meta.total ?? 0,
+              onChange: setEventPage,
+              showSizeChanger: false,
+            }}
+            onRow={(record) => ({
+              // 事件行：单击选中（右栏详情与操作），双击打开报文 Drawer。
+              onClick: () => setSelectedEventId(selectedEventId === record.id ? null : record.id),
+              onDoubleClick: () => setEventDetail(record),
+              style: {
+                cursor: 'pointer',
+                background: selectedEventId === record.id ? colors.primarySoft : undefined,
+              },
+            })}
+            columns={[
+              {
+                title: '平台',
+                dataIndex: 'platform',
+                key: 'platform',
+                width: 100,
+                render: (value: string) => <PlatformTag code={value} />,
+              },
+              {
+                title: '事件类型',
+                dataIndex: 'eventType',
+                key: 'eventType',
+                width: 150,
+                render: (value: string) => {
+                  const meta = EVENT_TYPE_META[value] ?? {
+                    tone: 'neutral' as const,
+                    label: value,
+                  };
+                  return (
+                    <StatusBadge tone={meta.tone} label={meta.label} hint={value} showDot={false} />
+                  );
+                },
+              },
+              {
+                title: '状态',
+                dataIndex: 'status',
+                key: 'status',
+                width: 96,
+                render: (value: string) => {
+                  const meta = EVENT_STATUS_META[value] ?? {
+                    tone: 'neutral' as const,
+                    label: value,
+                  };
+                  return (
+                    <StatusBadge tone={meta.tone} label={meta.label} hint={value} showDot={false} />
+                  );
+                },
+              },
+              {
+                title: '接收时间',
+                dataIndex: 'receivedAt',
+                key: 'receivedAt',
+                width: 110,
+                render: (value: string) => <RelativeTime value={value} />,
+              },
+              {
+                title: '处理时间',
+                dataIndex: 'processedAt',
+                key: 'processedAt',
+                width: 110,
+                render: (value: string | null) => <RelativeTime value={value} />,
+              },
+              {
+                title: '错误',
+                key: 'error',
+                ellipsis: true,
+                render: (_: unknown, row: RawEventRow) => (
+                  <ErrorCell code={row.errorCode} message={row.errorMessage} />
+                ),
+              },
+            ]}
+          />
+        </SectionCard>
+      )}
 
       {/* ---- Job detail drawer (task §19) ---- */}
       <Drawer
@@ -1108,7 +1102,7 @@ export function SyncCenterPage() {
                 {
                   label: '载荷哈希',
                   children: (
-                    <span style={{ fontSize: 12, fontFamily: 'monospace' }}>
+                    <span style={{ fontSize: 12, fontFamily: typography.monoFamily }}>
                       {eventDetail.payloadHash}
                     </span>
                   ),

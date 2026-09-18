@@ -23,6 +23,7 @@ import {
   RelativeTime,
   SectionCard,
   StatusBadge,
+  typography,
   useContextRail,
 } from '../../design-system';
 
@@ -314,7 +315,9 @@ export function PlatformMappingsPage() {
                 key: 'platformProduct',
                 render: (_: unknown, row: ListingRow) => (
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 550, fontFamily: 'monospace', fontSize: 13 }}>
+                    <div
+                      style={{ fontWeight: 550, fontFamily: typography.monoFamily, fontSize: 13 }}
+                    >
                       {row.platformProductId}
                     </div>
                     <div
@@ -348,9 +351,9 @@ export function PlatformMappingsPage() {
                 width: 100,
                 render: (value: string) =>
                   value === 'MAPPED' ? (
-                    <StatusBadge tone="success" label="已映射" />
+                    <StatusBadge tone="success" label="已映射" showDot={false} />
                   ) : (
-                    <StatusBadge tone="warning" label="未映射" />
+                    <StatusBadge tone="warning" label="未映射" showDot={false} />
                   ),
               },
               {

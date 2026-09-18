@@ -20,6 +20,7 @@ import {
   SectionCard,
   StatusBadge,
   StatusSwitch,
+  typography,
   useContextRail,
 } from '../../design-system';
 
@@ -439,7 +440,7 @@ export function BinsPage() {
                 color: colors.textPrimary,
               }}
             >
-              将创建：<span style={{ fontFamily: 'monospace' }}>{singlePreview}</span>
+              将创建：<span style={{ fontFamily: typography.monoFamily }}>{singlePreview}</span>
             </div>
           )}
         </Form>

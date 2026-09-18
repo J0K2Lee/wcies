@@ -48,6 +48,7 @@ import {
   StatusSwitch,
   SyncStatusBadge,
   MetricCard,
+  typography,
   useContextRail,
 } from '../../design-system';
 
@@ -846,9 +847,9 @@ export function StoresPage() {
       width: 96,
       render: (value: boolean) =>
         value ? (
-          <StatusBadge tone="success" label="已配置" />
+          <StatusBadge tone="success" label="已配置" showDot={false} />
         ) : (
-          <StatusBadge tone="warning" label="未连接" />
+          <StatusBadge tone="warning" label="未连接" showDot={false} />
         ),
     },
     {
@@ -1365,7 +1366,9 @@ function StoreDetailBody({
             },
             {
               label: '店铺 ID',
-              children: <span style={{ fontSize: 12, fontFamily: 'monospace' }}>{store.id}</span>,
+              children: (
+                <span style={{ fontSize: 12, fontFamily: typography.monoFamily }}>{store.id}</span>
+              ),
             },
             {
               label: '状态',
@@ -1427,6 +1430,7 @@ function StoreDetailBody({
                   tone={value === 'ACTIVE' ? 'success' : 'neutral'}
                   label={value === 'ACTIVE' ? '启用' : value}
                   hint={value}
+                  showDot={false}
                 />
               ),
             },
@@ -1436,13 +1440,13 @@ function StoreDetailBody({
               width: 110,
               render: (value: string | null) =>
                 value === 'VALID' ? (
-                  <StatusBadge tone="success" label="已连接" />
+                  <StatusBadge tone="success" label="已连接" showDot={false} />
                 ) : value === 'INVALID' ? (
-                  <StatusBadge tone="danger" label="认证失败" />
+                  <StatusBadge tone="danger" label="认证失败" showDot={false} />
                 ) : value === 'ERROR' ? (
-                  <StatusBadge tone="warning" label="验证出错" />
+                  <StatusBadge tone="warning" label="验证出错" showDot={false} />
                 ) : (
-                  <StatusBadge tone="neutral" label="未验证" />
+                  <StatusBadge tone="neutral" label="未验证" showDot={false} />
                 ),
             },
             {

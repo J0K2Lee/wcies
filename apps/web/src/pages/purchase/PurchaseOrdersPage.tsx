@@ -461,7 +461,9 @@ export function PurchaseOrdersPage() {
               width: 110,
               render: (value: string) => {
                 const meta = STATUS_META[value] ?? { tone: 'neutral' as const, label: value };
-                return <StatusBadge tone={meta.tone} label={meta.label} hint={value} />;
+                return (
+                  <StatusBadge tone={meta.tone} label={meta.label} hint={value} showDot={false} />
+                );
               },
             },
             {

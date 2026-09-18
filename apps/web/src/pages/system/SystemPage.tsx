@@ -21,6 +21,7 @@ import {
   RailHint,
   SectionCard,
   StatusBadge,
+  typography,
   useContextRail,
 } from '../../design-system';
 
@@ -259,7 +260,13 @@ export function SystemPage() {
               <span style={{ fontSize: 13.5, fontWeight: 550, color: colors.textPrimary }}>
                 {platform.name}
               </span>
-              <span style={{ fontSize: 12, fontFamily: 'monospace', color: colors.textTertiary }}>
+              <span
+                style={{
+                  fontSize: 12,
+                  fontFamily: typography.monoFamily,
+                  color: colors.textTertiary,
+                }}
+              >
                 {platform.code}
               </span>
               <StatusBadge

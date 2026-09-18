@@ -13,7 +13,7 @@ import {
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { apiPost, useApiQuery } from '../../api/hooks';
-import { fmtDateTime, fmtMoney } from '../../utils/format';
+import { fmtDate, fmtDateTime, fmtMoney } from '../../utils/format';
 import {
   colors,
   ContextAction,
@@ -190,7 +190,7 @@ export function FinancePayoutsPage() {
             />
             <ContextMetric
               label="对账期间"
-              value={`${selectedRow.periodStart.slice(0, 10)} ~ ${selectedRow.periodEnd.slice(0, 10)}`}
+              value={`${fmtDate(selectedRow.periodStart)} ~ ${fmtDate(selectedRow.periodEnd)}`}
             />
             <ContextMetric label="店铺" value={selectedRow.storeName ?? '—'} />
             <ContextMetric label="登记时间" value={fmtDateTime(selectedRow.createdAt)} />
@@ -212,6 +212,7 @@ export function FinancePayoutsPage() {
                   block
                   danger
                   style={{ marginTop: 8 }}
+                  loading={cancelMutation.isPending}
                   onClick={() => {
                     // 取消单据类 = L2（UI 规范 §7）。
                     modal.confirm({
@@ -235,7 +236,7 @@ export function FinancePayoutsPage() {
         </>
       ),
     };
-  }, [selectedRow, list.data, modal, cancelMutation]);
+  }, [selectedRow, list.data, modal, cancelMutation.isPending]);
 
   useContextRail(railContent);
 
@@ -320,7 +321,7 @@ export function FinancePayoutsPage() {
               key: 'period',
               width: 200,
               render: (_: unknown, row: PayoutRow) =>
-                `${row.periodStart.slice(0, 10)} ~ ${row.periodEnd.slice(0, 10)}`,
+                `${fmtDate(row.periodStart)} ~ ${fmtDate(row.periodEnd)}`,
             },
             {
               title: '打款金额',

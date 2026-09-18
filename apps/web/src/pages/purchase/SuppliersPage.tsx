@@ -329,6 +329,7 @@ export function SuppliersPage() {
                   tone={value === 'ACTIVE' ? 'success' : 'neutral'}
                   label={value === 'ACTIVE' ? '启用' : '停用'}
                   hint={value}
+                  showDot={false}
                 />
               ),
             },
