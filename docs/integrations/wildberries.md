@@ -102,7 +102,7 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 | 商品属性增强 | 卡片 `characteristics[]` 自带（无需独立增强同步） | 已验证 |
 | 平台仓库列表 | `GET /api/v3/warehouses` 是**卖家 FBS 自建仓 CRUD**，不是 WB 平台仓；唯一的历史候选 supplies-api `/api/v1/warehouses`（.ru 与 .cn 同样）已被平台**整体禁用**——实测 404 "This method is temporarily disabled"，官方 release-notes id=570 说明：2026-08-15 起「形成供应信息 / 供应费率」类 API 全部停用 | **缺口已定论（官方下线，非未找到）**：WB_FBW 绑定走手动录入平台仓 ID + 备注名（绑定弹窗已支持手动录入）；平台若重新开放该 API 可自动接入 |
 | webhook | **已验证 + 已实现（2026-09-18）**：官方 webhooks-api 文档核对，见 §5b | 已实现 |
-| **发货流程平台写**（2026-09-18：OZON 已实现组包 `prepareShipment` + 面单 `fetchShippingLabel`，契约与前端能力位已就位） | **缺口：仓库内无经核实的写接口事实**。已知的只有：① `POST /api/v3/orders/status` 在本文档中明确是「状态批量**读取**」，不是回写；② supplies-api 已被平台整体停用（见上一行）；③ `supplierStatus` 词表 `new/confirm/complete/cancel` 存在，但**没有任何已核实的「把订单改为 confirm/complete」的端点规格**；④ §4 只提到「订单/供应单/面单 300 req/min」的**配额分类**，未给面单端点 | **T0 待验证 / 待用户提供官方文档**。需要：(1) 订单状态回写端点（方法 + 路径 + 请求体 + 错误码）；(2) 单订单面单/стикер 获取端点与响应形态；(3) 词表中「已发货」对应的确切取值与前置状态。拿到后按 `packages/platform-contracts` 的同一可选方法契约补齐，**不动订单核心、不改前端**（能力位自动放行） |
+| **发货流程平台写** | **官方 swagger 已核对并落盘（2026-09-18，见 §9 与 docs/wb-orders-fbs-openapi.yaml）**：发货写操作按**供应单**走——建供应单 → 加订单（→`confirm`）→ 供应单转交付（→`complete`）；面单 `POST /api/v3/orders/stickers`（仅 `confirm`/`complete` 可取，JSON 内 base64） | 规范已核对、**未实现**：契约 `prepareShipment` 是按订单的，WB 按供应单，映射方案见 §9.4，需业务确认后再写代码 |
 
 ## 5b. Webhook（已验证 2026-09-18，官方文档核对；已实现）
 
@@ -145,3 +145,90 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 5. ~~WB webhooks：订阅端点/事件枚举/payload/签名~~（已核实并实现，见 §5b）；剩余校准项：**创建响应 secret 字段名**、真实投递样例、`GET /api/v1/event-scopes` 最新事件目录、订单类事件是否上线。
 6. returns 域真实端点与规格。
 7. WB_FBW 平台仓数据源（有无可列平台仓的接口）。
+8. **发货流程写操作（§9，需用户授权后实测，AGENTS §92）**：① `POST /api/v3/supplies` 创建供应单的真实响应；② 加单后订单状态是否立刻变 `confirm`；③ `shipping-method` 未设置时 deliver 是否如规范所说返回 409；④ `POST /api/v3/orders/stickers` 真实响应（file 的 base64 与格式）；⑤ deliver 后订单是否变 `complete`；⑥ 对已处于目标状态的订单重复提交的行为（幂等性）。
+
+## 9. 发货流程平台写能力（2026-09-18 官方 swagger 核对；未实现）
+
+> 事实来源：官方 swagger `dev.wildberries.ru/en/swagger/orders-fbs` 的原始规范，
+> 已整份落盘 **`docs/wb-orders-fbs-openapi.yaml`**（openapi 3.0.1，title "FBS Orders"，
+> version "order"，252 KB，2026-09-18 抓取）。该站有 antibot（HTTP 498 + JS 质询），
+> 纯 curl 拿不到；抓取方式见 §9.4。
+>
+> ⚠ 本节是**规范核对**，尚未对真实账号执行（AGENTS.md §92）。
+
+### 9.1 与发货相关的端点全集（Base：`https://marketplace-api.wildberries.ru`；沙箱 `…-sandbox.…`）
+
+| 方法 | 端点 | 作用 |
+|---|---|---|
+| GET | `/api/v3/orders/new` | 新组货订单 |
+| GET | `/api/v3/orders` | 组货订单（近 3 个月；`dateFrom/dateTo` Unix 秒，单次 ≤30 天，`next` 游标） |
+| POST | `/api/v3/orders/status` | **读**状态（body `{orders:[int64]}` ≤1000） |
+| PATCH | `/api/v3/orders/{orderId}/cancel` | 取消组货订单（100 req/min、600ms、burst 20） |
+| POST | `/api/v3/orders/stickers` | **面单贴纸**（≤100/次，`type=svg/zplv/zplh/png`，`width=58/40`，`height=40/30`） |
+| POST | `/api/v3/supplies` | **创建供应单**（body `{name}`，返回 `{id:"WB-GI-1234567"}`） |
+| PATCH | `/api/marketplace/v3/supplies/{supplyId}/orders` | **把订单加入供应单**（≤100/次）→ 订单进入 `confirm` |
+| PATCH | `/api/v3/supplies/{supplyId}/deliver` | **供应单转“已交付”** → 全部订单进入 `complete`，供应单关闭 |
+| GET | `/api/v3/supplies/{supplyId}` | 供应单详情 |
+| GET | `/api/v3/supplies/{supplyId}/barcode` | 供应单 QR 码 |
+| PATCH | `/api/marketplace/v3/fbs/supplies/shipping-method` | 设置配送方式/发货日期/发货点（俄→俄**必填**，否则 deliver 返回 409） |
+| PATCH | `/api/marketplace/v3/fbs/supplies/waybill` | 电子运单号（仅 `shippingType:"transportCompany"` 时可用） |
+| GET | `/api/v3/supplies/{supplyId}/trbx` / POST / DELETE | 供应单装箱单位（trbx） |
+| POST | `/api/v3/supplies/{supplyId}/trbx/stickers` | 供应单装箱 QR 贴纸 |
+
+鉴权：`HeaderApiKey`（即现有 client 的 Authorization token），与 §1 一致。
+限流（FBS 组货订单/供应单/通行证/自动退回这一组）：**300 req/min、200ms 间隔、burst 20；
+一个 4XX 计 10 次**。沙箱内所有 Marketplace 方法合计 **1 req/s**。
+
+### 9.2 发货状态机：**供应单驱动**，卖家不能单独“发货”一张订单
+
+`supplierStatus`（卖家侧，**只能由卖家动作改变**）：
+
+| 状态 | 含义 | 如何到达 |
+|---|---|---|
+| `new` | 新订单 | （平台生成） |
+| `confirm` | **组货中**（WB fbs 配送） | 把订单加入供应单（`PATCH …/supplies/{id}/orders`） |
+| `complete` | **配送中**（WB fbs 与 wbgo） | 供应单转交付（`PATCH /api/v3/supplies/{supplyId}/deliver`） |
+| `cancel` | 卖家取消 | `PATCH /api/v3/orders/{orderId}/cancel` |
+| `cancel_carrier` | 承运商取消（**仅跨境**） | 承运商改变 |
+
+`wbStatus`（平台侧事实，与 §3 一致）：`waiting / sorted / sold / canceled /
+canceled_by_client / declined_by_client / defect / ready_for_pickup /
+postponed_delivery / accepted_by_carrier / sent_to_carrier / canceled_by_carrier`。
+
+`PATCH /api/v3/orders/{orderId}/cancel` 的 409 示例名：`StatusMismatch`、
+`StatusChangeNotAllowed`；`isCancellable` 字段（`POST /api/v3/orders/status` 返回）
+指示能否取消。
+
+### 9.3 面单（贴纸）
+
+`POST /api/v3/orders/stickers?type=png&width=58&height=40`
+body `{orders:[int64]}`（≤100），响应：
+
+```json
+{ "stickers": [{ "orderId": 5346346, "partA": "231648", "partB": "9753",
+                 "barcode": "!uKEtQZVx", "file": "<base64>" }] }
+```
+
+- `file` = 所请求格式的 **base64**（JSON 内，不是二进制流）。
+- **只有 `confirm` / `complete` 状态能取贴纸**——即必须先加入供应单。
+- 需要报关单号的商品，未填报关单号时取不到贴纸。
+- 供应单整体另有 QR：`GET /api/v3/supplies/{supplyId}/barcode`；装箱单位贴纸
+  `POST /api/v3/supplies/{supplyId}/trbx/stickers`。
+
+### 9.4 与 WCIES 契约的映射（实现前必须确认的设计差异）
+
+我们 `prepareShipment(orderId)` 是**按订单**的，而 WB 的写操作是**按供应单**的。
+最直接的对齐方式：**每张订单自动建一个专属供应单**（`POST /api/v3/supplies`
+`{name: "WCIES-<orderNo>"}`）→ 加单 → 取贴纸 → `deliver`。这与小单量卖家的实际操作一致，
+但会产生“一单一供应单”的平台侧结构，需要业务确认（尤其是否影响汇总交付）。
+
+其他前置：deliver 要求①供应单内至少一张订单②所有订单必填的标识（如 УИН/报关单号）
+已填并通过校验③俄→俄供应单必须已设置 shipping-method，否则 409。
+**这三条都要在 T0 实测**，不能只按规范假设。
+
+### 9.5 抓取方式（ antibot ）
+
+`dev.wildberries.ru` 对非浏览器请求返回 **HTTP 498** + JS 质询（自家 wbaas antibot），
+curl 直接被拒。可行做法：真浏览器打开 `/en/swagger/orders-fbs` 过质询后，从页面
+RSC payload 取得规范地址 `/api/swagger/yaml/en/03-orders-fbs.yaml`，再把浏览器会话的
+`x_wbaas_token` Cookie 复制给 curl 即可直取。规范文件随本仓库落盘，一般无需重抓。

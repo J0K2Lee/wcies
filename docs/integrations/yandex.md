@@ -65,7 +65,7 @@
 | 商品图片/增强 | offer-mappings 自带 pictures/weightDimensions/characteristics 等价物 | 已验证（无需独立接口） |
 | 类目树 | `POST /v2/categories/tree`（整树一次返回 `{id,name,children}`；**官方已标弃用倾向**）；替代：offer-mappings 自带 `marketCategoryId/Name`（按商品自带，无需全树） | 已验证（建议：首发不做全树同步，走 offer 自带类目） |
 | 平台仓库列表 | `GET /v2/businesses/{businessId}/warehouses`（**覆盖 FBS/DBS/Express 卖家侧仓；FBY 平台仓未在返回结构中出现**） | 已验证 + **缺口**（见 §8） |
-| **发货流程平台写**（2026-09-18：OZON 已实现组包 `prepareShipment` + 面单 `fetchShippingLabel`，契约与前端能力位已就位） | **缺口：仓库内无经核实的写接口事实**。本文档只覆盖读侧：`status` 词表、`substatus`（`PROCESSING` 下含 `STARTED/READY_TO_SHIP/SHIPPED`）与 `delivery.tracks` 都是**订单响应里的读字段**；`ORDER_STATUS_UPDATED` 是**平台推给我们**的入站事件，不是我们回写平台 | **T0 待验证 / 待用户提供官方文档**。需要：(1) 订单状态回写端点（方法 + 路径 + 请求体 + 错误码，Yandex 侧通常形如 `campaigns/orders/status/update`，**但仓库内无此事实，不得按记忆实现**，§88）；(2) 面单/标签获取端点与响应形态；(3) 回写允许的前置状态。拿到后按同一可选方法契约补齐，不动订单核心、不改前端 |
+| **发货流程平台写** | **官方 OpenAPI 已核对并落盘（2026-09-18，见 §9 与 docs/yandex-partner-api-openapi.json）**：`PUT /v2/campaigns/{id}/orders/{orderId}/status` → `PROCESSING/READY_TO_SHIP`；面单 `GET …/orders/{orderId}/delivery/labels` 直接回 PDF 二进制 | 规范已核对、**未实现**：与契约无结构冲突，见 §9.5 |
 
 ## 7. 代码级落地点（复用 OZON 骨架）
 
@@ -89,3 +89,80 @@
 | 4 | 30 天前历史订单 | 接口限制 | 需要历史补录时用 `POST /v2/campaigns/{campaignId}/stats/orders`（首发不做，与 OZON 归档限制同级别的已知边界） |
 | 5 | `v2/categories/tree` 弃用倾向 | 技术风险 | 首发不做全树类目同步（商品自带 marketCategoryId/Name 已满足展示） |
 | 6 | webhook 事件 `ORDER_CREATED` payload 示例文档笔误（示例 notificationType 均为 PING 占位） | 文档噪声 | T0 用真实回调样本确认各事件 payload 实形 |
+
+### 8.1 发货流程 T0 项（§9 实现/实测前）
+
+1. 对已处于 `READY_TO_SHIP` 的订单重复 `PUT …/status` 的返回（幂等性）。
+2. `delivery/labels` 对未备货完成订单的真实报错（映射“面单未就绪”）。
+3. `format` 缺省（A7）与 A4 的实际排版。
+4. FBS 订单在 `PROCESSING/STARTED` 前置状态下直接写 `READY_TO_SHIP` 是否被 400 拒绝。
+
+## 9. 发货流程平台写能力（2026-09-18 官方 OpenAPI 核对；未实现）
+
+> 事实来源：Yandex 官方 OpenAPI 规范仓库
+> `github.com/yandex-market/yandex-market-partner-api`（commit `8b32780df5`，2026-09-18），
+> 已打包成单文件落盘 **`docs/yandex-partner-api-openapi.json`**（1.24 MB，
+> 159 路径 / 849 schemas，外部 $ref 全部内联为 `#/components/...`，可直接 grep）。
+>
+> ⚠ 本节是**规范核对**，尚未对真实账号执行（AGENTS.md §92）。
+
+### 9.1 基础（与现有实现一致）
+
+- Base：`https://api.partner.market.yandex.ru`
+- 鉴权：`Api-Key` 请求头（securitySchemes 同时列出 OAuth，我们用 Api-Key）
+- 该组方法限流：`x-resource-limit-config` = **10000 次 / 1 小时**（none 与 medium 档相同）
+
+### 9.2 状态回写（“组包/发货”）
+
+**`PUT /v2/campaigns/{campaignId}/orders/{orderId}/status`**（operationId
+`updateOrderStatus`；tags `orders, fbs, dbs, laas, express`）
+
+```json
+{ "order": { "status": "PROCESSING", "substatus": "READY_TO_SHIP" } }
+```
+
+- body = `UpdateOrderStatusRequest`：必填 `order.status`
+  （`OrderStatusType`），可选 `order.substatus`（`OrderSubstatusType`）、
+  `order.delivery`（`OrderStatusChangeDeliveryDTO`）。
+- 规范明确列出的允许迁移（DBS 语义，tags 含 fbs）：
+  1. `PROCESSING/STARTED` → **`PROCESSING/READY_TO_SHIP`**（已确认并备货完成，可发货）
+  2. `PROCESSING/STARTED` → `CANCELLED/SHOP_FAILED`（确认了但无法履约）
+  3. `PROCESSING/READY_TO_SHIP` → `CANCELLED/SHOP_FAILED`（备货后发现无法履约）
+- 完整状态模型见规范链接的概念页 `dbs-order-status-model.md`。
+- **没有**“标记已送达”之类把订单推到 `DELIVERY/DELIVERED` 的卖家写接口——
+  那些状态由平台物流事实产生，我们继续按只读事实同步（§3）。
+- 响应：200 返回 `UpdateOrderStatusResponse`（更新后的订单信息）；错误
+  400/401/403/404/**420（限流）**/500，与现有错误归一化一致（§2）。
+
+### 9.3 面单
+
+**`GET /v2/campaigns/{campaignId}/orders/{orderId}/delivery/labels`**
+（operationId `generateOrderLabels`；tags `order-labels, fbs, dbs, express`）
+
+- 可选 query `format` = `PageFormatType`：`A9_HORIZONTALLY`（58×40mm 无边距）、
+  `A9`、`A7`（**缺省值**）、`A4`。
+- **200 直接返回 `application/pdf` 二进制**（schema `string format: binary`）——
+  与 OZON 面单“规范自相矛盾”不同，这里规范就是干净的二进制下载。
+- 另有 **`GET …/delivery/labels/data`**（`getOrderLabelsData`）返回 JSON 的
+  标签数据，供自行排版打印；以及按箱的
+  `GET /v2/campaigns/{campaignId}/orders/{orderId}/delivery/shipments/{shipmentId}/boxes/{boxId}/label`。
+- 若要在面单上显示外部订单号，先调
+  `POST /v2/campaigns/{campaignId}/orders/{orderId}/external-id`。
+
+### 9.4 其他相关（本次不实现，仅登记）
+
+| 端点 | 说明 |
+|---|---|
+| `POST /v2/campaigns/{campaignId}/orders/{orderId}/delivery/track` | **传跟踪号**（`setOrderDeliveryTrackCode`，DBS 自送场景） |
+| `POST /v2/campaigns/{campaignId}/orders/{orderId}/identifiers/status` | `getOrderIdentifiersStatus`，标记校验码状态（**读语义的 POST**） |
+| `PUT /v2/campaigns/{campaignId}/shipments/{shipmentId}/status` 相关 | FBS **供应单（отгрузка）** 流程：`/first-mile/shipments` 家族（`…/act`、`…/confirm`、`…/pallet-labels`、`…/transportation-waybill`）——Yandex 的“发货”也可按**批量供应单**走，与 WB 类似；按单走 9.2 即可满足我们的流程 |
+
+### 9.5 与 WCIES 契约的映射（无结构性冲突）
+
+- `prepareShipment(orderId)` → `PUT …/orders/{orderId}/status`
+  `{order:{status:"PROCESSING", substatus:"READY_TO_SHIP"}}`；幂等性：对已处于
+  `READY_TO_SHIP` 的订单重复提交的结果（200 还是 400）**需 T0 实测**，实现按
+  “先读后写”规避（同 OZON 模式）。
+- `fetchShippingLabel(orderId)` → `GET …/delivery/labels?format=A7`，二进制 PDF
+  直接落对象存储；平台未生成时（400/404）映射为“面单未就绪”。
+- FBY（平台仓）订单本就不进拣货（`isExternalFulfillmentMode`），不调用写接口。
