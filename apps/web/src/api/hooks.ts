@@ -127,15 +127,30 @@ export async function apiPost<TData>(
   path: QueryKey,
   body: unknown,
   pathParams?: Record<string, string>,
+  queryParams?: Record<string, unknown>,
 ): Promise<TData> {
   const { data, error } = await apiClient.POST(path, {
-    params: pathParams === undefined ? undefined : { path: pathParams as never },
+    params: buildParams(pathParams, queryParams),
     body: body as never,
   });
   if (error !== undefined) {
     throw toApiError(error.error);
   }
   return (data as { data: TData }).data;
+}
+
+/** Path + query params for the generated client; omitted when none were given. */
+function buildParams(
+  pathParams?: Record<string, string>,
+  queryParams?: Record<string, unknown>,
+): { path?: never; query?: never } | undefined {
+  if (pathParams === undefined && queryParams === undefined) {
+    return undefined;
+  }
+  return {
+    ...(pathParams === undefined ? {} : { path: pathParams as never }),
+    ...(queryParams === undefined ? {} : { query: queryParams as never }),
+  };
 }
 
 /** Typed PATCH helper returning the unwrapped data or throwing. */

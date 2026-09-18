@@ -810,15 +810,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/warehouse-bindings": {
+    "/api/v1/warehouses/{warehouseId}/platform-bindings": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List bindings across stores (paged, filterable) */
-        get: operations["StoreWarehouseBindingController_list"];
+        /** 列出仓库已绑定的平台仓库（分页） */
+        get: operations["WarehousePlatformBindingController_list"];
+        put?: never;
+        /** 绑定平台仓库到内部仓库（校验类型↔履约模式、托管仓单绑定） */
+        post: operations["WarehousePlatformBindingController_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/stores/{storeId}/platform-bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 列出店铺关联的平台仓库绑定（跨仓库，分页） */
+        get: operations["WarehousePlatformBindingController_listByStore"];
         put?: never;
         post?: never;
         delete?: never;
@@ -827,25 +845,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/stores/{storeId}/warehouse-bindings": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List bindings of a store */
-        get: operations["StoreWarehouseBindingController_listByStore"];
-        put?: never;
-        /** Bind a warehouse to a store with a fulfillment mode */
-        post: operations["StoreWarehouseBindingController_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/stores/{storeId}/warehouse-bindings/{id}": {
+    "/api/v1/warehouses/{warehouseId}/platform-bindings/{bindingId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -855,43 +855,8 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Delete a store-warehouse binding */
-        delete: operations["StoreWarehouseBindingController_removeBinding"];
-        options?: never;
-        head?: never;
-        /** Update a binding */
-        patch: operations["StoreWarehouseBindingController_update"];
-        trace?: never;
-    };
-    "/api/v1/stores/{storeId}/warehouse-bindings/{id}/disable": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Disable a binding */
-        post: operations["StoreWarehouseBindingController_disable"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/stores/{storeId}/warehouse-bindings/{id}/enable": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Enable a binding */
-        post: operations["StoreWarehouseBindingController_enable"];
-        delete?: never;
+        /** 解除平台仓库绑定 */
+        delete: operations["WarehousePlatformBindingController_remove"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1753,6 +1718,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/picking-tasks/auto-create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 自动为待拣货（READY_TO_PICK）订单创建拣货任务（跳过已有进行中任务的订单） */
+        post: operations["PickingController_autoCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/picking-tasks/{id}": {
         parameters: {
             query?: never;
@@ -2596,6 +2578,160 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/webhooks/yandex/stores/{storeCode}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Yandex Market API 通知入口（IP 白名单 + PING 秒回 + raw event 入队） */
+        post: operations["YandexWebhookController_receive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/webhooks/yandex/stores/{storeCode}/notification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["YandexWebhookController_receiveNotification"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/webhooks/wb/stores/{storeCode}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** WB webhook 事件投递入口（secret 验证 + 逐事件落库 + 入队） */
+        post: operations["WbWebhookReceiverController_receive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/stores/{storeId}/webhooks/wb/subscription": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询店铺的 WB webhook 订阅状态 */
+        get: operations["WbWebhookManageController_status"];
+        put?: never;
+        /** 订阅 WB webhook（平台侧创建 + 一次性 secret 加密落库为 WEBHOOK 凭证） */
+        post: operations["WbWebhookManageController_subscribe"];
+        /** 退订 WB webhook（按回调 URL 精确匹配删除） */
+        delete: operations["WbWebhookManageController_unsubscribe"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/stores/{storeId}/platform-warehouses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询店铺的平台仓库目录（实时调用平台 API；当前仅 OZON） */
+        get: operations["PlatformWarehouseController_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders/{id}/prepare-shipment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 获取运单号（平台组包；真实平台写操作，幂等：已组包则不重复写） */
+        post: operations["OrderFulfillmentController_prepareShipment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders/{id}/shipping-label": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 打单（取平台面单 PDF 存私有桶，返回签名 URL 供浏览器打开打印） */
+        post: operations["OrderFulfillmentController_fetchShippingLabel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders/{id}/shipping-labels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 该订单的平台面单列表（不调用平台） */
+        get: operations["OrderFulfillmentController_listShippingLabels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders/{id}/ship": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 一键发货：自动建发货单+单包裹装箱封箱 → 正式出库扣减库存 → 订单 SHIPPED */
+        post: operations["OrderFulfillmentController_quickShip"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/finance/transactions": {
         parameters: {
             query?: never;
@@ -3166,7 +3302,7 @@ export interface components {
              * @example MAIN_API
              * @enum {string}
              */
-            credentialType: "MAIN_API";
+            credentialType: "MAIN_API" | "WEBHOOK";
             /** @description Plain credential payload (e.g. apiKey/clientId); encrypted at rest */
             payload: Record<string, never>;
         };
@@ -3714,8 +3850,11 @@ export interface components {
             updatedAt: string;
             /** @example 20 */
             binCount: number;
-            /** @example 4 */
-            boundStoreCount: number;
+            /**
+             * @description 已绑定的平台仓库数（ACTIVE）
+             * @example 4
+             */
+            boundPlatformWarehouseCount: number;
         };
         WarehouseResponseDto: {
             /** Format: uuid */
@@ -3750,7 +3889,7 @@ export interface components {
              * @example SELF
              * @enum {string}
              */
-            warehouseType: "SELF" | "PLATFORM" | "THIRD_PARTY" | "RETURN_TEMP";
+            warehouseType: "SELF" | "SEMI_MANAGED" | "PLATFORM" | "THIRD_PARTY" | "RETURN_TEMP";
             /** @example CN */
             countryCode?: string;
             /** @example 广东 */
@@ -3871,9 +4010,15 @@ export interface components {
             status?: "ACTIVE" | "INACTIVE";
             remark?: string;
         };
-        BindingResponseDto: {
+        PlatformBindingResponseDto: {
             /** Format: uuid */
             id: string;
+            /** Format: uuid */
+            warehouseId: string;
+            /** @example SZ01 */
+            warehouseCode: string;
+            /** @example 深圳自管仓 */
+            warehouseName: string;
             /** Format: uuid */
             storeId: string;
             /** @example OZON-A */
@@ -3882,22 +4027,16 @@ export interface components {
             storeName: string;
             /** @example OZON */
             platformCode: string;
-            /** Format: uuid */
-            warehouseId: string;
-            /** @example SZ01 */
-            warehouseCode: string;
-            /** @example 深圳自管仓 */
-            warehouseName: string;
-            /** @example OZON_RFBS */
+            /** @example 1020005000770362 */
+            platformWarehouseId: string;
+            /** @example OZON 莫斯科东仓 */
+            platformWarehouseName: Record<string, never> | null;
+            /** @example OZON_FBO */
             fulfillmentMode: string;
-            platformWarehouseId: Record<string, never> | null;
-            /** @example true */
-            isInventorySource: boolean;
-            /** @example false */
-            isInventoryPushEnabled: boolean;
+            /** @example 俄东主仓 */
+            remarkName: Record<string, never> | null;
             /** @example 100 */
             priority: number;
-            settings: Record<string, never> | null;
             /** @example ACTIVE */
             status: string;
             /** Format: date-time */
@@ -3905,35 +4044,34 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
-        CreateBindingRequestDto: {
-            /** Format: uuid */
-            warehouseId: string;
+        CreatePlatformBindingRequestDto: {
             /**
-             * @example OZON_RFBS
+             * Format: uuid
+             * @description 平台仓库归属的店铺
+             */
+            storeId: string;
+            /**
+             * @description 平台仓库 ID（OZON warehouse_id 等），同店铺内唯一
+             * @example 1020005000770362
+             */
+            platformWarehouseId: string;
+            /**
+             * @description 平台侧仓库名称快照
+             * @example OZON 莫斯科东仓
+             */
+            platformWarehouseName?: string;
+            /**
+             * @example OZON_FBO
              * @enum {string}
              */
             fulfillmentMode: "OZON_RFBS" | "OZON_FBS" | "OZON_FBO" | "OZON_FBP" | "WB_FBS" | "WB_FBW" | "YANDEX_FBS" | "YANDEX_FBY";
             /**
-             * @description Warehouse id on the platform side
-             * @example 123456
+             * @description 操作者备注名
+             * @example 俄东主仓
              */
-            platformWarehouseId?: string;
-            /** @default true */
-            isInventorySource: boolean;
-            /** @default false */
-            isInventoryPushEnabled: boolean;
+            remarkName?: string;
             /** @example 100 */
             priority?: number;
-            settings?: Record<string, never>;
-        };
-        UpdateBindingRequestDto: {
-            platformWarehouseId?: string;
-            isInventorySource?: boolean;
-            isInventoryPushEnabled?: boolean;
-            priority?: number;
-            settings?: Record<string, never>;
-            /** @enum {string} */
-            status?: "ACTIVE" | "DISABLED";
         };
         ListingResponseDto: {
             /** Format: uuid */
@@ -4758,7 +4896,7 @@ export interface components {
             /** @example EXC00000001 */
             exceptionNo: string;
             /** @enum {string} */
-            exceptionType: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR" | "SYNC_FAILED" | "ORDER_TRACKING_STALLED" | "ORDER_CANCELLED_AFTER_SHIP" | "RETURN_ORDER_NOT_FOUND" | "RETURN_DIFFERENCE";
+            exceptionType: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR" | "SYNC_FAILED" | "ORDER_TRACKING_STALLED" | "ORDER_CANCELLED_AFTER_SHIP" | "RETURN_ORDER_NOT_FOUND" | "RETURN_DIFFERENCE" | "ORDER_PLATFORM_SHIP_FAILED";
             /** @enum {string} */
             severity: "LOW" | "MEDIUM" | "HIGH";
             /** @enum {string} */
@@ -4802,6 +4940,8 @@ export interface components {
              * @description 平台要求的发货截止时间（平台事实，非 ERP 状态）
              */
             shipmentDeadline?: string | null;
+            /** @description 平台运单号（平台事实）；已组包后由平台返回，出库时自动填入发货单物流单号 */
+            platformTrackingNo: string | null;
             /** Format: date-time */
             createdAt: string;
             /** @enum {string|null} */
@@ -4839,6 +4979,8 @@ export interface components {
             skuCode: string;
             /** @example VK87 MAX V2 黑色 */
             skuName: string;
+            /** @description 最近采购价（SKU 主数据操作者维护，master-data.md §4.3；用户指示 2026-09-17 展开行展示） */
+            latestPurchasePrice?: string | null;
             warehouseId: string | null;
             /** @example 2.000 */
             quantity: string;
@@ -4857,7 +4999,7 @@ export interface components {
             /** @enum {string|null} */
             imageSource: "INTERNAL" | "PLATFORM" | null;
             /** @enum {string} */
-            fulfillmentStatus: "PENDING" | "RESERVED" | "BACKORDERED" | "PICKED" | "SHIPPED" | "RELEASED";
+            fulfillmentStatus: "PENDING" | "RESERVED" | "BACKORDERED" | "PICKED" | "SHIPPED" | "RELEASED" | "EXTERNAL_FULFILLED";
             /** @enum {string} */
             mappingStatus: "PENDING" | "MAPPED" | "FAILED";
             /**
@@ -4947,6 +5089,8 @@ export interface components {
              * @description 平台要求的发货截止时间（平台事实，非 ERP 状态）
              */
             shipmentDeadline?: string | null;
+            /** @description 平台运单号（平台事实）；已组包后由平台返回，出库时自动填入发货单物流单号 */
+            platformTrackingNo: string | null;
             rawData: Record<string, never> | null;
             remark: string | null;
             /** @enum {string|null} */
@@ -4968,7 +5112,7 @@ export interface components {
             /** @enum {string} */
             mappingStatus: "PENDING" | "MAPPED" | "FAILED";
             /** @enum {string} */
-            fulfillmentStatus: "PENDING" | "RESERVED" | "BACKORDERED" | "PICKED" | "SHIPPED" | "RELEASED";
+            fulfillmentStatus: "PENDING" | "RESERVED" | "BACKORDERED" | "PICKED" | "SHIPPED" | "RELEASED" | "EXTERNAL_FULFILLED";
             skuId: string | null;
             reservationId: string | null;
         };
@@ -5021,6 +5165,11 @@ export interface components {
              * @description 平台要求的发货截止时间（平台事实，非 ERP 状态；可空）
              */
             shipmentDeadline?: string;
+            /**
+             * @description 平台运单号（OZON tracking_number，平台事实）；出库时自动填入发货单物流单号。这不是被禁止的 orders.tracking_number 物流模型——Shipment/Package 仍是唯一物流载体。
+             * @example 89491381-0072-1
+             */
+            platformTrackingNo?: Record<string, never> | null;
             /** @example RUB */
             currency?: string;
             items: components["schemas"]["NormalizedOrderItemInputDto"][];
@@ -5057,7 +5206,7 @@ export interface components {
         OrderRetryAllocationResultDto: {
             orderItemId: string;
             /** @enum {string} */
-            fulfillmentStatus: "PENDING" | "RESERVED" | "BACKORDERED" | "PICKED" | "SHIPPED" | "RELEASED";
+            fulfillmentStatus: "PENDING" | "RESERVED" | "BACKORDERED" | "PICKED" | "SHIPPED" | "RELEASED" | "EXTERNAL_FULFILLED";
             reserved: boolean;
         };
         NotificationDto: {
@@ -5121,6 +5270,36 @@ export interface components {
         CreatePickingTaskRequestDto: {
             /** @description 从该订单的 RESERVED 行生成拣货任务（按仓拆分） */
             orderId: string;
+        };
+        AutoCreatePickingTasksResultDto: {
+            /** @description 候选订单数（READY_TO_PICK） */
+            candidates: number;
+            /** @description 成功创建任务的订单数 */
+            created: number;
+            /** @description 跳过数（已有进行中的拣货任务） */
+            skipped: number;
+            /** @description 失败数（域错误，逐单记录） */
+            failed: number;
+            /** @description 新建的拣货单号 */
+            createdTaskNos: string[];
+            /** @description 失败明细 */
+            failures: {
+                orderNo?: string;
+                code?: string;
+                message?: string;
+            }[];
+        };
+        AutoCreatePickingTasksRequestDto: {
+            /**
+             * Format: uuid
+             * @description 仅处理该店铺的订单；省略 = 全部店铺
+             */
+            storeId?: string;
+            /**
+             * @description 单次批量上限
+             * @default 100
+             */
+            limit: number;
         };
         PickingBinLineDto: {
             binId: string;
@@ -5748,7 +5927,10 @@ export interface components {
         };
         ShippingLabelDto: {
             id: string;
-            shipmentId: string;
+            /** @description 发货单级面单（手工上传）有值；平台面单在出库前先挂订单，此时为 null */
+            shipmentId: string | null;
+            /** @description 订单级（平台 API）面单所属订单；发货单级面单为 null */
+            orderId: string | null;
             packageId: Record<string, never> | null;
             /** @enum {string} */
             labelType: "SHIPPING";
@@ -5759,6 +5941,7 @@ export interface components {
             fileSize: number;
             /** @example MANUAL_UPLOAD */
             source: string;
+            externalLabelId: string | null;
             /** Format: date-time */
             createdAt: string;
             /** @description 短期有效的私有文件签名 URL（浏览器打开/打印） */
@@ -6024,6 +6207,61 @@ export interface components {
             processedAt: string | null;
             errorCode: string | null;
             errorMessage: string | null;
+        };
+        PlatformWarehouseOptionDto: {
+            /** @example 1020005000770362 */
+            platformWarehouseId: string;
+            /** @example Екатеринбург_РФЦ */
+            name: string;
+            /**
+             * @example OZON_FBO
+             * @enum {string}
+             */
+            fulfillmentMode: "OZON_RFBS" | "OZON_FBS" | "OZON_FBP" | "OZON_FBO";
+            /**
+             * @example MANAGED
+             * @enum {string}
+             */
+            category: "SELF_MANAGED" | "SEMI_MANAGED" | "MANAGED";
+            status?: Record<string, never> | null;
+            address?: Record<string, never> | null;
+            partnerName?: Record<string, never> | null;
+            isActive?: boolean | null;
+        };
+        PrepareShipmentResultDto: {
+            orderId: string;
+            /** @example ORD00000001 */
+            orderNo: string;
+            /** @example OZON */
+            platformCode: string;
+            /** @description 平台运单号；平台在组包后才分配，未返回时为 null */
+            trackingNumber: string | null;
+            /** @description 组包后的平台订单状态（平台原文） */
+            platformStatus: string | null;
+            /** @description 平台此前已受理该订单（本次未再写平台） */
+            alreadyPrepared: boolean;
+            /** @description 本次是否真的调用了平台写接口 */
+            platformWritePerformed: boolean;
+        };
+        QuickShipShipmentDto: {
+            shipmentId: string;
+            /** @example SHP00000001 */
+            shipmentNo: string;
+            /** @description 本次自动装箱的包裹（已备好时为 null） */
+            packageId: string | null;
+            packageNo: string | null;
+            /** @description 该发货单此前已出库（本次未再次扣减库存） */
+            alreadyShipped: boolean;
+        };
+        QuickShipResultDto: {
+            orderId: string;
+            /** @example ORD00000001 */
+            orderNo: string;
+            /** @description 出库后订单 ERP 状态（全部行出库后为 SHIPPED） */
+            orderErpStatus: string;
+            /** @description 带入发货单的平台运单号（订单上无平台运单号时为 null） */
+            trackingNumber: string | null;
+            shipments: components["schemas"]["QuickShipShipmentDto"][];
         };
         FinanceTransactionDto: {
             id: string;
@@ -7841,7 +8079,7 @@ export interface operations {
             query?: {
                 /** @description Matches warehouse_code / name / city */
                 keyword?: string;
-                warehouseType?: "SELF" | "PLATFORM" | "THIRD_PARTY" | "RETURN_TEMP";
+                warehouseType?: "SELF" | "SEMI_MANAGED" | "PLATFORM" | "THIRD_PARTY" | "RETURN_TEMP";
                 status?: "ACTIVE" | "INACTIVE";
             };
             header?: never;
@@ -8258,44 +8496,17 @@ export interface operations {
             };
         };
     };
-    StoreWarehouseBindingController_list: {
+    WarehousePlatformBindingController_list: {
         parameters: {
             query?: {
-                storeId?: string;
+                /** @description 按仓库过滤 */
                 warehouseId?: string;
+                storeId?: string;
                 status?: "ACTIVE" | "DISABLED";
             };
             header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["BindingResponseDto"][];
-                        meta: {
-                            page: number;
-                            pageSize: number;
-                            total: number;
-                        };
-                    };
-                };
-            };
-        };
-    };
-    StoreWarehouseBindingController_listByStore: {
-        parameters: {
-            query?: never;
-            header?: never;
             path: {
-                storeId: string;
+                warehouseId: string;
             };
             cookie?: never;
         };
@@ -8309,7 +8520,7 @@ export interface operations {
                     "application/json": {
                         /** @enum {boolean} */
                         success: true;
-                        data: components["schemas"]["BindingResponseDto"][];
+                        data: components["schemas"]["PlatformBindingResponseDto"][];
                         meta: {
                             page: number;
                             pageSize: number;
@@ -8320,18 +8531,18 @@ export interface operations {
             };
         };
     };
-    StoreWarehouseBindingController_create: {
+    WarehousePlatformBindingController_create: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                storeId: string;
+                warehouseId: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateBindingRequestDto"];
+                "application/json": components["schemas"]["CreatePlatformBindingRequestDto"];
             };
         };
         responses: {
@@ -8343,19 +8554,54 @@ export interface operations {
                     "application/json": {
                         /** @enum {boolean} */
                         success: true;
-                        data: components["schemas"]["BindingResponseDto"];
+                        data: components["schemas"]["PlatformBindingResponseDto"];
                     };
                 };
             };
         };
     };
-    StoreWarehouseBindingController_removeBinding: {
+    WarehousePlatformBindingController_listByStore: {
+        parameters: {
+            query?: {
+                /** @description 按仓库过滤 */
+                warehouseId?: string;
+                storeId?: string;
+                status?: "ACTIVE" | "DISABLED";
+            };
+            header?: never;
+            path: {
+                storeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PlatformBindingResponseDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    WarehousePlatformBindingController_remove: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                storeId: string;
-                id: string;
+                warehouseId: string;
+                bindingId: string;
             };
             cookie?: never;
         };
@@ -8370,88 +8616,6 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: Record<string, never>;
-                    };
-                };
-            };
-        };
-    };
-    StoreWarehouseBindingController_update: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                storeId: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateBindingRequestDto"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["BindingResponseDto"];
-                    };
-                };
-            };
-        };
-    };
-    StoreWarehouseBindingController_disable: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                storeId: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["BindingResponseDto"];
-                    };
-                };
-            };
-        };
-    };
-    StoreWarehouseBindingController_enable: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                storeId: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["BindingResponseDto"];
                     };
                 };
             };
@@ -9607,7 +9771,7 @@ export interface operations {
     ExceptionController_list: {
         parameters: {
             query?: {
-                exceptionType?: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR" | "SYNC_FAILED" | "ORDER_TRACKING_STALLED" | "ORDER_CANCELLED_AFTER_SHIP" | "RETURN_ORDER_NOT_FOUND" | "RETURN_DIFFERENCE";
+                exceptionType?: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR" | "SYNC_FAILED" | "ORDER_TRACKING_STALLED" | "ORDER_CANCELLED_AFTER_SHIP" | "RETURN_ORDER_NOT_FOUND" | "RETURN_DIFFERENCE" | "ORDER_PLATFORM_SHIP_FAILED";
                 status?: "OPEN" | "RESOLVED" | "IGNORED";
                 referenceType?: string;
                 referenceId?: string;
@@ -9732,6 +9896,8 @@ export interface operations {
                 /** @description 二级 · 行级货物状态（双轴 §2.2，单选）：TO_PICK=存在 RESERVED 行；PICKING=erp_status PICKING；TO_SHIP=存在 PICKED 行；BACKORDERED=存在缺货行；MAPPING_FAILED=存在映射失败行；SHIPMENT_OVERDUE=已过发货时限未发完；ABNORMAL=缺货∪映射失败∪发货超时∪物流停滞（OPEN ORDER_TRACKING_STALLED） */
                 goodsState?: "TO_PICK" | "PICKING" | "TO_SHIP" | "BACKORDERED" | "MAPPING_FAILED" | "SHIPMENT_OVERDUE" | "ABNORMAL";
                 storeId?: string;
+                /** @description 履约方式精确匹配（用户指示 2026-09-17）：订单头 fulfillment_mode 原值，OZON 订单为 FBS / RFBS / FBP / FBO 短码 */
+                fulfillmentMode?: string;
                 /** @description 待采购视图：存在 MAPPED+BACKORDERED 且无未取消采购单覆盖的订单行 */
                 pendingProcurement?: "true";
             };
@@ -10032,6 +10198,33 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["CreatePickingTaskResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    PickingController_autoCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutoCreatePickingTasksRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["AutoCreatePickingTasksResultDto"];
                     };
                 };
             };
@@ -11661,6 +11854,268 @@ export interface operations {
                          * @example 2026-09-14T15:30:00Z
                          */
                         time: string;
+                    };
+                };
+            };
+        };
+    };
+    YandexWebhookController_receive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                storeCode: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Yandex 约定的确认格式（非 WCIES envelope） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example 1.0.0 */
+                        version: string;
+                        /** @example WCIES */
+                        name: string;
+                        /**
+                         * Format: date-time
+                         * @example 2026-09-18T15:30:00Z
+                         */
+                        time: string;
+                    };
+                };
+            };
+        };
+    };
+    YandexWebhookController_receiveNotification: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                storeCode: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    WbWebhookReceiverController_receive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                storeCode: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 仅要求 HTTP 200；body 供排查用（非平台约定格式） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        ok?: boolean;
+                        /** @enum {string} */
+                        status?: "ACCEPTED" | "DUPLICATE";
+                    };
+                };
+            };
+        };
+    };
+    WbWebhookManageController_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                storeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    WbWebhookManageController_subscribe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                storeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    WbWebhookManageController_unsubscribe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                storeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    PlatformWarehouseController_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                storeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PlatformWarehouseOptionDto"];
+                    };
+                };
+            };
+        };
+    };
+    OrderFulfillmentController_prepareShipment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PrepareShipmentResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    OrderFulfillmentController_fetchShippingLabel: {
+        parameters: {
+            query?: {
+                /** @description true = 忽略已存档面单，重新向平台取一次（平台面单接口限流，默认复用本地存档） */
+                refresh?: "true" | "false";
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ShippingLabelDto"];
+                    };
+                };
+            };
+        };
+    };
+    OrderFulfillmentController_listShippingLabels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ShippingLabelDto"];
+                    };
+                };
+            };
+        };
+    };
+    OrderFulfillmentController_quickShip: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["QuickShipResultDto"];
                     };
                 };
             };

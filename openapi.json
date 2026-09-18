@@ -2467,7 +2467,7 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": ["SELF", "PLATFORM", "THIRD_PARTY", "RETURN_TEMP"]
+              "enum": ["SELF", "SEMI_MANAGED", "PLATFORM", "THIRD_PARTY", "RETURN_TEMP"]
             }
           },
           {
@@ -3188,21 +3188,30 @@
         "tags": ["warehouse-bins"]
       }
     },
-    "/api/v1/warehouse-bindings": {
+    "/api/v1/warehouses/{warehouseId}/platform-bindings": {
       "get": {
-        "operationId": "StoreWarehouseBindingController_list",
+        "operationId": "WarehousePlatformBindingController_list",
         "parameters": [
           {
-            "name": "storeId",
+            "name": "warehouseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "warehouseId",
             "required": false,
             "in": "query",
+            "description": "按仓库过滤",
             "schema": {
               "format": "uuid",
               "type": "string"
             }
           },
           {
-            "name": "warehouseId",
+            "name": "storeId",
             "required": false,
             "in": "query",
             "schema": {
@@ -3236,7 +3245,7 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/BindingResponseDto"
+                        "$ref": "#/components/schemas/PlatformBindingResponseDto"
                       }
                     },
                     "meta": {
@@ -3263,13 +3272,60 @@
             }
           }
         },
-        "summary": "List bindings across stores (paged, filterable)",
-        "tags": ["store-warehouse-bindings"]
+        "summary": "列出仓库已绑定的平台仓库（分页）",
+        "tags": ["warehouse-platform-bindings"]
+      },
+      "post": {
+        "operationId": "WarehousePlatformBindingController_create",
+        "parameters": [
+          {
+            "name": "warehouseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePlatformBindingRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PlatformBindingResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "绑定平台仓库到内部仓库（校验类型↔履约模式、托管仓单绑定）",
+        "tags": ["warehouse-platform-bindings"]
       }
     },
-    "/api/v1/stores/{storeId}/warehouse-bindings": {
+    "/api/v1/stores/{storeId}/platform-bindings": {
       "get": {
-        "operationId": "StoreWarehouseBindingController_listByStore",
+        "operationId": "WarehousePlatformBindingController_listByStore",
         "parameters": [
           {
             "name": "storeId",
@@ -3277,6 +3333,34 @@
             "in": "path",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "warehouseId",
+            "required": false,
+            "in": "query",
+            "description": "按仓库过滤",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "storeId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["ACTIVE", "DISABLED"]
             }
           }
         ],
@@ -3296,7 +3380,7 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/BindingResponseDto"
+                        "$ref": "#/components/schemas/PlatformBindingResponseDto"
                       }
                     },
                     "meta": {
@@ -3323,118 +3407,16 @@
             }
           }
         },
-        "summary": "List bindings of a store",
-        "tags": ["store-warehouse-bindings"]
-      },
-      "post": {
-        "operationId": "StoreWarehouseBindingController_create",
-        "parameters": [
-          {
-            "name": "storeId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateBindingRequestDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/BindingResponseDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "Bind a warehouse to a store with a fulfillment mode",
-        "tags": ["store-warehouse-bindings"]
+        "summary": "列出店铺关联的平台仓库绑定（跨仓库，分页）",
+        "tags": ["warehouse-platform-bindings"]
       }
     },
-    "/api/v1/stores/{storeId}/warehouse-bindings/{id}": {
-      "patch": {
-        "operationId": "StoreWarehouseBindingController_update",
-        "parameters": [
-          {
-            "name": "storeId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateBindingRequestDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/BindingResponseDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "Update a binding",
-        "tags": ["store-warehouse-bindings"]
-      },
+    "/api/v1/warehouses/{warehouseId}/platform-bindings/{bindingId}": {
       "delete": {
-        "operationId": "StoreWarehouseBindingController_removeBinding",
+        "operationId": "WarehousePlatformBindingController_remove",
         "parameters": [
           {
-            "name": "storeId",
+            "name": "warehouseId",
             "required": true,
             "in": "path",
             "schema": {
@@ -3442,7 +3424,7 @@
             }
           },
           {
-            "name": "id",
+            "name": "bindingId",
             "required": true,
             "in": "path",
             "schema": {
@@ -3472,102 +3454,8 @@
             }
           }
         },
-        "summary": "Delete a store-warehouse binding",
-        "tags": ["store-warehouse-bindings"]
-      }
-    },
-    "/api/v1/stores/{storeId}/warehouse-bindings/{id}/disable": {
-      "post": {
-        "operationId": "StoreWarehouseBindingController_disable",
-        "parameters": [
-          {
-            "name": "storeId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/BindingResponseDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "Disable a binding",
-        "tags": ["store-warehouse-bindings"]
-      }
-    },
-    "/api/v1/stores/{storeId}/warehouse-bindings/{id}/enable": {
-      "post": {
-        "operationId": "StoreWarehouseBindingController_enable",
-        "parameters": [
-          {
-            "name": "storeId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/BindingResponseDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "Enable a binding",
-        "tags": ["store-warehouse-bindings"]
+        "summary": "解除平台仓库绑定",
+        "tags": ["warehouse-platform-bindings"]
       }
     },
     "/api/v1/listings": {
@@ -5698,7 +5586,8 @@
                 "ORDER_TRACKING_STALLED",
                 "ORDER_CANCELLED_AFTER_SHIP",
                 "RETURN_ORDER_NOT_FOUND",
-                "RETURN_DIFFERENCE"
+                "RETURN_DIFFERENCE",
+                "ORDER_PLATFORM_SHIP_FAILED"
               ]
             }
           },
@@ -5986,6 +5875,15 @@
             "name": "storeId",
             "required": false,
             "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fulfillmentMode",
+            "required": false,
+            "in": "query",
+            "description": "履约方式精确匹配（用户指示 2026-09-17）：订单头 fulfillment_mode 原值，OZON 订单为 FBS / RFBS / FBP / FBO 短码",
             "schema": {
               "type": "string"
             }
@@ -6541,6 +6439,46 @@
           }
         },
         "summary": "从订单创建拣货任务（仅 RESERVED 行，按仓拆分）",
+        "tags": ["picking-tasks"]
+      }
+    },
+    "/api/v1/picking-tasks/auto-create": {
+      "post": {
+        "operationId": "PickingController_autoCreate",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutoCreatePickingTasksRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/AutoCreatePickingTasksResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "自动为待拣货（READY_TO_PICK）订单创建拣货任务（跳过已有进行中任务的订单）",
         "tags": ["picking-tasks"]
       }
     },
@@ -9371,6 +9309,377 @@
         "tags": ["webhooks"]
       }
     },
+    "/api/v1/webhooks/yandex/stores/{storeCode}": {
+      "post": {
+        "operationId": "YandexWebhookController_receive",
+        "parameters": [
+          {
+            "name": "storeCode",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Yandex 约定的确认格式（非 WCIES envelope）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["version", "name", "time"],
+                  "properties": {
+                    "version": {
+                      "type": "string",
+                      "example": "1.0.0"
+                    },
+                    "name": {
+                      "type": "string",
+                      "example": "WCIES"
+                    },
+                    "time": {
+                      "type": "string",
+                      "format": "date-time",
+                      "example": "2026-09-18T15:30:00Z"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Yandex Market API 通知入口（IP 白名单 + PING 秒回 + raw event 入队）",
+        "tags": ["webhooks"]
+      }
+    },
+    "/api/v1/webhooks/yandex/stores/{storeCode}/notification": {
+      "post": {
+        "operationId": "YandexWebhookController_receiveNotification",
+        "parameters": [
+          {
+            "name": "storeCode",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": ["webhooks"]
+      }
+    },
+    "/api/v1/webhooks/wb/stores/{storeCode}": {
+      "post": {
+        "operationId": "WbWebhookReceiverController_receive",
+        "parameters": [
+          {
+            "name": "storeCode",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "仅要求 HTTP 200；body 供排查用（非平台约定格式）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["ACCEPTED", "DUPLICATE"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "WB webhook 事件投递入口（secret 验证 + 逐事件落库 + 入队）",
+        "tags": ["webhooks"]
+      }
+    },
+    "/api/v1/stores/{storeId}/webhooks/wb/subscription": {
+      "get": {
+        "operationId": "WbWebhookManageController_status",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "查询店铺的 WB webhook 订阅状态",
+        "tags": ["stores"]
+      },
+      "post": {
+        "operationId": "WbWebhookManageController_subscribe",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "订阅 WB webhook（平台侧创建 + 一次性 secret 加密落库为 WEBHOOK 凭证）",
+        "tags": ["stores"]
+      },
+      "delete": {
+        "operationId": "WbWebhookManageController_unsubscribe",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "退订 WB webhook（按回调 URL 精确匹配删除）",
+        "tags": ["stores"]
+      }
+    },
+    "/api/v1/stores/{storeId}/platform-warehouses": {
+      "get": {
+        "operationId": "PlatformWarehouseController_list",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PlatformWarehouseOptionDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "查询店铺的平台仓库目录（实时调用平台 API；当前仅 OZON）",
+        "tags": ["platform-warehouses"]
+      }
+    },
+    "/api/v1/orders/{id}/prepare-shipment": {
+      "post": {
+        "operationId": "OrderFulfillmentController_prepareShipment",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PrepareShipmentResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "获取运单号（平台组包；真实平台写操作，幂等：已组包则不重复写）",
+        "tags": ["orders"]
+      }
+    },
+    "/api/v1/orders/{id}/shipping-label": {
+      "post": {
+        "operationId": "OrderFulfillmentController_fetchShippingLabel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "refresh",
+            "required": false,
+            "in": "query",
+            "description": "true = 忽略已存档面单，重新向平台取一次（平台面单接口限流，默认复用本地存档）",
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ShippingLabelDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "打单（取平台面单 PDF 存私有桶，返回签名 URL 供浏览器打开打印）",
+        "tags": ["orders"]
+      }
+    },
+    "/api/v1/orders/{id}/shipping-labels": {
+      "get": {
+        "operationId": "OrderFulfillmentController_listShippingLabels",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ShippingLabelDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "该订单的平台面单列表（不调用平台）",
+        "tags": ["orders"]
+      }
+    },
+    "/api/v1/orders/{id}/ship": {
+      "post": {
+        "operationId": "OrderFulfillmentController_quickShip",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/QuickShipResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "一键发货：自动建发货单+单包裹装箱封箱 → 正式出库扣减库存 → 订单 SHIPPED",
+        "tags": ["orders"]
+      }
+    },
     "/api/v1/finance/transactions": {
       "get": {
         "operationId": "FinanceController_listTransactions",
@@ -11088,7 +11397,7 @@
         "properties": {
           "credentialType": {
             "type": "string",
-            "enum": ["MAIN_API"],
+            "enum": ["MAIN_API", "WEBHOOK"],
             "example": "MAIN_API"
           },
           "payload": {
@@ -12409,9 +12718,10 @@
             "type": "number",
             "example": 20
           },
-          "boundStoreCount": {
+          "boundPlatformWarehouseCount": {
             "type": "number",
-            "example": 4
+            "example": 4,
+            "description": "已绑定的平台仓库数（ACTIVE）"
           }
         },
         "required": [
@@ -12430,7 +12740,7 @@
           "createdAt",
           "updatedAt",
           "binCount",
-          "boundStoreCount"
+          "boundPlatformWarehouseCount"
         ]
       },
       "WarehouseResponseDto": {
@@ -12525,7 +12835,7 @@
           },
           "warehouseType": {
             "type": "string",
-            "enum": ["SELF", "PLATFORM", "THIRD_PARTY", "RETURN_TEMP"],
+            "enum": ["SELF", "SEMI_MANAGED", "PLATFORM", "THIRD_PARTY", "RETURN_TEMP"],
             "example": "SELF"
           },
           "countryCode": {
@@ -12791,12 +13101,24 @@
           }
         }
       },
-      "BindingResponseDto": {
+      "PlatformBindingResponseDto": {
         "type": "object",
         "properties": {
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "warehouseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "warehouseCode": {
+            "type": "string",
+            "example": "SZ01"
+          },
+          "warehouseName": {
+            "type": "string",
+            "example": "深圳自管仓"
           },
           "storeId": {
             "type": "string",
@@ -12814,41 +13136,27 @@
             "type": "string",
             "example": "OZON"
           },
-          "warehouseId": {
+          "platformWarehouseId": {
             "type": "string",
-            "format": "uuid"
+            "example": "1020005000770362"
           },
-          "warehouseCode": {
-            "type": "string",
-            "example": "SZ01"
-          },
-          "warehouseName": {
-            "type": "string",
-            "example": "深圳自管仓"
+          "platformWarehouseName": {
+            "type": "object",
+            "nullable": true,
+            "example": "OZON 莫斯科东仓"
           },
           "fulfillmentMode": {
             "type": "string",
-            "example": "OZON_RFBS"
+            "example": "OZON_FBO"
           },
-          "platformWarehouseId": {
+          "remarkName": {
             "type": "object",
-            "nullable": true
-          },
-          "isInventorySource": {
-            "type": "boolean",
-            "example": true
-          },
-          "isInventoryPushEnabled": {
-            "type": "boolean",
-            "example": false
+            "nullable": true,
+            "example": "俄东主仓"
           },
           "priority": {
             "type": "number",
             "example": 100
-          },
-          "settings": {
-            "type": "object",
-            "nullable": true
           },
           "status": {
             "type": "string",
@@ -12865,30 +13173,40 @@
         },
         "required": [
           "id",
+          "warehouseId",
+          "warehouseCode",
+          "warehouseName",
           "storeId",
           "storeCode",
           "storeName",
           "platformCode",
-          "warehouseId",
-          "warehouseCode",
-          "warehouseName",
-          "fulfillmentMode",
           "platformWarehouseId",
-          "isInventorySource",
-          "isInventoryPushEnabled",
+          "platformWarehouseName",
+          "fulfillmentMode",
+          "remarkName",
           "priority",
-          "settings",
           "status",
           "createdAt",
           "updatedAt"
         ]
       },
-      "CreateBindingRequestDto": {
+      "CreatePlatformBindingRequestDto": {
         "type": "object",
         "properties": {
-          "warehouseId": {
+          "storeId": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "平台仓库归属的店铺"
+          },
+          "platformWarehouseId": {
+            "type": "string",
+            "example": "1020005000770362",
+            "description": "平台仓库 ID（OZON warehouse_id 等），同店铺内唯一"
+          },
+          "platformWarehouseName": {
+            "type": "string",
+            "example": "OZON 莫斯科东仓",
+            "description": "平台侧仓库名称快照"
           },
           "fulfillmentMode": {
             "type": "string",
@@ -12902,55 +13220,19 @@
               "YANDEX_FBS",
               "YANDEX_FBY"
             ],
-            "example": "OZON_RFBS"
+            "example": "OZON_FBO"
           },
-          "platformWarehouseId": {
+          "remarkName": {
             "type": "string",
-            "example": "123456",
-            "description": "Warehouse id on the platform side"
-          },
-          "isInventorySource": {
-            "type": "boolean",
-            "default": true
-          },
-          "isInventoryPushEnabled": {
-            "type": "boolean",
-            "default": false
+            "example": "俄东主仓",
+            "description": "操作者备注名"
           },
           "priority": {
             "type": "number",
             "example": 100
-          },
-          "settings": {
-            "type": "object"
           }
         },
-        "required": ["warehouseId", "fulfillmentMode"]
-      },
-      "UpdateBindingRequestDto": {
-        "type": "object",
-        "properties": {
-          "platformWarehouseId": {
-            "type": "string",
-            "maxLength": 255
-          },
-          "isInventorySource": {
-            "type": "boolean"
-          },
-          "isInventoryPushEnabled": {
-            "type": "boolean"
-          },
-          "priority": {
-            "type": "number"
-          },
-          "settings": {
-            "type": "object"
-          },
-          "status": {
-            "type": "string",
-            "enum": ["ACTIVE", "DISABLED"]
-          }
-        }
+        "required": ["storeId", "platformWarehouseId", "fulfillmentMode"]
       },
       "ListingResponseDto": {
         "type": "object",
@@ -15114,7 +15396,8 @@
               "ORDER_TRACKING_STALLED",
               "ORDER_CANCELLED_AFTER_SHIP",
               "RETURN_ORDER_NOT_FOUND",
-              "RETURN_DIFFERENCE"
+              "RETURN_DIFFERENCE",
+              "ORDER_PLATFORM_SHIP_FAILED"
             ]
           },
           "severity": {
@@ -15241,6 +15524,11 @@
             "format": "date-time",
             "description": "平台要求的发货截止时间（平台事实，非 ERP 状态）"
           },
+          "platformTrackingNo": {
+            "type": "string",
+            "nullable": true,
+            "description": "平台运单号（平台事实）；已组包后由平台返回，出库时自动填入发货单物流单号"
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -15289,6 +15577,7 @@
           "fulfillmentMode",
           "currency",
           "orderedAt",
+          "platformTrackingNo",
           "createdAt",
           "syncSource",
           "itemsCount",
@@ -15365,6 +15654,11 @@
             "type": "string",
             "example": "VK87 MAX V2 黑色"
           },
+          "latestPurchasePrice": {
+            "type": "string",
+            "nullable": true,
+            "description": "最近采购价（SKU 主数据操作者维护，master-data.md §4.3；用户指示 2026-09-17 展开行展示）"
+          },
           "warehouseId": {
             "type": "string",
             "nullable": true
@@ -15397,7 +15691,15 @@
           },
           "fulfillmentStatus": {
             "type": "string",
-            "enum": ["PENDING", "RESERVED", "BACKORDERED", "PICKED", "SHIPPED", "RELEASED"]
+            "enum": [
+              "PENDING",
+              "RESERVED",
+              "BACKORDERED",
+              "PICKED",
+              "SHIPPED",
+              "RELEASED",
+              "EXTERNAL_FULFILLED"
+            ]
           },
           "mappingStatus": {
             "type": "string",
@@ -15675,6 +15977,11 @@
             "format": "date-time",
             "description": "平台要求的发货截止时间（平台事实，非 ERP 状态）"
           },
+          "platformTrackingNo": {
+            "type": "string",
+            "nullable": true,
+            "description": "平台运单号（平台事实）；已组包后由平台返回，出库时自动填入发货单物流单号"
+          },
           "rawData": {
             "type": "object",
             "nullable": true
@@ -15740,6 +16047,7 @@
           "fulfillmentMode",
           "currency",
           "orderedAt",
+          "platformTrackingNo",
           "rawData",
           "remark",
           "syncSource",
@@ -15767,7 +16075,15 @@
           },
           "fulfillmentStatus": {
             "type": "string",
-            "enum": ["PENDING", "RESERVED", "BACKORDERED", "PICKED", "SHIPPED", "RELEASED"]
+            "enum": [
+              "PENDING",
+              "RESERVED",
+              "BACKORDERED",
+              "PICKED",
+              "SHIPPED",
+              "RELEASED",
+              "EXTERNAL_FULFILLED"
+            ]
           },
           "skuId": {
             "type": "string",
@@ -15896,6 +16212,12 @@
             "format": "date-time",
             "description": "平台要求的发货截止时间（平台事实，非 ERP 状态；可空）"
           },
+          "platformTrackingNo": {
+            "type": "object",
+            "example": "89491381-0072-1",
+            "nullable": true,
+            "description": "平台运单号（OZON tracking_number，平台事实）；出库时自动填入发货单物流单号。这不是被禁止的 orders.tracking_number 物流模型——Shipment/Package 仍是唯一物流载体。"
+          },
           "currency": {
             "type": "string",
             "example": "RUB"
@@ -16008,7 +16330,15 @@
           },
           "fulfillmentStatus": {
             "type": "string",
-            "enum": ["PENDING", "RESERVED", "BACKORDERED", "PICKED", "SHIPPED", "RELEASED"]
+            "enum": [
+              "PENDING",
+              "RESERVED",
+              "BACKORDERED",
+              "PICKED",
+              "SHIPPED",
+              "RELEASED",
+              "EXTERNAL_FULFILLED"
+            ]
           },
           "reserved": {
             "type": "boolean"
@@ -16202,6 +16532,69 @@
           }
         },
         "required": ["orderId"]
+      },
+      "AutoCreatePickingTasksResultDto": {
+        "type": "object",
+        "properties": {
+          "candidates": {
+            "type": "number",
+            "description": "候选订单数（READY_TO_PICK）"
+          },
+          "created": {
+            "type": "number",
+            "description": "成功创建任务的订单数"
+          },
+          "skipped": {
+            "type": "number",
+            "description": "跳过数（已有进行中的拣货任务）"
+          },
+          "failed": {
+            "type": "number",
+            "description": "失败数（域错误，逐单记录）"
+          },
+          "createdTaskNos": {
+            "description": "新建的拣货单号",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "failures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "orderNo": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "失败明细"
+          }
+        },
+        "required": ["candidates", "created", "skipped", "failed", "createdTaskNos", "failures"]
+      },
+      "AutoCreatePickingTasksRequestDto": {
+        "type": "object",
+        "properties": {
+          "storeId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "仅处理该店铺的订单；省略 = 全部店铺"
+          },
+          "limit": {
+            "type": "number",
+            "default": 100,
+            "maximum": 200,
+            "description": "单次批量上限"
+          }
+        }
       },
       "PickingBinLineDto": {
         "type": "object",
@@ -17978,7 +18371,14 @@
             "type": "string"
           },
           "shipmentId": {
-            "type": "string"
+            "type": "string",
+            "nullable": true,
+            "description": "发货单级面单（手工上传）有值；平台面单在出库前先挂订单，此时为 null"
+          },
+          "orderId": {
+            "type": "string",
+            "nullable": true,
+            "description": "订单级（平台 API）面单所属订单；发货单级面单为 null"
           },
           "packageId": {
             "type": "object",
@@ -18003,6 +18403,10 @@
             "type": "string",
             "example": "MANUAL_UPLOAD"
           },
+          "externalLabelId": {
+            "type": "string",
+            "nullable": true
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -18015,12 +18419,14 @@
         "required": [
           "id",
           "shipmentId",
+          "orderId",
           "packageId",
           "labelType",
           "fileName",
           "mimeType",
           "fileSize",
           "source",
+          "externalLabelId",
           "createdAt",
           "signedUrl"
         ]
@@ -18814,6 +19220,143 @@
           "errorCode",
           "errorMessage"
         ]
+      },
+      "PlatformWarehouseOptionDto": {
+        "type": "object",
+        "properties": {
+          "platformWarehouseId": {
+            "type": "string",
+            "example": "1020005000770362"
+          },
+          "name": {
+            "type": "string",
+            "example": "Екатеринбург_РФЦ"
+          },
+          "fulfillmentMode": {
+            "type": "string",
+            "example": "OZON_FBO",
+            "enum": ["OZON_RFBS", "OZON_FBS", "OZON_FBP", "OZON_FBO"]
+          },
+          "category": {
+            "type": "string",
+            "example": "MANAGED",
+            "enum": ["SELF_MANAGED", "SEMI_MANAGED", "MANAGED"]
+          },
+          "status": {
+            "type": "object",
+            "nullable": true
+          },
+          "address": {
+            "type": "object",
+            "nullable": true
+          },
+          "partnerName": {
+            "type": "object",
+            "nullable": true
+          },
+          "isActive": {
+            "type": "boolean",
+            "nullable": true
+          }
+        },
+        "required": ["platformWarehouseId", "name", "fulfillmentMode", "category"]
+      },
+      "PrepareShipmentResultDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "orderNo": {
+            "type": "string",
+            "example": "ORD00000001"
+          },
+          "platformCode": {
+            "type": "string",
+            "example": "OZON"
+          },
+          "trackingNumber": {
+            "type": "string",
+            "nullable": true,
+            "description": "平台运单号；平台在组包后才分配，未返回时为 null"
+          },
+          "platformStatus": {
+            "type": "string",
+            "nullable": true,
+            "description": "组包后的平台订单状态（平台原文）"
+          },
+          "alreadyPrepared": {
+            "type": "boolean",
+            "description": "平台此前已受理该订单（本次未再写平台）"
+          },
+          "platformWritePerformed": {
+            "type": "boolean",
+            "description": "本次是否真的调用了平台写接口"
+          }
+        },
+        "required": [
+          "orderId",
+          "orderNo",
+          "platformCode",
+          "trackingNumber",
+          "platformStatus",
+          "alreadyPrepared",
+          "platformWritePerformed"
+        ]
+      },
+      "QuickShipShipmentDto": {
+        "type": "object",
+        "properties": {
+          "shipmentId": {
+            "type": "string"
+          },
+          "shipmentNo": {
+            "type": "string",
+            "example": "SHP00000001"
+          },
+          "packageId": {
+            "type": "string",
+            "nullable": true,
+            "description": "本次自动装箱的包裹（已备好时为 null）"
+          },
+          "packageNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "alreadyShipped": {
+            "type": "boolean",
+            "description": "该发货单此前已出库（本次未再次扣减库存）"
+          }
+        },
+        "required": ["shipmentId", "shipmentNo", "packageId", "packageNo", "alreadyShipped"]
+      },
+      "QuickShipResultDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "orderNo": {
+            "type": "string",
+            "example": "ORD00000001"
+          },
+          "orderErpStatus": {
+            "type": "string",
+            "description": "出库后订单 ERP 状态（全部行出库后为 SHIPPED）"
+          },
+          "trackingNumber": {
+            "type": "string",
+            "nullable": true,
+            "description": "带入发货单的平台运单号（订单上无平台运单号时为 null）"
+          },
+          "shipments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuickShipShipmentDto"
+            }
+          }
+        },
+        "required": ["orderId", "orderNo", "orderErpStatus", "trackingNumber", "shipments"]
       },
       "FinanceTransactionDto": {
         "type": "object",

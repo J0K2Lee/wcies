@@ -69,6 +69,11 @@ interface OrderListItem {
   orderedAt: string;
   /** Platform-required ship-by time (OZON shipment_date); platform fact, not ERP state. */
   shipmentDeadline: string | null;
+  /**
+   * 平台运单号（平台事实，2026-09-18 发货流程）。OZON 只在组包后分配，
+   * 所以在只拿到 awaiting_packaging 的订单上它为空。
+   */
+  platformTrackingNo: string | null;
   createdAt: string;
   itemsCount: number;
   reservedCount: number;
@@ -134,6 +139,10 @@ interface OrderDetail {
   currency: string | null;
   orderedAt: string;
   shipmentDeadline: string | null;
+  /** 平台运单号（平台事实）；出库时自动带入发货单物流单号。 */
+  platformTrackingNo: string | null;
+  /** 该店铺平台是否支持发货写能力；前端据此显隐「获取运单号 / 打单」按钮。 */
+  platformCapabilities: { prepareShipment: boolean; fetchShippingLabel: boolean };
   syncSource: string | null;
   rawData: Record<string, unknown> | null;
   items: OrderItem[];
@@ -169,6 +178,17 @@ interface OrderDetail {
 }
 
 type Envelope<T> = { data: T; meta: { total: number } };
+
+/** 平台面单（订单级，source=PLATFORM_API）；signedUrl 为短期签名地址。 */
+interface ShippingLabelItem {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  source: string;
+  createdAt: string;
+  signedUrl: string;
+}
 
 /**
  * Axis 1 - order logistics stage tabs (dual-axis §2.1, orders.md §17a).
@@ -284,6 +304,9 @@ const DEFAULT_VIEW_SETTINGS: OrdersViewSettings = {
     { key: 'fulfillmentMode', visible: true },
     { key: 'shipmentDeadline', visible: true },
     { key: 'orderedAt', visible: true },
+    // 平台运单号是「获取运单号」的结果，默认放到列设置里由用户开启，
+    // 避免默认视图多出大量空列（未组包订单本来就没有运单号）。
+    { key: 'platformTrackingNo', visible: false },
   ],
   expandedColumns: [
     { key: 'image', visible: true },
@@ -704,6 +727,16 @@ export function OrdersPage() {
     railDetailId !== null,
   );
 
+  // 平台面单列表（纯本地读，不触发平台调用）：有存档就让操作区直接给出打开入口。
+  const labelsQuery = useApiQuery<{ data: ShippingLabelItem[] }>(
+    '/api/v1/orders/{id}/shipping-labels',
+    {},
+    ['order-shipping-labels', railDetailId],
+    railDetailId === null ? undefined : { id: railDetailId },
+    railDetailId !== null,
+  );
+  const orderLabels = labelsQuery.data?.data ?? [];
+
   const cancelMutation = useMutation({
     mutationFn: (id: string) =>
       apiPost<{ releasedItems: number; interceptions: number }>(
@@ -764,6 +797,82 @@ export function OrdersPage() {
       void queryClient.invalidateQueries({ queryKey: ['exceptions'] });
     },
     onError: (error: Error) => message.error(`重试失败：${error.message}`),
+  });
+
+  // ------------------------------------------------------------------
+  // 发货流程（用户真实作业顺序：获取运单号 → 拣货 → 打单 → 发货）
+  // ------------------------------------------------------------------
+
+  /**
+   * 获取运单号 = 平台组包（OZON awaiting_packaging → awaiting_deliver）。
+   * 真实平台写操作，只有用户显式点击才会发生（AGENTS.md §92）；接口本身
+   * 幂等，已组包时不会重复写平台。
+   */
+  const prepareShipmentMutation = useMutation({
+    mutationFn: (id: string) =>
+      apiPost<{
+        trackingNumber: string | null;
+        platformStatus: string | null;
+        alreadyPrepared: boolean;
+      }>('/api/v1/orders/{id}/prepare-shipment', {}, { id }),
+    onSuccess: (result: {
+      trackingNumber: string | null;
+      platformStatus: string | null;
+      alreadyPrepared: boolean;
+    }) => {
+      const waybill =
+        result.trackingNumber === null ? '平台暂未返回运单号' : `运单号 ${result.trackingNumber}`;
+      message.success(
+        result.alreadyPrepared ? `平台此前已组包（${waybill}）` : `已完成平台组包（${waybill}）`,
+      );
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
+      void queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+    },
+    onError: (error: Error) => message.error(`获取运单号失败：${error.message}`),
+  });
+
+  /** 打单：取平台面单 PDF（已存档则复用），新开标签页供浏览器打印。 */
+  const shippingLabelMutation = useMutation({
+    mutationFn: ({ id, refresh }: { id: string; refresh: boolean }) =>
+      apiPost<{ id: string; fileName: string; signedUrl: string }>(
+        '/api/v1/orders/{id}/shipping-label',
+        {},
+        { id },
+        refresh ? { refresh: 'true' } : undefined,
+      ),
+    onSuccess: (label: { fileName: string; signedUrl: string }) => {
+      message.success(`面单已就绪（${label.fileName}），已在新标签页打开，可直接打印`);
+      window.open(label.signedUrl, '_blank', 'noopener');
+      void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
+    },
+    onError: (error: Error) => message.error(`打单失败：${error.message}`),
+  });
+
+  /** 一键发货：自动建发货单+包裹装箱封箱 → 正式出库扣库存 → 订单 SHIPPED。 */
+  const quickShipMutation = useMutation({
+    mutationFn: (id: string) =>
+      apiPost<{ orderErpStatus: string; shipments: Array<{ alreadyShipped: boolean }> }>(
+        '/api/v1/orders/{id}/ship',
+        {},
+        { id },
+      ),
+    onSuccess: (result: {
+      orderErpStatus: string;
+      shipments: Array<{ alreadyShipped: boolean }>;
+    }) => {
+      const replayed = result.shipments.filter((shipment) => shipment.alreadyShipped).length;
+      message.success(
+        `发货完成（${result.shipments.length} 张发货单${
+          replayed > 0 ? `，其中 ${replayed} 张此前已出库` : ''
+        }），订单状态 ${result.orderErpStatus}`,
+      );
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
+      void queryClient.invalidateQueries({ queryKey: ['shipments'] });
+      void queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+    },
+    onError: (error: Error) => message.error(`发货失败：${error.message}`),
   });
 
   // Reuse the existing detail query and its exact key; never retry from list counts.
@@ -1295,6 +1404,18 @@ export function OrdersPage() {
       label: selectedRow.erpStatus,
     };
     const deadline = deadlineBadge(selectedRow.shipmentDeadline);
+    // 发货流程按钮显隐（2026-09-18）。能力来自后端的能力位——前端不判断平台，
+    // 后端也不靠平台名硬编码：没接入发货能力的平台这两个按钮就不出现。
+    const canPrepareShipment =
+      (railDetail?.platformCapabilities.prepareShipment ?? false) &&
+      selectedRow.erpStatus !== 'SHIPPED' &&
+      selectedRow.erpStatus !== 'CANCELLED';
+    // 平台面单要有平台运单号才打得出来（OZON 仅在组包后分配运单号）；
+    // 已存档面单也保留入口，方便重复打印。
+    const canPrintLabel =
+      (railDetail?.platformCapabilities.fetchShippingLabel ?? false) &&
+      (selectedRow.platformTrackingNo !== null || orderLabels.length > 0);
+    const canQuickShip = selectedRow.erpStatus === 'PICKED';
     // Risk section: mapping failed (red) takes priority over backordered (orange).
     const riskItems =
       railDetail?.items.filter(
@@ -1324,6 +1445,34 @@ export function OrdersPage() {
       ),
       children: (
         <>
+          {/* 发货流程（2026-09-18）：运单号与面单都是平台事实，直接展示；
+              仓库内部出库仍在「发货」按钮里走既有阶梯。 */}
+          {(selectedRow.platformTrackingNo !== null ||
+            canPrepareShipment ||
+            orderLabels.length > 0) && (
+            <ContextSection title="发货 / 物流">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <ContextMetric
+                  label="平台运单号"
+                  value={selectedRow.platformTrackingNo ?? '尚未获取（点「获取运单号」）'}
+                />
+                {orderLabels.length > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 12.5, color: colors.textSecondary }}>
+                      平台面单 {orderLabels.length} 张
+                    </span>
+                    <Button
+                      size="small"
+                      style={{ marginLeft: 'auto' }}
+                      onClick={() => window.open(orderLabels[0]!.signedUrl, '_blank', 'noopener')}
+                    >
+                      打开面单
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </ContextSection>
+          )}
           {selectedRow.mappingFailedCount > 0 && (
             <ContextSection title="风险">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1460,6 +1609,67 @@ export function OrdersPage() {
             <Button block onClick={() => setDetailId(selectedRow.id)}>
               查看详情
             </Button>
+            {/* 获取运单号 = 平台组包（真实平台写操作）。放在最前，因为它对应
+                真实流程的第一步；接口幂等，已组包时不会重复写平台。 */}
+            {canPrepareShipment && (
+              <Button
+                block
+                style={{ marginTop: 8 }}
+                loading={prepareShipmentMutation.isPending}
+                onClick={() => {
+                  modal.confirm({
+                    title: `获取运单号：${selectedRow.platformOrderId}？`,
+                    content:
+                      '将调用平台「组包」接口把该订单推进到待发货状态（OZON awaiting_deliver），' +
+                      '这是真实平台操作：会改变平台上的订单状态，并让平台分配运单号。' +
+                      '已组包的订单不会重复提交。',
+                    okText: '获取运单号',
+                    cancelText: '返回',
+                    onOk: () => {
+                      prepareShipmentMutation.mutate(selectedRow.id);
+                    },
+                  });
+                }}
+              >
+                {selectedRow.platformTrackingNo === null ? '获取运单号' : '重新获取运单号'}
+              </Button>
+            )}
+            {/* 打单：取平台面单 PDF 并打开打印（已存档则直接复用）。 */}
+            {canPrintLabel && (
+              <Button
+                block
+                style={{ marginTop: 8 }}
+                loading={shippingLabelMutation.isPending}
+                onClick={() => shippingLabelMutation.mutate({ id: selectedRow.id, refresh: false })}
+              >
+                {orderLabels.length === 0 ? '打单（取平台面单）' : '打单（用已存档面单）'}
+              </Button>
+            )}
+            {/* 一键发货：自动建发货单+单包裹封箱 → 正式出库扣库存 → 订单 SHIPPED。
+                库存扣减与订单状态仍由既有出库阶梯完成，这里只是编排入口。 */}
+            {canQuickShip && (
+              <Button
+                block
+                type="primary"
+                style={{ marginTop: 8 }}
+                loading={quickShipMutation.isPending}
+                onClick={() => {
+                  modal.confirm({
+                    title: `发货：${selectedRow.platformOrderId}？`,
+                    content:
+                      '自动创建发货单与单包裹并封箱，然后正式出库：会扣减已拣货库存，' +
+                      '全部行出库后订单变为已发货。已出库的发货单不会重复扣减库存。',
+                    okText: '确认发货',
+                    cancelText: '返回',
+                    onOk: () => {
+                      quickShipMutation.mutate(selectedRow.id);
+                    },
+                  });
+                }}
+              >
+                发货
+              </Button>
+            )}
             {/* 待拣货订单的主操作（2026-09-18 从详情弹窗迁至右栏操作区）：
                 仅 READY_TO_PICK 且有 RESERVED 行、且无进行中拣货任务时显示。 */}
             {selectedRow.erpStatus === 'READY_TO_PICK' &&
@@ -1864,6 +2074,13 @@ export function OrdersPage() {
           <StatusBadge tone={badge.tone} label={badge.label} hint={badge.exact} />
         );
       },
+    },
+    platformTrackingNo: {
+      title: '运单号',
+      dataIndex: 'platformTrackingNo',
+      key: 'platformTrackingNo',
+      width: 170,
+      render: (value: string | null) => value ?? '—',
     },
     orderedAt: {
       title: '下单时间',

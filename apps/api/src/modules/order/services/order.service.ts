@@ -28,6 +28,7 @@ import { ORDER_PICKING_STATE_PORT, OrderPickingStatePort } from '../ports/order-
 import { ORDER_INTERCEPTION_PORT, OrderInterceptionPort } from '../ports/order-interception.port';
 import { ORDER_PROCUREMENT_PORT, OrderProcurementPort } from '../ports/order-procurement.port';
 import { isExternalFulfillmentMode } from '../../platform/constants/platform.constants';
+import { PlatformAdapterRegistry } from '../../integration/platform-adapter.registry';
 import { OrderDetailDto, OrderListItemDto } from '../dto/order.dto';
 
 /**
@@ -65,6 +66,13 @@ export class OrderService {
     private readonly interceptionPort: OrderInterceptionPort,
     @Inject(forwardRef(() => ORDER_PROCUREMENT_PORT))
     private readonly procurementPort: OrderProcurementPort,
+    /**
+     * Capability FLAGS only (2026-09-18 fulfillment flow). The registry is the
+     * sanctioned way for core modules to learn which capabilities a platform
+     * exposes without importing platform internals (AGENTS.md §32/§33); no
+     * platform call is ever made from here.
+     */
+    private readonly adapterRegistry: PlatformAdapterRegistry,
   ) {}
 
   // --------------------------------------------------------------------------
@@ -301,6 +309,7 @@ export class OrderService {
       orderedAt: order.orderedAt,
       shipmentDeadline: order.shipmentDeadline,
       platformTrackingNo: order.platformTrackingNo,
+      platformCapabilities: this.platformCapabilitiesOf(store?.platformCode ?? null),
       rawData: order.rawData,
       remark: order.remark,
       syncSource: order.syncSource,
@@ -1060,6 +1069,27 @@ export class OrderService {
       throw new OrderNotFoundError(id);
     }
     return order;
+  }
+
+  /**
+   * Which order-fulfillment capabilities the store's platform exposes
+   * (2026-09-18). Pure capability lookup - no platform call, no platform
+   * vocabulary; a platform that has not implemented a capability reports
+   * false so the UI hides the action instead of failing at click time
+   * (AGENTS.md §88).
+   */
+  private platformCapabilitiesOf(platformCode: string | null): {
+    prepareShipment: boolean;
+    fetchShippingLabel: boolean;
+  } {
+    if (platformCode === null || platformCode === '' || !this.adapterRegistry.has(platformCode)) {
+      return { prepareShipment: false, fetchShippingLabel: false };
+    }
+    const adapter = this.adapterRegistry.getAdapter(platformCode);
+    return {
+      prepareShipment: typeof adapter.prepareShipment === 'function',
+      fetchShippingLabel: typeof adapter.fetchShippingLabel === 'function',
+    };
   }
 
   private async setItemReleased(item: OrderItemEntity): Promise<void> {

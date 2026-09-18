@@ -423,6 +423,13 @@ export class OrderDetailDto {
     description: '平台运单号（平台事实）；已组包后由平台返回，出库时自动填入发货单物流单号',
   })
   platformTrackingNo!: string | null;
+  @ApiProperty({
+    description:
+      '该店铺平台是否支持订单履约写能力（获取运单号 / 打单）。前端据此显隐按钮，' +
+      '不猜测平台；后端同时以 PLATFORM_CAPABILITY_UNSUPPORTED 兜底。',
+    example: { prepareShipment: true, fetchShippingLabel: true },
+  })
+  platformCapabilities!: { prepareShipment: boolean; fetchShippingLabel: boolean };
   @ApiProperty({ nullable: true, type: Object }) rawData!: Record<string, unknown> | null;
   @ApiProperty({ nullable: true, type: String }) remark!: string | null;
   @ApiProperty({ nullable: true, enum: ['MANUAL', 'API', 'POLLING', 'WEBHOOK'] })

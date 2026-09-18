@@ -19,6 +19,7 @@ import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { OrderPickingStatePort } from '../ports/order-picking-state.port';
 import { OrderInterceptionPort } from '../ports/order-interception.port';
 import { OrderProcurementPort } from '../ports/order-procurement.port';
+import { PlatformAdapterRegistry } from '../../integration/platform-adapter.registry';
 import { OrderEntity } from '../entities/order.entity';
 import { OrderItemEntity } from '../entities/order-item.entity';
 
@@ -78,6 +79,7 @@ describe('OrderService.applySyncedPlatformFacts - fulfillmentMode', () => {
       {} as OrderPickingStatePort,
       {} as OrderInterceptionPort,
       {} as OrderProcurementPort,
+      {} as PlatformAdapterRegistry,
     );
     return { service, orderRepo, history };
   }
@@ -208,6 +210,7 @@ describe('OrderService.retryAllocation - mapped line without stock', () => {
       {} as OrderPickingStatePort,
       {} as OrderInterceptionPort,
       {} as OrderProcurementPort,
+      {} as PlatformAdapterRegistry,
     );
     return { service, itemRepo, exceptionService, statusService };
   }
