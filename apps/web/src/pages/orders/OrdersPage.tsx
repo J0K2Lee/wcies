@@ -1445,34 +1445,6 @@ export function OrdersPage() {
       ),
       children: (
         <>
-          {/* 发货流程（2026-09-18）：运单号与面单都是平台事实，直接展示；
-              仓库内部出库仍在「发货」按钮里走既有阶梯。 */}
-          {(selectedRow.platformTrackingNo !== null ||
-            canPrepareShipment ||
-            orderLabels.length > 0) && (
-            <ContextSection title="发货 / 物流">
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <ContextMetric
-                  label="平台运单号"
-                  value={selectedRow.platformTrackingNo ?? '尚未获取（点「获取运单号」）'}
-                />
-                {orderLabels.length > 0 && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 12.5, color: colors.textSecondary }}>
-                      平台面单 {orderLabels.length} 张
-                    </span>
-                    <Button
-                      size="small"
-                      style={{ marginLeft: 'auto' }}
-                      onClick={() => window.open(orderLabels[0]!.signedUrl, '_blank', 'noopener')}
-                    >
-                      打开面单
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </ContextSection>
-          )}
           {selectedRow.mappingFailedCount > 0 && (
             <ContextSection title="风险">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1587,6 +1559,35 @@ export function OrdersPage() {
               />
             )}
           </ContextSection>
+          {/* 发货流程（2026-09-18）：运单号与面单都是平台事实，直接展示；
+              仓库内部出库仍在「发货」按钮里走既有阶梯。
+              分区位置遵循 UI 规范 §4.2：概要（订单概况 / 发货物流）→ 风险 → 操作区。 */}
+          {(selectedRow.platformTrackingNo !== null ||
+            canPrepareShipment ||
+            orderLabels.length > 0) && (
+            <ContextSection title="发货 / 物流">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <ContextMetric
+                  label="平台运单号"
+                  value={selectedRow.platformTrackingNo ?? '尚未获取（点「获取运单号」）'}
+                />
+                {orderLabels.length > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 12.5, color: colors.textSecondary }}>
+                      平台面单 {orderLabels.length} 张
+                    </span>
+                    <Button
+                      size="small"
+                      style={{ marginLeft: 'auto' }}
+                      onClick={() => window.open(orderLabels[0]!.signedUrl, '_blank', 'noopener')}
+                    >
+                      打开面单
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </ContextSection>
+          )}
           {railDetail !== undefined && railDetail.history.length > 0 && (
             <ContextSection title="最近状态">
               <Timeline
@@ -1609,8 +1610,54 @@ export function OrdersPage() {
             <Button block onClick={() => setDetailId(selectedRow.id)}>
               查看详情
             </Button>
-            {/* 获取运单号 = 平台组包（真实平台写操作）。放在最前，因为它对应
-                真实流程的第一步；接口幂等，已组包时不会重复写平台。 */}
+            {/* 发货 = PICKED 订单的推进主操作（§4.3：主操作紧跟查看详情，每个
+                视图 ≤1 个 primary）。一键出库：自动建发货单+单包裹封箱 →
+                正式出库扣库存 → 订单 SHIPPED。正式出库属 UI 规范 §7 L2，
+                确认弹窗带 danger ok。 */}
+            {canQuickShip && (
+              <Button
+                block
+                type="primary"
+                style={{ marginTop: 8 }}
+                loading={quickShipMutation.isPending}
+                onClick={() => {
+                  modal.confirm({
+                    title: `发货：${selectedRow.platformOrderId}？`,
+                    content:
+                      '自动创建发货单与单包裹并封箱，然后正式出库：会扣减已拣货库存，' +
+                      '全部行出库后订单变为已发货。已出库的发货单不会重复扣减库存。',
+                    okText: '确认发货',
+                    okButtonProps: { danger: true },
+                    cancelText: '返回',
+                    onOk: () => {
+                      quickShipMutation.mutate(selectedRow.id);
+                    },
+                  });
+                }}
+              >
+                发货
+              </Button>
+            )}
+            {/* 待拣货订单的推进主操作（2026-09-18 从详情弹窗迁至右栏操作区）：
+                仅 READY_TO_PICK 且有 RESERVED 行、且无进行中拣货任务时显示；
+                与「发货」（PICKED）互斥，保证同一视图只有一个 primary。 */}
+            {selectedRow.erpStatus === 'READY_TO_PICK' &&
+              !(railDetail?.pickingTasks ?? []).some(
+                (task) => task.status === 'CREATED' || task.status === 'IN_PROGRESS',
+              ) && (
+                <Button
+                  block
+                  type="primary"
+                  style={{ marginTop: 8 }}
+                  loading={createPickingMutation.isPending}
+                  onClick={() => createPickingMutation.mutate(selectedRow.id)}
+                >
+                  创建拣货任务
+                </Button>
+              )}
+            {/* 获取运单号 = 平台组包（真实平台写操作）。流程第一步（先于拣货）；
+                接口幂等，已组包时不会重复写平台。真实外部写超出 §7 分级表，
+                按 L2 力度用 modal.confirm 说明后果（比 Popconfirm 重是刻意的）。 */}
             {canPrepareShipment && (
               <Button
                 block
@@ -1645,54 +1692,12 @@ export function OrdersPage() {
                 {orderLabels.length === 0 ? '打单（取平台面单）' : '打单（用已存档面单）'}
               </Button>
             )}
-            {/* 一键发货：自动建发货单+单包裹封箱 → 正式出库扣库存 → 订单 SHIPPED。
-                库存扣减与订单状态仍由既有出库阶梯完成，这里只是编排入口。 */}
-            {canQuickShip && (
-              <Button
-                block
-                type="primary"
-                style={{ marginTop: 8 }}
-                loading={quickShipMutation.isPending}
-                onClick={() => {
-                  modal.confirm({
-                    title: `发货：${selectedRow.platformOrderId}？`,
-                    content:
-                      '自动创建发货单与单包裹并封箱，然后正式出库：会扣减已拣货库存，' +
-                      '全部行出库后订单变为已发货。已出库的发货单不会重复扣减库存。',
-                    okText: '确认发货',
-                    cancelText: '返回',
-                    onOk: () => {
-                      quickShipMutation.mutate(selectedRow.id);
-                    },
-                  });
-                }}
-              >
-                发货
-              </Button>
-            )}
-            {/* 待拣货订单的主操作（2026-09-18 从详情弹窗迁至右栏操作区）：
-                仅 READY_TO_PICK 且有 RESERVED 行、且无进行中拣货任务时显示。 */}
-            {selectedRow.erpStatus === 'READY_TO_PICK' &&
-              !(railDetail?.pickingTasks ?? []).some(
-                (task) => task.status === 'CREATED' || task.status === 'IN_PROGRESS',
-              ) && (
-                <Button
-                  block
-                  type="primary"
-                  style={{ marginTop: 8 }}
-                  loading={createPickingMutation.isPending}
-                  onClick={() => createPickingMutation.mutate(selectedRow.id)}
-                >
-                  创建拣货任务
-                </Button>
-              )}
-            {/* 快速建档 = 操作区主操作（就地弹窗，不跳转工作台）。作用于第一个
-                可定位的映射失败行；弹窗内可切换该商品链接的其它未映射变体。 */}
+            {/* 快速建档 = 修复类次操作（§3.1 primary 语义是"推进动作"，且每视图
+                ≤1；与创建拣货任务/发货并存时降级为 default，避免双 primary）。 */}
             {failedMappingItems.length > 0 &&
               mappingSearchKeyword(failedMappingItems[0]!) !== null && (
                 <Button
                   block
-                  type="primary"
                   style={{ marginTop: 8 }}
                   loading={onboardLookupPending}
                   onClick={() => openQuickOnboard(failedMappingItems[0]!, selectedRow.storeId)}
@@ -1745,6 +1750,11 @@ export function OrdersPage() {
     retryMutation.isPending,
     createPickingMutation.isPending,
     autoCreatePickingMutation.isPending,
+    prepareShipmentMutation.isPending,
+    shippingLabelMutation.isPending,
+    quickShipMutation.isPending,
+    // 面单列表异步到达：不进依赖则「发货 / 物流」区与打单按钮停在旧态（§4.4）。
+    orderLabels,
     query.data,
     pendingCount.data,
     inTransitCount.data,
@@ -1863,7 +1873,6 @@ export function OrdersPage() {
               <Button
                 size="small"
                 type="primary"
-                ghost
                 onClick={(event) => {
                   event.stopPropagation();
                   setRegisterItem(row);
