@@ -326,12 +326,23 @@ export function PurchaseReceiptsPage() {
   });
 
   const fromPoMutation = useMutation({
-    mutationFn: ({ poId, values }: { poId: string; values: { warehouseId: string } }) =>
-      apiPost<{ id: string; receiptNo: string }>(
+    // 表单字段整体作为 values 传入时含 poId，但 poId 只属于路径参数——
+    // 请求体里多带会被后端白名单校验拒绝（property poId should not exist，
+    // 2026-09-18 修复）。这里剥掉表单标识字段，只提交 DTO 接受的字段。
+    mutationFn: ({
+      poId,
+      values,
+    }: {
+      poId: string;
+      values: { poId: string; warehouseId: string };
+    }) => {
+      const { poId: _formPoId, ...body } = values;
+      return apiPost<{ id: string; receiptNo: string }>(
         '/api/v1/purchase-receipts/from-po/{poId}',
-        values,
+        body,
         { poId },
-      ),
+      );
+    },
     onSuccess: (result) => {
       void message.success(`已从采购单生成收货单 ${result.receiptNo}（草稿）`);
       setFromPoOpen(false);

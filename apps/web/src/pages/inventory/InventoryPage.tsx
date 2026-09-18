@@ -918,7 +918,7 @@ export function InventoryPage() {
                 rules={[{ required: true }]}
                 extra="显示当前值，保存后立即生效"
               >
-                <InputNumber min={0} precision={3} style={{ width: '100%' }} />
+                <InputNumber min={0} precision={0} step={1} style={{ width: '100%' }} />
               </Form.Item>
             </>
           ) : (
@@ -943,16 +943,23 @@ export function InventoryPage() {
               <Form.Item
                 name="binId"
                 label="库位"
+                // 仓库已有库位时必选（否则提交才报 INVENTORY_DIMENSION_INVALID，2026-09-18 改为提前拦截）；
+                // 无库位仓库可留空（系统自动创建 DEFAULT 虚拟库位）。
+                rules={
+                  binOptions.length > 0
+                    ? [{ required: true, message: '该仓库已有库位，请选择库位' }]
+                    : []
+                }
                 extra="留空时仅允许没有任何库位的仓库（系统自动创建 DEFAULT 虚拟库位）"
               >
                 <Select allowClear showSearch optionFilterProp="label" options={binOptions} />
               </Form.Item>
               <Form.Item
                 name="quantity"
-                label="数量（允许 0：建立零余额记录）"
+                label="数量（整数；允许 0：建立零余额记录）"
                 rules={[{ required: true }]}
               >
-                <InputNumber min={0} precision={3} style={{ width: '100%' }} />
+                <InputNumber min={0} precision={0} step={1} style={{ width: '100%' }} />
               </Form.Item>
               <Form.Item name="remark" label="备注">
                 <Input.TextArea rows={2} />
@@ -970,7 +977,7 @@ export function InventoryPage() {
                 label="调整量（+N / -N，不允许 0）"
                 rules={[{ required: true }]}
               >
-                <InputNumber precision={3} style={{ width: '100%' }} />
+                <InputNumber precision={0} step={1} style={{ width: '100%' }} />
               </Form.Item>
               <Form.Item name="reason" label="原因（必填）" rules={[{ required: true }]}>
                 <Input placeholder="如：盘点补录 / 商品损坏" />
@@ -994,7 +1001,7 @@ export function InventoryPage() {
                 label="移位数量（不可超过未占用库存）"
                 rules={[{ required: true }]}
               >
-                <InputNumber min={0.001} precision={3} style={{ width: '100%' }} />
+                <InputNumber min={1} precision={0} step={1} style={{ width: '100%' }} />
               </Form.Item>
             </>
           )}
