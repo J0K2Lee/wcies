@@ -108,6 +108,7 @@ export class OrderIngestionService {
             currency: input.currency ?? null,
             orderedAt: input.orderedAt,
             shipmentDeadline: input.shipmentDeadline ?? null,
+            platformTrackingNo: input.platformTrackingNo ?? null,
             rawData: input.rawData ?? null,
             remark: input.remark ?? null,
             syncSource: input.syncSource ?? 'API',

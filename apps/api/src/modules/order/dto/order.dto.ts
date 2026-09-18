@@ -111,6 +111,17 @@ export class NormalizedOrderInputDto {
   @IsOptional()
   @IsDateString()
   shipmentDeadline?: Date;
+  @ApiPropertyOptional({
+    example: '89491381-0072-1',
+    nullable: true,
+    description:
+      '平台运单号（OZON tracking_number，平台事实）；出库时自动填入发货单物流单号。' +
+      '这不是被禁止的 orders.tracking_number 物流模型——Shipment/Package 仍是唯一物流载体。',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  platformTrackingNo?: string | null;
   @ApiPropertyOptional({ example: 'RUB' })
   @IsOptional()
   @IsString()
@@ -231,6 +242,12 @@ export class OrderListItemDto {
     description: '平台要求的发货截止时间（平台事实，非 ERP 状态）',
   })
   shipmentDeadline!: Date | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: '平台运单号（平台事实）；已组包后由平台返回，出库时自动填入发货单物流单号',
+  })
+  platformTrackingNo!: string | null;
   @ApiProperty({ type: Date }) createdAt!: Date;
   @ApiProperty({ nullable: true, enum: ['MANUAL', 'API', 'POLLING', 'WEBHOOK'] })
   syncSource!: string | null;
@@ -400,6 +417,12 @@ export class OrderDetailDto {
     description: '平台要求的发货截止时间（平台事实，非 ERP 状态）',
   })
   shipmentDeadline!: Date | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: '平台运单号（平台事实）；已组包后由平台返回，出库时自动填入发货单物流单号',
+  })
+  platformTrackingNo!: string | null;
   @ApiProperty({ nullable: true, type: Object }) rawData!: Record<string, unknown> | null;
   @ApiProperty({ nullable: true, type: String }) remark!: string | null;
   @ApiProperty({ nullable: true, enum: ['MANUAL', 'API', 'POLLING', 'WEBHOOK'] })

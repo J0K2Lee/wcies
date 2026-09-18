@@ -3,13 +3,17 @@ import {
   PaginatedResult,
   PlatformAdapter,
   PlatformCredentialContext,
+  PlatformLabelFile,
   PlatformListingRaw,
   PlatformOrderRaw,
   PlatformReturnRaw,
+  PlatformShipmentPreparation,
   PlatformWebhookEvent,
   StoreContext,
 } from '@wcies/platform-contracts';
 import { OzonClient, OzonAuth } from './ozon.client';
+import { OzonShipmentService } from './ozon-shipment.service';
+import { parseOzonAuth } from './ozon-auth';
 import {
   mapPostingToOrder,
   mapProductToListing,
@@ -17,7 +21,6 @@ import {
   mapWebhookPayload,
 } from './ozon.mapper';
 import { mapProductImages } from './ozon-product-image.mapper';
-import { StoreCredentialMalformedError } from '../integration.errors';
 import {
   OzonProductAttributesResponse,
   OzonProductInfoItem,
@@ -55,7 +58,10 @@ const PRODUCT_INFO_BATCH = 100;
 export class OzonAdapter implements PlatformAdapter {
   readonly platformCode = 'OZON' as const;
 
-  constructor(private readonly client: OzonClient) {}
+  constructor(
+    private readonly client: OzonClient,
+    private readonly shipmentService: OzonShipmentService,
+  ) {}
 
   async validateCredential(context: PlatformCredentialContext): Promise<void> {
     // Safe read-only validation (task §32): one minimal product list call.
@@ -219,6 +225,37 @@ export class OzonAdapter implements PlatformAdapter {
 
   // -----------------------------------------------------------------------
 
+  /**
+   * WRITE: assemble the order on OZON (组包, awaiting_packaging ->
+   * awaiting_deliver) so the platform assigns a waybill. This is the ONE
+   * platform write of the order fulfillment flow; it is never exercised by
+   * tests against a live account (AGENTS.md §92). No-op (read-only) when the
+   * platform already accepted the order.
+   */
+  async prepareShipment(
+    context: StoreContext,
+    order: { platformOrderId: string },
+  ): Promise<PlatformShipmentPreparation> {
+    return this.shipmentService.prepareShipment(
+      { storeId: context.storeId, credential: context.credential },
+      order,
+    );
+  }
+
+  /**
+   * Shipping label PDF (面单) for an order, archived and printed by the order
+   * page. Null while OZON has not generated it yet.
+   */
+  async fetchShippingLabel(
+    context: StoreContext,
+    order: { platformOrderId: string },
+  ): Promise<PlatformLabelFile | null> {
+    return this.shipmentService.fetchShippingLabel(
+      { storeId: context.storeId, credential: context.credential },
+      order,
+    );
+  }
+
   private async fetchPostingsByNumber(
     auth: OzonAuth,
     storeId: string,
@@ -270,30 +307,16 @@ export class OzonAdapter implements PlatformAdapter {
 // ---------------------------------------------------------------------------
 
 function parseAuth(credential: Readonly<Record<string, unknown>>, storeId: string): OzonAuth {
-  const clientId = credential['clientId'];
-  const apiKey = credential['apiKey'];
-  if (
-    typeof clientId !== 'string' ||
-    clientId === '' ||
-    typeof apiKey !== 'string' ||
-    apiKey === ''
-  ) {
-    throw new StoreCredentialMalformedError(storeId, 'OZON', 'expected { clientId, apiKey }');
-  }
-  return { clientId, apiKey };
+  return parseOzonAuth(credential, storeId);
 }
 
 /**
- * Shared credential parse for OZON-specific services that call the client
- * outside the generic adapter contract (category tree sync, attribute
- * enrichment). Same validation, same error.
+ * Re-export for the OZON-specific services that historically imported the
+ * credential parse from this file. The implementation lives in ozon-auth.ts
+ * so those services do not import the adapter (which depends on
+ * OzonShipmentService - an adapter<->service cycle otherwise).
  */
-export function parseOzonAuth(
-  credential: Readonly<Record<string, unknown>>,
-  storeId: string,
-): OzonAuth {
-  return parseAuth(credential, storeId);
-}
+export { parseOzonAuth };
 
 /**
  * Computes the effective window cursor:

@@ -49,6 +49,8 @@ describe('OZON product images', () => {
         perStoreMinIntervalMs: 0,
         fetchImpl: transport,
       }),
+      // Not exercised here: image lookup never touches the shipment write path.
+      {} as unknown as ConstructorParameters<typeof OzonAdapter>[1],
     );
     const context = {
       storeId: 'store',

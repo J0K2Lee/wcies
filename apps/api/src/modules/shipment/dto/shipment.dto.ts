@@ -323,13 +323,25 @@ export class ShipShipmentResultDto {
 
 export class ShippingLabelDto {
   @ApiProperty() id!: string;
-  @ApiProperty() shipmentId!: string;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: '发货单级面单（手工上传）有值；平台面单在出库前先挂订单，此时为 null',
+  })
+  shipmentId!: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: '订单级（平台 API）面单所属订单；发货单级面单为 null',
+  })
+  orderId!: string | null;
   @ApiProperty({ nullable: true }) packageId!: string | null;
   @ApiProperty({ enum: SHIPPING_LABEL_TYPES }) labelType!: string;
   @ApiProperty({ example: '面单.pdf' }) fileName!: string;
   @ApiProperty({ example: 'application/pdf' }) mimeType!: string;
   @ApiProperty() fileSize!: number;
   @ApiProperty({ example: 'MANUAL_UPLOAD' }) source!: string;
+  @ApiProperty({ nullable: true, type: String }) externalLabelId!: string | null;
   @ApiProperty({ type: Date }) createdAt!: Date;
   @ApiProperty({ description: '短期有效的私有文件签名 URL（浏览器打开/打印）' }) signedUrl!: string;
 }

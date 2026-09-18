@@ -3,6 +3,7 @@ import {
   OzonErrorBody,
   OzonFbsPostingGetResponse,
   OzonFbsPostingListResponse,
+  OzonFbsShipResponse,
   OzonFbpWarehouseListResponse,
   OzonOwnWarehouseListResponse,
   OzonProductAttributesResponse,
@@ -10,6 +11,7 @@ import {
   OzonProductListResponse,
   OzonRfbsReturnListResponse,
   OzonSellerWarehouseListResponse,
+  OzonShipPackage,
 } from './types/api.types';
 import { PlatformErrorDetail } from '@wcies/platform-contracts';
 import { PlatformApiError, PlatformMalformedResponseError } from '../platform-error';
@@ -61,6 +63,23 @@ interface RequestCall {
   readonly endpoint: string;
   readonly storeId: string;
   readonly body: Record<string, unknown>;
+  /**
+   * True for endpoints that may answer with a NON-JSON body (the package
+   * label spec declares `application/pdf` while documenting a JSON envelope).
+   * The transport then hands back the raw bytes instead of parsing.
+   */
+  readonly raw?: boolean;
+}
+
+/**
+ * Raw HTTP outcome for binary-capable endpoints. `text` is the UTF-8 decoding
+ * of `bytes` so a JSON-envelope variant can be parsed by the caller without a
+ * second read of the response.
+ */
+export interface OzonRawResponse {
+  readonly contentType: string | null;
+  readonly bytes: Uint8Array;
+  readonly text: string;
 }
 
 /** Per-store serialized rate limiting state. */
@@ -243,6 +262,51 @@ export class OzonClient {
   }
 
   // -----------------------------------------------------------------------
+  // Outbound shipment operations (order fulfillment flow, 2026-09-18)
+  //
+  // REAL platform writes. Never invoked from tests against a live account
+  // (AGENTS.md §92); the factory refuses to fall back to the real base URL.
+  // -----------------------------------------------------------------------
+
+  /**
+   * `POST /v4/posting/fbs/ship` - "pack the order" (组包). Moves the posting
+   * from awaiting_packaging to awaiting_deliver and is the ONLY seller-facing
+   * status write on this path. A 200 does NOT prove assembly: the spec
+   * requires re-reading the posting and checking `substatus` (see
+   * OzonShipmentService).
+   */
+  async fbsPostingShip(
+    auth: OzonAuth,
+    storeId: string,
+    input: { postingNumber: string; packages: readonly OzonShipPackage[] },
+  ): Promise<OzonFbsShipResponse> {
+    return this.request<OzonFbsShipResponse>(auth, {
+      endpoint: '/v4/posting/fbs/ship',
+      storeId,
+      body: { posting_number: input.postingNumber, packages: [...input.packages] },
+    });
+  }
+
+  /**
+   * `POST /v2/posting/fbs/package-label` - generates the shipping label PDF
+   * for postings in `awaiting_deliver`. Served as raw bytes: the live body is
+   * either the PDF itself or a JSON envelope with base64 `file_content`
+   * (the spec contradicts itself), so decoding is the caller's job.
+   */
+  async packageLabel(
+    auth: OzonAuth,
+    storeId: string,
+    postingNumbers: readonly string[],
+  ): Promise<OzonRawResponse> {
+    return this.request<OzonRawResponse>(auth, {
+      endpoint: '/v2/posting/fbs/package-label',
+      storeId,
+      body: { posting_number: [...postingNumbers] },
+      raw: true,
+    });
+  }
+
+  // -----------------------------------------------------------------------
   // Transport: auth headers + timeout + retry + rate limit + error mapping
   // -----------------------------------------------------------------------
 
@@ -367,6 +431,37 @@ export class OzonClient {
           requestId,
           await safeErrorMessage(response),
         ),
+      };
+    }
+
+    if (call.raw === true) {
+      let buffer: ArrayBuffer;
+      try {
+        buffer = await response.arrayBuffer();
+      } catch (error: unknown) {
+        return {
+          ok: false,
+          retryable: false,
+          retryAfterMs: null,
+          error: new PlatformMalformedResponseError({
+            httpStatus: response.status,
+            requestId,
+            endpoint: call.endpoint,
+            storeId: call.storeId,
+            message: `Response body could not be read (${String(error)})`,
+          }),
+        };
+      }
+      const bytes = new Uint8Array(buffer);
+      return {
+        ok: true,
+        value: {
+          contentType: response.headers.get('content-type'),
+          bytes,
+          // Tolerant by construction: a binary body decodes to replacement
+          // characters, which the caller ignores unless the type says JSON.
+          text: new TextDecoder().decode(bytes),
+        } as TResponse,
       };
     }
 

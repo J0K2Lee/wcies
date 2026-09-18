@@ -104,6 +104,13 @@ export interface OzonFbsPosting {
   readonly fact_delivery_date?: string | null;
   /** Delivery-window / expected-delivery display facts (verified 2026-09-15). */
   readonly analytics_data?: OzonFbsPostingAnalyticsData | null;
+  /**
+   * Platform-advertised next actions (v3 spec `v3FbsPostingDetail`,
+   * e.g. `ship` / `ship_async` / `ship_async_in_process` / `label_download`).
+   * Preferred "can this posting be assembled?" signal; not guaranteed
+   * present, so callers fall back to the status vocabulary.
+   */
+  readonly available_actions?: readonly string[] | null;
   readonly products: readonly OzonPostingProduct[];
   readonly [key: string]: unknown;
 }
@@ -289,4 +296,62 @@ export interface OzonOwnWarehouse {
 
 export interface OzonOwnWarehouseListResponse {
   readonly warehouses: readonly OzonOwnWarehouse[];
+}
+
+// ---------------------------------------------------------------------------
+// Outbound shipment operations (order fulfillment flow, 2026-09-18)
+//
+// Source: vendored v3 English spec (docs/ozon-seller-api-eng-version-3.json),
+// operationIds PostingAPI_ShipFbsPostingV4 / PostingAPI_PostingFBSPackageLabel.
+// NOT yet verified against the live API - the write path needs an explicit
+// owner-approved T0 run (AGENTS.md §92); see docs/integrations/ozon.md.
+// ---------------------------------------------------------------------------
+
+/** One product instance inside a ship request package (spec: product_id = SKU). */
+export interface OzonShipPackageProduct {
+  readonly product_id: number;
+  readonly quantity: number;
+}
+
+/** One shipment parcel of `POST /v4/posting/fbs/ship`. */
+export interface OzonShipPackage {
+  readonly products: readonly OzonShipPackageProduct[];
+}
+
+export interface OzonFbsShipRequest {
+  readonly posting_number: string;
+  readonly packages: readonly OzonShipPackage[];
+}
+
+/**
+ * Response of `POST /v4/posting/fbs/ship`: `result` lists the posting numbers
+ * the platform accepted. The spec explicitly warns that a 200 does NOT prove
+ * the order was assembled - the caller must re-read the posting and check
+ * `substatus` (`ship_failed` means "retry").
+ */
+export interface OzonFbsShipResponse {
+  readonly result?: readonly string[];
+  readonly additional_data?: readonly {
+    readonly posting_number?: string;
+    readonly products?: readonly OzonShipPackageProduct[];
+    readonly [key: string]: unknown;
+  }[];
+  readonly [key: string]: unknown;
+}
+
+/**
+ * Response of `POST /v2/posting/fbs/package-label`.
+ *
+ * The spec is self-contradictory here: it declares the 200 content type as
+ * `application/pdf` while the documented schema is this JSON envelope with a
+ * base64 `file_content`. Both shapes are handled at runtime by inspecting the
+ * actual Content-Type (see OzonClient.packageLabel) - the live shape is a T0
+ * item (docs/integrations/ozon.md 平台写操作).
+ */
+export interface OzonPackageLabelResponse {
+  readonly content_type?: string | null;
+  readonly file_name?: string | null;
+  /** Base64-encoded PDF bytes (schema: `format: byte`). */
+  readonly file_content?: string | null;
+  readonly [key: string]: unknown;
 }

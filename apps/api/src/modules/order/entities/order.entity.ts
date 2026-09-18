@@ -89,6 +89,17 @@ export class OrderEntity {
   @Column({ type: 'timestamptz', name: 'shipment_deadline', nullable: true })
   shipmentDeadline!: Date | null;
 
+  /**
+   * Platform-assigned waybill/tracking number (OZON `tracking_number`),
+   * 2026-09-18 order fulfillment flow. A platform FACT for display and for
+   * filling the internal Shipment's tracking number at outbound time - it
+   * does NOT make the order the logistics model (AGENTS.md §37: Shipment /
+   * Package stay the only carrier). Null while the platform has not assigned
+   * one; `raw_data` keeps the verbatim original (AGENTS.md §34).
+   */
+  @Column({ type: 'varchar', length: 255, name: 'platform_tracking_no', nullable: true })
+  platformTrackingNo!: string | null;
+
   @Column({ type: 'jsonb', name: 'raw_data', nullable: true })
   rawData!: Record<string, unknown> | null;
 

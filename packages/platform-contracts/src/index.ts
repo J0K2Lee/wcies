@@ -6,8 +6,16 @@
  *
  * Sprint 5 extends the minimal Sprint 0 shape with the read-first sync
  * capabilities: listing sync, order polling, credential validation and
- * (platform-dependent) webhook parsing. Write operations (push inventory,
- * prices, shipments) are intentionally NOT part of this contract yet.
+ * (platform-dependent) webhook parsing.
+ *
+ * 2026-09-18 (order fulfillment flow): the read-first boundary is lifted for
+ * exactly ONE order lifecycle operation per platform - `prepareShipment`
+ * (OZON 组包) plus its companion label fetch `fetchShippingLabel`. Inventory
+ * / price push operations remain intentionally OUT of this contract.
+ * Write capabilities stay OPTIONAL per adapter: a platform without a verified
+ * write endpoint simply does not implement them, and callers must treat the
+ * absence as "not supported" rather than falling back to a guess
+ * (AGENTS.md §88/§92).
  */
 
 /**
@@ -181,6 +189,15 @@ export interface PlatformOrderRaw {
    * missing/unparseable - callers fall back to their observation time.
    */
   readonly platformStageChangedAt?: Date | null;
+  /**
+   * Platform-assigned waybill/tracking number of this shipment (OZON
+   * `tracking_number`). A platform FACT used for display and for filling the
+   * internal Shipment's tracking number at outbound time - it does NOT make
+   * the order the logistics model (AGENTS.md §37: Shipment/Package stay the
+   * only logistics carrier). Null/absent while the platform has not assigned
+   * one yet; mappers must tolerate that, never fabricate (2026-09-18).
+   */
+  readonly platformTrackingNo?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -239,6 +256,38 @@ export interface PlatformWebhookEvent {
   /** Platform order ids referenced by the event (e.g. posting numbers). */
   readonly platformOrderIds: readonly string[];
   readonly payload: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// Outbound shipment operations (order fulfillment flow, 2026-09-18)
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of handing an order over to the platform for dispatch.
+ *
+ * OZON calls this "pack the order" (`POST /v4/posting/fbs/ship`) and it IS
+ * the platform-side "we have shipped it" step: `awaiting_packaging` ->
+ * `awaiting_deliver`. Verified against the vendored spec: there is NO further
+ * seller-facing status write afterwards, so a repeat call for an already
+ * prepared order must be reported as SUCCESS (`alreadyPrepared`), never as an
+ * error - callers depend on this for idempotency (docs/integrations/ozon.md).
+ */
+export interface PlatformShipmentPreparation {
+  /** Platform order id the operation ran on. */
+  readonly platformOrderId: string;
+  /** Waybill/tracking number assigned by the platform, when exposed. */
+  readonly trackingNumber: string | null;
+  /** Platform status AFTER the operation, verbatim platform vocabulary. */
+  readonly platformStatus: string | null;
+  /** True when the platform reported the order was already prepared. */
+  readonly alreadyPrepared: boolean;
+}
+
+/** A platform-generated label/waybill file, fetched so it can be printed. */
+export interface PlatformLabelFile {
+  readonly fileName: string;
+  readonly mimeType: string;
+  readonly bytes: Uint8Array;
 }
 
 // ---------------------------------------------------------------------------
@@ -303,4 +352,31 @@ export interface PlatformAdapter {
     context: StoreContext,
     cursor?: unknown,
   ): Promise<PaginatedResult<PlatformReturnRaw>>;
+
+  /**
+   * Optional WRITE: hand the order over to the platform for dispatch (OZON
+   * 组包). This changes REAL platform order state, so callers must act on
+   * explicit user intent only (AGENTS.md §92) and must never call it from a
+   * test against a live account. Implementations must be idempotent from the
+   * caller's point of view: an order the platform already accepted resolves
+   * with `alreadyPrepared: true` instead of throwing.
+   *
+   * Platforms whose write endpoint is not verified simply omit this method -
+   * absence means "unsupported", never "guess it" (AGENTS.md §88).
+   */
+  prepareShipment?(
+    context: StoreContext,
+    order: { platformOrderId: string },
+  ): Promise<PlatformShipmentPreparation>;
+
+  /**
+   * Optional READ: fetch the platform-generated shipping label (面单) for an
+   * order so it can be archived and printed. Returns null when the platform
+   * has no label for the order yet (e.g. OZON only serves labels once the
+   * order is `awaiting_deliver`).
+   */
+  fetchShippingLabel?(
+    context: StoreContext,
+    order: { platformOrderId: string },
+  ): Promise<PlatformLabelFile | null>;
 }

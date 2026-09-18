@@ -167,6 +167,11 @@ export function mapPostingToOrder(posting: OzonFbsPosting): PlatformOrderRaw {
     fulfillmentMode: mapOzonFulfillmentMode(posting.integration_type_flow),
     orderedAt,
     shipmentDeadline,
+    // Platform waybill number (2026-09-18 fulfillment flow). Tolerant: the v3
+    // schema does not mark it required and OZON only assigns it once the order
+    // is accepted for dispatch, so absent/blank/whitespace stays null
+    // (AGENTS.md §49 - one missing fact never fails the posting sync).
+    platformTrackingNo: readString(posting.tracking_number?.trim() ?? null) ?? null,
     currency,
     items,
     rawData: { ...posting },

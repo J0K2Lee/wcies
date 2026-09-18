@@ -8,6 +8,7 @@ import { PlatformCategoryNodeEntity } from './entities/platform-category-node.en
 import { PlatformCategoryNodeRepository } from './repositories/platform-category-node.repository';
 import { OzonCategoryTreeService } from './ozon-category-tree.service';
 import { OzonWarehouseService } from './ozon-warehouse.service';
+import { OzonShipmentService } from './ozon-shipment.service';
 
 /** OZON platform wiring: one adapter instance per process. */
 @Module({
@@ -23,8 +24,9 @@ import { OzonWarehouseService } from './ozon-warehouse.service';
     PlatformCategoryNodeRepository,
     OzonCategoryTreeService,
     OzonWarehouseService,
+    OzonShipmentService,
   ],
-  exports: [OzonAdapter, OzonCategoryTreeService, OzonWarehouseService],
+  exports: [OzonAdapter, OzonCategoryTreeService, OzonWarehouseService, OzonShipmentService],
 })
 export class OzonModule implements OnModuleInit {
   constructor(

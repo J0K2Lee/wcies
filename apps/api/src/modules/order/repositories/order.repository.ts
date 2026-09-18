@@ -94,6 +94,7 @@ export class OrderRepository {
       currency: string | null;
       orderedAt: Date;
       shipmentDeadline: Date | null;
+      platformTrackingNo: string | null;
       rawData: Record<string, unknown> | null;
       remark: string | null;
       syncSource: string | null;
@@ -161,6 +162,11 @@ export class OrderRepository {
       platformStage?: string | null;
       platformStageChangedAt?: Date | null;
       fulfillmentMode?: string | null;
+      /**
+       * Platform waybill number (2026-09-18). Null/undefined keeps the stored
+       * value so a fact set that omits it never wipes a known number.
+       */
+      platformTrackingNo?: string | null;
     },
   ): Promise<void> {
     const update: Record<string, unknown> = {
@@ -171,6 +177,9 @@ export class OrderRepository {
     };
     if (patch.fulfillmentMode !== undefined && patch.fulfillmentMode !== null) {
       update.fulfillmentMode = patch.fulfillmentMode;
+    }
+    if (patch.platformTrackingNo !== undefined && patch.platformTrackingNo !== null) {
+      update.platformTrackingNo = patch.platformTrackingNo;
     }
     if (patch.platformStage !== undefined) {
       update.platformStage = patch.platformStage;

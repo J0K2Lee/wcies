@@ -144,6 +144,7 @@ export class OrderService {
         currency: row.order.currency,
         orderedAt: row.order.orderedAt,
         shipmentDeadline: row.order.shipmentDeadline,
+        platformTrackingNo: row.order.platformTrackingNo,
         syncSource: row.order.syncSource,
         createdAt: row.order.createdAt,
         itemsCount: row.itemsCount,
@@ -299,6 +300,7 @@ export class OrderService {
       currency: order.currency,
       orderedAt: order.orderedAt,
       shipmentDeadline: order.shipmentDeadline,
+      platformTrackingNo: order.platformTrackingNo,
       rawData: order.rawData,
       remark: order.remark,
       syncSource: order.syncSource,
@@ -627,6 +629,11 @@ export class OrderService {
       newFulfillmentMode !== null && newFulfillmentMode !== order.fulfillmentMode;
     const newDeadline = toInstantOrNull(input.shipmentDeadline);
     const deadlineChanged = !sameInstant(newDeadline, order.shipmentDeadline ?? null);
+    // Platform waybill number (2026-09-18): same null-keeps-stored rule as the
+    // other facts - the platform only assigns it once, and later re-reads that
+    // omit it must not erase it.
+    const newTrackingNo = input.platformTrackingNo ?? null;
+    const trackingNoChanged = newTrackingNo !== null && newTrackingNo !== order.platformTrackingNo;
     // Key-order-insensitive comparison: PG jsonb normalizes key order on the
     // round-trip, so a naive JSON.stringify diff would flag EVERY re-sync as
     // changed and break the zero-write idempotency rule.
@@ -634,7 +641,14 @@ export class OrderService {
       canonicalJson(input.rawData ?? null) !== canonicalJson(order.rawData ?? null);
 
     let cancelled = false;
-    if (statusChanged || deadlineChanged || rawChanged || stageChanged || fulfillmentModeChanged) {
+    if (
+      statusChanged ||
+      deadlineChanged ||
+      rawChanged ||
+      stageChanged ||
+      fulfillmentModeChanged ||
+      trackingNoChanged
+    ) {
       const effectiveDeadline = newDeadline ?? order.shipmentDeadline ?? null;
       const effectiveRawData = input.rawData ?? order.rawData ?? null;
       await this.dataSource.transaction(async (runner) => {
@@ -643,6 +657,7 @@ export class OrderService {
           shipmentDeadline: effectiveDeadline,
           rawData: effectiveRawData,
           ...(fulfillmentModeChanged ? { fulfillmentMode: newFulfillmentMode } : {}),
+          ...(trackingNoChanged ? { platformTrackingNo: newTrackingNo } : {}),
           ...(stageChanged
             ? {
                 platformStage: newStage,
@@ -1078,6 +1093,12 @@ export interface OrderPlatformFactsInput {
    */
   platformChangedAt?: Date | string | null;
   shipmentDeadline: Date | string | null;
+  /**
+   * Platform waybill number (OZON `tracking_number`, 2026-09-18). Null /
+   * undefined keeps the stored value - a fact set that omits it must never
+   * wipe a number already known.
+   */
+  platformTrackingNo?: string | null;
   rawData: Record<string, unknown> | null;
   /** Channel that delivered the facts (ORDER_SYNC / WEBHOOK / ...). */
   source: string;

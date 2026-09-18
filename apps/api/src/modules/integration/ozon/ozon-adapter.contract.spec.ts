@@ -1,6 +1,7 @@
 import { vi } from 'vitest';
 import { OzonAdapter } from './ozon.adapter';
 import { OzonClient } from './ozon.client';
+import { OzonShipmentService } from './ozon-shipment.service';
 import { AdapterContractHarness, listingItem, runAdapterContractSuite } from '../adapter.contract';
 
 /**
@@ -58,7 +59,18 @@ function makeOzonHarness(): AdapterContractHarness {
   });
   return {
     name: 'OZON',
-    adapter: new OzonAdapter(client),
+    adapter: new OzonAdapter(
+      client,
+      // The shipment operations run against the SAME scripted transport, so
+      // the contract suite can exercise the write path without ever reaching
+      // the real platform (AGENTS.md §92).
+      new OzonShipmentService(client, {
+        log: () => undefined,
+        warn: () => undefined,
+        error: () => undefined,
+        debug: () => undefined,
+      } as unknown as ConstructorParameters<typeof OzonShipmentService>[1]),
+    ),
     credentialContext: {
       storeId: 'store-1',
       platform: 'OZON',
