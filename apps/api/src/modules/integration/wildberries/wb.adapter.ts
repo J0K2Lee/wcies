@@ -5,10 +5,16 @@ import {
   PlatformCredentialContext,
   PlatformListingRaw,
   PlatformOrderRaw,
+  PlatformWebhookEvent,
   StoreContext,
 } from '@wcies/platform-contracts';
 import { WbClient, WbAuth } from './wb.client';
-import { mapCardToListing, mapFbsOrderToOrder, mapStatsRowToOrder } from './wb.mapper';
+import {
+  mapCardToListing,
+  mapFbsOrderToOrder,
+  mapStatsRowToOrder,
+  mapWebhookEnvelope,
+} from './wb.mapper';
 import { StoreCredentialMalformedError } from '../integration.errors';
 import { WbCard, WbStatsOrderRow, WbV3Order, WbV3OrdersResponse } from './types/api.types';
 import { PlatformApiError } from '../platform-error';
@@ -39,7 +45,11 @@ const ORDER_PAGE_SIZE = 1000;
  * - fetchOrders: DUAL-source - FBS/DBS tasks (marketplace v3 `next` cursor in
  *   a rolling creation window) THEN DBW rows (statistics incremental by
  *   lastChangeDate, ONE call per run - the endpoint allows 1 req/min);
- * - NOT implemented on purpose (spec unverified, T0 first): processWebhook,
+ * - processWebhook (2026-09-18, docs verified): parses event deliveries from
+ *   webhooks-api (content events today; dedup rides the platform's
+ *   idempotencyKey). Authenticity = Authorization-header secret check in the
+ *   SYNC ingest service; subscription managed via WbWebhookService;
+ * - NOT implemented on purpose (spec unverified, T0 first):
  *   fetchOrdersByPlatformIds (/api/v3/orders/status body unverified),
  *   fetchReturns (returns-domain spec unverified), fetchProductImages (cards
  *   carry photos; no barcode-keyed lookup endpoint).
@@ -52,6 +62,10 @@ export class WbAdapter implements PlatformAdapter {
 
   async validateCredential(context: PlatformCredentialContext): Promise<void> {
     await this.client.sellerInfo(parseWbAuth(context.credential, context.storeId), context.storeId);
+  }
+
+  async processWebhook(_context: StoreContext, payload: unknown): Promise<PlatformWebhookEvent[]> {
+    return mapWebhookEnvelope(payload);
   }
 
   async fetchListings(

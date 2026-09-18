@@ -6,6 +6,9 @@ import {
   WbSellerInfoResponse,
   WbStatsOrderRow,
   WbV3OrdersResponse,
+  WbWebhookCreateResponse,
+  WbWebhookResource,
+  extractWebhookRows,
   extractStatsRows,
 } from './types/api.types';
 
@@ -36,7 +39,7 @@ import {
  */
 
 /** WB module domains with distinct hosts and rate budgets. */
-export type WbDomain = 'common' | 'content' | 'marketplace' | 'statistics';
+export type WbDomain = 'common' | 'content' | 'marketplace' | 'statistics' | 'webhooks';
 
 export interface WbClientOptions {
   readonly baseUrls: Readonly<Record<WbDomain, string>>;
@@ -46,6 +49,11 @@ export interface WbClientOptions {
   readonly perStoreMinIntervalMs: number;
   /** Statistics-domain floor - the endpoint allows 1 req/min (docs §2). */
   readonly statisticsMinIntervalMs: number;
+  /**
+   * Webhook-API floor - 1 req/sec per seller across ALL webhook methods
+   * (docs §Limits); shared per store like the other lanes.
+   */
+  readonly webhooksMinIntervalMs: number;
   /** Marketplace cool-down after a 4XX (billed x10 against the budget). */
   readonly marketplace4xxPenaltyMs: number;
   readonly fetchImpl?: typeof fetch;
@@ -57,6 +65,14 @@ export interface WbAuth {
   readonly apiKey: string;
 }
 
+/**
+ * Webhook-API auth: the seller token PLUS the WCIES service secret from the
+ * Solutions Catalog registration (docs §Access) - `X-Client-Secret` header.
+ */
+export interface WbWebhookAuth extends WbAuth {
+  readonly serviceSecret: string;
+}
+
 export const WB_DEFAULT_OPTIONS: Readonly<
   Omit<WbClientOptions, 'baseUrls' | 'fetchImpl' | 'sleep' | 'now'>
 > = {
@@ -64,6 +80,7 @@ export const WB_DEFAULT_OPTIONS: Readonly<
   maxRetries: 3,
   perStoreMinIntervalMs: 110,
   statisticsMinIntervalMs: 61_000,
+  webhooksMinIntervalMs: 1_100,
   marketplace4xxPenaltyMs: 2_000,
 };
 
@@ -72,14 +89,15 @@ export const WB_DEFAULT_BASE_URLS: Readonly<Record<WbDomain, string>> = {
   content: 'https://content-api.wildberries.ru',
   marketplace: 'https://marketplace-api.wildberries.ru',
   statistics: 'https://statistics-api.wildberries.ru',
+  webhooks: 'https://webhooks-api.wildberries.ru',
 };
 
 interface RequestCall {
   readonly domain: WbDomain;
   readonly endpoint: string;
   readonly storeId: string;
-  readonly method: 'GET' | 'POST';
-  /** GET: query params; POST: JSON body. */
+  readonly method: 'GET' | 'POST' | 'DELETE';
+  /** GET/DELETE: query params; POST: JSON body. */
   readonly query?: Record<string, string | number>;
   readonly body?: Record<string, unknown>;
 }
@@ -163,6 +181,79 @@ export class WbClient {
   }
 
   // -----------------------------------------------------------------------
+  // Webhook management API (webhooks-api domain, docs verified 2026-09-18)
+  // -----------------------------------------------------------------------
+
+  /**
+   * Creates a webhook subscription (docs §How to create). The response's
+   * webhook secret is shown ONLY here - the caller must persist it at once.
+   */
+  async createWebhook(
+    auth: WbWebhookAuth,
+    storeId: string,
+    body: {
+      readonly enabled: boolean;
+      readonly url: string;
+      readonly name: string;
+      readonly subscriptions: readonly { scope: string; event: string }[];
+    },
+  ): Promise<WbWebhookCreateResponse> {
+    return this.request<WbWebhookCreateResponse>(auth, {
+      domain: 'webhooks',
+      endpoint: '/api/v1/webhooks',
+      storeId,
+      method: 'POST',
+      body: { ...body, subscriptions: body.subscriptions.map((row) => ({ ...row })) },
+    });
+  }
+
+  /** All webhooks of the seller (docs §Managing). */
+  async listWebhooks(auth: WbWebhookAuth, storeId: string): Promise<readonly WbWebhookResource[]> {
+    const body = await this.request<unknown>(auth, {
+      domain: 'webhooks',
+      endpoint: '/api/v1/webhooks',
+      storeId,
+      method: 'GET',
+    });
+    return extractWebhookRows(body);
+  }
+
+  /** Deletes a webhook (docs §Managing). Any 2xx (incl. empty body) counts. */
+  async deleteWebhook(auth: WbWebhookAuth, storeId: string, id: string): Promise<void> {
+    await this.request<Record<string, never>>(auth, {
+      domain: 'webhooks',
+      endpoint: `/api/v1/webhooks/${encodeURIComponent(id)}`,
+      storeId,
+      method: 'DELETE',
+    });
+  }
+
+  /** URL reachability probe (docs §Testing). */
+  async checkWebhookUrl(
+    auth: WbWebhookAuth,
+    storeId: string,
+    url: string,
+  ): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>(auth, {
+      domain: 'webhooks',
+      endpoint: '/api/v1/webhooks/check',
+      storeId,
+      method: 'POST',
+      body: { url },
+    });
+  }
+
+  /** Sends a `test: true` event through the webhook (docs §Testing). */
+  async sendTestEvent(auth: WbWebhookAuth, storeId: string, id: string): Promise<void> {
+    await this.request<Record<string, never>>(auth, {
+      domain: 'webhooks',
+      endpoint: `/api/v1/webhooks/${encodeURIComponent(id)}/test/send`,
+      storeId,
+      method: 'POST',
+    });
+  }
+
+  // -----------------------------------------------------------------------
   // Transport: auth header + timeout + retry + rate limit + error mapping
   // -----------------------------------------------------------------------
 
@@ -202,8 +293,11 @@ export class WbClient {
         method: call.method,
         headers: {
           Accept: 'application/json',
-          // Secrets travel ONLY in this header; never logged (AGENTS.md §29).
+          // Secrets travel ONLY in these headers; never logged (AGENTS.md §29).
           Authorization: auth.apiKey,
+          ...(typeof (auth as WbWebhookAuth).serviceSecret === 'string'
+            ? { 'X-Client-Secret': (auth as WbWebhookAuth).serviceSecret }
+            : {}),
           ...(call.body === undefined ? {} : { 'Content-Type': 'application/json' }),
         },
         ...(call.body === undefined ? {} : { body: JSON.stringify(call.body) }),
@@ -292,7 +386,13 @@ export class WbClient {
 
     let parsed: unknown;
     try {
-      parsed = await response.json();
+      // DELETE (and some admin calls) may answer 2xx with an empty body -
+      // treat it as a success object instead of a malformed response.
+      const text = await response.text();
+      if (text.trim() === '') {
+        return { ok: true, value: {} as TResponse };
+      }
+      parsed = JSON.parse(text) as unknown;
     } catch (error: unknown) {
       return {
         ok: false,
@@ -339,17 +439,19 @@ export class WbClient {
   }
 
   /**
-   * Per-store, per-domain request spacing. Statistics lives on 1 req/min,
-   * so its lane floor is `statisticsMinIntervalMs`; a marketplace 4XX pushes
-   * the lane's availability forward by the penalty (budget x10, docs §1).
-   * Returns the ms the caller must wait before dispatching.
+   * Per-store, per-domain request spacing. Statistics lives on 1 req/min and
+   * the webhook API on 1 req/sec per seller, so those lanes use their own
+   * floors; a marketplace 4XX pushes that lane's availability forward by the
+   * penalty (budget x10, docs §1). Returns the ms the caller must wait.
    */
   private throttle(call: RequestCall): number {
     const key = `${call.storeId}:${call.domain}`;
     const interval =
       call.domain === 'statistics'
         ? this.options.statisticsMinIntervalMs
-        : this.options.perStoreMinIntervalMs;
+        : call.domain === 'webhooks'
+          ? this.options.webhooksMinIntervalMs
+          : this.options.perStoreMinIntervalMs;
     const now = this.now();
     const existing = this.lanes.get(key);
     const waitMs = existing === undefined ? 0 : Math.max(0, existing.availableAt - now);

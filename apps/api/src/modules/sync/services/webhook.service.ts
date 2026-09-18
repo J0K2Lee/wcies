@@ -8,9 +8,15 @@ import { StoreService } from '../../store/services/store.service';
 import { StoreNotFoundError } from '../../store/errors/store-errors';
 import { PlatformAdapterRegistry } from '../../integration/platform-adapter.registry';
 import { YandexAdapter } from '../../integration/yandex/yandex.adapter';
+import {
+  isWbTestWebhookEvent,
+  isWbWebhookSecretValid,
+  webhookEnvelopeSellerId,
+} from '../../integration/wildberries/wb.mapper';
 import { SyncContextService } from './sync-context.service';
 import { OrderSyncService } from './order-sync.service';
 import { ExternalRawEventRepository } from '../repositories/external-raw-event.repository';
+import { PlatformCredentialService } from '../../store/services/platform-credential.service';
 import { webhookChangedStateDate, webhookSellerId } from '../../integration/ozon/ozon.mapper';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { WebhookJobPayload } from '../sync.constants';
@@ -36,6 +42,7 @@ export class WebhookIngestService {
     private readonly storeService: StoreService,
     private readonly registry: PlatformAdapterRegistry,
     private readonly contextService: SyncContextService,
+    private readonly credentialService: PlatformCredentialService,
     private readonly rawEventRepo: ExternalRawEventRepository,
     @InjectQueue(QUEUE_NAMES.webhook) private readonly webhookQueue: Queue<WebhookJobPayload>,
     private readonly logger: AppLoggerService,
@@ -137,6 +144,102 @@ export class WebhookIngestService {
     return this.storeAndEnqueue('YANDEX', store.id, payload as Record<string, unknown>, event);
   }
 
+  /**
+   * WB webhook 事件接收（2026-09-18，docs verified）。与 OZON/Yandex 的
+   * 差异：WB 用创建 webhook 时一次性返回的 secret 验证入站推送 ——
+   * Authorization 头必须等于店铺 WEBHOOK 凭证里的 secret（时序安全比较），
+   * 这是唯一的真实性信号（平台不签名、无 IP 白名单要求）。
+   * 一份投递可含最多 100 个事件；逐事件落库（externalEventId =
+   * idempotencyKey ?? id，投递重试天然幂等），test:true 的探活事件落库为
+   * SKIPPED 不入队（docs §Testing：不得当真实事件处理）。
+   * 当前事件目录无订单事件：处理器对 ITEM_CHANGED/UNKNOWN 的既有行为就是
+   * 记录事实不动作，与 OZON 链路一致。
+   */
+  async ingestWb(
+    storeCode: string,
+    payload: unknown,
+    authorizationHeader: string | undefined,
+  ): Promise<'ACCEPTED' | 'DUPLICATE' | 'REJECTED'> {
+    const store = await this.resolveStoreByPlatform('WB', storeCode);
+    const adapter = this.registry.getAdapter('WB');
+    if (adapter.processWebhook === undefined) {
+      throw new Error('WB adapter does not support webhooks');
+    }
+
+    // Authenticity: Authorization header == the store's WEBHOOK secret.
+    const secretPayload = await this.credentialService.getDecryptedActivePayload(
+      store.id,
+      'WEBHOOK',
+    );
+    const expectedSecret =
+      typeof secretPayload?.['secret'] === 'string' ? secretPayload['secret'] : null;
+    if (!isWbWebhookSecretValid(authorizationHeader ?? null, expectedSecret)) {
+      await this.rawEventRepo.insertIfNew({
+        platform: 'WB',
+        storeId: store.id,
+        eventType: 'UNKNOWN',
+        externalEventId: null,
+        payload:
+          typeof payload === 'object' && payload !== null
+            ? (payload as Record<string, unknown>)
+            : { payload: null },
+        status: 'REJECTED',
+      });
+      this.logger.warn('wb webhook rejected: secret mismatch', {
+        module: 'sync',
+        storeId: store.id,
+        claimedSellerId: webhookEnvelopeSellerId(payload),
+      });
+      return 'REJECTED';
+    }
+
+    const context = await this.contextService.buildStoreContext(store);
+    // Throws on malformed payloads (PLATFORM_BAD_RESPONSE) - HTTP 400.
+    const events = await adapter.processWebhook(context, payload);
+
+    let accepted = 0;
+    let duplicates = 0;
+    let skipped = 0;
+    for (const event of events) {
+      const testEvent = isWbTestWebhookEvent(event);
+      const stored = await this.rawEventRepo.insertIfNew({
+        platform: 'WB',
+        storeId: store.id,
+        eventType: event.eventType,
+        externalEventId: event.externalEventId,
+        payload: event.payload,
+        status: testEvent ? 'SKIPPED' : 'PENDING',
+      });
+      if (stored === null) {
+        duplicates += 1;
+        continue;
+      }
+      if (testEvent) {
+        skipped += 1; // recorded for audit, never processed as real (docs §Testing)
+        continue;
+      }
+      await this.webhookQueue.add(
+        'process',
+        { rawEventId: stored.id },
+        {
+          attempts: 1,
+          removeOnComplete: { age: 3600 },
+          removeOnFail: { age: 24 * 3600 },
+          jobId: `rawevent-${stored.id}`,
+        },
+      );
+      accepted += 1;
+    }
+    this.logger.info('wb webhook delivery ingested', {
+      module: 'sync',
+      storeId: store.id,
+      accepted,
+      duplicates,
+      skipped,
+    });
+    return accepted === 0 && duplicates > 0 ? 'DUPLICATE' : 'ACCEPTED';
+  }
+
   /** Persist the raw event (hash dedup) and hand off to the worker. */
   private async storeAndEnqueue(
     platform: string,
@@ -177,7 +280,7 @@ export class WebhookIngestService {
   }
 
   private async resolveStoreByPlatform(
-    platformCode: 'OZON' | 'YANDEX',
+    platformCode: 'OZON' | 'YANDEX' | 'WB',
     storeCode: string,
   ): Promise<NonNullable<Awaited<ReturnType<StoreService['getEntityById']>>>> {
     const platform = await this.platformService.getEntityByCode(platformCode);

@@ -4,8 +4,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { QUEUE_NAMES } from '../../infrastructure/queue/queue.constants';
 import { IntegrationModule } from '../integration/integration.module';
 import { OzonModule } from '../integration/ozon/ozon.module';
+import { WildberriesModule } from '../integration/wildberries/wb.module';
 import { YandexModule } from '../integration/yandex/yandex.module';
 import { ListingModule } from '../listing/listing.module';
+import { OperationLogModule } from '../operation-log/operation-log.module';
 import { OrderModule } from '../order/order.module';
 import { PlatformModule } from '../platform/platform.module';
 import { StoreModule } from '../store/store.module';
@@ -25,10 +27,15 @@ import { SyncDispatchService } from './services/sync-dispatch.service';
 import { SyncFailureAlertService } from './services/sync-failure-alert.service';
 import { SyncJobService } from './services/sync-job.service';
 import { WebhookIngestService, WebhookProcessService } from './services/webhook.service';
+import { WbWebhookService } from './services/wb-webhook.service';
 import { PlatformWarehouseQueryService } from './services/platform-warehouse-query.service';
 import { SyncController } from './controllers/sync.controller';
 import { OzonWebhookController } from './controllers/ozon-webhook.controller';
 import { YandexWebhookController } from './controllers/yandex-webhook.controller';
+import {
+  WbWebhookManageController,
+  WbWebhookReceiverController,
+} from './controllers/wb-webhook.controller';
 import { PlatformWarehouseController } from './controllers/platform-warehouse.controller';
 import {
   CategoryTreeSyncProcessor,
@@ -58,17 +65,21 @@ import {
     ),
     IntegrationModule,
     OzonModule,
+    WildberriesModule,
     YandexModule,
     StoreModule,
     PlatformModule,
     ListingModule,
     OrderModule,
     ExceptionModule,
+    OperationLogModule,
   ],
   controllers: [
     SyncController,
     OzonWebhookController,
     YandexWebhookController,
+    WbWebhookReceiverController,
+    WbWebhookManageController,
     PlatformWarehouseController,
   ],
   providers: [
@@ -86,6 +97,7 @@ import {
     ProductEnrichmentSyncService,
     WebhookIngestService,
     WebhookProcessService,
+    WbWebhookService,
     OrderSyncProcessor,
     ListingSyncProcessor,
     CategoryTreeSyncProcessor,

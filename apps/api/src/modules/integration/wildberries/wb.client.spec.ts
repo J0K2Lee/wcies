@@ -22,6 +22,7 @@ function makeClient(overrides: Partial<ConstructorParameters<typeof WbClient>[0]
     maxRetries: 3,
     perStoreMinIntervalMs: 0,
     statisticsMinIntervalMs: 0,
+    webhooksMinIntervalMs: 0,
     marketplace4xxPenaltyMs: 0,
     fetchImpl: fetchImpl as unknown as typeof fetch,
     sleep,
@@ -171,3 +172,66 @@ async function capture(action: Promise<unknown>): Promise<unknown> {
     return error;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Webhook management domain (docs verified 2026-09-18)
+// ---------------------------------------------------------------------------
+
+describe('WbClient webhook management domain', () => {
+  const WEBHOOK_AUTH = { apiKey: 'seller-token', serviceSecret: 'service-secret' };
+
+  it('targets webhooks-api with BOTH the seller token and X-Client-Secret', async () => {
+    const { client, fetchImpl } = makeClient();
+    fetchImpl.mockImplementation(async (input: string) => {
+      const url = String(input);
+      if (url.includes('/api/v1/webhooks/check')) {
+        return jsonResponse(200, {});
+      }
+      return jsonResponse(200, { id: 'wh-1', secret: 's', enabled: true });
+    });
+    await client.createWebhook(WEBHOOK_AUTH, 's1', {
+      enabled: true,
+      url: 'https://hook.example.com/wb',
+      name: 'WCIES WB-A',
+      subscriptions: [{ scope: 'content', event: 'card_changed' }],
+    });
+    await client.checkWebhookUrl(WEBHOOK_AUTH, 's1', 'https://hook.example.com/wb');
+
+    const createCall = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(createCall[0]).toBe(`${BASES.webhooks}/api/v1/webhooks`);
+    const headers = new Headers(createCall[1].headers);
+    expect(headers.get('Authorization')).toBe('seller-token');
+    expect(headers.get('X-Client-Secret')).toBe('service-secret');
+
+    const checkCall = fetchImpl.mock.calls[1] as unknown as [string, RequestInit];
+    expect(checkCall[0]).toBe(`${BASES.webhooks}/api/v1/webhooks/check`);
+  });
+
+  it('treats a 204/empty-body DELETE as success', async () => {
+    const { client, fetchImpl } = makeClient();
+    fetchImpl.mockImplementation(async () => new Response(null, { status: 204 }));
+    await expect(client.deleteWebhook(WEBHOOK_AUTH, 's1', 'wh-1')).resolves.toBeUndefined();
+    const call = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(call[0]).toBe(`${BASES.webhooks}/api/v1/webhooks/wh-1`);
+    expect(call[1].method).toBe('DELETE');
+  });
+
+  it('enforces the webhook-domain 1 req/sec lane per store', async () => {
+    const { client, fetchImpl, sleep, tick } = makeClient({ webhooksMinIntervalMs: 1_100 });
+    fetchImpl.mockImplementation(async () => jsonResponse(200, []));
+    await client.listWebhooks(WEBHOOK_AUTH, 's1');
+    tick(100); // far below 1.1s
+    await client.listWebhooks(WEBHOOK_AUTH, 's1');
+    expect(sleep).toHaveBeenCalledWith(1_000);
+  });
+
+  it('tolerant list extraction accepts wrapped and bare-array responses', async () => {
+    const { client, fetchImpl } = makeClient();
+    fetchImpl.mockImplementationOnce(async () => jsonResponse(200, [{ id: 'wh-1', url: 'u' }]));
+    await expect(client.listWebhooks(WEBHOOK_AUTH, 's1')).resolves.toHaveLength(1);
+    fetchImpl.mockImplementationOnce(async () =>
+      jsonResponse(200, { webhooks: [{ id: 'wh-2', url: 'u' }] }),
+    );
+    await expect(client.listWebhooks(WEBHOOK_AUTH, 's1')).resolves.toHaveLength(1);
+  });
+});

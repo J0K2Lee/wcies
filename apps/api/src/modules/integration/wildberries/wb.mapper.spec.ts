@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isWbTestWebhookEvent,
+  isWbWebhookSecretValid,
   mapCardToListing,
   mapFbsOrderToOrder,
   mapStatsRowToOrder,
+  mapWebhookEnvelope,
   wbCancelledOf,
   wbStageOf,
+  webhookEnvelopeSellerId,
   WbMappingError,
 } from './wb.mapper';
 import { WbCard, WbStatsOrderRow, WbV3Order } from './types/api.types';
@@ -163,5 +167,119 @@ describe('mapStatsRowToOrder (statistics DBW rows)', () => {
 
   it('rejects rows without srid', () => {
     expect(() => mapStatsRowToOrder({ ...row, srid: undefined })).toThrow(WbMappingError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Webhooks (docs verified 2026-09-18)
+// ---------------------------------------------------------------------------
+
+const DELIVERY = {
+  sellerId: 'fb25c9e9-cae8-52db-b68e-736c1466a3f5',
+  requestId: '839db129-458c-4604-8019-41f32571474e',
+  events: [
+    {
+      id: '01951e00-d818-74bf-b0c0-b41479c0826e',
+      time: '2025-02-21T00:35:26.389710263Z',
+      test: false,
+      type: 'card_changed',
+      scope: 'content',
+      idempotencyKey: '2f8c7ffd86ecebc828335d2ab4d643b9abc',
+      payload: { nmID: 419929116, vendorCode: 'pro-59221854' },
+    },
+    {
+      id: '01951e00-9999-74bf-b0c0-b41479c0826e',
+      time: '2025-02-21T00:35:27Z',
+      test: false,
+      type: 'feedback_updated',
+      scope: 'questionsandfeedback',
+      idempotencyKey: 'aa74c0e-2',
+    },
+  ],
+};
+
+describe('mapWebhookEnvelope', () => {
+  it('maps every envelope event to its own normalized event', () => {
+    const events = mapWebhookEnvelope(DELIVERY);
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      eventType: 'ITEM_CHANGED',
+      externalEventId: '2f8c7ffd86ecebc828335d2ab4d643b9abc',
+      platformOrderIds: [],
+    });
+    // payload keeps the INDIVIDUAL event object (per-event raw-event rows)
+    expect(events[0]?.payload).toMatchObject({
+      type: 'card_changed',
+      payload: { nmID: 419929116 },
+    });
+    // unmapped catalog types record as UNKNOWN - never guessed
+    expect(events[1]?.eventType).toBe('UNKNOWN');
+  });
+
+  it('prefers idempotencyKey, then id, then null (payload-hash dedup)', () => {
+    const events = mapWebhookEnvelope({
+      events: [
+        { type: 'card_changed', idempotencyKey: 'k1', id: 'e1' },
+        { type: 'card_changed', id: 'e2' },
+        { type: 'card_changed' },
+      ],
+    });
+    expect(events.map((event) => event.externalEventId)).toEqual(['k1', 'e2', null]);
+  });
+
+  it('classifies only card_changed; the rest of the catalog records as UNKNOWN', () => {
+    const events = mapWebhookEnvelope({
+      events: [
+        { type: 'card_changed' },
+        { type: 'card_creation_error' },
+        { type: 'feedback_updated' },
+        { type: 'report_generation_complete' },
+        { type: 'some_future_type' },
+      ],
+    });
+    expect(events.map((event) => event.eventType)).toEqual([
+      'ITEM_CHANGED',
+      'UNKNOWN',
+      'UNKNOWN',
+      'UNKNOWN',
+      'UNKNOWN',
+    ]);
+  });
+
+  it('flags test events via the payload test field', () => {
+    const events = mapWebhookEnvelope({
+      events: [{ type: 'card_changed', test: true, idempotencyKey: 't1' }],
+    });
+    expect(isWbTestWebhookEvent(events[0]!)).toBe(true);
+    expect(events[0]?.externalEventId).toBe('t1');
+  });
+
+  it('rejects non-envelope payloads', () => {
+    expect(() => mapWebhookEnvelope('nope')).toThrow(WbMappingError);
+    expect(() => mapWebhookEnvelope({ requestId: 'x' })).toThrow(WbMappingError);
+    expect(() => mapWebhookEnvelope({ events: [{ noType: true }] })).toThrow(WbMappingError);
+  });
+
+  it('exposes the envelope seller id for audit context', () => {
+    expect(webhookEnvelopeSellerId(DELIVERY)).toBe('fb25c9e9-cae8-52db-b68e-736c1466a3f5');
+    expect(webhookEnvelopeSellerId(null)).toBeNull();
+  });
+});
+
+describe('isWbWebhookSecretValid (Authorization header vs stored secret)', () => {
+  const SECRET = 'whsec-6f1d2c9e0a';
+
+  it('accepts only the exact secret', () => {
+    expect(isWbWebhookSecretValid(SECRET, SECRET)).toBe(true);
+    expect(isWbWebhookSecretValid('whsec-6f1d2c9e0b', SECRET)).toBe(false);
+    expect(isWbWebhookSecretValid(`${SECRET}x`, SECRET)).toBe(false);
+  });
+
+  it('rejects missing material on either side', () => {
+    expect(isWbWebhookSecretValid(null, SECRET)).toBe(false);
+    expect(isWbWebhookSecretValid(undefined, SECRET)).toBe(false);
+    expect(isWbWebhookSecretValid('', SECRET)).toBe(false);
+    expect(isWbWebhookSecretValid(SECRET, null)).toBe(false);
+    expect(isWbWebhookSecretValid(SECRET, '')).toBe(false);
   });
 });

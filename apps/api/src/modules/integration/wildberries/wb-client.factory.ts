@@ -26,6 +26,11 @@ export class WbClientFactory {
         'WB_STATISTICS_MIN_INTERVAL_MS',
         WB_DEFAULT_OPTIONS.statisticsMinIntervalMs,
       ),
+      webhooksMinIntervalMs: numberEnv(
+        this.config,
+        'WB_WEBHOOKS_MIN_INTERVAL_MS',
+        WB_DEFAULT_OPTIONS.webhooksMinIntervalMs,
+      ),
       marketplace4xxPenaltyMs: numberEnv(
         this.config,
         'WB_MARKETPLACE_4XX_PENALTY_MS',

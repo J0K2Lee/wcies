@@ -176,3 +176,67 @@ export function extractStatsRows(body: unknown): readonly WbStatsOrderRow[] {
   }
   return [];
 }
+
+// ---------------------------------------------------------------------------
+// Webhook management API (webhooks-api domain, docs verified 2026-09-18)
+// ---------------------------------------------------------------------------
+
+/** One webhook resource as returned by GET /api/v1/webhooks. */
+export interface WbWebhookResource {
+  readonly id?: number | string;
+  readonly url?: string;
+  readonly name?: string;
+  readonly enabled?: boolean;
+  readonly subscriptions?: readonly { scope?: string; event?: string }[];
+  readonly [key: string]: unknown;
+}
+
+/**
+ * POST /api/v1/webhooks response - carries the webhook SECRET, shown only at
+ * creation (docs §How to create). The exact field name is T0-calibration
+ * material (the doc says "the response returns the webhook secret" without
+ * naming it); `extractWebhookSecret` scans /secret/i keys instead of
+ * hard-coding a guess (AGENTS.md §88).
+ */
+export interface WbWebhookCreateResponse {
+  readonly [key: string]: unknown;
+}
+
+/** Tolerant list extraction: bare array or `{webhooks|data|items: [...]}`. */
+export function extractWebhookRows(body: unknown): readonly WbWebhookResource[] {
+  if (Array.isArray(body)) {
+    return body as readonly WbWebhookResource[];
+  }
+  if (typeof body === 'object' && body !== null) {
+    for (const key of ['webhooks', 'data', 'items']) {
+      const value = (body as Record<string, unknown>)[key];
+      if (Array.isArray(value)) {
+        return value as readonly WbWebhookResource[];
+      }
+    }
+  }
+  return [];
+}
+
+/**
+ * Finds the creation-response secret WITHOUT logging or echoing anything:
+ * scans top-level, then nested objects (bounded depth), for a /secret/i key
+ * whose value is a non-empty string. Returns null when nothing matches.
+ */
+export function extractWebhookSecret(response: unknown, depth = 2): string | null {
+  if (depth <= 0 || typeof response !== 'object' || response === null) {
+    return null;
+  }
+  for (const [key, value] of Object.entries(response as Record<string, unknown>)) {
+    if (/secret/i.test(key) && typeof value === 'string' && value !== '') {
+      return value;
+    }
+  }
+  for (const value of Object.values(response as Record<string, unknown>)) {
+    const nested = extractWebhookSecret(value, depth - 1);
+    if (nested !== null) {
+      return nested;
+    }
+  }
+  return null;
+}

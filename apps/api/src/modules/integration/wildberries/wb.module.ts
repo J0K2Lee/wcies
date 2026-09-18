@@ -15,7 +15,7 @@ import { WbClientFactory } from './wb-client.factory';
     },
     WbAdapter,
   ],
-  exports: [WbAdapter],
+  exports: [WbClient, WbAdapter],
 })
 export class WildberriesModule implements OnModuleInit {
   constructor(

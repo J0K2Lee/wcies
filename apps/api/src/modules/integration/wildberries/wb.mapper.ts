@@ -4,7 +4,10 @@ import {
   PlatformOrderItemRaw,
   PlatformOrderRaw,
   PlatformOrderStage,
+  PlatformWebhookEvent,
+  PlatformWebhookEventType,
 } from '@wcies/platform-contracts';
+import { timingSafeEqual } from 'node:crypto';
 import { DomainError } from '../../../common/errors/domain.error';
 import { WbCard, WbCardSize, WbStatsOrderRow, WbV3Order } from './types/api.types';
 
@@ -240,6 +243,110 @@ export function mapStatsRowToOrder(row: WbStatsOrderRow): PlatformOrderRaw {
     items: [item],
     rawData: { ...row },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Webhooks (docs verified 2026-09-18: webhooks-api event deliveries)
+// ---------------------------------------------------------------------------
+
+/**
+ * WB event type -> normalized contract type. Current catalog (docs
+ * §Available events): report_generation_complete / card_creation_error /
+ * card_changed / feedback_updated. ONLY card_changed maps to a known
+ * contract type (ITEM_CHANGED); everything else - including future types the
+ * platform adds - records as UNKNOWN (facts, never guessed).
+ */
+const WB_WEBHOOK_EVENT_TYPES: Readonly<Record<string, PlatformWebhookEventType>> = {
+  card_changed: 'ITEM_CHANGED',
+};
+
+/** One delivery event inside the envelope (docs §Event format). */
+export interface WbWebhookEventRaw {
+  readonly id?: string;
+  readonly time?: string;
+  readonly test?: boolean;
+  readonly type?: string;
+  readonly scope?: string;
+  readonly idempotencyKey?: string;
+  readonly payload?: Record<string, unknown>;
+  readonly [key: string]: unknown;
+}
+
+/**
+ * WB webhook delivery envelope -> normalized events. One delivery carries up
+ * to 100 events (docs §Event format). Each event keeps its OWN object as the
+ * payload (the raw-event row is per event; dedup rides the platform's
+ * idempotencyKey, falling back to the event id, falling back to payload
+ * hash). Order ids: content events reference cards, not orders - always [].
+ */
+export function mapWebhookEnvelope(payload: unknown): PlatformWebhookEvent[] {
+  if (typeof payload !== 'object' || payload === null) {
+    throw malformed('webhook envelope', 'not a JSON object');
+  }
+  const body = payload as Record<string, unknown>;
+  if (!Array.isArray(body.events)) {
+    throw malformed('webhook envelope', 'events array missing');
+  }
+  const events: PlatformWebhookEvent[] = [];
+  for (const raw of body.events as unknown[]) {
+    if (typeof raw !== 'object' || raw === null) {
+      throw malformed('webhook envelope event', 'not a JSON object');
+    }
+    const event = raw as WbWebhookEventRaw;
+    const type = readString(event.type);
+    if (type === null) {
+      throw malformed('webhook envelope event', 'type missing');
+    }
+    events.push({
+      eventType: WB_WEBHOOK_EVENT_TYPES[type] ?? 'UNKNOWN',
+      externalEventId: readString(event.idempotencyKey ?? null) ?? readString(event.id ?? null),
+      platformOrderIds: [],
+      payload: { ...(event as Record<string, unknown>) },
+    });
+  }
+  return events;
+}
+
+/** Delivery envelope's seller identity (audit/log context only). */
+export function webhookEnvelopeSellerId(payload: unknown): string | null {
+  if (typeof payload !== 'object' || payload === null) {
+    return null;
+  }
+  return readString((payload as Record<string, unknown>).sellerId ?? null);
+}
+
+/** True when the event is the platform's TEST probe (docs §Testing). */
+export function isWbTestWebhookEvent(event: PlatformWebhookEvent): boolean {
+  return event.payload['test'] === true;
+}
+
+/**
+ * Constant-time comparison of the delivery's Authorization header against
+ * the stored webhook secret (docs §Verifying event authenticity - the
+ * secret generated at creation time is the ONLY authenticity signal).
+ * A length mismatch still burns one compare to avoid a length oracle.
+ */
+export function isWbWebhookSecretValid(
+  headerValue: string | null | undefined,
+  expectedSecret: string | null | undefined,
+): boolean {
+  if (
+    headerValue === null ||
+    headerValue === undefined ||
+    headerValue === '' ||
+    expectedSecret === null ||
+    expectedSecret === undefined ||
+    expectedSecret === ''
+  ) {
+    return false;
+  }
+  const provided = Buffer.from(headerValue, 'utf8');
+  const expected = Buffer.from(expectedSecret, 'utf8');
+  if (provided.length !== expected.length) {
+    timingSafeEqual(expected, expected);
+    return false;
+  }
+  return timingSafeEqual(provided, expected);
 }
 
 // ---------------------------------------------------------------------------

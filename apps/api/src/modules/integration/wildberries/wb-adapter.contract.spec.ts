@@ -67,6 +67,7 @@ function makeWbHarness(): AdapterContractHarness {
     maxRetries: 0,
     perStoreMinIntervalMs: 0,
     statisticsMinIntervalMs: 0,
+    webhooksMinIntervalMs: 0,
     marketplace4xxPenaltyMs: 0,
     fetchImpl: fetchImpl as unknown as typeof fetch,
     sleep: async () => undefined,
