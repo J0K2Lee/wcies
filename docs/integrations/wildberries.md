@@ -14,6 +14,10 @@
 - 请求头 `Authorization: <token>`（无 Client ID 概念，**单 token 模式**）。
 - Token 为 JWT（RFC 7519），**自创建起 180 天有效**——到期必须到卖家后台换发；凭证管理需要到期提醒（见 §6 缺口）。
 - 四种类型：Personal(acc=3)/Service(acc=4)/Base(acc=1)/Test(acc=2)，卖家后台创建；Test token 仅沙箱可用。
+- **新授权方案（官方文章 25.09.2025，"Transition to New API Request Authorization"）**：
+  - `X-Client-Secret`（Service Secret，联系 business-solutions@rwb.ru 获取，180 天有效可重发）**只针对解决方案目录（Business Solutions Catalog）里的云服务**——用于标识「哪个服务在替卖家访问」；
+  - **on-premise 豁免（对 WCIES 关键）**："a ready-made corporate solution as an on-premise version deployed on seller's servers" 视为卖家自有集成，**无需 service secret，应使用卖家 Personal Token**；
+  - Personal Token = 自有集成（含 on-premise）专用，覆盖全部数据类别，禁止用于云服务；Base Token 面向基础类别集成，**部分新数据类别不可用**；Service Token 面向目录云服务（JWT payload `for: asid:{ServiceID}`，只对签发的服务有效）。
 - 凭证 payload 形态：`{ "apiKey": "<JWT>" }`（单字段，无 clientId）。
 - 错误码：`401` token 过期/错误/缺失；`403` 权限类别不符或方法被封；`429` 限流（响应头 `X-Ratelimit-Retry`/`-Limit`/`-Reset`/`-Remaining`）；**Marketplace 模块 4XX 一律按 10 次请求计费限流额度**。
 - 建议的凭证验证调用（validateCredential）：common 域 `GET https://common-api.wildberries.cn/api/v1/seller-info`（限流 1 req/min，返回卖家信息）；各域 `GET /ping` 是无鉴权存活探针，不能用于凭证验证。
@@ -102,7 +106,9 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
   - Personal（个人令牌）→ `403 "only service tokens are allowed"`；
   - **Base（基础令牌，「用于手动集成」tab 创建）→ 同样 403**（文档称 "A Service or Base token"，与实测不符，以实测为准）；
   - 唯一出路是**服务令牌**：只能在「为目录中的服务创建」tab 里、针对已入驻解决方案目录的服务创建——即**自部署单租户系统必须先把 WCIES 注册为 WB 解决方案目录的开发者/服务**（大概率需要独联体主体）。X-Client-Secret 校验层在 token 类型之后，实测未能到达。
-  - **结论：WB webhook 对当前自部署场景搁置**；数据链路用轮询（LISTING/ORDER_SYNC）。接收链路代码保留待命：将来拿到服务令牌 + 服务密钥后，订阅三步即可启用；或以任何其它方式创建订阅后，把投递 secret 配到店铺 WEBHOOK 凭证即可接收。
+  - **与新授权方案文章互相印证**：webhook API 本就是目录云服务的事件通道（"available to all services from the Catalog"），on-premise 系统没有服务身份（asid），不在其设计对象内——403 行为与文章模型一致。
+  - **结论：WB webhook 对当前自部署场景搁置**；数据链路用轮询（LISTING/ORDER_SYNC）。接收链路代码保留待命：将来若把 WCIES 注册进目录（联系 business-solutions@rwb.ru，需评估主体资质）拿到服务令牌 + 服务密钥，订阅三步即可启用；或以任何其它方式创建订阅后，把投递 secret 配到店铺 WEBHOOK 凭证即可接收。
+  - **主凭证类型建议：Personal**——按官方模型，on-premise 自有集成应使用 Personal Token（全类别 + 明确豁免 service secret）；Base Token 有限制（部分新数据类别不可用，且目录服务场景下要求签名 secret，存在未来扩大执行的风险）。
   - Base 令牌本身对常规卖家 API 完全可用（seller-info / content / statistics 均接受，凭证验证 VALID），替换主凭证无副作用。
 - **当前事件目录（无订单事件！）**：`report_generation_complete`（contentanalytics）、`card_creation_error`、`card_changed`（content）、`feedback_updated`（questionsandfeedback）。最新列表走 `GET /api/v1/event-scopes`。订单同步的兜底仍是轮询。
 - **投递格式**：`{sellerId, requestId, events[]}`，单请求最多 100 个事件；每个事件 `{id, time, test, type, scope, idempotencyKey, payload}`。幂等去重键 = `idempotencyKey`。
