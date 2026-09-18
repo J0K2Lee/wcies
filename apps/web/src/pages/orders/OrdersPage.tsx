@@ -875,9 +875,40 @@ export function OrdersPage() {
       apiPost<{ tasks: Array<{ pickingNo: string }> }>('/api/v1/picking-tasks', { orderId }),
     onSuccess: (result) => {
       message.success(`已创建拣货任务：${result.tasks.map((task) => task.pickingNo).join('、')}`);
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
       void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
     },
     onError: (error: Error) => message.error(`创建失败：${error.message}`),
+  });
+
+  // 自动创建拣货任务（2026-09-18 用户指示）：为当前筛选店铺下所有「待拣货」
+  // 订单批量生成拣货单；已有进行中任务的订单由后端跳过（幂等）。
+  const autoCreatePickingMutation = useMutation({
+    mutationFn: (filterStoreId: string | undefined) =>
+      apiPost<{
+        candidates: number;
+        created: number;
+        skipped: number;
+        failed: number;
+        createdTaskNos: string[];
+        failures: Array<{ orderNo: string; code: string; message: string }>;
+      }>('/api/v1/picking-tasks/auto-create', {
+        ...(filterStoreId !== undefined && filterStoreId !== '' ? { storeId: filterStoreId } : {}),
+        limit: 100,
+      }),
+    onSuccess: (result) => {
+      const parts = [`新建 ${result.created} 个任务`];
+      if (result.skipped > 0) {
+        parts.push(`跳过 ${result.skipped}（已有进行中任务）`);
+      }
+      if (result.failed > 0) {
+        parts.push(`失败 ${result.failed}`);
+      }
+      message.success(`自动创建拣货任务：${parts.join('，')}`);
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
+    },
+    onError: (error: Error) => message.error(`自动创建失败：${error.message}`),
   });
 
   const registerPurchaseMutation = useMutation({
@@ -1232,13 +1263,30 @@ export function OrdersPage() {
       return {
         defaultCollapsed: true,
         children: (
-          <ContextSection title="订单概览">
-            <ContextMetric label="当前筛选" value={`${query.data?.meta.total ?? 0} 单`} />
-            <ContextMetric label="待处理" value={pendingCount.data?.meta.total ?? 0} />
-            <ContextMetric label="待收货" value={inTransitCount.data?.meta.total ?? 0} />
-            <ContextMetric label="已完成" value={completedCount.data?.meta.total ?? 0} />
-            <RailHint>点击订单行快速预览风险与状态；缺货订单可在右栏重试分配或登记采购。</RailHint>
-          </ContextSection>
+          <>
+            <ContextSection title="订单概览">
+              <ContextMetric label="当前筛选" value={`${query.data?.meta.total ?? 0} 单`} />
+              <ContextMetric label="待处理" value={pendingCount.data?.meta.total ?? 0} />
+              <ContextMetric label="待收货" value={inTransitCount.data?.meta.total ?? 0} />
+              <ContextMetric label="已完成" value={completedCount.data?.meta.total ?? 0} />
+              <RailHint>
+                点击订单行快速预览风险与状态；缺货订单可在右栏重试分配或登记采购。
+              </RailHint>
+            </ContextSection>
+            <ContextAction>
+              <Button
+                block
+                type="primary"
+                loading={autoCreatePickingMutation.isPending}
+                onClick={() => autoCreatePickingMutation.mutate(storeId)}
+              >
+                自动创建拣货任务
+              </Button>
+              <RailHint>
+                为当前店铺筛选下所有「待拣货」订单批量生成拣货单；已有进行中任务的订单自动跳过。
+              </RailHint>
+            </ContextAction>
+          </>
         ),
       };
     }
@@ -1412,6 +1460,22 @@ export function OrdersPage() {
             <Button block onClick={() => setDetailId(selectedRow.id)}>
               查看详情
             </Button>
+            {/* 待拣货订单的主操作（2026-09-18 从详情弹窗迁至右栏操作区）：
+                仅 READY_TO_PICK 且有 RESERVED 行、且无进行中拣货任务时显示。 */}
+            {selectedRow.erpStatus === 'READY_TO_PICK' &&
+              !(railDetail?.pickingTasks ?? []).some(
+                (task) => task.status === 'CREATED' || task.status === 'IN_PROGRESS',
+              ) && (
+                <Button
+                  block
+                  type="primary"
+                  style={{ marginTop: 8 }}
+                  loading={createPickingMutation.isPending}
+                  onClick={() => createPickingMutation.mutate(selectedRow.id)}
+                >
+                  创建拣货任务
+                </Button>
+              )}
             {/* 快速建档 = 操作区主操作（就地弹窗，不跳转工作台）。作用于第一个
                 可定位的映射失败行；弹窗内可切换该商品链接的其它未映射变体。 */}
             {failedMappingItems.length > 0 &&
@@ -1469,6 +1533,8 @@ export function OrdersPage() {
     selectedRow,
     railDetail,
     retryMutation.isPending,
+    createPickingMutation.isPending,
+    autoCreatePickingMutation.isPending,
     query.data,
     pendingCount.data,
     inTransitCount.data,
@@ -1477,6 +1543,7 @@ export function OrdersPage() {
     modal,
     onboardLookupPending,
     openQuickOnboard,
+    storeId,
   ]);
   useContextRail(railContent);
 
@@ -2081,19 +2148,7 @@ export function OrdersPage() {
                 ]}
               />
             </div>
-            <div style={{ marginBottom: 16 }}>
-              <Button
-                type="primary"
-                loading={createPickingMutation.isPending}
-                disabled={
-                  detail.erpStatus === 'CANCELLED' ||
-                  !detail.items.some((item) => item.fulfillmentStatus === 'RESERVED')
-                }
-                onClick={() => createPickingMutation.mutate(detail.id)}
-              >
-                创建拣货任务
-              </Button>
-            </div>
+
             <Tabs
               items={[
                 {

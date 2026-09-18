@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString, IsUUID, Length } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
+import { Type } from 'class-transformer';
 import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
 import { PICKING_ITEM_STATUSES, PICKING_TASK_STATUSES } from '../enums/picking.constants';
 
@@ -11,6 +12,43 @@ export class CreatePickingTaskRequestDto {
   @ApiProperty({ description: '从该订单的 RESERVED 行生成拣货任务（按仓拆分）' })
   @IsUUID()
   orderId!: string;
+}
+
+/** 自动创建拣货任务（批量：erpStatus = READY_TO_PICK 的订单）。 */
+export class AutoCreatePickingTasksRequestDto {
+  @ApiPropertyOptional({ format: 'uuid', description: '仅处理该店铺的订单；省略 = 全部店铺' })
+  @IsOptional()
+  @IsUUID()
+  storeId?: string;
+
+  @ApiPropertyOptional({ default: 100, maximum: 200, description: '单次批量上限' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  limit?: number;
+}
+
+export class AutoCreatePickingTasksResultDto {
+  @ApiProperty({ description: '候选订单数（READY_TO_PICK）' }) candidates!: number;
+  @ApiProperty({ description: '成功创建任务的订单数' }) created!: number;
+  @ApiProperty({ description: '跳过数（已有进行中的拣货任务）' }) skipped!: number;
+  @ApiProperty({ description: '失败数（域错误，逐单记录）' }) failed!: number;
+  @ApiProperty({ type: [String], description: '新建的拣货单号' }) createdTaskNos!: string[];
+  @ApiProperty({
+    type: 'array',
+    items: {
+      type: 'object',
+      properties: {
+        orderNo: { type: 'string' },
+        code: { type: 'string' },
+        message: { type: 'string' },
+      },
+    },
+    description: '失败明细',
+  })
+  failures!: Array<{ orderNo: string; code: string; message: string }>;
 }
 
 export class PickingScanRequestDto {

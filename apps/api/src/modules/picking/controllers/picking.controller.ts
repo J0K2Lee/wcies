@@ -7,6 +7,8 @@ import { ApiOkEnvelope, ApiOkPagedEnvelope } from '../../../common/swagger/api-e
 import { PickingService } from '../services/picking.service';
 import {
   CreatePickingTaskRequestDto,
+  AutoCreatePickingTasksRequestDto,
+  AutoCreatePickingTasksResultDto,
   CreatePickingTaskResultDto,
   PickingScanRequestDto,
   PickingScanResultDto,
@@ -42,6 +44,24 @@ export class PickingController {
     return ok<CreatePickingTaskResultDto>({
       tasks: await this.pickingService.createPickingTask(request.orderId, operator),
     });
+  }
+
+  @Post('auto-create')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: '自动为待拣货（READY_TO_PICK）订单创建拣货任务（跳过已有进行中任务的订单）',
+  })
+  @ApiOkEnvelope(AutoCreatePickingTasksResultDto)
+  async autoCreate(
+    @Body() request: AutoCreatePickingTasksRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ) {
+    return ok<AutoCreatePickingTasksResultDto>(
+      await this.pickingService.autoCreateForReadyOrders(operator, {
+        storeId: request.storeId,
+        limit: request.limit ?? 100,
+      }),
+    );
   }
 
   @Get(':id')

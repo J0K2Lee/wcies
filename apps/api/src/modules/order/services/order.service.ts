@@ -71,6 +71,26 @@ export class OrderService {
   // Reads
   // --------------------------------------------------------------------------
 
+  /**
+   * 自动拣货批量入口的候选集（2026-09-18 用户指示）：erpStatus =
+   * READY_TO_PICK（待拣货）的订单，可按店铺过滤，按订单时间倒序取 limit 条。
+   * 只返回标识，拣货任务的创建/去重由 picking 模块负责（AGENTS §7/§9）。
+   */
+  async listReadyToPickOrders(filters: {
+    storeId?: string;
+    limit: number;
+  }): Promise<Array<{ id: string; orderNo: string }>> {
+    const { rows } = await this.orderRepo.listWithAggregates(
+      {
+        erpStatus: 'READY_TO_PICK',
+        ...(filters.storeId !== undefined ? { storeId: filters.storeId } : {}),
+      },
+      filters.limit,
+      0,
+    );
+    return rows.map((row) => ({ id: row.order.id, orderNo: row.order.orderNo }));
+  }
+
   async list(
     filters: OrderListFilters & { pendingProcurement?: boolean },
     page: { page: number; pageSize: number },

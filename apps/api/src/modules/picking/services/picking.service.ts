@@ -10,6 +10,7 @@ import { ReservationService } from '../../inventory/services/reservation.service
 import { InventoryQueryService } from '../../inventory/services/inventory-query.service';
 import { OrderService } from '../../order/services/order.service';
 import { OrderInvalidStateError } from '../../order/errors/order.errors';
+import { DomainError } from '../../../common/errors/domain.error';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { formatQty, parseQty, qtyFromDb } from '../../../common/utils/quantity';
 import { PickingTaskEntity } from '../entities/picking-task.entity';
@@ -138,6 +139,62 @@ export class PickingService implements OrderPickingStatePort {
     }
 
     return Promise.all(createdTasks.map((task) => this.toListItem(task.id)));
+  }
+
+  /**
+   * 自动为待拣货订单批量创建拣货任务（2026-09-18 用户指示）。
+   *
+   * 候选 = erpStatus READY_TO_PICK（可按店铺过滤）；已有进行中任务
+   * （CREATED/IN_PROGRESS 且含未拣行）的订单跳过——重复点击不会产生重复
+   * 拣货单。单笔失败（域错误）记录后继续，不拖垮整批（AGENTS §49 精神）；
+   * 系统错误照常抛出。创建动作与单笔路径共用 createPickingTask（含操
+   * 作日志）。
+   */
+  async autoCreateForReadyOrders(
+    operator: OperatorContext,
+    options: { storeId?: string; limit: number },
+  ): Promise<{
+    candidates: number;
+    created: number;
+    skipped: number;
+    failed: number;
+    createdTaskNos: string[];
+    failures: Array<{ orderNo: string; code: string; message: string }>;
+  }> {
+    const orders = await this.orderService.listReadyToPickOrders(options);
+    const createdTaskNos: string[] = [];
+    const failures: Array<{ orderNo: string; code: string; message: string }> = [];
+    let created = 0;
+    let skipped = 0;
+    let failed = 0;
+    for (const order of orders) {
+      if ((await this.countActivePickingItems(order.id)) > 0) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        const tasks = await this.createPickingTask(order.id, operator);
+        created += 1;
+        for (const task of tasks) {
+          createdTaskNos.push(task.pickingNo);
+        }
+      } catch (error: unknown) {
+        if (error instanceof DomainError) {
+          failed += 1;
+          failures.push({ orderNo: order.orderNo, code: error.code, message: error.message });
+          continue;
+        }
+        throw error;
+      }
+    }
+    this.logger.info('auto picking creation finished', {
+      module: 'picking',
+      candidates: orders.length,
+      created,
+      skipped,
+      failed,
+    });
+    return { candidates: orders.length, created, skipped, failed, createdTaskNos, failures };
   }
 
   async start(taskId: string, operator: OperatorContext): Promise<PickingTaskDetailDto> {

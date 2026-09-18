@@ -14,6 +14,7 @@ import { OperationLogService } from '../../operation-log/operation-log.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { PickingTaskEntity } from '../entities/picking-task.entity';
 import { PickingTaskItemEntity } from '../entities/picking-task-item.entity';
+import { PickingNoEligibleItemsError } from '../errors/picking.errors';
 const OPERATOR = { userId: null, username: 'test' };
 
 function makeTask(status: PickingTaskEntity['status'] = 'IN_PROGRESS'): PickingTaskEntity {
@@ -135,6 +136,7 @@ function build(input: {
   const recomputeAfterPick = vi.fn().mockResolvedValue('PICKED');
   const orderService = {
     listReservedItemsForPicking: vi.fn(),
+    listReadyToPickOrders: vi.fn().mockResolvedValue([]),
     getOrderOrThrow: vi.fn().mockResolvedValue({ id: 'order-1', orderNo: 'ORD1' }),
     markItemPickedInTx,
     recomputeAfterPick,
@@ -178,7 +180,7 @@ function build(input: {
   const operationLog = {
     record: vi.fn().mockResolvedValue(undefined),
   } as unknown as OperationLogService;
-  const logger = { log: vi.fn(), warn: vi.fn() } as unknown as AppLoggerService;
+  const logger = { log: vi.fn(), info: vi.fn(), warn: vi.fn() } as unknown as AppLoggerService;
   const service = new PickingService(
     dataSource,
     taskRepo,
@@ -319,5 +321,63 @@ describe('PickingService state port (order rollup / cancel blockers)', () => {
     hasPickedProgress.mockResolvedValue(true);
     await expect(service.countActivePickingItems('order-1')).resolves.toBe(2);
     await expect(service.hasPickedProgress('order-1')).resolves.toBe(true);
+  });
+});
+
+describe('PickingService.autoCreateForReadyOrders (2026-09-18 批量入口)', () => {
+  it('creates for eligible orders, skips active ones, isolates per-order domain failures', async () => {
+    const { service, orderService, countActivePickingItems } = build({ items: [makeItem()] });
+    vi.mocked(orderService.listReadyToPickOrders).mockResolvedValue([
+      { id: 'o1', orderNo: 'ORD1' },
+      { id: 'o2', orderNo: 'ORD2' },
+      { id: 'o3', orderNo: 'ORD3' },
+    ]);
+    vi.mocked(countActivePickingItems)
+      .mockResolvedValueOnce(0) // o1 -> create
+      .mockResolvedValueOnce(1) // o2 -> skip (active task exists)
+      .mockResolvedValueOnce(0); // o3 -> domain failure
+    const createSpy = vi
+      .spyOn(service, 'createPickingTask')
+      .mockResolvedValueOnce([{ pickingNo: 'PCK00000001' } as never])
+      .mockRejectedValueOnce(new PickingNoEligibleItemsError({ orderId: 'o3' }));
+
+    const result = await service.autoCreateForReadyOrders(OPERATOR, { limit: 100 });
+
+    expect(result).toMatchObject({ candidates: 3, created: 1, skipped: 1, failed: 1 });
+    expect(result.createdTaskNos).toEqual(['PCK00000001']);
+    expect(result.failures).toEqual([
+      expect.objectContaining({ orderNo: 'ORD3', code: 'PICKING_NO_ELIGIBLE_ITEMS' }),
+    ]);
+    expect(createSpy).toHaveBeenCalledTimes(2); // o1 attempted, o2 skipped, o3 attempted
+    expect(orderService.listReadyToPickOrders).toHaveBeenCalledWith({ limit: 100 });
+  });
+
+  it('passes the store filter through and reports an empty candidate set', async () => {
+    const { service, orderService } = build({ items: [makeItem()] });
+    vi.mocked(orderService.listReadyToPickOrders).mockResolvedValue([]);
+
+    const result = await service.autoCreateForReadyOrders(OPERATOR, {
+      storeId: 'store-1',
+      limit: 50,
+    });
+
+    expect(orderService.listReadyToPickOrders).toHaveBeenCalledWith({
+      storeId: 'store-1',
+      limit: 50,
+    });
+    expect(result).toMatchObject({ candidates: 0, created: 0, skipped: 0, failed: 0 });
+  });
+
+  it('rethrows system errors (only domain errors are isolated)', async () => {
+    const { service, orderService, countActivePickingItems } = build({ items: [makeItem()] });
+    vi.mocked(orderService.listReadyToPickOrders).mockResolvedValue([
+      { id: 'o1', orderNo: 'ORD1' },
+    ]);
+    vi.mocked(countActivePickingItems).mockResolvedValue(0);
+    vi.spyOn(service, 'createPickingTask').mockRejectedValueOnce(new Error('db down'));
+
+    await expect(service.autoCreateForReadyOrders(OPERATOR, { limit: 100 })).rejects.toThrow(
+      'db down',
+    );
   });
 });
