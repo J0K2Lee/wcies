@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { App as AntdApp, Button, Drawer, Form, Input, Modal, Select, Space } from 'antd';
+import { App as AntdApp, Button, Checkbox, Drawer, Form, Input, Modal, Select, Space } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { apiDelete, apiPatch, apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime } from '../../utils/format';
@@ -130,6 +130,9 @@ export function WarehousesPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [bindOpen, setBindOpen] = useState(false);
   const [bindStoreId, setBindStoreId] = useState<string | undefined>();
+  // 手动录入兜底（2026-09-18）：WB 目录接口被平台禁用、Yandex FBY 平台仓
+  // 不在目录数据源中——目录为空/不可用时允许直接录入平台仓库 ID。
+  const [manualBind, setManualBind] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
   // Snapshot taken when the batch modal opens so a closing drawer can't blank
   // the path parameter (modal chain fix); the shared modal keeps it too.
@@ -141,6 +144,7 @@ export function WarehousesPage() {
   const [bindForm] = Form.useForm<{
     storeId: string;
     platformWarehouseId: string;
+    fulfillmentMode?: string;
     remarkName?: string;
   }>();
 
@@ -263,6 +267,8 @@ export function WarehousesPage() {
       setBindOpen(false);
       bindForm.resetFields();
       setBindStoreId(undefined);
+      setManualBind(false);
+      setManualBind(false);
       refreshAll();
     },
     onError: (error: Error) => void message.error(error.message),
@@ -328,6 +334,7 @@ export function WarehousesPage() {
 
   const openBindModal = (row: WarehouseRow) => {
     setBindStoreId(undefined);
+    setManualBind(false);
     bindForm.resetFields();
     setBindOpen(true);
     void row;
@@ -893,10 +900,26 @@ export function WarehousesPage() {
         onCancel={() => {
           setBindOpen(false);
           setBindStoreId(undefined);
+          setManualBind(false);
+          setManualBind(false);
+          setManualBind(false);
           bindForm.resetFields();
         }}
         onOk={() => {
           void bindForm.validateFields().then((values) => {
+            if (manualBind) {
+              // 手动录入：平台仓库 ID 由操作者提供（目录缺失兜底）。
+              bindMutation.mutate({
+                warehouseId: selectedRow?.id ?? detailRow?.id ?? '',
+                values: {
+                  storeId: values.storeId,
+                  platformWarehouseId: String(values.platformWarehouseId).trim(),
+                  fulfillmentMode: values.fulfillmentMode,
+                  remarkName: values.remarkName,
+                },
+              });
+              return;
+            }
             const option = (platformWarehouses.data?.data ?? []).find(
               (candidate) => candidate.platformWarehouseId === values.platformWarehouseId,
             );
@@ -938,44 +961,94 @@ export function WarehousesPage() {
                 value: store.id,
                 label: `${store.storeCode} · ${store.name}（${store.platformCode}）`,
               }))}
-              onChange={(value: string) => setBindStoreId(value)}
+              onChange={(value: string) => {
+                setBindStoreId(value);
+                setManualBind(false);
+              }}
             />
           </Form.Item>
-          <Form.Item
-            name="platformWarehouseId"
-            label="平台仓库"
-            rules={[{ required: true, message: '请选择平台仓库' }]}
-            extra={
-              selectedRow !== null && allowedModesOfSelected.size === 0
-                ? '当前仓库类型（退货暂存仓）不支持绑定平台仓库'
-                : undefined
-            }
-          >
-            <Select
-              showSearch
-              optionFilterProp="label"
-              loading={platformWarehouses.isLoading}
+          <Form.Item>
+            <Checkbox
+              checked={manualBind}
               disabled={bindStoreId === undefined || bindStoreId === ''}
-              placeholder={
-                bindStoreId === undefined || bindStoreId === ''
-                  ? '请先选择店铺'
-                  : platformWarehouses.isLoading
-                    ? '平台仓库加载中…'
-                    : '选择平台仓库'
-              }
-              options={(platformWarehouses.data?.data ?? []).map((option) => {
-                const allowed = allowedModesOfSelected.has(option.fulfillmentMode);
-                const meta = FULFILLMENT_MODE_META[option.fulfillmentMode];
-                return {
-                  value: option.platformWarehouseId,
-                  label: `${option.name} · ${meta?.label ?? option.fulfillmentMode}（${
-                    TYPE_LABEL[selectedRow?.warehouseType ?? ''] ?? selectedRow?.warehouseType
-                  }${allowed ? '' : '·类型不符'}）`,
-                  disabled: !allowed,
-                };
-              })}
-            />
+              onChange={(e) => setManualBind(e.target.checked)}
+            >
+              平台仓库不在目录中（如 WB 目录接口未开放、Yandex FBY 平台仓）——手动录入
+            </Checkbox>
           </Form.Item>
+          {manualBind ? (
+            <>
+              <Form.Item
+                name="platformWarehouseId"
+                label="平台仓库 ID"
+                rules={[
+                  { required: true, message: '请输入平台仓库 ID' },
+                  { min: 1, max: 64, message: '长度 1-64 字符' },
+                ]}
+                extra="从平台卖家后台复制的仓库 ID；绑定后可用备注名标记用途。"
+              >
+                <Input placeholder="如 2327243" maxLength={64} />
+              </Form.Item>
+              <Form.Item
+                name="fulfillmentMode"
+                label="履约模式"
+                rules={[{ required: true, message: '请选择履约模式' }]}
+              >
+                <Select
+                  options={Object.entries(FULFILLMENT_MODE_META)
+                    .filter(([mode]) => {
+                      const platformCode = (storesForBind.data?.data ?? []).find(
+                        (store) => store.id === bindStoreId,
+                      )?.platformCode;
+                      if (platformCode !== undefined && !mode.startsWith(`${platformCode}_`)) {
+                        return false;
+                      }
+                      return allowedModesOfSelected.size === 0 || allowedModesOfSelected.has(mode);
+                    })
+                    .map(([mode, meta]) => ({ value: mode, label: meta.label }))}
+                  placeholder="选择该平台仓库的履约模式"
+                />
+              </Form.Item>
+            </>
+          ) : (
+            <Form.Item
+              name="platformWarehouseId"
+              label="平台仓库"
+              rules={[{ required: true, message: '请选择平台仓库' }]}
+              extra={
+                selectedRow !== null && allowedModesOfSelected.size === 0
+                  ? '当前仓库类型（退货暂存仓）不支持绑定平台仓库'
+                  : undefined
+              }
+            >
+              <Select
+                showSearch
+                optionFilterProp="label"
+                loading={platformWarehouses.isLoading}
+                disabled={bindStoreId === undefined || bindStoreId === ''}
+                placeholder={
+                  bindStoreId === undefined || bindStoreId === ''
+                    ? '请先选择店铺'
+                    : platformWarehouses.isLoading
+                      ? '平台仓库加载中…'
+                      : (platformWarehouses.data?.data ?? []).length === 0
+                        ? '目录为空——可勾选上方手动录入'
+                        : '选择平台仓库'
+                }
+                options={(platformWarehouses.data?.data ?? []).map((option) => {
+                  const allowed = allowedModesOfSelected.has(option.fulfillmentMode);
+                  const meta = FULFILLMENT_MODE_META[option.fulfillmentMode];
+                  return {
+                    value: option.platformWarehouseId,
+                    label: `${option.name} · ${meta?.label ?? option.fulfillmentMode}（${
+                      TYPE_LABEL[selectedRow?.warehouseType ?? ''] ?? selectedRow?.warehouseType
+                    }${allowed ? '' : '·类型不符'}）`,
+                    disabled: !allowed,
+                  };
+                })}
+              />
+            </Form.Item>
+          )}
           <Form.Item name="remarkName" label="备注名（选填）">
             <Input maxLength={255} placeholder="如 俄东主仓" />
           </Form.Item>

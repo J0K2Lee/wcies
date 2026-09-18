@@ -35,8 +35,10 @@ export class YandexWarehouseService {
     const response = await this.client.businessWarehouses(auth, context.storeId, {
       businessId: identity.businessId,
     });
+    // T0 校准（2026-09-18 live）：POST 分页变体响应为 {status, result:{warehouses}}。
+    const warehouses = response.result?.warehouses ?? [];
     const options: PlatformWarehouseOption[] = [];
-    for (const warehouse of response.warehouses ?? []) {
+    for (const warehouse of warehouses) {
       const name =
         typeof warehouse.name === 'string' && warehouse.name !== ''
           ? warehouse.name

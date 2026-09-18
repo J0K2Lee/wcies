@@ -153,11 +153,19 @@ export interface YxReturnsResponse {
 export interface YxWarehouse {
   readonly id?: number | string;
   readonly name?: string;
+  /** 归属 campaign（T0 2026-09-18 live：POST 分页变体返回该字段）。 */
+  readonly campaignId?: number | string;
+  readonly express?: boolean;
   readonly [key: string]: unknown;
 }
 
+/** T0 校准（2026-09-18 live）：POST 分页变体响应为 {status, result:{warehouses, paging}}。 */
 export interface YxWarehousesResponse {
-  readonly warehouses?: readonly YxWarehouse[];
+  readonly status?: string;
+  readonly result?: {
+    readonly warehouses?: readonly YxWarehouse[];
+    readonly paging?: { readonly nextPageToken?: string };
+  };
   readonly [key: string]: unknown;
 }
 

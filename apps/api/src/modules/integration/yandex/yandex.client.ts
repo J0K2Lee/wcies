@@ -142,8 +142,12 @@ export class YandexClient {
     });
   }
 
-  /** Seller-side FBS/DBS warehouses (docs §6; FBY platform warehouses are
-   * NOT part of this response - a documented data-source gap). */
+  /**
+   * Seller-side FBS/DBS warehouses (docs §6). T0 校准（2026-09-18 live）：
+   * GET 变体对 Api-Key 令牌返回 401 OAuth / 空列表；**分页 POST 变体**
+   * （{status, result:{warehouses, paging}}）才是可用形状，且响应带
+   * campaignId（yandex.md §8.1 建议的后续验证点）。
+   */
   async businessWarehouses(
     auth: YxAuth,
     storeId: string,
@@ -152,7 +156,8 @@ export class YandexClient {
     return this.request<YxWarehousesResponse>(auth, {
       endpoint: `/v2/businesses/${encodeURIComponent(input.businessId)}/warehouses`,
       storeId,
-      method: 'GET',
+      method: 'POST',
+      body: {},
     });
   }
 
