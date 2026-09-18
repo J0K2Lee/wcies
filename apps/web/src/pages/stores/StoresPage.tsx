@@ -165,6 +165,12 @@ interface PlatformCredentialSpec {
    * 用 Campaign/Business ID），不显示该字段。店铺实体字段保留（§99）。
    */
   showsSellerId: boolean;
+  /**
+   * 凭证表单是否显示可选的 Campaign ID 输入（2026-09-18）：YANDEX 的一个
+   * Api-Key 覆盖整个柜面，多 campaign 令牌必须在凭证 payload 里显式指定
+   * campaignId（yandex.adapter 的身份解析规则），单 campaign 令牌可留空。
+   */
+  showsCampaignId?: boolean;
 }
 
 const PLATFORM_CREDENTIAL_SPECS: Record<string, PlatformCredentialSpec> = {
@@ -182,6 +188,7 @@ const PLATFORM_CREDENTIAL_SPECS: Record<string, PlatformCredentialSpec> = {
     hint: '所需凭证：API 密钥（卖家后台直接创建，永久有效；令牌覆盖多店铺时可额外指定 Campaign ID）。',
     needsClientId: false,
     showsSellerId: false,
+    showsCampaignId: true,
   },
 };
 
@@ -358,12 +365,22 @@ export function StoresPage() {
     // 店铺 payload，店铺创建成功后立即用同一份输入配置 MAIN_API 凭证。
     // 凭证保存失败不回滚店铺（店铺已存在事实），提示到详情页补配。
     mutationFn: async (values: Record<string, unknown>) => {
-      const { credentialClientId, credentialApiKey, ...storePayload } = values;
+      const { credentialClientId, credentialApiKey, credentialCampaignId, ...storePayload } =
+        values;
       const created = await apiPost<StoreRow>('/api/v1/stores', storePayload);
       if (typeof credentialApiKey === 'string' && credentialApiKey !== '') {
-        const payload = credentialSpecForPlatform(createPlatformCode).needsClientId
-          ? { clientId: (credentialClientId as string) ?? '', apiKey: credentialApiKey }
+        const spec = credentialSpecForPlatform(createPlatformCode);
+        const payload: Record<string, unknown> = spec.needsClientId
+          ? { clientId: credentialClientId ?? '', apiKey: credentialApiKey }
           : { apiKey: credentialApiKey };
+        // YANDEX 多 campaign 令牌的身份解析依赖显式 campaignId（adapter 契约）。
+        if (
+          spec.showsCampaignId === true &&
+          typeof credentialCampaignId === 'string' &&
+          credentialCampaignId.trim() !== ''
+        ) {
+          payload.campaignId = credentialCampaignId.trim();
+        }
         await apiPost(
           '/api/v1/stores/{storeId}/credentials',
           { credentialType: 'MAIN_API', payload },
@@ -387,15 +404,25 @@ export function StoresPage() {
     mutationFn: (values: {
       clientId?: string;
       apiKey: string;
+      campaignId?: string;
       storeId: string;
       credentialId?: string;
     }) => {
       // Per-platform payload (user suggestion #14): platforms whose MAIN_API
       // needs only an API key must not submit an empty clientId — the payload
       // keys are decided by the adapter contract, OZON = { clientId, apiKey }.
-      const payload = credentialSpecForPlatform(credentialPlatformCode).needsClientId
+      const spec = credentialSpecForPlatform(credentialPlatformCode);
+      const payload: Record<string, unknown> = spec.needsClientId
         ? { clientId: values.clientId ?? '', apiKey: values.apiKey }
         : { apiKey: values.apiKey };
+      // YANDEX 多 campaign 令牌的身份解析依赖显式 campaignId（adapter 契约）。
+      if (
+        spec.showsCampaignId === true &&
+        values.campaignId !== undefined &&
+        values.campaignId.trim() !== ''
+      ) {
+        payload.campaignId = values.campaignId.trim();
+      }
       return values.credentialId === undefined
         ? apiPost(
             '/api/v1/stores/{storeId}/credentials',
@@ -1143,6 +1170,16 @@ export function StoresPage() {
                     <Input placeholder="OZON 后台的 Client ID" />
                   </Form.Item>
                 )}
+                {spec.showsCampaignId === true && (
+                  <Form.Item
+                    name="credentialCampaignId"
+                    label="Campaign ID"
+                    preserve={false}
+                    extra="一个 Api-Key 覆盖柜面下多个店铺时必填（卖家后台店铺列表里的 partnerId）；单店铺令牌可留空。"
+                  >
+                    <Input placeholder="如 216881164" />
+                  </Form.Item>
+                )}
                 <Form.Item
                   name="credentialApiKey"
                   label="API Key"
@@ -1200,6 +1237,15 @@ export function StoresPage() {
                     rules={[{ required: true, message: '请输入 Client ID' }]}
                   >
                     <Input placeholder="OZON 后台的 Client ID" />
+                  </Form.Item>
+                )}
+                {spec.showsCampaignId === true && (
+                  <Form.Item
+                    name="campaignId"
+                    label="Campaign ID"
+                    extra="一个 Api-Key 覆盖柜面下多个店铺时必填（卖家后台店铺列表里的 partnerId）；单店铺令牌可留空。"
+                  >
+                    <Input placeholder="如 216881164" />
                   </Form.Item>
                 )}
                 <Form.Item
