@@ -125,6 +125,21 @@ export class ShipmentRepository {
   }
 
   /**
+   * Live (non-CANCELLED) shipments of an order - the one-click outbound flow
+   * ships whatever already exists and only creates what is missing, so a
+   * repeated 发货 never duplicates shipments (2026-09-18).
+   */
+  async listLiveByOrderId(orderId: string): Promise<ShipmentEntity[]> {
+    return this.dataSource
+      .getRepository(ShipmentEntity)
+      .createQueryBuilder('shipment')
+      .where('shipment.order_id = :orderId', { orderId })
+      .andWhere('shipment.status != :cancelled', { cancelled: 'CANCELLED' })
+      .orderBy('shipment.created_at', 'ASC')
+      .getMany();
+  }
+
+  /**
    * The live (non-cancelled) shipment an order item is ACTIVELY assigned to.
    * VOIDED assignment rows are history and are ignored, so a repeated
    * interception return cannot pick up an already-voided line.

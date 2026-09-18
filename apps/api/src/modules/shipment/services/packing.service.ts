@@ -217,6 +217,126 @@ export class PackingService {
   }
 
   // --------------------------------------------------------------------------
+  // Bulk pack (one-click outbound, 2026-09-18)
+  // --------------------------------------------------------------------------
+
+  /**
+   * Packs the shipment's ENTIRE remaining demand into one existing OPEN /
+   * REPACK_REQUIRED package in a single transaction - the packing step of the
+   * one-click 发货 flow, where nobody scans barcodes by hand.
+   *
+   * It is NOT a bypass of the packing rules: every invariant of `scanItem` is
+   * enforced here (shipment-row lock, package lock, demand never exceeded,
+   * SN-tracked SKUs must carry their PICKED serials) - only the unit-by-unit
+   * barcode loop is replaced by "take exactly what the snapshot still owes".
+   * Packing still never touches stock.
+   *
+   * Returns the quantities actually attached (empty when nothing was owed).
+   */
+  async packAllItems(
+    packageId: string,
+    operator: OperatorContext,
+  ): Promise<{ packedQty: number; orderItemIds: string[] }> {
+    const pkg = await this.packageRepo.findById(packageId);
+    if (pkg === null) {
+      throw new PackageNotFoundError(packageId);
+    }
+
+    const result = await this.dataSource.transaction(async (manager) => {
+      await this.lockShipmentForPacking(manager, pkg.shipmentId);
+      const lockedPkg = await this.packageRepo.lockById(manager, packageId);
+      if (lockedPkg === null) {
+        throw new PackageNotFoundError(packageId);
+      }
+      if (lockedPkg.status !== 'OPEN' && lockedPkg.status !== 'REPACK_REQUIRED') {
+        throw new ShipmentStateInvalidError(
+          `包裹状态 ${lockedPkg.status} 不允许装箱（仅 OPEN / REPACK_REQUIRED）`,
+          { packageId, status: lockedPkg.status },
+        );
+      }
+
+      const shipmentItems = await this.shipmentRepo.findItemsByShipmentIdTx(
+        manager,
+        pkg.shipmentId,
+      );
+      const totals = await this.packageRepo.packedTotalsByShipmentTx(manager, pkg.shipmentId);
+      const touched: string[] = [];
+
+      for (const item of shipmentItems) {
+        const required = parseQty(item.quantity);
+        const packed = totals.get(item.orderItemId) ?? 0n;
+        const missing = required - packed;
+        if (missing <= 0n) {
+          continue;
+        }
+
+        const sku = await this.skuService.getEntityById(item.skuId);
+        // SN-tracked SKUs must record WHICH units were packed; the serials
+        // already sit on the reservation (PICKED), so the one-click path
+        // attaches exactly those instead of asking for a scan.
+        let serialNumbers: string[] = [];
+        if (sku?.serialTracking === true) {
+          const serials = await this.inventoryQuery.listReservationSerials(item.reservationId);
+          serialNumbers = serials
+            .filter((serial) => serial.status === 'PICKED')
+            .map((serial) => serial.serialNumber);
+          if (BigInt(serialNumbers.length) !== missing) {
+            throw new PackingSerialInvalidError(
+              `SN 管理商品 ${sku.skuCode} 已拣货 SN 数量（${serialNumbers.length}）与待装数量不一致`,
+              {
+                packageId,
+                orderItemId: item.orderItemId,
+                requiredQty: formatQty(missing),
+                serialCount: serialNumbers.length,
+              },
+            );
+          }
+        }
+
+        let packageItem = await this.packageRepo.lockItem(manager, packageId, item.orderItemId);
+        if (packageItem === null) {
+          packageItem = await this.packageRepo.insertItem(manager, {
+            packageId,
+            orderItemId: item.orderItemId,
+            skuId: item.skuId,
+            quantity: '0.000',
+          });
+        }
+        await this.packageRepo.updateItemQuantity(
+          manager,
+          packageItem.id,
+          formatQty(parseQty(packageItem.quantity) + missing),
+        );
+        for (const serialNumber of serialNumbers) {
+          await this.packageRepo.insertSerial(manager, {
+            packageItemId: packageItem.id,
+            packageId,
+            orderItemId: item.orderItemId,
+            skuId: item.skuId,
+            serialNumber,
+          });
+        }
+        touched.push(item.orderItemId);
+      }
+
+      return { touched, itemCount: shipmentItems.length };
+    });
+
+    await this.operationLog.record({
+      entityType: 'PACKAGE',
+      entityId: packageId,
+      entityCode: pkg.packageNo,
+      action: 'PACK_ALL',
+      changes: {
+        shipmentId: { from: null, to: pkg.shipmentId },
+        orderItems: { from: null, to: result.touched.length },
+      },
+      operator,
+    });
+    return { packedQty: result.touched.length, orderItemIds: result.touched };
+  }
+
+  // --------------------------------------------------------------------------
   // Seal (task §15-§16)
   // --------------------------------------------------------------------------
 

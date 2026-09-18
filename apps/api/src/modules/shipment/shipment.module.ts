@@ -19,6 +19,7 @@ import { ShipmentService } from './services/shipment.service';
 import { PackingService } from './services/packing.service';
 import { ShipmentShipService } from './services/shipment-ship.service';
 import { ShippingLabelService } from './services/shipping-label.service';
+import { QuickShipService } from './services/quick-ship.service';
 import { PackageController, ShipmentController } from './controllers/shipment.controller';
 
 /**
@@ -54,7 +55,16 @@ import { PackageController, ShipmentController } from './controllers/shipment.co
     PackingService,
     ShipmentShipService,
     ShippingLabelService,
+    QuickShipService,
   ],
-  exports: [ShipmentService, PackingService, ShipmentShipService],
+  // QuickShipService + ShippingLabelService are consumed by the order
+  // fulfillment flow in the sync layer (public services only, AGENTS.md §7).
+  exports: [
+    ShipmentService,
+    PackingService,
+    ShipmentShipService,
+    QuickShipService,
+    ShippingLabelService,
+  ],
 })
 export class ShipmentModule {}

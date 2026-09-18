@@ -50,6 +50,15 @@ export const EXCEPTION_TYPES = [
    */
   'RETURN_ORDER_NOT_FOUND',
   'RETURN_DIFFERENCE',
+  /**
+   * Order fulfillment flow (2026-09-18, orders.md §15C): the platform WRITE of
+   * 「获取运单号」 (OZON 组包) failed with a platform/infrastructure error, or
+   * the platform accepted the request but never confirmed assembly. Operator-
+   * fixable preconditions (wrong platform status, unsupported platform, async
+   * in progress) do NOT raise this - only genuine platform-side failures.
+   * Reference: ORDER/orderId. Auto-resolved by the next successful prepare.
+   */
+  'ORDER_PLATFORM_SHIP_FAILED',
 ] as const;
 export type ExceptionType = (typeof EXCEPTION_TYPES)[number];
 

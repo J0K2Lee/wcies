@@ -15,6 +15,7 @@ import { ExceptionModule } from '../exception/exception.module';
 import { ExternalRawEventEntity } from './entities/external-raw-event.entity';
 import { SyncCursorEntity } from './entities/sync-cursor.entity';
 import { SyncJobEntity } from './entities/sync-job.entity';
+import { ShipmentModule } from '../shipment/shipment.module';
 import { ExternalRawEventRepository } from './repositories/external-raw-event.repository';
 import { SyncCursorRepository } from './repositories/sync-cursor.repository';
 import { SyncJobRepository } from './repositories/sync-job.repository';
@@ -29,6 +30,7 @@ import { SyncJobService } from './services/sync-job.service';
 import { WebhookIngestService, WebhookProcessService } from './services/webhook.service';
 import { WbWebhookService } from './services/wb-webhook.service';
 import { PlatformWarehouseQueryService } from './services/platform-warehouse-query.service';
+import { OrderPlatformShipService } from './services/order-platform-ship.service';
 import { SyncController } from './controllers/sync.controller';
 import { OzonWebhookController } from './controllers/ozon-webhook.controller';
 import { YandexWebhookController } from './controllers/yandex-webhook.controller';
@@ -37,6 +39,7 @@ import {
   WbWebhookReceiverController,
 } from './controllers/wb-webhook.controller';
 import { PlatformWarehouseController } from './controllers/platform-warehouse.controller';
+import { OrderFulfillmentController } from './controllers/order-fulfillment.controller';
 import {
   CategoryTreeSyncProcessor,
   ListingSyncProcessor,
@@ -71,6 +74,10 @@ import {
     PlatformModule,
     ListingModule,
     OrderModule,
+    // Order fulfillment flow (2026-09-18): the sync layer orchestrates the
+    // platform steps and calls the shipment module's public one-click outbound
+    // service. ShipmentModule never imports SyncModule, so no cycle.
+    ShipmentModule,
     ExceptionModule,
     OperationLogModule,
   ],
@@ -81,6 +88,7 @@ import {
     WbWebhookReceiverController,
     WbWebhookManageController,
     PlatformWarehouseController,
+    OrderFulfillmentController,
   ],
   providers: [
     SyncJobRepository,
@@ -91,6 +99,7 @@ import {
     SyncFailureAlertService,
     SyncJobService,
     PlatformWarehouseQueryService,
+    OrderPlatformShipService,
     ListingSyncService,
     OrderSyncService,
     CategoryTreeSyncService,

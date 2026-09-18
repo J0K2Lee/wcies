@@ -321,6 +321,35 @@ export class ShipShipmentResultDto {
   @ApiProperty({ type: [String], description: '本次出库产生的库存事件号' }) eventNos!: string[];
 }
 
+/** One shipment leg of a one-click 发货 (订单页一键出库, 2026-09-18). */
+export class QuickShipShipmentDto {
+  @ApiProperty() shipmentId!: string;
+  @ApiProperty({ example: 'SHP00000001' }) shipmentNo!: string;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: '本次自动装箱的包裹（已备好时为 null）',
+  })
+  packageId!: string | null;
+  @ApiProperty({ nullable: true, type: String }) packageNo!: string | null;
+  @ApiProperty({ description: '该发货单此前已出库（本次未再次扣减库存）' })
+  alreadyShipped!: boolean;
+}
+
+export class QuickShipResultDto {
+  @ApiProperty() orderId!: string;
+  @ApiProperty({ example: 'ORD00000001' }) orderNo!: string;
+  @ApiProperty({ description: '出库后订单 ERP 状态（全部行出库后为 SHIPPED）' })
+  orderErpStatus!: string;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: '带入发货单的平台运单号（订单上无平台运单号时为 null）',
+  })
+  trackingNumber!: string | null;
+  @ApiProperty({ type: [QuickShipShipmentDto] }) shipments!: QuickShipShipmentDto[];
+}
+
 export class ShippingLabelDto {
   @ApiProperty() id!: string;
   @ApiProperty({
