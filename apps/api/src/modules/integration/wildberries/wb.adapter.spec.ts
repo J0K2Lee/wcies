@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WbAdapter } from './wb.adapter';
+
+// Not exercised here: the read paths never touch the shipment write capability.
+const SHIPMENT_STUB = {} as unknown as ConstructorParameters<typeof WbAdapter>[1];
 import { WbClient, WB_DEFAULT_BASE_URLS } from './wb.client';
 import { WbOrderResumeCursor, WbOrderRunCursor } from './types/cursors';
 
@@ -56,7 +59,7 @@ function stub(matchers: ReadonlyArray<{ match: (url: string) => boolean; body: u
     fetchImpl: fetchImpl as unknown as typeof fetch,
     sleep: async () => undefined,
   });
-  return { adapter: new WbAdapter(client), calls };
+  return { adapter: new WbAdapter(client, SHIPMENT_STUB), calls };
 }
 
 const onMarketplaceOrders = (body: unknown) => ({
@@ -219,7 +222,7 @@ function makeStateful(match: (url: string) => boolean, next: () => unknown): Stu
     fetchImpl: fetchImpl as unknown as typeof fetch,
     sleep: async () => undefined,
   });
-  return { adapter: new WbAdapter(client), calls };
+  return { adapter: new WbAdapter(client, SHIPMENT_STUB), calls };
 }
 
 async function capture(action: Promise<unknown>): Promise<unknown> {

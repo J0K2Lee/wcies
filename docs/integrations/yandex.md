@@ -65,7 +65,7 @@
 | 商品图片/增强 | offer-mappings 自带 pictures/weightDimensions/characteristics 等价物 | 已验证（无需独立接口） |
 | 类目树 | `POST /v2/categories/tree`（整树一次返回 `{id,name,children}`；**官方已标弃用倾向**）；替代：offer-mappings 自带 `marketCategoryId/Name`（按商品自带，无需全树） | 已验证（建议：首发不做全树同步，走 offer 自带类目） |
 | 平台仓库列表 | `GET /v2/businesses/{businessId}/warehouses`（**覆盖 FBS/DBS/Express 卖家侧仓；FBY 平台仓未在返回结构中出现**） | 已验证 + **缺口**（见 §8） |
-| **发货流程平台写** | **官方 OpenAPI 已核对并落盘（2026-09-18，见 §9 与 docs/yandex-partner-api-openapi.json）**：`PUT /v2/campaigns/{id}/orders/{orderId}/status` → `PROCESSING/READY_TO_SHIP`；面单 `GET …/orders/{orderId}/delivery/labels` 直接回 PDF 二进制 | 规范已核对、**未实现**：与契约无结构冲突，见 §9.5 |
+| **发货流程平台写** | **官方 OpenAPI 已核对并落盘（2026-09-18，见 §9 与 docs/yandex-partner-api-openapi.json）**：`PUT /v2/campaigns/{id}/orders/{orderId}/status` → `PROCESSING/READY_TO_SHIP`；面单 `GET …/orders/{orderId}/delivery/labels` 直接回 PDF 二进制 | **已实现（2026-09-18，T0 待实测）**：`prepareShipment`=先读后写（仅 `STARTED`→`READY_TO_SHIP`；平台已推进的子状态不回写）；`fetchShippingLabel`=A9_HORIZONTALLY(58×40) PDF，未生成映射为“面单未就绪” |
 
 ## 7. 代码级落地点（复用 OZON 骨架）
 
@@ -75,7 +75,8 @@
    - `yandex.adapter.ts`：`validateCredential` = `GET /v2/campaigns`；`fetchListings` = offer-mappings pageToken；`fetchOrders` = business orders（游标 kind：`YX_PAGE_TOKEN` + 30 天窗口 `YX_ORDER_WINDOW{from,to,pageToken}`；`updateDate` 增量）；`fetchOrdersByPlatformIds` = body `orderIds[]`；`processWebhook` = 事件映射（ORDER_CREATED/ORDER_STATUS_UPDATED/ORDER_CANCELLED/ORDER_UPDATED → 定向回读；RETURN_* → 退货事实）；`fetchReturns` = getReturns 游标。
    - `yandex.mapper.ts`：status→PLATFORM_ORDER_STAGES（`PROCESSING→AWAITING_SHIPMENT`（substatus SHIPPED→按发货事实）、`DELIVERY/PICKUP→IN_TRANSIT`、`DELIVERED→DELIVERED`、`CANCELLED→CANCELLED`；映射表在 T0 用真实 status×substatus 样本校准）；`programType` FBY→`YANDEX_FBY`、FBS/DBS→`YANDEX_FBS`（fulfillmentMode 枚举已有）；`items[].offerId`→offerId/sellerSku、`mapping.marketSku`→platformSkuId（需 offer-mappings 反查一次建立 orderId→marketSku 素材，T0 决定缓存策略）。
    - `types/cursors.ts` + `yandex.module.ts`（registry.register）。
-3. Webhook：新增 `ozon-webhook.controller` 同款 `POST /api/v1/webhooks/yandex/stores/:storeCode`——PING 1 秒内回 `{version:'1.0.0', name:'WCIES', time}`；订单类事件 → raw events → 定向回读（body orderIds）；IP 白名单校验（三段）；轮询调度器保持为兜底（14 天不可达解除集成的风险要求 webhook 故障可观测）。
+3. **发货写能力（2026-09-18 已实现）**：`yandex.client.ts` 传输层增 **raw 字节模式**（`PUT` 加入 method 联合）+ `updateOrderStatus`/`orderLabels`；新 `yandex-shipment.service.ts`（先读后写、`YX_ORDER_NOT_PREPARABLE`、`LABEL_FORMAT=A9_HORIZONTALLY`）；`yandex.adapter.ts` 实现 `prepareShipment`/`fetchShippingLabel`（经 `resolveIdentityForContext` 拿 campaignId）；凭证解析抽到 `yandex-auth.ts`（避免 adapter↔service 循环，同 OZON）。
+4. Webhook：新增 `ozon-webhook.controller` 同款 `POST /api/v1/webhooks/yandex/stores/:storeCode`——PING 1 秒内回 `{version:'1.0.0', name:'WCIES', time}`；订单类事件 → raw events → 定向回读（body orderIds）；IP 白名单校验（三段）；轮询调度器保持为兜底（14 天不可达解除集成的风险要求 webhook 故障可观测）。
 4. 平台仓库：`PlatformWarehouseQueryService` 按 platformCode 分发；Yandex 返回 FBS/DBS 卖家侧仓（fulfillmentMode `YANDEX_FBS`）。**FBY 仓不在数据源中**（见 §8）。
 5. 前端：`PLATFORM_CREDENTIAL_SPECS` YANDEX 行去掉「尚未接入」；凭证 payload 单 `apiKey`（needsClientId=false 已兼容）。
 
@@ -157,12 +158,15 @@
 | `POST /v2/campaigns/{campaignId}/orders/{orderId}/identifiers/status` | `getOrderIdentifiersStatus`，标记校验码状态（**读语义的 POST**） |
 | `PUT /v2/campaigns/{campaignId}/shipments/{shipmentId}/status` 相关 | FBS **供应单（отгрузка）** 流程：`/first-mile/shipments` 家族（`…/act`、`…/confirm`、`…/pallet-labels`、`…/transportation-waybill`）——Yandex 的“发货”也可按**批量供应单**走，与 WB 类似；按单走 9.2 即可满足我们的流程 |
 
-### 9.5 与 WCIES 契约的映射（无结构性冲突）
+### 9.5 与 WCIES 契约的映射（已实现 2026-09-18）
 
 - `prepareShipment(orderId)` → `PUT …/orders/{orderId}/status`
-  `{order:{status:"PROCESSING", substatus:"READY_TO_SHIP"}}`；幂等性：对已处于
-  `READY_TO_SHIP` 的订单重复提交的结果（200 还是 400）**需 T0 实测**，实现按
-  “先读后写”规避（同 OZON 模式）。
-- `fetchShippingLabel(orderId)` → `GET …/delivery/labels?format=A7`，二进制 PDF
-  直接落对象存储；平台未生成时（400/404）映射为“面单未就绪”。
+  `{order:{status:"PROCESSING", substatus:"READY_TO_SHIP"}}`；实现按“先读后写”：
+  仅 `PROCESSING/STARTED` 才写；已在 `READY_TO_SHIP`、平台已推进的子状态
+  （SHIPPED/PACKAGING…）或后续物流阶段一律 `alreadyPrepared` 不写；
+  CANCELLED/PENDING/UNPAID 等显式报错（`YX_ORDER_NOT_PREPARABLE`）。
+- `fetchShippingLabel(orderId)` → `GET …/delivery/labels?format=A9_HORIZONTALLY`
+  （58×40mm，与 WB 贴纸同尺寸，热敏打印机通用；换纸张只改
+  `yandex-shipment.service.ts` 的 `LABEL_FORMAT` 一个常量），二进制 PDF 直接落对象存储；
+  平台未生成时（400/404/409）映射为“面单未就绪”。
 - FBY（平台仓）订单本就不进拣货（`isExternalFulfillmentMode`），不调用写接口。

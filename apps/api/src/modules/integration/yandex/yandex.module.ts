@@ -4,6 +4,7 @@ import { YandexAdapter } from './yandex.adapter';
 import { YandexClient } from './yandex.client';
 import { YandexClientFactory } from './yandex-client.factory';
 import { YandexWarehouseService } from './yandex-warehouse.service';
+import { YandexShipmentService } from './yandex-shipment.service';
 
 /** Yandex Market platform wiring: one adapter instance per process. */
 @Module({
@@ -16,8 +17,9 @@ import { YandexWarehouseService } from './yandex-warehouse.service';
     },
     YandexAdapter,
     YandexWarehouseService,
+    YandexShipmentService,
   ],
-  exports: [YandexAdapter, YandexWarehouseService],
+  exports: [YandexAdapter, YandexWarehouseService, YandexShipmentService],
 })
 export class YandexModule implements OnModuleInit {
   constructor(

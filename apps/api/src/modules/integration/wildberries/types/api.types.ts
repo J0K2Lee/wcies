@@ -262,3 +262,50 @@ export function extractWebhookSecret(response: unknown, depth = 2): string | nul
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// Outbound shipment operations (order fulfillment flow, 2026-09-18)
+//
+// Source: the official FBS Orders swagger vendored at
+// docs/wb-orders-fbs-openapi.yaml (openapi 3.0.1, 2026-09-18). Spec-verified,
+// NOT yet executed against a live account (AGENTS.md §92 - see
+// docs/integrations/wildberries.md §9).
+// ---------------------------------------------------------------------------
+
+/** `POST /api/v3/orders/status` item - a READ of one assembly order's state. */
+export interface WbV3OrderStatus {
+  readonly id: number;
+  readonly isCancellable?: boolean;
+  /** Seller-side state: new / confirm / complete / cancel (cancel_carrier crossborder). */
+  readonly supplierStatus?: string;
+  /** WB-side fact (waiting / sorted / sold / canceled / ...). */
+  readonly wbStatus?: string;
+  readonly [key: string]: unknown;
+}
+
+export interface WbV3OrderStatusesResponse {
+  readonly orders: readonly WbV3OrderStatus[];
+}
+
+/** `POST /api/v3/supplies` - 201 body. */
+export interface WbV3CreateSupplyResponse {
+  /** Supply ID, e.g. "WB-GI-1234567". */
+  readonly id: string;
+}
+
+/**
+ * `POST /api/v3/orders/stickers` item. `file` is the BASE64 of the sticker in
+ * the requested format (the endpoint answers JSON, not a binary stream).
+ */
+export interface WbV3Sticker {
+  readonly orderId: number;
+  readonly partA: string;
+  readonly partB: string;
+  /** Encoded sticker value printed on the label. */
+  readonly barcode: string;
+  readonly file: string;
+}
+
+export interface WbV3StickersResponse {
+  readonly stickers: readonly WbV3Sticker[];
+}

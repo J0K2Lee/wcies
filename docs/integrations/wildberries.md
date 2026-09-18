@@ -102,7 +102,7 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 | 商品属性增强 | 卡片 `characteristics[]` 自带（无需独立增强同步） | 已验证 |
 | 平台仓库列表 | `GET /api/v3/warehouses` 是**卖家 FBS 自建仓 CRUD**，不是 WB 平台仓；唯一的历史候选 supplies-api `/api/v1/warehouses`（.ru 与 .cn 同样）已被平台**整体禁用**——实测 404 "This method is temporarily disabled"，官方 release-notes id=570 说明：2026-08-15 起「形成供应信息 / 供应费率」类 API 全部停用 | **缺口已定论（官方下线，非未找到）**：WB_FBW 绑定走手动录入平台仓 ID + 备注名（绑定弹窗已支持手动录入）；平台若重新开放该 API 可自动接入 |
 | webhook | **已验证 + 已实现（2026-09-18）**：官方 webhooks-api 文档核对，见 §5b | 已实现 |
-| **发货流程平台写** | **官方 swagger 已核对并落盘（2026-09-18，见 §9 与 docs/wb-orders-fbs-openapi.yaml）**：发货写操作按**供应单**走——建供应单 → 加订单（→`confirm`）→ 供应单转交付（→`complete`）；面单 `POST /api/v3/orders/stickers`（仅 `confirm`/`complete` 可取，JSON 内 base64） | 规范已核对、**未实现**：契约 `prepareShipment` 是按订单的，WB 按供应单，映射方案见 §9.4，需业务确认后再写代码 |
+| **发货流程平台写** | **官方 swagger 已核对并落盘（2026-09-18，见 §9 与 docs/wb-orders-fbs-openapi.yaml）**：发货写操作按**供应单**走——建供应单 → 加订单（→`confirm`）→ 供应单转交付（→`complete`）；面单 `POST /api/v3/orders/stickers`（仅 `confirm`/`complete` 可取，JSON 内 base64） | **已实现（2026-09-18，T0 待实测）**：`prepareShipment`=建专属供应单(WCIES-<订单号>)+加单（→`confirm`，先读后写保证幂等，不调 deliver——`complete` 由平台收货扫码产生）；`fetchShippingLabel`=58×40 png 贴纸。映射经用户确认，见 §9.4 |
 
 ## 5b. Webhook（已验证 2026-09-18，官方文档核对；已实现）
 
@@ -135,6 +135,7 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 3. Sync：`SYNC_TYPES` 复用 LISTING_SYNC/ORDER_SYNC（store+syncType 游标天然隔离平台）；轮询间隔受 statistics 1 req/min 约束。
 4. 平台仓库查询端口：`PlatformWarehouseQueryService` 当前对非 OZON 抛 `PLATFORM_WAREHOUSE_QUERY_UNSUPPORTED`——WB 接入时改为按 platformCode 分发；数据源缺口期间返回空列表 + 前端手动录入模式。
 5. 前端：`PLATFORM_CREDENTIAL_SPECS` WB 行去掉「尚未接入」措辞；凭证 payload 单 `apiKey`（前端已按 needsClientId=false 处理，天然兼容）。
+6. **发货写能力（2026-09-18 已实现）**：`wb.client.ts` 增 `v3OrderStatuses`/`v3CreateSupply`/`v3AddOrdersToSupply`/`v3OrderStickers`（method 联合类型补 PATCH）；新 `wb-shipment.service.ts`（§9.4 幂等与状态机；`WB_ORDER_NOT_PREPARABLE`）；`wb.adapter.ts` 实现 `prepareShipment`/`fetchShippingLabel`（可选能力 → 前端能力位自动点亮）。
 
 ## 8. T0 验证清单（实现前用真实 token 冒烟，模式同 `scripts/ozon-t0-smoke.ts`）
 
@@ -215,12 +216,20 @@ body `{orders:[int64]}`（≤100），响应：
 - 供应单整体另有 QR：`GET /api/v3/supplies/{supplyId}/barcode`；装箱单位贴纸
   `POST /api/v3/supplies/{supplyId}/trbx/stickers`。
 
-### 9.4 与 WCIES 契约的映射（实现前必须确认的设计差异）
+### 9.4 与 WCIES 契约的映射（用户已确认 2026-09-18，已实现）
 
 我们 `prepareShipment(orderId)` 是**按订单**的，而 WB 的写操作是**按供应单**的。
-最直接的对齐方式：**每张订单自动建一个专属供应单**（`POST /api/v3/supplies`
-`{name: "WCIES-<orderNo>"}`）→ 加单 → 取贴纸 → `deliver`。这与小单量卖家的实际操作一致，
-但会产生“一单一供应单”的平台侧结构，需要业务确认（尤其是否影响汇总交付）。
+**已确认并实现：每张订单自动建一个专属供应单**（`POST /api/v3/supplies`，
+名字 `WCIES-<platformOrderId>`）→ 加单（→`confirm`）→ 之后才可取贴纸。
+
+实现要点（`wb-shipment.service.ts`）：
+
+- **幂等靠先读后写**：`POST /api/v3/orders/status` 读到 `confirm`/`complete` 时**完全不写**
+  （供应单名字不用于去重——WB 总是新建，重复名字不会复用）；
+- **不调 `deliver`**：那会让平台把订单标成“配送中”，而货还在我们仓里。
+  `complete` 事实来自 WB 收货扫码，经常规订单同步回流（与 OZON“一次组包就够”同一原则）；
+- `cancel`/`cancel_carrier` 与未核实状态一律显式报错（`WB_ORDER_NOT_PREPARABLE`），不猜；
+- 订单号必须为数字（v3 组货订单 id 为 int64），否则报错不转换（§89）。
 
 其他前置：deliver 要求①供应单内至少一张订单②所有订单必填的标识（如 УИН/报关单号）
 已填并通过校验③俄→俄供应单必须已设置 shipping-method，否则 409。

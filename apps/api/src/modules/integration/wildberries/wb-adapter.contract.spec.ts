@@ -1,6 +1,7 @@
 import { vi } from 'vitest';
 import { WbAdapter } from './wb.adapter';
 import { WbClient, WB_DEFAULT_BASE_URLS } from './wb.client';
+import { WbShipmentService } from './wb-shipment.service';
 import {
   AdapterContractHarness,
   listingItem,
@@ -41,10 +42,50 @@ function makeWbHarness(): AdapterContractHarness {
   // call (validateCredential hits common, the malformed-body test hits
   // content) - shape-based routing cannot know, so serve them anywhere.
   let fallback: ScriptedRoute | null = null;
+  // The scripted assembly order's seller status. Flips to `confirm` when the
+  // supply PATCH lands, which is what the adapter's post-write re-read sees.
+  let wbOrderStatus = 'new';
+  const SHIPMENT_ORDER_ID = 5632423;
+  const SUPPLY_ID = 'WB-GI-1';
+  const STICKER_PNG = Buffer.from('%PNG-scripted-sticker').toString('base64');
   let callCount = 0;
   const fetchImpl = vi.fn(async (input: string) => {
     callCount += 1;
     const url = String(input);
+    if (url.startsWith(`${BASES.marketplace}/api/v3/orders/status`)) {
+      return new Response(
+        JSON.stringify({
+          orders: [{ id: SHIPMENT_ORDER_ID, supplierStatus: wbOrderStatus, wbStatus: 'waiting' }],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    if (url === `${BASES.marketplace}/api/v3/supplies`) {
+      return new Response(JSON.stringify({ id: SUPPLY_ID }), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (url === `${BASES.marketplace}/api/marketplace/v3/supplies/${SUPPLY_ID}/orders`) {
+      wbOrderStatus = 'confirm';
+      return new Response(null, { status: 204 });
+    }
+    if (url.startsWith(`${BASES.marketplace}/api/v3/orders/stickers`)) {
+      return new Response(
+        JSON.stringify({
+          stickers: [
+            {
+              orderId: SHIPMENT_ORDER_ID,
+              partA: '231648',
+              partB: '9753',
+              barcode: '!uKEtQZVx',
+              file: STICKER_PNG,
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
     for (const [prefix, route] of routes) {
       if (url.startsWith(prefix)) {
         return new Response(JSON.stringify(route.body), {
@@ -74,7 +115,7 @@ function makeWbHarness(): AdapterContractHarness {
   });
   return {
     name: 'WB',
-    adapter: new WbAdapter(client),
+    adapter: new WbAdapter(client, new WbShipmentService(client, LOGGER_STUB)),
     credentialContext: {
       storeId: 'store-1',
       platform: 'WB',
@@ -102,8 +143,28 @@ function makeWbHarness(): AdapterContractHarness {
       }
     },
     calls: () => callCount,
+    shipmentFulfillment: {
+      platformOrderId: String(SHIPMENT_ORDER_ID),
+      scriptAlreadyPrepared: () => {
+        wbOrderStatus = 'confirm';
+      },
+      scriptPrepareSuccess: () => {
+        wbOrderStatus = 'new';
+      },
+      scriptLabel: () => {
+        // The sticker route is always scripted; the caller's status decides.
+        wbOrderStatus = 'confirm';
+      },
+    },
   };
 }
+
+const LOGGER_STUB = {
+  log: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+  debug: () => undefined,
+} as unknown as ConstructorParameters<typeof WbShipmentService>[1];
 
 /**
  * Translates generic (OZON-shaped) fixtures into WB DTOs. Returns null when

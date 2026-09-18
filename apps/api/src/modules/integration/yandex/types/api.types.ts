@@ -177,3 +177,30 @@ export interface YxErrorBody {
   readonly status?: string;
   readonly errors?: readonly { code?: string; message?: string }[];
 }
+
+// ---------------------------------------------------------------------------
+// Outbound shipment operations (order fulfillment flow, 2026-09-18)
+//
+// Source: docs/yandex-partner-api-openapi.json (official OpenAPI, commit
+// 8b32780df5, 2026-09-18). Spec-verified, NOT yet executed against a live
+// account (AGENTS.md §92) - see docs/integrations/yandex.md §9.
+// ---------------------------------------------------------------------------
+
+/**
+ * `PUT /v2/campaigns/{campaignId}/orders/{orderId}/status` (operationId
+ * `updateOrderStatus`). Verified transition: `{status:"PROCESSING",
+ * substatus:"STARTED"}` -> `{status:"PROCESSING", substatus:"READY_TO_SHIP"}`.
+ */
+export interface YxUpdateOrderStatusRequest {
+  readonly order: {
+    readonly status: string;
+    readonly substatus?: string;
+    readonly delivery?: Record<string, unknown>;
+  };
+}
+
+/** 200 body: the updated order (same shape as the read path). */
+export interface YxUpdateOrderStatusResponse {
+  readonly order?: YxOrder;
+  readonly [key: string]: unknown;
+}

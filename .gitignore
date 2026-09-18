@@ -42,6 +42,9 @@ tmp/
 .zcode/
 gui-*-screenshots/
 
+# CodeGraph local index (AI tooling, machine-local)
+.codegraph/
+
 # DB backups (local only, never commit)
 backups/
 

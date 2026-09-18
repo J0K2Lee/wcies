@@ -3,12 +3,15 @@ import {
   PaginatedResult,
   PlatformAdapter,
   PlatformCredentialContext,
+  PlatformLabelFile,
   PlatformListingRaw,
   PlatformOrderRaw,
+  PlatformShipmentPreparation,
   PlatformWebhookEvent,
   StoreContext,
 } from '@wcies/platform-contracts';
 import { WbClient, WbAuth } from './wb.client';
+import { WbShipmentService } from './wb-shipment.service';
 import {
   mapCardToListing,
   mapFbsOrderToOrder,
@@ -58,7 +61,10 @@ const ORDER_PAGE_SIZE = 1000;
 export class WbAdapter implements PlatformAdapter {
   readonly platformCode = 'WB' as const;
 
-  constructor(private readonly client: WbClient) {}
+  constructor(
+    private readonly client: WbClient,
+    private readonly shipmentService: WbShipmentService,
+  ) {}
 
   async validateCredential(context: PlatformCredentialContext): Promise<void> {
     await this.client.sellerInfo(parseWbAuth(context.credential, context.storeId), context.storeId);
@@ -66,6 +72,34 @@ export class WbAdapter implements PlatformAdapter {
 
   async processWebhook(_context: StoreContext, payload: unknown): Promise<PlatformWebhookEvent[]> {
     return mapWebhookEnvelope(payload);
+  }
+
+  /**
+   * WRITE: put the order into a dedicated supply (order -> `confirm`), the
+   * only seller path there per the vendor spec. Does NOT call
+   * `supplies/{id}/deliver` - the `complete` fact arrives when WB scans the
+   * supply at handover (docs/integrations/wildberries.md §9.4). No-op
+   * (read-only) when the order already sits in a supply.
+   */
+  async prepareShipment(
+    context: StoreContext,
+    order: { platformOrderId: string },
+  ): Promise<PlatformShipmentPreparation> {
+    return this.shipmentService.prepareShipment(
+      { storeId: context.storeId, credential: context.credential },
+      order,
+    );
+  }
+
+  /** Sticker (面单) PNG for an order - only `confirm` / `complete` have one. */
+  async fetchShippingLabel(
+    context: StoreContext,
+    order: { platformOrderId: string },
+  ): Promise<PlatformLabelFile | null> {
+    return this.shipmentService.fetchShippingLabel(
+      { storeId: context.storeId, credential: context.credential },
+      order,
+    );
   }
 
   async fetchListings(

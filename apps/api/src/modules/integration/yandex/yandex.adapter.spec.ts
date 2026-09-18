@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { YandexAdapter } from './yandex.adapter';
+
+// Not exercised here: the read paths never touch the shipment write capability.
+const SHIPMENT_STUB = {} as unknown as ConstructorParameters<typeof YandexAdapter>[1];
 import { YandexClient } from './yandex.client';
 import { YxOrderResumeCursor } from './types/cursors';
 
@@ -37,7 +40,7 @@ function stub(responses: ReadonlyArray<{ match: (url: string) => boolean; body: 
     fetchImpl: fetchImpl as unknown as typeof fetch,
     sleep: async () => undefined,
   });
-  return { adapter: new YandexAdapter(client), fetchImpl };
+  return { adapter: new YandexAdapter(client, SHIPMENT_STUB), fetchImpl };
 }
 
 const jsonResponse = (body: unknown) =>
@@ -183,7 +186,7 @@ describe('YandexAdapter order window walk', () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
       sleep: async () => undefined,
     });
-    const adapter = new YandexAdapter(client);
+    const adapter = new YandexAdapter(client, SHIPMENT_STUB);
     const resume: YxOrderResumeCursor = {
       kind: 'YX_ORDER_RESUME',
       businessId: '2002',

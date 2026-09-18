@@ -1,6 +1,7 @@
 import { vi } from 'vitest';
 import { YandexAdapter } from './yandex.adapter';
 import { YandexClient } from './yandex.client';
+import { YandexShipmentService } from './yandex-shipment.service';
 import {
   AdapterContractHarness,
   listingItem,
@@ -26,20 +27,83 @@ interface ScriptedRoute {
   readonly status: number;
   readonly body: unknown;
   readonly headers?: Record<string, string>;
+  /** Literal body (label PDF bytes) instead of JSON.stringify. */
+  readonly rawBody?: string;
 }
 
 const EVERGREEN_CAMPAIGNS = { campaigns: [{ id: 1001, businessId: 2002, name: 'Test Shop' }] };
 
+const LOGGER_STUB = {
+  log: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+  debug: () => undefined,
+} as unknown as ConstructorParameters<typeof YandexShipmentService>[1];
+
 function makeYandexHarness(): AdapterContractHarness {
   const routes = new Map<string, ScriptedRoute>();
   let fallback: ScriptedRoute | null = null;
+  // The scripted order's lifecycle state; the PUT write flips it, which is
+  // what the adapter's post-write re-read must observe.
+  let orderStatus = 'PROCESSING';
+  let orderSubstatus: string | undefined = 'STARTED';
+  const SHIPMENT_ORDER_ID = 5632423;
+  const LABEL_PDF = '%PDF-1.4 scripted label';
   let callCount = 0;
-  const fetchImpl = vi.fn(async (input: string) => {
+  const fetchImpl = vi.fn(async (input: string, init?: RequestInit) => {
     callCount += 1;
     const url = String(input);
+    // Targeted order re-read (also the post-write confirmation). ONLY for
+    // orderIds bodies: fetchOrders walks the SAME endpoint with a window
+    // body, and must keep using the scripted routes.
+    const requestBody =
+      typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : {};
+    if (
+      url.includes('/v1/businesses/') &&
+      url.includes('/orders') &&
+      Array.isArray(requestBody.orderIds)
+    ) {
+      return new Response(
+        JSON.stringify({
+          orders: [
+            {
+              orderId: SHIPMENT_ORDER_ID,
+              status: orderStatus,
+              ...(orderSubstatus === undefined ? {} : { substatus: orderSubstatus }),
+              creationDate: '2026-09-08T10:15:30+03:00',
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    // The one seller write: flips the scripted lifecycle state.
+    if (url.includes('/orders/') && url.endsWith('/status')) {
+      orderStatus = 'PROCESSING';
+      orderSubstatus = 'READY_TO_SHIP';
+      return new Response(
+        JSON.stringify({
+          order: { orderId: SHIPMENT_ORDER_ID, status: orderStatus, substatus: orderSubstatus },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    // Label PDF - served raw, only once the order is READY_TO_SHIP.
+    if (url.includes('/delivery/labels')) {
+      if (orderSubstatus !== 'READY_TO_SHIP') {
+        return new Response(JSON.stringify({ status: 'ERROR', errors: [{ code: 'NOT_READY' }] }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(LABEL_PDF, {
+        status: 200,
+        headers: { 'Content-Type': 'application/pdf' },
+      });
+    }
     for (const route of routes.values()) {
       if (route.match(url)) {
-        return new Response(JSON.stringify(route.body), {
+        return new Response(route.rawBody ?? JSON.stringify(route.body), {
           status: route.status,
           headers: { 'Content-Type': 'application/json', ...route.headers },
         });
@@ -62,9 +126,14 @@ function makeYandexHarness(): AdapterContractHarness {
     fetchImpl: fetchImpl as unknown as typeof fetch,
     sleep: async () => undefined,
   });
+  const CAMPAIGNS_ROUTE: ScriptedRoute = {
+    match: (url) => url.endsWith('/v2/campaigns') || url.includes('/v2/campaigns?'),
+    status: 200,
+    body: EVERGREEN_CAMPAIGNS,
+  };
   return {
     name: 'YANDEX',
-    adapter: new YandexAdapter(client),
+    adapter: new YandexAdapter(client, new YandexShipmentService(client, LOGGER_STUB)),
     credentialContext: {
       storeId: 'store-1',
       platform: 'YANDEX',
@@ -93,6 +162,27 @@ function makeYandexHarness(): AdapterContractHarness {
       }
     },
     calls: () => callCount,
+    shipmentFulfillment: {
+      platformOrderId: String(SHIPMENT_ORDER_ID),
+      scriptAlreadyPrepared: () => {
+        orderStatus = 'PROCESSING';
+        orderSubstatus = 'READY_TO_SHIP';
+        fallback = null;
+        routes.set('campaigns', CAMPAIGNS_ROUTE);
+      },
+      scriptPrepareSuccess: () => {
+        orderStatus = 'PROCESSING';
+        orderSubstatus = 'STARTED';
+        fallback = null;
+        routes.set('campaigns', CAMPAIGNS_ROUTE);
+      },
+      scriptLabel: () => {
+        orderStatus = 'PROCESSING';
+        orderSubstatus = 'READY_TO_SHIP';
+        fallback = null;
+        routes.set('campaigns', CAMPAIGNS_ROUTE);
+      },
+    },
   };
 
   function classify(

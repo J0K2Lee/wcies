@@ -3,13 +3,18 @@ import {
   PaginatedResult,
   PlatformAdapter,
   PlatformCredentialContext,
+  PlatformLabelFile,
   PlatformListingRaw,
   PlatformOrderRaw,
+  PlatformShipmentPreparation,
   PlatformReturnRaw,
   PlatformWebhookEvent,
   StoreContext,
 } from '@wcies/platform-contracts';
 import { YandexClient, YxAuth } from './yandex.client';
+import { parseYxAuth } from './yandex-auth';
+import { YandexShipmentService } from './yandex-shipment.service';
+export { parseYxAuth };
 import {
   mapOfferMappingToListing,
   mapOrderToOrder,
@@ -57,7 +62,10 @@ const TARGETED_IDS_BATCH = 50;
 export class YandexAdapter implements PlatformAdapter {
   readonly platformCode = 'YANDEX' as const;
 
-  constructor(private readonly client: YandexClient) {}
+  constructor(
+    private readonly client: YandexClient,
+    private readonly shipmentService: YandexShipmentService,
+  ) {}
 
   async validateCredential(context: PlatformCredentialContext): Promise<void> {
     // GET /v2/campaigns doubles as the light credential-validation read
@@ -159,6 +167,37 @@ export class YandexAdapter implements PlatformAdapter {
 
   async processWebhook(_context: StoreContext, payload: unknown): Promise<PlatformWebhookEvent[]> {
     return mapWebhookPayload(payload);
+  }
+
+  /**
+   * WRITE: the one seller transition on the Yandex order lifecycle -
+   * `PROCESSING/STARTED -> PROCESSING/READY_TO_SHIP` (组包/可发货). No-op
+   * (read-only) when the order already passed that step. Never exercised
+   * against a live account by tests (AGENTS.md §92).
+   */
+  async prepareShipment(
+    context: StoreContext,
+    order: { platformOrderId: string },
+  ): Promise<PlatformShipmentPreparation> {
+    const identity = await this.resolveIdentityForContext(context);
+    return this.shipmentService.prepareShipment(
+      { storeId: context.storeId, credential: context.credential },
+      order,
+      identity,
+    );
+  }
+
+  /** Label PDF (面单) for an order; null while Yandex has not generated it. */
+  async fetchShippingLabel(
+    context: StoreContext,
+    order: { platformOrderId: string },
+  ): Promise<PlatformLabelFile | null> {
+    const identity = await this.resolveIdentityForContext(context);
+    return this.shipmentService.fetchShippingLabel(
+      { storeId: context.storeId, credential: context.credential },
+      order,
+      identity,
+    );
   }
 
   async fetchOrdersByPlatformIds(
@@ -301,14 +340,6 @@ function identityOf(campaign: YxCampaign, storeId: string): YxIdentity {
     );
   }
   return { businessId: String(businessId), campaignId: String(campaignId) };
-}
-
-function parseYxAuth(credential: Readonly<Record<string, unknown>>, storeId: string): YxAuth {
-  const apiKey = credential['apiKey'];
-  if (typeof apiKey !== 'string' || apiKey === '') {
-    throw new StoreCredentialMalformedError(storeId, 'YANDEX', 'expected { apiKey, campaignId? }');
-  }
-  return { apiKey };
 }
 
 type IdentityResolver = (

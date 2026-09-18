@@ -6,6 +6,7 @@ import {
   YxOfferMappingsResponse,
   YxOrdersResponse,
   YxReturnsResponse,
+  YxUpdateOrderStatusResponse,
   YxWarehousesResponse,
 } from './types/api.types';
 
@@ -60,14 +61,29 @@ export const YANDEX_DEFAULT_OPTIONS: Readonly<
 interface RequestCall {
   readonly endpoint: string;
   readonly storeId: string;
-  readonly method: 'GET' | 'POST';
+  readonly method: 'GET' | 'POST' | 'PUT';
   readonly query?: Record<string, string | number | undefined>;
   readonly body?: Record<string, unknown>;
+  /**
+   * True for endpoints answering with a NON-JSON body (the order label PDF).
+   * The transport then hands back the raw bytes instead of parsing.
+   */
+  readonly raw?: boolean;
 }
 
 /** Per-store serialized rate limiting state. */
 interface StoreThrottle {
   readonly availableAt: number;
+}
+
+/**
+ * Raw HTTP outcome for binary-capable endpoints. `text` is the UTF-8 decoding
+ * of `bytes` so an error-JSON variant can still be inspected by the caller.
+ */
+export interface YxRawResponse {
+  readonly contentType: string | null;
+  readonly bytes: Uint8Array;
+  readonly text: string;
 }
 
 export class YandexClient {
@@ -158,6 +174,64 @@ export class YandexClient {
       storeId,
       method: 'POST',
       body: {},
+    });
+  }
+
+  // -----------------------------------------------------------------------
+  // Outbound shipment operations (order fulfillment flow, 2026-09-18).
+  // Spec: docs/yandex-partner-api-openapi.json (updateOrderStatus /
+  // generateOrderLabels). REAL writes - never exercised against a live
+  // account by tests (AGENTS.md §92).
+  // -----------------------------------------------------------------------
+
+  /**
+   * `PUT /v2/campaigns/{campaignId}/orders/{orderId}/status` - the one
+   * seller write on the order lifecycle. The verified transition for our
+   * flow is PROCESSING/STARTED -> PROCESSING/READY_TO_SHIP.
+   */
+  async updateOrderStatus(
+    auth: YxAuth,
+    storeId: string,
+    input: {
+      campaignId: string;
+      orderId: string;
+      status: string;
+      substatus?: string;
+    },
+  ): Promise<YxUpdateOrderStatusResponse> {
+    return this.request<YxUpdateOrderStatusResponse>(auth, {
+      endpoint:
+        `/v2/campaigns/${encodeURIComponent(input.campaignId)}/orders/` +
+        `${encodeURIComponent(input.orderId)}/status`,
+      storeId,
+      method: 'PUT',
+      body: {
+        order: {
+          status: input.status,
+          ...(input.substatus === undefined ? {} : { substatus: input.substatus }),
+        },
+      },
+    });
+  }
+
+  /**
+   * `GET /v2/campaigns/{campaignId}/orders/{orderId}/delivery/labels` -
+   * answers `application/pdf` BINARY (format param: A9_HORIZONTALLY / A9 /
+   * A7 / A4, default A7). Served raw; decoding is the caller's job.
+   */
+  async orderLabels(
+    auth: YxAuth,
+    storeId: string,
+    input: { campaignId: string; orderId: string; format?: string },
+  ): Promise<YxRawResponse> {
+    return this.request<YxRawResponse>(auth, {
+      endpoint:
+        `/v2/campaigns/${encodeURIComponent(input.campaignId)}/orders/` +
+        `${encodeURIComponent(input.orderId)}/delivery/labels`,
+      storeId,
+      method: 'GET',
+      query: input.format === undefined ? {} : { format: input.format },
+      raw: true,
     });
   }
 
@@ -287,6 +361,37 @@ export class YandexClient {
           null,
           await safeErrorMessage(response),
         ),
+      };
+    }
+
+    if (call.raw === true) {
+      let buffer: ArrayBuffer;
+      try {
+        buffer = await response.arrayBuffer();
+      } catch (error: unknown) {
+        return {
+          ok: false,
+          retryable: false,
+          retryAfterMs: null,
+          error: new PlatformMalformedResponseError({
+            httpStatus: response.status,
+            requestId: null,
+            endpoint: call.endpoint,
+            storeId: call.storeId,
+            message: `Response body could not be read (${String(error)})`,
+          }),
+        };
+      }
+      const bytes = new Uint8Array(buffer);
+      return {
+        ok: true,
+        value: {
+          contentType: response.headers.get('content-type'),
+          bytes,
+          // Tolerant by construction: a binary body decodes to replacement
+          // characters, which the caller ignores unless the type says JSON.
+          text: new TextDecoder().decode(bytes),
+        } as TResponse,
       };
     }
 

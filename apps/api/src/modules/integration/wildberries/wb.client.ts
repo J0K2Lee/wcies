@@ -5,7 +5,10 @@ import {
   WbCardsListResponse,
   WbSellerInfoResponse,
   WbStatsOrderRow,
+  WbV3CreateSupplyResponse,
+  WbV3OrderStatusesResponse,
   WbV3OrdersResponse,
+  WbV3StickersResponse,
   WbWebhookCreateResponse,
   WbWebhookResource,
   extractWebhookRows,
@@ -96,7 +99,7 @@ interface RequestCall {
   readonly domain: WbDomain;
   readonly endpoint: string;
   readonly storeId: string;
-  readonly method: 'GET' | 'POST' | 'DELETE';
+  readonly method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   /** GET/DELETE: query params; POST: JSON body. */
   readonly query?: Record<string, string | number>;
   readonly body?: Record<string, unknown>;
@@ -178,6 +181,89 @@ export class WbClient {
       query,
     });
     return extractStatsRows(body);
+  }
+
+  // -----------------------------------------------------------------------
+  // Outbound shipment operations (order fulfillment flow, 2026-09-18).
+  // Marketplace domain, spec: docs/wb-orders-fbs-openapi.yaml. REAL writes -
+  // never exercised against a live account by tests (AGENTS.md §92).
+  // -----------------------------------------------------------------------
+
+  /**
+   * `POST /api/v3/orders/status` - a READ of assembly-order states (body
+   * `{orders: int64[]}`, max 1000; vendor docs §FBS Assembly Orders).
+   */
+  async v3OrderStatuses(
+    auth: WbAuth,
+    storeId: string,
+    orderIds: readonly number[],
+  ): Promise<WbV3OrderStatusesResponse> {
+    return this.request<WbV3OrderStatusesResponse>(auth, {
+      domain: 'marketplace',
+      endpoint: '/api/v3/orders/status',
+      storeId,
+      method: 'POST',
+      body: { orders: [...orderIds] },
+    });
+  }
+
+  /** `POST /api/v3/supplies` - creates a supply, 201 with `{id}`. */
+  async v3CreateSupply(
+    auth: WbAuth,
+    storeId: string,
+    input: { name: string },
+  ): Promise<WbV3CreateSupplyResponse> {
+    return this.request<WbV3CreateSupplyResponse>(auth, {
+      domain: 'marketplace',
+      endpoint: '/api/v3/supplies',
+      storeId,
+      method: 'POST',
+      body: { name: input.name },
+    });
+  }
+
+  /**
+   * `PATCH /api/marketplace/v3/supplies/{supplyId}/orders` - adds assembly
+   * orders (max 100) to the supply, moving them to `confirm` (vendor docs:
+   * the ONLY seller path into that state).
+   */
+  async v3AddOrdersToSupply(
+    auth: WbAuth,
+    storeId: string,
+    input: { supplyId: string; orderIds: readonly number[] },
+  ): Promise<void> {
+    await this.request<unknown>(auth, {
+      domain: 'marketplace',
+      endpoint: `/api/marketplace/v3/supplies/${encodeURIComponent(input.supplyId)}/orders`,
+      storeId,
+      method: 'PATCH',
+      body: { orders: [...input.orderIds] },
+    });
+  }
+
+  /**
+   * `POST /api/v3/orders/stickers` - stickers for orders in `confirm` /
+   * `complete`. Answers JSON with a BASE64 `file` (not a binary stream).
+   * 58x40 png is the thermal-label size matching WB's own defaults.
+   */
+  async v3OrderStickers(
+    auth: WbAuth,
+    storeId: string,
+    input: {
+      orderIds: readonly number[];
+      type: 'svg' | 'zplv' | 'zplh' | 'png';
+      width: 58 | 40;
+      height: 40 | 30;
+    },
+  ): Promise<WbV3StickersResponse> {
+    return this.request<WbV3StickersResponse>(auth, {
+      domain: 'marketplace',
+      endpoint: '/api/v3/orders/stickers',
+      storeId,
+      method: 'POST',
+      query: { type: input.type, width: input.width, height: input.height },
+      body: { orders: [...input.orderIds] },
+    });
   }
 
   // -----------------------------------------------------------------------
