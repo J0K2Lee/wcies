@@ -98,6 +98,12 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 ## 5b. Webhook（已验证 2026-09-18，官方文档核对；已实现）
 
 - **订阅方式与 OZON/Yandex 不同：通过 API 创建**（webhooks-api.wildberries.ru），不是卖家后台 UI。鉴权 = seller token（Authorization）+ **WCIES 服务密钥**（`X-Client-Secret`，解决方案目录注册获得，env `WB_WEBHOOKS_SERVICE_SECRET`）；token 类别必须匹配事件类别。
+- **⚠ 实测门槛（2026-09-18 live，优先于下述文档描述）**：webhook API 对 token **类型**有硬门槛——
+  - Personal（个人令牌）→ `403 "only service tokens are allowed"`；
+  - **Base（基础令牌，「用于手动集成」tab 创建）→ 同样 403**（文档称 "A Service or Base token"，与实测不符，以实测为准）；
+  - 唯一出路是**服务令牌**：只能在「为目录中的服务创建」tab 里、针对已入驻解决方案目录的服务创建——即**自部署单租户系统必须先把 WCIES 注册为 WB 解决方案目录的开发者/服务**（大概率需要独联体主体）。X-Client-Secret 校验层在 token 类型之后，实测未能到达。
+  - **结论：WB webhook 对当前自部署场景搁置**；数据链路用轮询（LISTING/ORDER_SYNC）。接收链路代码保留待命：将来拿到服务令牌 + 服务密钥后，订阅三步即可启用；或以任何其它方式创建订阅后，把投递 secret 配到店铺 WEBHOOK 凭证即可接收。
+  - Base 令牌本身对常规卖家 API 完全可用（seller-info / content / statistics 均接受，凭证验证 VALID），替换主凭证无副作用。
 - **当前事件目录（无订单事件！）**：`report_generation_complete`（contentanalytics）、`card_creation_error`、`card_changed`（content）、`feedback_updated`（questionsandfeedback）。最新列表走 `GET /api/v1/event-scopes`。订单同步的兜底仍是轮询。
 - **投递格式**：`{sellerId, requestId, events[]}`，单请求最多 100 个事件；每个事件 `{id, time, test, type, scope, idempotencyKey, payload}`。幂等去重键 = `idempotencyKey`。
 - **真实性验证 = webhook secret**：创建 webhook 的响应中**仅此一次**返回 secret，之后不可查询（只能轮换）。WB 投递时把它放进 `Authorization` 头，接收方做比对（无签名、无 IP 白名单机制）。
