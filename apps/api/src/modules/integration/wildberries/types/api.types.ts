@@ -29,8 +29,12 @@ export interface WbCardSize {
   /** WB characteristic id - stable identity of one size variant. */
   readonly chrtID?: number;
   readonly techSize?: string;
-  /** Seller barcodes of this size - order lines resolve against these. */
-  readonly skus?: readonly number[];
+  /**
+   * Seller barcodes of this size - order lines resolve against these.
+   * T0 校准（2026-09-18 live）：skus 是字符串数组（如 "2056942167514"），
+   * 不是数字。数字保留为兼容回退。
+   */
+  readonly skus?: readonly (number | string)[];
   readonly [key: string]: unknown;
 }
 
@@ -58,23 +62,38 @@ export interface WbCard {
  * A business error rides inside HTTP 200 with `error: true` - the client
  * unwraps it (docs/integrations/wildberries.md §4).
  */
+/**
+ * POST /content/v2/get/cards/list 响应 —— T0 校准（2026-09-18 live）：
+ * **真实响应是顶层 `{cards, cursor}`，没有文档所称的 `{data, error, errorText}`
+ * 信封**（信封解封装仅对带 `error` 键的形状生效）。cursor.updatedAt 是
+ * RFC3339 时间字符串（翻页原样回传），nmID 是数字。
+ */
 export interface WbCardsListResponse {
-  readonly data?: {
-    readonly cards?: readonly WbCard[];
-    /** Cursor to echo back (updatedAt + nmID of the last card). */
-    readonly cursor?: { total?: number; updatedAt?: number; nmID?: number };
+  readonly cards?: readonly WbCard[];
+  readonly cursor?: {
+    readonly updatedAt?: string | number;
+    readonly nmID?: number;
+    readonly total?: number;
   };
   readonly error?: boolean;
   readonly errorText?: string;
   readonly additionalErrors?: unknown;
+  readonly [key: string]: unknown;
 }
 
-/** Request body of /content/v2/get/cards/list. */
+/**
+ * Request body of /content/v2/get/cards/list —— T0 校准（2026-09-18 live）：
+ * 首页就是 `{settings: {}}`（**不带 cursor 字段**）；cursor.updatedAt 是
+ * RFC3339 时间字符串（数字会 400: Time.UnmarshalJSON）。filter/sort 可省略。
+ */
 export interface WbCardsListRequest {
   readonly settings: {
-    readonly filter: Record<string, unknown>;
-    readonly cursor: { readonly updatedAt: number; readonly nmID: number; readonly limit: number };
-    readonly sort?: { readonly ascending: boolean };
+    readonly cursor?: {
+      readonly updatedAt?: string;
+      readonly nmID?: number;
+      readonly limit?: number;
+    };
+    readonly filter?: Record<string, unknown>;
   };
 }
 
@@ -89,8 +108,11 @@ export interface WbV3Order {
   readonly rid?: string;
   /** Seller article (= vendorCode on the card). */
   readonly article?: string;
-  /** Seller barcodes - the platform-SKU identity order lines resolve by. */
-  readonly skus?: readonly number[];
+  /**
+   * Seller barcodes - the platform-SKU identity order lines resolve by.
+   * 字符串或数字都可能（cards 实测为字符串，订单侧 T0 校准）。
+   */
+  readonly skus?: readonly (number | string)[];
   readonly nmId?: number;
   readonly chrtId?: number;
   readonly price?: number;

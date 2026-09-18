@@ -75,38 +75,38 @@ export class WbAdapter implements PlatformAdapter {
     const auth = parseWbAuth(context.credential, context.storeId);
     const pageCursor = isWbListingCursor(cursor)
       ? cursor
-      : ({ kind: 'WB_LISTING', updatedAt: 0, nmId: 0 } as const);
+      : ({ kind: 'WB_LISTING', updatedAt: null, nmId: null } as const);
 
-    const response = await this.client.cardsList(auth, context.storeId, {
-      settings: {
-        filter: {},
-        cursor: {
-          updatedAt: pageCursor.updatedAt,
-          nmID: pageCursor.nmId,
-          limit: LISTING_PAGE_SIZE,
-        },
-        sort: { ascending: true },
-      },
-    });
-    const data = response.data;
-    if (typeof data !== 'object' || data === null || !Array.isArray(data.cards)) {
+    // T0 校准（2026-09-18 live）：首页请求就是 {settings: {}}（不带 cursor
+    // 字段，数字型 updatedAt 会 400）；翻页把响应 cursor 原样回传
+    // （updatedAt 为 RFC3339 字符串 + nmID 数字 + limit）。
+    const settings: { cursor?: Record<string, unknown> } = {};
+    if (pageCursor.updatedAt !== null || pageCursor.nmId !== null) {
+      settings.cursor = {
+        ...(pageCursor.updatedAt !== null ? { updatedAt: pageCursor.updatedAt } : {}),
+        ...(pageCursor.nmId !== null ? { nmID: pageCursor.nmId } : {}),
+        limit: LISTING_PAGE_SIZE,
+      };
+    }
+
+    const response = await this.client.cardsList(auth, context.storeId, { settings });
+    // T0 校准：真实响应是顶层 {cards, cursor}——没有 {data} 信封。
+    if (!Array.isArray(response.cards)) {
       throw malformedListResponse(context.storeId);
     }
-    const cards: ReadonlyArray<WbCard> = data.cards;
+    const cards: ReadonlyArray<WbCard> = response.cards;
     const items = cards.map(mapCardToListing);
 
-    // Cursor round-trip: echo the response cursor (docs §4). A short page
-    // ends the walk. If a full page echoes the SAME cursor we were resuming
-    // from, the platform made no progress - stop instead of looping forever.
-    const hasMore =
-      cards.length >= LISTING_PAGE_SIZE &&
-      (data.cursor?.updatedAt !== pageCursor.updatedAt || data.cursor?.nmID !== pageCursor.nmId);
-    const echo: WbListingCursor = {
-      kind: 'WB_LISTING',
-      updatedAt:
-        typeof data.cursor?.updatedAt === 'number' ? data.cursor.updatedAt : pageCursor.updatedAt,
-      nmId: typeof data.cursor?.nmID === 'number' ? data.cursor.nmID : pageCursor.nmId,
-    };
+    // Cursor round-trip: echo the response cursor. A short page ends the
+    // walk; a full page whose cursor equals the one we sent means NO
+    // progress - stop instead of looping forever.
+    const echoUpdatedAt = readCursorUpdatedAt(response.cursor?.updatedAt);
+    const echoNmId = typeof response.cursor?.nmID === 'number' ? response.cursor.nmID : null;
+    const progressed = echoUpdatedAt !== pageCursor.updatedAt || echoNmId !== pageCursor.nmId;
+    const hasMore = cards.length >= LISTING_PAGE_SIZE && progressed;
+    const echo: WbListingCursor | null = hasMore
+      ? { kind: 'WB_LISTING', updatedAt: echoUpdatedAt, nmId: echoNmId }
+      : null;
     return { items, nextCursor: hasMore ? echo : null, hasMore };
   }
 
@@ -187,6 +187,17 @@ export class WbAdapter implements PlatformAdapter {
 
 // ---------------------------------------------------------------------------
 
+/** Response cursor updatedAt is an RFC3339 string; tolerate numbers verbatim. */
+function readCursorUpdatedAt(value: unknown): string | null {
+  if (typeof value === 'string' && value !== '') {
+    return value;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
+
 function parseWbAuth(credential: Readonly<Record<string, unknown>>, storeId: string): WbAuth {
   const apiKey = credential['apiKey'];
   if (typeof apiKey !== 'string' || apiKey === '') {
@@ -262,7 +273,7 @@ function epochSeconds(iso: string): number {
 }
 
 function malformedListResponse(storeId: string): Error {
-  return new WbBadShape(storeId, 'content/cards/list', 'data.cards missing');
+  return new WbBadShape(storeId, 'content/cards/list', 'cards array missing');
 }
 function malformedOrdersResponse(storeId: string): Error {
   return new WbBadShape(storeId, 'marketplace/orders', 'orders array missing');

@@ -50,7 +50,7 @@ describe('WbClient domain routing + auth header', () => {
     fetchImpl.mockImplementation(jsonResponses(200, {}));
     await client.sellerInfo(AUTH, 's1');
     await client.cardsList(AUTH, 's1', {
-      settings: { filter: {}, cursor: { updatedAt: 0, nmID: 0, limit: 1 } },
+      settings: { cursor: { updatedAt: '2000-01-01T00:00:00Z', nmID: 0, limit: 1 } },
     });
     await client.fbsOrders(AUTH, 's1', { dateFrom: 1, dateTo: 2, next: 0, limit: 1 });
     await client.supplierOrders(AUTH, 's1', { dateFrom: '2026-09-18T00:00:00+03:00', flag: 0 });
@@ -97,7 +97,7 @@ describe('WbClient error normalization', () => {
     );
     const error = await capture(
       client.cardsList(AUTH, 's1', {
-        settings: { filter: {}, cursor: { updatedAt: 0, nmID: 0, limit: 1 } },
+        settings: { cursor: { updatedAt: '2000-01-01T00:00:00Z', nmID: 0, limit: 1 } },
       }),
     );
     expect(error).toBeInstanceOf(PlatformApiError);

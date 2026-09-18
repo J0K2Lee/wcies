@@ -125,19 +125,17 @@ function translate(body: unknown): { url: string; body: unknown } | null {
     }
     if ('last_id' in result && Array.isArray(result.items) && result.items.length > 0) {
       const items = result.items as ReturnType<typeof listingItem>[];
+      // T0 校准（2026-09-18 live）：cards/list 响应为顶层 {cards, cursor}，
+      // cursor.updatedAt 是 RFC3339 字符串。
       return {
         url: `${BASES.content}/content/v2/get/cards/list`,
         body: {
-          data: {
-            cards: items.map((item) => toWbCard(item)),
-            cursor: {
-              total: items.length,
-              updatedAt: 12345,
-              nmID: items.at(-1)?.product_id ?? 0,
-            },
+          cards: items.map((item) => toWbCard(item)),
+          cursor: {
+            total: items.length,
+            updatedAt: '2030-01-01T00:00:00Z',
+            nmID: items.at(-1)?.product_id ?? 0,
           },
-          error: false,
-          errorText: '',
         },
       };
     }

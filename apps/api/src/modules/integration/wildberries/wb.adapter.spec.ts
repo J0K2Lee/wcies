@@ -180,8 +180,8 @@ describe('WbAdapter fetchListings cursor', () => {
       sizes: [{ skus: [20300 + i] }],
     }));
     const responses: unknown[] = [
-      { data: { cards: fullPage, cursor: { updatedAt: 111, nmID: 1099 } }, error: false },
-      { data: { cards: [{ nmID: 5000, vendorCode: 'SKU-Z', sizes: [] }] }, error: false },
+      { cards: fullPage, cursor: { updatedAt: '2030-01-01T00:00:00Z', nmID: 1099 } },
+      { cards: [{ nmID: 5000, vendorCode: 'SKU-Z', sizes: [] }] },
     ];
     let index = 0;
     const { adapter } = makeStateful(

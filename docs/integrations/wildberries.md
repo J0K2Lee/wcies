@@ -71,7 +71,11 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 
 ## 4. 商品卡 / Listing（已验证）
 
-- `POST https://content-api.wildberries.cn/content/v2/get/cards/list`：body `settings{filter{textSearch,objectIDs,imtID,withPhoto,...}, cursor{updatedAt,nmID,limit}, sort{ascending}}`；**limit ≤100/页**；分页 = 回传响应 `cursor{updatedAt, nmID}`（响应含 `cursor.total`）；**回收站卡片不出现在结果中**。
+- `POST https://content-api.wildberries.cn/content/v2/get/cards/list`——**T0 校准（2026-09-18 live，与早期文档记录有出入，以此为准）**：
+  - 首页请求就是 `{"settings": {}}`（**不带 cursor 字段**；cursor.updatedAt 是 **RFC3339 时间字符串**，传数字会 `400 Time.UnmarshalJSON`）；翻页把响应 cursor 原样回传：`{"settings":{"cursor":{"updatedAt":"…","nmID":123,"limit":100}}}`；filter/sort 可整体省略；
+  - **响应是顶层 `{cards, cursor}`，没有 `{data, error, errorText}` 信封**（client 的 content 域解封装仅在响应带 `error:true` 键时触发，二者兼容）；
+  - `sizes[].skus` 条码是**字符串**数组（如 `"2056942167514"`）；
+  - **limit ≤100/页**；翻页终止：短页（<limit）或 cursor 无前进；响应含 `cursor.total`；**回收站卡片不出现在结果中**。
 - `cards[]` 字段：`nmID, imtID, nmUUID, subjectID, subjectName, vendorCode, brand, title, description, photos{big,c246x328,c516x688,square,tm}, video, dimensions{length,width,height,weightBrutto}, characteristics[{id,name,value}], sizes[{chrtID,techSize,skus[]}], tags[], createdAt, updatedAt`。
 - 响应封装：`{data, error(bool), errorText, additionalErrors}`——**HTTP 200 内可能藏业务错误**，client 必须解封装（与 OZON 直接返回数据不同）。
 - 限流：100 req/min、600ms、burst 5。

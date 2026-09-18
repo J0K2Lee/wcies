@@ -97,10 +97,20 @@ export function mapCardToListing(card: WbCard): PlatformListingRaw {
   // stays visible and resolvable by sellerSku.
   const skus: PlatformListingSkuRaw[] = [];
   for (const size of sizes) {
+    // T0 校准（2026-09-18 live）：cards 的 sizes[].skus 条码是字符串数组
+    // （"2056942167514"）；数字保留为兼容回退。
     const barcodes = Array.isArray(size.skus)
-      ? size.skus.filter(
-          (sku: unknown): sku is number => typeof sku === 'number' && Number.isFinite(sku),
-        )
+      ? size.skus
+          .map((sku: unknown): string | null => {
+            if (typeof sku === 'string' && sku.trim() !== '') {
+              return sku.trim();
+            }
+            if (typeof sku === 'number' && Number.isFinite(sku)) {
+              return String(sku);
+            }
+            return null;
+          })
+          .filter((sku): sku is string => sku !== null)
       : [];
     if (barcodes.length === 0) {
       skus.push({
@@ -353,13 +363,16 @@ export function isWbWebhookSecretValid(
 // Helpers
 // ---------------------------------------------------------------------------
 
-function firstBarcode(skus: readonly number[] | undefined): string | null {
+function firstBarcode(skus: readonly (number | string)[] | undefined): string | null {
   if (!Array.isArray(skus)) {
     return null;
   }
   for (const sku of skus) {
     if (typeof sku === 'number' && Number.isFinite(sku)) {
       return String(sku);
+    }
+    if (typeof sku === 'string' && sku.trim() !== '') {
+      return sku.trim();
     }
   }
   return null;

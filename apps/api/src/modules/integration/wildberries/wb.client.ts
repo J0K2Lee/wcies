@@ -509,19 +509,25 @@ function toQueryString(query: Record<string, string | number> | undefined): stri
 
 /** Parses WB error bodies without ever echoing request headers. */
 async function safeErrorMessage(response: Response, domain: WbDomain): Promise<string> {
+  let raw = '';
   try {
-    const body = (await response.json()) as {
+    raw = await response.text();
+    const body = JSON.parse(raw) as {
       message?: unknown;
       errorText?: unknown;
-      errors?: unknown;
+      detail?: unknown;
     };
-    for (const candidate of [body.message, body.errorText]) {
+    for (const candidate of [body.message, body.errorText, body.detail]) {
       if (typeof candidate === 'string' && candidate !== '') {
-        return `WB ${domain} error (HTTP ${response.status}): ${candidate}`;
+        return `WB ${domain} error (HTTP ${response.status}): ${candidate.slice(0, 300)}`;
       }
     }
   } catch {
-    // fall through to the generic message
+    // Plain-text bodies exist (e.g. Go decoder 400s, T0 2026-09-18) - surface
+    // a trimmed slice; bodies never contain credentials (those are headers).
+    if (raw.trim() !== '') {
+      return `WB ${domain} error (HTTP ${response.status}): ${raw.slice(0, 300)}`;
+    }
   }
   return `WB ${domain} responded HTTP ${response.status}`;
 }

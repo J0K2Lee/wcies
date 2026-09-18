@@ -8,11 +8,15 @@
  * sources' positions; the stored RESUME marker carries them across runs.
  */
 
-/** Listing enumeration state: cards/list cursor {updatedAt, nmID} echo. */
+/**
+ * Listing enumeration state: cards/list cursor echo.
+ * T0 校准（2026-09-18 live）：updatedAt 是 RFC3339 字符串（不是数字），
+ * nmID 是数字；首页请求不带 cursor，两者以 null 表示。
+ */
 export interface WbListingCursor {
   readonly kind: 'WB_LISTING';
-  readonly updatedAt: number;
-  readonly nmId: number;
+  readonly updatedAt: string | null;
+  readonly nmId: number | null;
 }
 
 /**
@@ -45,12 +49,14 @@ export interface WbOrderResumeCursor {
 }
 
 export function isWbListingCursor(value: unknown): value is WbListingCursor {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const row = value as { kind?: unknown; updatedAt?: unknown; nmId?: unknown };
   return (
-    typeof value === 'object' &&
-    value !== null &&
-    (value as { kind?: unknown }).kind === 'WB_LISTING' &&
-    typeof (value as { updatedAt?: unknown }).updatedAt === 'number' &&
-    typeof (value as { nmId?: unknown }).nmId === 'number'
+    row.kind === 'WB_LISTING' &&
+    (row.updatedAt === null || typeof row.updatedAt === 'string') &&
+    (row.nmId === null || typeof row.nmId === 'number')
   );
 }
 
