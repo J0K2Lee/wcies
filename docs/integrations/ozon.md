@@ -574,7 +574,7 @@ master-data.md §7）。平台仓库分类与履约模式对应：
 | `product_id` | = OZON **SKU**（规范原文「Product identifier in the Ozon system, SKU」） | 规范字段描述 |
 | 响应 | `{ result:["<posting_number>"], additional_data:[...] }` | 规范 + 示例 |
 | ⚠ 坑 1 | **200 不代表组包成功**；规范要求回读 `/v3/posting/fbs/get` 并检查 `substatus`，`ship_failed` 需重试 | 规范描述段 |
-| ⚠ 坑 2 | 状态变更是**异步**的 | 同上 |
+| ⚠ 坑 2 | 状态变更是**异步**的（T0 实测：回读落在 `awaiting_packaging` + `substatus=ship_pending`，见下） | 同上 |
 | 幂等 | 已组包的发货单禁止重复提交；`POSTING_ALREADY_SHIPPED` / `HAS_INCORRECT_STATUS` 按**成功**处理 | 规范 Errors 表 |
 | 其他错误 | `TRANSITION_IS_NOT_POSSIBLE`、`POSTING_NOT_FOUND`、`POSTING_ALREADY_CANCELLED`、`HAS_INCORRECT_PRODUCT_QUANTITY` | 同上 |
 
@@ -600,8 +600,23 @@ master-data.md §7）。平台仓库分类与履约模式对应：
    `acceptance_in_progress` / `delivered`）→ 直接返回 `alreadyPrepared=true`，**不写平台**；
 3. 可组包判断优先看 `available_actions`（`ship` / `ship_async`），
    否则只认 `awaiting_packaging`；其余状态（含 `cancelled`）显式报错，**不猜**；
-4. 写平台 → **回读** → 仍未组包则抛 `PLATFORM_SHIP_NOT_CONFIRMED`；
+4. 写平台 → **回读**：
+   - 已组包 → 返回运单号；
+   - **受理但未确认**（`awaiting_packaging` + `substatus=ship_pending`，或
+     `available_actions` 含 `ship_async_in_process` / `ship_async_retry`）→
+     返回 `assemblyPending=true` 的**成功**结果（2026-10-09 T0 后语义；
+     运单号此时不可读，用户再次点击或常规订单同步自然收敛）；
+   - `ship_failed` 或写后变 `cancelled` → 抛 `PLATFORM_SHIP_NOT_CONFIRMED`（真失败，进异常中心）；
 5. 请求体由**平台回读结果**构造（全部商品装入一个包裹），不用本地行，避免与平台内容不一致。
+
+**T0 实测（2026-10-09，OZON 124 店 / 订单 56089221-0064-1，用户点击「获取运单号」）**：
+
+- `POST /v4/posting/fbs/ship` 以平台回读构造的请求体（全部商品单包裹）正常受理；
+- 回读返回 `status=awaiting_packaging`、`substatus=ship_pending`——组包确认
+  **异步进行中**，这是正常中间态而非错误（为此把实现从抛 502 改为返回
+  `assemblyPending`）；
+- 同日真实链路还暴露过一处本地 bug（`requireCapability` 返回解绑方法导致
+  `this===undefined` 500，已于当日修复并补回归测试），与平台行为无关。
 
 ### ② 面单 `POST /v2/posting/fbs/package-label`
 
@@ -621,8 +636,10 @@ master-data.md §7）。平台仓库分类与履约模式对应：
 
 ### 待 T0 实测（拿到用户授权后逐项回填）
 
-1. `/v4/posting/fbs/ship` 真实请求/响应；已组包时的**真实错误文案与 HTTP 状态**；
-2. `substatus = ship_failed` 的传播时机（异步组包需多久）；
+1. ~~`/v4/posting/fbs/ship` 真实请求/响应~~ ✅ 2026-10-09 已测（见上：受理正常、
+   确认异步、中间态 `ship_pending`）；已组包时的**真实错误文案与 HTTP 状态**仍未遇到；
+2. `substatus = ship_failed` 的传播时机（异步组包需多久）——`ship_pending` 中间态
+   已实测，失败态未遇到；
 3. `integration_type_flow = aggregator`（rFBS，本店 146/183 单）是否同样走本端点组包；
 4. `/v2/posting/fbs/package-label` 真实响应体是 PDF 字节还是 JSON base64；
 5. `available_actions` 在真实 `/v3/posting/fbs/get` 响应中是否出现、取值集合。

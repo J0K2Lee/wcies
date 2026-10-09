@@ -858,8 +858,12 @@ PickingTaskItem 状态变化与 Inventory `Reserved → Picked` **必须原子�
   **155 单全部有 `tracking_number`**，16 单 `awaiting_packaging` **全部没有**——
   证实平台只在组包时分配运单号，这也解释了为什么「获取运单号」必须调组包接口。
 - **幂等**：先回读发货单，已组包（或平台返回已组包）时**完全不写平台**，只刷新本地事实。
-- **必须回读确认**：规范明确 200 不代表组包成功，需回读并检查 `substatus`；
-  未确认时抛 `PLATFORM_SHIP_NOT_CONFIRMED`，不得当成成功。
+- **回读确认 + 异步受理（2026-10-09 T0 修订）**：规范明确 200 不代表组包成功，需回读
+  并检查 `substatus`。组包确认是**异步**的——回读落在 `awaiting_packaging` +
+  `substatus=ship_pending` 属正常「已受理、处理中」，作为成功返回
+  （`assemblyPending=true`，运单号暂为 null，不建异常）；用户再次点击或常规订单
+  同步自然收敛。仅 `substatus=ship_failed` 或写后 `cancelled` 才抛
+  `PLATFORM_SHIP_NOT_CONFIRMED`（真失败，进异常中心）。
 - 组包后把平台事实（状态 / 阶段 / 时限 / 运单号 / raw_data）经平台 mapper
   归一化后落库；**ERP 状态一律由 `OrderStatusService` 决定**（§38 不变）。
 - 平台未实现该能力时不猜测、不跳过：抛 `PLATFORM_CAPABILITY_UNSUPPORTED`，

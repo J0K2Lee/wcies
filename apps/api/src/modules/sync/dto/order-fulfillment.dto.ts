@@ -27,6 +27,11 @@ export class PrepareShipmentResultDto {
   platformStatus!: string | null;
   @ApiProperty({ description: '平台此前已受理该订单（本次未再写平台）' })
   alreadyPrepared!: boolean;
-  @ApiProperty({ description: '本次是否真的调用了平台写接口' })
+  @ApiProperty({
+    description:
+      '平台已受理组包但尚未确认（OZON 异步处理，正常中间态）：运单号暂不可读，稍后再次点击即可收敛',
+  })
+  assemblyPending!: boolean;
+  @ApiProperty({ description: '本次点击是否完成平台组包写（受理中/已组包过则为 false）' })
   platformWritePerformed!: boolean;
 }

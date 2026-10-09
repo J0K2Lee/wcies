@@ -26,6 +26,12 @@ export interface PrepareShipmentResult {
   platformStatus: string | null;
   /** True when the platform had already accepted the order (no write made). */
   alreadyPrepared: boolean;
+  /**
+   * True when the platform ACCEPTED the assembly but has not confirmed it
+   * yet (OZON processes 组包 asynchronously) - a success outcome; the
+   * waybill simply is not readable yet and a later call converges.
+   */
+  assemblyPending: boolean;
   /** True when this call actually performed the platform write. */
   platformWritePerformed: boolean;
 }
@@ -108,7 +114,11 @@ export class OrderPlatformShipService {
       entityType: 'ORDER',
       entityId: order.id,
       entityCode: order.orderNo,
-      action: result.alreadyPrepared ? 'PLATFORM_SHIP_ALREADY_PREPARED' : 'PLATFORM_SHIP_PREPARE',
+      action: result.alreadyPrepared
+        ? 'PLATFORM_SHIP_ALREADY_PREPARED'
+        : result.assemblyPending === true
+          ? 'PLATFORM_SHIP_SUBMITTED'
+          : 'PLATFORM_SHIP_PREPARE',
       changes: {
         platformStatus: { from: order.platformStatus, to: result.platformStatus },
         trackingNumber: { from: order.platformTrackingNo, to: result.trackingNumber },
@@ -123,7 +133,8 @@ export class OrderPlatformShipService {
       trackingNumber: result.trackingNumber,
       platformStatus: result.platformStatus,
       alreadyPrepared: result.alreadyPrepared,
-      platformWritePerformed: !result.alreadyPrepared,
+      assemblyPending: result.assemblyPending === true,
+      platformWritePerformed: !result.alreadyPrepared && result.assemblyPending !== true,
     };
   }
 

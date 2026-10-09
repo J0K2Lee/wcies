@@ -281,6 +281,15 @@ export interface PlatformShipmentPreparation {
   readonly platformStatus: string | null;
   /** True when the platform reported the order was already prepared. */
   readonly alreadyPrepared: boolean;
+  /**
+   * True when the platform ACCEPTED the assembly request but has not
+   * confirmed it yet - a SUCCESS outcome, not an error (T0 2026-10-09,
+   * OZON 124 / 56089221-0064-1: `/v4/posting/fbs/ship` returns 200 and the
+   * posting then sits in `awaiting_packaging` with substatus `ship_pending`
+   * for a while before flipping to `awaiting_deliver`). The waybill is
+   * simply not readable yet; a later call converges on the facts.
+   */
+  readonly assemblyPending?: boolean;
 }
 
 /** A platform-generated label/waybill file, fetched so it can be printed. */

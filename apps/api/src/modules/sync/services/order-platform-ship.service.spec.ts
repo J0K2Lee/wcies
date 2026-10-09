@@ -143,6 +143,33 @@ describe('OrderPlatformShipService.prepareShipment', () => {
     });
   });
 
+  it('passes the async acceptance through as a success (assemblyPending), no exception row', async () => {
+    // OZON 组包是异步的：平台受理但未确认属于正常结果，不得建异常，
+    // 操作日志记 PLATFORM_SHIP_SUBMITTED，platformWritePerformed 为 false。
+    const { service, exceptionService, operationLog } = makeService({
+      platformCode: 'OZON',
+      async prepareShipment() {
+        return {
+          platformOrderId: ORDER.platformOrderId,
+          trackingNumber: null,
+          platformStatus: 'awaiting_packaging',
+          alreadyPrepared: false,
+          assemblyPending: true,
+        };
+      },
+    });
+
+    const result = await service.prepareShipment('order-1', OPERATOR);
+
+    expect(result.assemblyPending).toBe(true);
+    expect(result.platformWritePerformed).toBe(false);
+    expect(operationLog.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'PLATFORM_SHIP_SUBMITTED', operator: OPERATOR }),
+    );
+    // Pending 不是失败：只走 resolve（清旧告警），不走 create（建新告警）。
+    expect(exceptionService.create).not.toHaveBeenCalled();
+  });
+
   it('throws PLATFORM_CAPABILITY_UNSUPPORTED when the platform lacks the capability', async () => {
     const { service } = makeService(new BareAdapter());
 

@@ -811,16 +811,24 @@ export function OrdersPage() {
         trackingNumber: string | null;
         platformStatus: string | null;
         alreadyPrepared: boolean;
+        assemblyPending: boolean;
       }>('/api/v1/orders/{id}/prepare-shipment', {}, { id }),
     onSuccess: (result: {
       trackingNumber: string | null;
       platformStatus: string | null;
       alreadyPrepared: boolean;
+      assemblyPending: boolean;
     }) => {
+      // 组包是异步的：平台受理后要过一会儿才转 awaiting_deliver 并分配
+      // 运单号，受理中是正常结果，提示稍后再点一次即可收敛。
       const waybill =
         result.trackingNumber === null ? '平台暂未返回运单号' : `运单号 ${result.trackingNumber}`;
       message.success(
-        result.alreadyPrepared ? `平台此前已组包（${waybill}）` : `已完成平台组包（${waybill}）`,
+        result.alreadyPrepared
+          ? `平台此前已组包（${waybill}）`
+          : result.assemblyPending
+            ? '组包已提交，平台处理中；运单号稍后可取，可再次点击「获取运单号」刷新'
+            : `已完成平台组包（${waybill}）`,
       );
       void queryClient.invalidateQueries({ queryKey: ['orders'] });
       void queryClient.invalidateQueries({ queryKey: ['order-detail'] });

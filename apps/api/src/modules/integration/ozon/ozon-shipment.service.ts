@@ -46,6 +46,16 @@ const SHIP_IN_PROGRESS_HINTS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Posting substatus meaning "assembly accepted, platform still processing".
+ * T0 2026-10-09 (OZON 124 / 56089221-0064-1): right after a 200 from
+ * /v4/posting/fbs/ship the posting re-reads as awaiting_packaging with
+ * substatus `ship_pending` and only later flips to awaiting_deliver - the
+ * confirmation is asynchronous and this state is a normal pending outcome,
+ * never an error.
+ */
+const SHIP_PENDING_SUBSTATUS = 'ship_pending';
+
+/**
  * OZON order fulfillment operations (2026-09-18 order shipping flow).
  *
  * Owns the platform-side WRITE for this flow - 组包 (`/v4/posting/fbs/ship`)
@@ -89,11 +99,14 @@ export class OzonShipmentService {
 
     const decision = classify(before);
     if (decision === 'IN_PROGRESS') {
-      throw new OzonOrderNotReadyError('OZON 正在组包该订单，请稍后重试', {
-        postingNumber,
-        platformStatus: before.status,
-        reason: 'ship_async_in_process',
-      });
+      // Assembly was already submitted (by this or an earlier call) and the
+      // platform is still processing it: report the pending acceptance, do
+      // NOT fire a second write.
+      this.logger.log(
+        `ozon assembly submitted, confirmation pending store=${context.storeId} posting=${postingNumber} status=${before.status}${before.substatus ? `/${before.substatus}` : ''}`,
+        'OzonShipmentService',
+      );
+      return pendingResult(postingNumber, before.status);
     }
     if (decision === 'BLOCKED') {
       throw new OzonOrderNotReadyError(`OZON 订单当前状态（${before.status}）不允许组包`, {
@@ -106,14 +119,22 @@ export class OzonShipmentService {
     await this.shipIgnoringAlreadyShipped(auth, context.storeId, postingNumber, packages);
 
     // The spec is explicit that a 200 does NOT prove assembly - the posting
-    // must be re-read and, on `substatus = ship_failed`, the assembly retried.
+    // must be re-read. A genuine failure (ship_failed / cancelled) is an
+    // error; anything else still unassembled is the normal async window.
     const after = await this.readPosting(auth, context.storeId, postingNumber);
     if (!isAssembled(after)) {
-      throw new OzonAssemblyNotConfirmedError({
-        postingNumber,
-        platformStatus: after.status,
-        substatus: after.substatus ?? null,
-      });
+      if (after.status === 'cancelled' || after.substatus === 'ship_failed') {
+        throw new OzonAssemblyNotConfirmedError({
+          postingNumber,
+          platformStatus: after.status,
+          substatus: after.substatus ?? null,
+        });
+      }
+      this.logger.log(
+        `ozon assembly submitted, confirmation pending store=${context.storeId} posting=${postingNumber} status=${after.status}${after.substatus ? `/${after.substatus}` : ''}`,
+        'OzonShipmentService',
+      );
+      return pendingResult(postingNumber, after.status);
     }
     this.logger.log(
       `ozon posting assembled store=${context.storeId} posting=${postingNumber} status=${after.status}`,
@@ -209,6 +230,17 @@ function isAssembled(posting: OzonFbsPosting): boolean {
   return OZON_ASSEMBLED_STATUSES.has(posting.status);
 }
 
+/** Platform accepted the assembly; the waybill is not readable yet. */
+function pendingResult(postingNumber: string, platformStatus: string): PlatformShipmentPreparation {
+  return {
+    platformOrderId: postingNumber,
+    trackingNumber: null,
+    platformStatus,
+    alreadyPrepared: false,
+    assemblyPending: true,
+  };
+}
+
 /**
  * Decides whether the posting may be assembled. `available_actions` (when the
  * platform provides it) wins over our status list so a posting the platform
@@ -216,6 +248,9 @@ function isAssembled(posting: OzonFbsPosting): boolean {
  * vocabulary.
  */
 function classify(posting: OzonFbsPosting): PrepareDecision {
+  if (posting.substatus === SHIP_PENDING_SUBSTATUS) {
+    return 'IN_PROGRESS';
+  }
   const actions = readActions(posting);
   if (actions.some((action) => SHIP_IN_PROGRESS_HINTS.has(action))) {
     return 'IN_PROGRESS';
@@ -358,7 +393,11 @@ export class OzonOrderNotReadyError extends DomainError {
   }
 }
 
-/** The platform accepted the request but the posting is not assembled yet. */
+/**
+ * The platform REJECTED the assembly (substatus ship_failed) or the posting
+ * turned out cancelled after the write - a genuine failure worth an exception
+ * row, unlike the normal async pending window (assemblyPending).
+ */
 export class OzonAssemblyNotConfirmedError extends DomainError {
   readonly code = 'PLATFORM_SHIP_NOT_CONFIRMED';
   readonly httpStatus = 502;
@@ -369,9 +408,9 @@ export class OzonAssemblyNotConfirmedError extends DomainError {
     substatus: string | null;
   }) {
     super(
-      `OZON 未确认组包成功（当前状态 ${details.platformStatus}${
+      `OZON 组包未成功（当前状态 ${details.platformStatus}${
         details.substatus === null ? '' : `/${details.substatus}`
-      }），请稍后重试`,
+      }），请重试`,
       { ...details },
     );
   }

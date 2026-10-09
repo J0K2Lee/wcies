@@ -31,6 +31,8 @@ interface Script {
   /** Status returned by /v3/posting/fbs/get on the Nth read (last one repeats). */
   readonly statuses: readonly string[];
   readonly substatus?: string;
+  /** Per-read substatus override (last one repeats); entries may be undefined. */
+  readonly substatuses?: readonly (string | undefined)[];
   readonly availableActions?: readonly string[];
   /** Response of /v4/posting/fbs/ship; omit to make the call fail the test. */
   readonly shipResponse?: { status: number; body: unknown };
@@ -59,13 +61,19 @@ function build(script: Script) {
       });
     }
     const status = script.statuses[Math.min(readIndex, script.statuses.length - 1)] ?? 'unknown';
+    // Per-read substatus: an explicit undefined entry means NO substatus for
+    // that read (needed to script "plain read, then ship_pending re-read").
+    const substatus =
+      script.substatuses === undefined
+        ? script.substatus
+        : script.substatuses[Math.min(readIndex, script.substatuses.length - 1)];
     readIndex += 1;
     return new Response(
       JSON.stringify({
         result: {
           posting_number: POSTING,
           status,
-          ...(script.substatus === undefined ? {} : { substatus: script.substatus }),
+          ...(substatus === undefined ? {} : { substatus }),
           ...(script.availableActions === undefined
             ? {}
             : { available_actions: script.availableActions }),
@@ -164,14 +172,42 @@ describe('OzonShipmentService.prepareShipment', () => {
     expect(shipCalls).toHaveLength(1);
   });
 
+  it('reports an accepted-but-unconfirmed assembly as PENDING, not an error', async () => {
+    // T0 2026-10-09 (OZON 124 / 56089221-0064-1): ship returns 200, the
+    // re-read still shows awaiting_packaging/ship_pending - OZON confirms
+    // assembly asynchronously and the waybill is not readable yet.
+    const { service, shipCalls } = build({
+      statuses: ['awaiting_packaging', 'awaiting_packaging'],
+      substatuses: [undefined, 'ship_pending'],
+    });
+    const result = await service.prepareShipment(CONTEXT, { platformOrderId: POSTING });
+    expect(result.assemblyPending).toBe(true);
+    expect(result.trackingNumber).toBeNull();
+    expect(result.platformStatus).toBe('awaiting_packaging');
+    expect(shipCalls).toHaveLength(1);
+  });
+
+  it('returns PENDING without a second write when entry read shows ship_pending', async () => {
+    // An earlier call already submitted the assembly: converge on that fact
+    // instead of firing /v4/posting/fbs/ship again.
+    const { service, shipCalls } = build({
+      statuses: ['awaiting_packaging'],
+      substatus: 'ship_pending',
+    });
+    const result = await service.prepareShipment(CONTEXT, { platformOrderId: POSTING });
+    expect(result.assemblyPending).toBe(true);
+    expect(shipCalls).toHaveLength(0);
+  });
+
   it('reports assembly still running instead of firing a second write', async () => {
+    // available_actions carries the in-progress hint (alternative platform
+    // signal for the same pending state).
     const { service, shipCalls } = build({
       statuses: ['awaiting_packaging'],
       availableActions: ['ship_async_in_process'],
     });
-    await expect(service.prepareShipment(CONTEXT, { platformOrderId: POSTING })).rejects.toThrow(
-      OzonOrderNotReadyError,
-    );
+    const result = await service.prepareShipment(CONTEXT, { platformOrderId: POSTING });
+    expect(result.assemblyPending).toBe(true);
     expect(shipCalls).toHaveLength(0);
   });
 });
