@@ -280,7 +280,9 @@ function requireCapability<K extends 'prepareShipment' | 'fetchShippingLabel'>(
       '该平台尚未接入此发货能力（缺少经核实的平台接口事实）',
     );
   }
-  return candidate;
+  // Bind back to the adapter: a detached prototype method would run with
+  // `this === undefined` and crash inside the platform implementation.
+  return candidate.bind(adapter) as CapabilityMethod<K>;
 }
 
 /** The platform has not generated a printable label for the order yet. */
