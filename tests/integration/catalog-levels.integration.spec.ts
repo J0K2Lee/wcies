@@ -5,8 +5,11 @@ import { ApiClient, runPrefix } from './sprint1.helpers';
 /**
  * Sprint 6 three-level category semantics (decision 0005) + brand naming
  * (decision 0006) against real PostgreSQL: depth limits incl. whole-subtree
- * height, product level-3 rule, same-parent name uniqueness (roots included),
- * subtree level shifts on re-parent, subtree product filtering.
+ * height, SKU level-3 rule, same-parent name uniqueness (roots included),
+ * subtree level shifts on re-parent, subtree SKU filtering.
+ *
+ * V1 (2026-10-13): products are gone - the level-3 rule and the subtree
+ * filter are asserted against SKUs (category is a SKU field, decision D5).
  */
 let api: ManagedProcess;
 const BASE = 'http://localhost:3111';
@@ -61,7 +64,7 @@ describe('category depth limits (decision 0005 §9.4)', () => {
     const otherL2 = await createCategory({ parentId: otherL1.data.id, nameZh: `${PREFIX} 线材` });
     expect(otherL2.data.level).toBe(2);
 
-    // Legal: the other L1 becomes an L2 under hostL1 (no children, no products).
+    // Legal: the other L1 becomes an L2 under hostL1 (no children, no SKUs).
     const legal = await client.patch<CategoryDto>(`/api/v1/categories/${otherL1.data.id}`, {
       parentId: hostL1.data.id,
     });
@@ -105,7 +108,7 @@ describe('category depth limits (decision 0005 §9.4)', () => {
     const leafL2 = await createCategory({ parentId: rootA.data.id, nameZh: `${PREFIX} 移动叶子` });
     expect(leafL2.data.level).toBe(2);
 
-    // L2 -> root: becomes L1 (delta -1), no children, no products.
+    // L2 -> root: becomes L1 (delta -1), no children, no SKUs.
     const moved = await client.patch<CategoryDto>(`/api/v1/categories/${leafL2.data.id}`, {
       parentId: null,
     });
@@ -136,7 +139,7 @@ describe('category depth limits (decision 0005 §9.4)', () => {
   });
 });
 
-describe('products only reference level-3 categories', () => {
+describe('SKUs only reference level-3 categories (V1: category is a SKU field)', () => {
   let l1 = '';
   let l2 = '';
   let l3 = '';
@@ -150,39 +153,39 @@ describe('products only reference level-3 categories', () => {
     l3 = r3.data.id;
   });
 
-  it('rejects products on level 1 / level 2; accepts level 3', async () => {
-    const onL1 = await client.post('/api/v1/products', {
-      nameZh: `${PREFIX} 挂一级商品`,
+  it('rejects SKUs on level 1 / level 2; accepts level 3', async () => {
+    const onL1 = await client.post('/api/v1/skus', {
+      nameZh: `${PREFIX} 挂一级SKU`,
       categoryId: l1,
     });
     expect(onL1.status).toBe(422);
     expect(onL1.body.error?.code).toBe('CATEGORY_LEVEL_INVALID');
 
-    const onL2 = await client.post('/api/v1/products', {
-      nameZh: `${PREFIX} 挂二级商品`,
+    const onL2 = await client.post('/api/v1/skus', {
+      nameZh: `${PREFIX} 挂二级SKU`,
       categoryId: l2,
     });
     expect(onL2.status).toBe(422);
 
-    const onL3 = await client.post<{ id: string }>('/api/v1/products', {
-      nameZh: `${PREFIX} 挂三级商品`,
+    const onL3 = await client.post<{ id: string }>('/api/v1/skus', {
+      nameZh: `${PREFIX} 挂三级SKU`,
       categoryId: l3,
     });
     expect(onL3.body.success).toBe(true);
   });
 
-  it('scenario C: a level-3 category carrying products cannot be re-leveled', async () => {
+  it('scenario C: a level-3 category carrying SKUs cannot be re-leveled', async () => {
     const moved = await client.patch(`/api/v1/categories/${l3}`, { parentId: l1 });
     expect(moved.status).toBe(422);
     expect(moved.body.error?.code).toBe('CATEGORY_LEVEL_INVALID');
   });
 
-  it('filters products by category subtree (level-1 selects descendants)', async () => {
+  it('filters SKUs by category subtree (level-1 selects descendants)', async () => {
     const list = await client.get<Array<{ nameZh: string }>>(
-      `/api/v1/products?categoryId=${l1}&pageSize=100`,
+      `/api/v1/skus?categoryId=${l1}&pageSize=100`,
     );
-    const names = list.body.data.map((product) => product.nameZh);
-    expect(names).toContain(`${PREFIX} 挂三级商品`);
+    const names = list.body.data.map((sku) => sku.nameZh);
+    expect(names).toContain(`${PREFIX} 挂三级SKU`);
   });
 });
 

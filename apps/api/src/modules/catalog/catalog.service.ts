@@ -144,7 +144,7 @@ export class CatalogService {
     return this.brandToResponse(updated as BrandEntity);
   }
 
-  /** Cross-module validation for Product service. */
+  /** Cross-module validation for SKU service (V1: product layer removed). */
   async findBrandEntityById(id: string): Promise<BrandEntity | null> {
     return this.repository.findBrandById(id);
   }
@@ -155,8 +155,8 @@ export class CatalogService {
     if (brand === null) {
       throw new BrandNotFoundError(id);
     }
-    const productCount = await this.repository.countBrandReferences(id);
-    if (productCount > 0) {
+    const skuCount = await this.repository.countBrandReferences(id);
+    if (skuCount > 0) {
       throw new BrandInUseError(id);
     }
     await this.repository.deleteBrand(id);
@@ -306,8 +306,7 @@ export class CatalogService {
   /**
    * Re-parent rules (decision 0005, §9.4): the check must consider the
    * height of the WHOLE subtree (not just the moved node), and a subtree
-   * carrying products can never shift levels (products only live on
-   * level-3 nodes).
+   * carrying SKUs can never shift levels (SKUs only live on level-3 nodes).
    */
   private async reparentWithDepthRules(
     id: string,
@@ -334,9 +333,9 @@ export class CatalogService {
     }
     const delta = newLevel - category.level;
     if (delta !== 0) {
-      const productCount = await this.repository.countProductsInSubtree(id);
-      if (productCount > 0) {
-        // Scenario C: moving would re-level nodes that carry products.
+      const skuCount = await this.repository.countSkusInSubtree(id);
+      if (skuCount > 0) {
+        // Scenario C: moving would re-level nodes that carry SKUs.
         throw new CategoryLevelInvalidError(id, 3);
       }
     }
@@ -345,7 +344,7 @@ export class CatalogService {
     }
   }
 
-  /** Cross-module validation for Product service. */
+  /** Cross-module validation for SKU service (V1: product layer removed). */
   async findCategoryEntityById(id: string): Promise<CategoryEntity | null> {
     return this.repository.findCategoryById(id);
   }
@@ -466,7 +465,7 @@ export class CatalogService {
   }
 
   /**
-   * Zero-reference hard delete (decision 0003): children and products each
+   * Zero-reference hard delete (decision 0003): children and SKUs each
    * block with their own error code (children are a hierarchy relation).
    */
   async removeCategory(id: string, operator: OperatorContext): Promise<void> {
@@ -477,7 +476,7 @@ export class CatalogService {
     if ((await this.repository.countCategoryChildren(id)) > 0) {
       throw new CategoryHasChildrenError(id);
     }
-    if ((await this.repository.countCategoryProducts(id)) > 0) {
+    if ((await this.repository.countCategorySkus(id)) > 0) {
       throw new CategoryInUseError(id);
     }
     await this.repository.deleteCategory(id);

@@ -62,12 +62,10 @@ export class CategoryLevelInvalidError extends DomainError {
   readonly httpStatus = 422;
 
   constructor(categoryId: string, level: number) {
-    super(
-      level === 3
-        ? '该类目下有商品，不可移动到非三级位置'
-        : '商品分类必须挂三级类目',
-      { categoryId, level },
-    );
+    super(level === 3 ? '该类目下有 SKU，不可移动到非三级位置' : 'SKU 分类必须挂三级类目', {
+      categoryId,
+      level,
+    });
   }
 }
 
@@ -91,22 +89,22 @@ export class CategoryHasChildrenError extends DomainError {
   }
 }
 
-/** Products still reference this category (decision 0003). */
+/** SKUs still reference this category (decision 0003; V1: category is a SKU field). */
 export class CategoryInUseError extends DomainError {
   readonly code = 'CATEGORY_IN_USE';
   readonly httpStatus = 409;
 
   constructor(categoryId: string) {
-    super('该记录已被引用（存在商品），只能停用不能删除', { categoryId });
+    super('该记录已被引用（存在 SKU），只能停用不能删除', { categoryId });
   }
 }
 
-/** Products still reference this brand (decision 0003). */
+/** SKUs still reference this brand (decision 0003; V1: brand is a SKU field). */
 export class BrandInUseError extends DomainError {
   readonly code = 'BRAND_IN_USE';
   readonly httpStatus = 409;
 
   constructor(brandId: string) {
-    super('该记录已被引用（存在商品），只能停用不能删除', { brandId });
+    super('该记录已被引用（存在 SKU），只能停用不能删除', { brandId });
   }
 }

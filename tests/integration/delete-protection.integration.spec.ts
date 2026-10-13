@@ -110,24 +110,25 @@ describe('store / binding delete', () => {
 });
 
 describe('brand / category delete', () => {
-  it('brand: IN_USE with products, deletable without', async () => {
+  it('brand: IN_USE with SKUs, deletable without (V1: brand is a SKU field)', async () => {
     const brand = await client.post<IdDto>('/api/v1/brands', { name: `${PREFIX} 删除品牌` });
-    const product = await client.post<IdDto>('/api/v1/products', {
-      nameZh: `${PREFIX} 引用品牌商品`,
+    const sku = await client.post<IdDto>('/api/v1/skus', {
+      nameZh: `${PREFIX} 引用品牌SKU`,
       brandId: brand.body.data.id,
     });
 
     const rejected = await client.del(`/api/v1/brands/${brand.body.data.id}`);
     expect(rejected.status).toBe(409);
     expect(rejected.body.error?.code).toBe('BRAND_IN_USE');
+    expect(rejected.body.error?.message).toContain('SKU');
 
-    await client.del(`/api/v1/products/${product.body.data.id}`);
+    await client.del(`/api/v1/skus/${sku.body.data.id}`);
     const deleted = await client.del(`/api/v1/brands/${brand.body.data.id}`);
     expect(deleted.status).toBe(200);
   });
 
-  it('category: children / products block; zero-reference deletes', async () => {
-    // L1 -> L2 -> L3 so a product can legally sit on the leaf.
+  it('category: children / SKUs block; zero-reference deletes (V1)', async () => {
+    // L1 -> L2 -> L3 so a SKU can legally sit on the leaf.
     const parent = await client.post<IdDto>('/api/v1/categories', {
       nameZh: `${PREFIX} 删除父类`,
     });
@@ -144,16 +145,17 @@ describe('brand / category delete', () => {
     expect(withChildren.status).toBe(409);
     expect(withChildren.body.error?.code).toBe('CATEGORY_HAS_CHILDREN');
 
-    const product = await client.post<IdDto>('/api/v1/products', {
-      nameZh: `${PREFIX} 引用类目商品`,
+    const sku = await client.post<IdDto>('/api/v1/skus', {
+      nameZh: `${PREFIX} 引用类目SKU`,
       categoryId: child.body.data.id,
     });
 
-    const withProducts = await client.del(`/api/v1/categories/${child.body.data.id}`);
-    expect(withProducts.status).toBe(409);
-    expect(withProducts.body.error?.code).toBe('CATEGORY_IN_USE');
+    const withSkus = await client.del(`/api/v1/categories/${child.body.data.id}`);
+    expect(withSkus.status).toBe(409);
+    expect(withSkus.body.error?.code).toBe('CATEGORY_IN_USE');
+    expect(withSkus.body.error?.message).toContain('SKU');
 
-    await client.del(`/api/v1/products/${product.body.data.id}`);
+    await client.del(`/api/v1/skus/${sku.body.data.id}`);
     const childDeleted = await client.del(`/api/v1/categories/${child.body.data.id}`);
     expect(childDeleted.status).toBe(200);
     const midDeleted = await client.del(`/api/v1/categories/${mid.body.data.id}`);

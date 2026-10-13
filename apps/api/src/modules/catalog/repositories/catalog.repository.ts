@@ -55,10 +55,10 @@ export class CatalogRepository {
     await this.brandRepository.update({ id }, patch);
   }
 
-  /** Products whose brand_id references this brand (decision 0003). */
+  /** SKUs whose brand_id references this brand (decision 0003; V1: brand is a SKU field). */
   async countBrandReferences(id: string): Promise<number> {
     const rows = await this.brandRepository.query<Array<{ count: string }>>(
-      'SELECT COUNT(*)::text AS count FROM products WHERE brand_id = $1',
+      'SELECT COUNT(*)::text AS count FROM skus WHERE brand_id = $1',
       [id],
     );
     return Number(rows[0]?.count ?? 0);
@@ -170,15 +170,15 @@ export class CatalogRepository {
     });
   }
 
-  /** Products attached anywhere in the subtree (products live on level-3 nodes). */
-  async countProductsInSubtree(id: string): Promise<number> {
+  /** SKUs attached anywhere in the subtree (SKUs live on level-3 nodes; V1). */
+  async countSkusInSubtree(id: string): Promise<number> {
     const rows = await this.categoryRepository.query<Array<{ count: string }>>(
       `WITH RECURSIVE t AS (
          SELECT id FROM categories WHERE id = $1
          UNION ALL
          SELECT c.id FROM categories c JOIN t ON c.parent_id = t.id
        )
-       SELECT COUNT(*)::text AS count FROM products WHERE category_id IN (SELECT id FROM t)`,
+       SELECT COUNT(*)::text AS count FROM skus WHERE category_id IN (SELECT id FROM t)`,
       [id],
     );
     return Number(rows[0]?.count ?? 0);
@@ -193,10 +193,10 @@ export class CatalogRepository {
     return this.categoryRepository.count({ where: { parentId: id } });
   }
 
-  /** Products whose category_id references this category directly. */
-  async countCategoryProducts(id: string): Promise<number> {
+  /** SKUs whose category_id references this category directly (V1). */
+  async countCategorySkus(id: string): Promise<number> {
     const rows = await this.categoryRepository.query<Array<{ count: string }>>(
-      'SELECT COUNT(*)::text AS count FROM products WHERE category_id = $1',
+      'SELECT COUNT(*)::text AS count FROM skus WHERE category_id = $1',
       [id],
     );
     return Number(rows[0]?.count ?? 0);

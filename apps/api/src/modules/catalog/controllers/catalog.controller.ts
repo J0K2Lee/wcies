@@ -119,7 +119,7 @@ export class CatalogController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Delete a category with zero references (children -> CATEGORY_HAS_CHILDREN, products -> CATEGORY_IN_USE)',
+      'Delete a category with zero references (children -> CATEGORY_HAS_CHILDREN, skus -> CATEGORY_IN_USE)',
   })
   @ApiOkNoDataEnvelope()
   async removeCategory(
