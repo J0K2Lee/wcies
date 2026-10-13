@@ -23,6 +23,8 @@ import { OperatorContext } from '../../operation-log/operation-log.service';
 import {
   BatchCreateBinsRequestDto,
   BatchCreateBinsResponseDto,
+  BatchDeleteBinsRequestDto,
+  BatchDeleteBinsResponseDto,
   BinListQueryDto,
   BinResponseDto,
   CreateBinRequestDto,
@@ -154,6 +156,20 @@ export class WarehouseBinController {
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true; data: BatchCreateBinsResponseDto }> {
     return ok(await this.binService.batchCreate(warehouseId, dto, operator));
+  }
+
+  @Post('warehouses/:warehouseId/bins/batch-delete')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Batch-delete bins (per-bin zero-reference rule; failures reported item by item)',
+  })
+  @ApiOkEnvelope(BatchDeleteBinsResponseDto)
+  async batchDeleteBins(
+    @Param('warehouseId') warehouseId: string,
+    @Body() dto: BatchDeleteBinsRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: BatchDeleteBinsResponseDto }> {
+    return ok(await this.binService.batchRemove(warehouseId, dto.binIds, operator));
   }
 
   @Get('warehouses/:warehouseId/bins/zones')

@@ -169,11 +169,23 @@ export class OrderIngestResultDto {
 // ---------------------------------------------------------------------------
 
 export class OrderListQueryDto extends PaginationQueryDto {
-  @ApiPropertyOptional({ description: '订单号 / 平台订单号模糊搜索' })
+  @ApiPropertyOptional({
+    description:
+      '混合搜索（用户指示 2026-09-28）：订单号 / 平台订单号 / 内部 SKU 编码 / ' +
+      'offer_id / seller_sku / platform_sku_id 任一命中',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(100)
   keyword?: string;
+
+  @ApiPropertyOptional({
+    description: '平台代码精确过滤（stores 所属平台 code，如 OZON/WB/YANDEX）',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  platform?: string;
 
   @ApiPropertyOptional({ enum: ERP_ORDER_STATUSES })
   @IsOptional()

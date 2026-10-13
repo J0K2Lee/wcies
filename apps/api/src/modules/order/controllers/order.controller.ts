@@ -46,6 +46,7 @@ export class OrderController {
     const result = await this.orderService.list(
       {
         keyword: query.keyword?.trim() || undefined,
+        platform: query.platform?.trim() || undefined,
         erpStatus: query.erpStatus,
         stage: query.stage as OrderStageFilter | undefined,
         goodsState: query.goodsState as OrderGoodsStateFilter | undefined,

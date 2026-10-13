@@ -267,6 +267,14 @@ ORDER_SYNC 再遇到已存在的订单（窗口重叠再投递，或定向回读
    `OrderStatusService.transition` 自动转 `SHIPPED`（历史原因
    「平台履约流转：平台仓库已发货」）；不评估发货时限异常。此类订单的履约
    流程在平台侧完成，不阻塞、不依赖内部发货单。
+   **映射修复同样遵守外部履约语义（2026-09-28，ERP 建议#6 修复）**：此前
+   恢复路径 `retryFailedMappingItem` / `retryAllocation` 对映射失败或缺货的
+   外部履约行误走内部库存分配，导致 FBP 订单被 `ORDER_SKU_MAPPING_FAILED` /
+   `ORDER_OUT_OF_STOCK` 异常永久卡在 待处理/异常。修复后：外部履约行修复时
+   不占库存，行直接 `EXTERNAL_FULFILLED` 并关闭行上的
+   `ORDER_OUT_OF_STOCK`；平台阶段已是 `IN_TRANSIT / DELIVERED` 的订单立即
+   转 `SHIPPED`（历史原因「平台履约流转：映射修复/重新分配时平台已发货」），
+   否则保持当前状态等平台事件推进。
 1. **只更新平台事实字段**：`platform_status` / `shipment_deadline` / `raw_data`。
    绝不直接改 `erp_status`（§1）。平台未提供的字段（NULL 输入）保持库内原值，
    历史上 `platform_status IS NULL` 的行不得被「看起来空」而清理或改写。

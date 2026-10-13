@@ -1,6 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsIn,
   IsInt,
   IsOptional,
@@ -405,6 +408,42 @@ export class BatchCreateBinsResponseDto {
 
   @ApiProperty({ type: [BinResponseDto] })
   bins!: BinResponseDto[];
+}
+
+/**
+ * 批量删除（用户指示 2026-09-28）：逐个执行与单删完全相同的零引用规则
+ * （decision 0003）——被引用/不存在的库位跳过并逐条返回原因，部分成功。
+ */
+export class BatchDeleteBinsRequestDto {
+  @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    description: '要删除的库位 ID 列表（1~2000 个，重复自动去重）',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(2000)
+  @IsUUID('4', { each: true })
+  binIds!: string[];
+}
+
+export class BatchDeleteBinFailureDto {
+  @ApiProperty({ format: 'uuid' })
+  binId!: string;
+
+  @ApiProperty({ nullable: true, example: 'ZG-01-A03-1' })
+  binCode!: string | null;
+
+  @ApiProperty({ example: '该库位已被引用（inventory_balances），只能停用不能删除' })
+  reason!: string;
+}
+
+export class BatchDeleteBinsResponseDto {
+  @ApiProperty({ example: 18, description: '成功删除的库位数' })
+  deletedCount!: number;
+
+  @ApiProperty({ type: [BatchDeleteBinFailureDto], description: '未删除的库位及原因' })
+  failures!: BatchDeleteBinFailureDto[];
 }
 
 // ---------------------------------------------------------------------------

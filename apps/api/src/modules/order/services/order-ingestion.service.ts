@@ -400,6 +400,40 @@ export class OrderIngestionService {
       skuId: resolution.skuId,
     });
 
+    // 外部履约（ERP 建议#6 修复 2026-09-28）：FBO/FBP/FBW/FBY 行由平台仓库
+    // 持货发货，与摄入路径（allocateItem 2a）同样**不占内部库存、不进拣货**。
+    // 平台已发货（platform_stage IN_TRANSIT / DELIVERED）时订单随平台事实
+    // 立即转 SHIPPED——这正是此前 FBP 订单被映射异常卡在 待处理/异常 的根因：
+    // 摄入时映射失败挂异常，恢复路径又误走内部库存分配。
+    if (isExternalFulfillmentMode(order.fulfillmentMode)) {
+      await this.dataSource.transaction(async (runner) => {
+        await this.itemRepo.updateFulfillment(runner, item.id, {
+          fulfillmentStatus: 'EXTERNAL_FULFILLED',
+        });
+        // 历史重试可能留过 ORDER_OUT_OF_STOCK，行转外部履约后内部缺货语义消失。
+        await this.exceptionService.resolveByReferenceInTx(runner, {
+          exceptionType: 'ORDER_OUT_OF_STOCK',
+          referenceType: 'ORDER_ITEM',
+          referenceId: item.id,
+        });
+      });
+      if (order.platformStage === 'IN_TRANSIT' || order.platformStage === 'DELIVERED') {
+        await this.statusService.transition(
+          order.id,
+          'SHIPPED',
+          operator,
+          `平台履约流转：映射修复时平台已发货（${order.platformStage}，外部履约 ${order.fulfillmentMode}）`,
+        );
+      } else {
+        await this.statusService.recomputeOrderStatus(
+          order.id,
+          operator,
+          `第 ${item.lineNo} 行映射修复（外部履约，等待平台发货事实）`,
+        );
+      }
+      return { resolved: true, reserved: false, reservationId: null };
+    }
+
     const fresh = (await this.itemRepo.findById(item.id)) as OrderItemEntity;
     let outcome: { reserved: boolean; reservationId: string | null };
     try {

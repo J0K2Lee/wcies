@@ -36,6 +36,12 @@ interface BinRow {
   status: string;
 }
 
+/** POST /bins/batch-delete 响应（部分成功语义）。 */
+interface BatchDeleteResult {
+  deletedCount: number;
+  failures: Array<{ binId: string; binCode: string | null; reason: string }>;
+}
+
 interface SingleFormValues {
   zone?: string;
   rackNumber: number;
@@ -65,7 +71,7 @@ function previewSingleBin(warehouseCode: string, values: Partial<SingleFormValue
 
 /** 库位管理 (task §63/§77): pick a warehouse, browse/search/batch-create bins. */
 export function BinsPage() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
   const [warehouseId, setWarehouseId] = useState<string | undefined>();
   const [keyword, setKeyword] = useState('');
@@ -75,6 +81,9 @@ export function BinsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
   const [deleting, setDeleting] = useState<BinRow | null>(null);
+  // 批量删除（用户指示 2026-09-28）：勾选集合 + 确认弹窗。
+  const [selectedBinIds, setSelectedBinIds] = useState<string[]>([]);
+  const [batchConfirmOpen, setBatchConfirmOpen] = useState(false);
   const [form] = Form.useForm<SingleFormValues>();
   const singleValues = Form.useWatch([], form) as Partial<SingleFormValues> | undefined;
 
@@ -158,6 +167,38 @@ export function BinsPage() {
       setDeleting(null);
       setSelectedId(null);
       void queryClient.invalidateQueries({ queryKey: ['bins', warehouseId] });
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  // 批量删除：逐个零引用规则，部分成功；失败逐条弹窗说明原因。
+  const batchDeleteMutation = useMutation({
+    mutationFn: ({ warehouseId: wid, binIds }: { warehouseId: string; binIds: string[] }) =>
+      apiPost<BatchDeleteResult>(
+        '/api/v1/warehouses/{warehouseId}/bins/batch-delete',
+        { binIds },
+        { warehouseId: wid },
+      ),
+    onSuccess: (result) => {
+      setBatchConfirmOpen(false);
+      setSelectedBinIds([]);
+      invalidateBins();
+      if (result.failures.length > 0) {
+        modal.warning({
+          title: `已删除 ${result.deletedCount} 个库位，${result.failures.length} 个未删除`,
+          content: (
+            <ul style={{ paddingLeft: 18, margin: 0, fontSize: 12.5 }}>
+              {result.failures.map((failure) => (
+                <li key={failure.binId}>
+                  {failure.binCode ?? failure.binId.slice(0, 8)}：{failure.reason}
+                </li>
+              ))}
+            </ul>
+          ),
+        });
+      } else {
+        void message.success(`已删除 ${result.deletedCount} 个库位`);
+      }
     },
     onError: (error: Error) => void message.error(error.message),
   });
@@ -273,9 +314,19 @@ export function BinsPage() {
         title="库位管理"
         description="按仓库浏览、搜索、新建库位；批量创建使用同一编码规则（仓库-货架-层）"
         secondary={
-          <Button disabled={warehouseId === undefined} onClick={() => setBatchOpen(true)}>
-            批量创建库位
-          </Button>
+          <Space>
+            <Button
+              danger
+              disabled={warehouseId === undefined || selectedBinIds.length === 0}
+              loading={batchDeleteMutation.isPending}
+              onClick={() => setBatchConfirmOpen(true)}
+            >
+              批量删除（{selectedBinIds.length}）
+            </Button>
+            <Button disabled={warehouseId === undefined} onClick={() => setBatchOpen(true)}>
+              批量创建库位
+            </Button>
+          </Space>
         }
         primary={
           <Button
@@ -311,6 +362,7 @@ export function BinsPage() {
             setPage(1);
             setZone(undefined);
             setSelectedId(null);
+            setSelectedBinIds([]);
             setWarehouseId(value);
           }}
           options={(warehouses.data?.data ?? []).map((warehouse) => ({
@@ -335,6 +387,10 @@ export function BinsPage() {
       <SectionCard flush>
         <DataTable<BinRow>
           rowKey="id"
+          rowSelection={{
+            selectedRowKeys: selectedBinIds,
+            onChange: (keys) => setSelectedBinIds(keys as string[]),
+          }}
           loading={bins.isLoading}
           dataSource={rows}
           pagination={{
@@ -457,6 +513,19 @@ export function BinsPage() {
           }
         }}
         onCancel={() => setDeleting(null)}
+      />
+
+      <DeleteConfirmModal
+        open={batchConfirmOpen}
+        title={`批量删除 ${selectedBinIds.length} 个库位？`}
+        description="仅零引用（无库存/流水）的库位可删除；被引用的库位会自动跳过并逐条说明原因，不影响其余库位删除。"
+        confirmLoading={batchDeleteMutation.isPending}
+        onConfirm={() => {
+          if (warehouseId !== undefined && selectedBinIds.length > 0) {
+            batchDeleteMutation.mutate({ warehouseId, binIds: selectedBinIds });
+          }
+        }}
+        onCancel={() => setBatchConfirmOpen(false)}
       />
 
       <BinBatchCreateModal

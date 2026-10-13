@@ -180,6 +180,7 @@ describe('OrderService.retryAllocation - mapped line without stock', () => {
       allocateMappedItem: vi.fn().mockResolvedValue({ reserved: false, reservationId: null }),
     } as unknown as OrderIngestionService;
     const statusService = {
+      transition: vi.fn().mockResolvedValue(undefined),
       recomputeOrderStatus: vi.fn().mockResolvedValue('BACKORDERED'),
     } as unknown as OrderStatusService;
     const service = new OrderService(
@@ -212,7 +213,7 @@ describe('OrderService.retryAllocation - mapped line without stock', () => {
       {} as OrderProcurementPort,
       {} as PlatformAdapterRegistry,
     );
-    return { service, itemRepo, exceptionService, statusService };
+    return { service, itemRepo, exceptionService, statusService, ingestionService };
   }
 
   it('lands the line on BACKORDERED, creates ORDER_OUT_OF_STOCK and recomputes', async () => {
@@ -257,5 +258,56 @@ describe('OrderService.retryAllocation - mapped line without stock', () => {
       referenceId: item.id,
     });
     expect(statusService.recomputeOrderStatus).toHaveBeenCalled();
+  });
+
+  // 外部履约（ERP 建议#6 修复 2026-09-28）：平台持货行的重试永不占用内部库存。
+  it('external-fulfillment line goes EXTERNAL_FULFILLED and follows platform facts to SHIPPED', async () => {
+    const item = makeItem({});
+    const { service, itemRepo, exceptionService, statusService, ingestionService } = build(item, {
+      fulfillmentMode: 'FBP',
+      platformStage: 'IN_TRANSIT',
+    });
+    (itemRepo.findById as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ ...item, fulfillmentStatus: 'BACKORDERED' })
+      .mockResolvedValueOnce({ ...item, fulfillmentStatus: 'EXTERNAL_FULFILLED' });
+
+    const result = await service.retryAllocation(item.id, OPERATOR);
+
+    expect(result).toMatchObject({ reserved: false, fulfillmentStatus: 'EXTERNAL_FULFILLED' });
+    expect(itemRepo.updateFulfillment).toHaveBeenCalledWith(expect.anything(), item.id, {
+      fulfillmentStatus: 'EXTERNAL_FULFILLED',
+    });
+    expect(exceptionService.resolveByReferenceInTx).toHaveBeenCalledWith(expect.anything(), {
+      exceptionType: 'ORDER_OUT_OF_STOCK',
+      referenceType: 'ORDER_ITEM',
+      referenceId: item.id,
+    });
+    expect(statusService.transition).toHaveBeenCalledWith(
+      'order-1',
+      'SHIPPED',
+      OPERATOR,
+      expect.stringContaining('平台履约流转'),
+    );
+    expect(
+      (ingestionService.allocateMappedItem as ReturnType<typeof vi.fn>).mock.calls,
+    ).toHaveLength(0);
+  });
+
+  it('external-fulfillment line awaiting platform shipment only recomputes (no SHIPPED yet)', async () => {
+    const item = makeItem({});
+    const { service, statusService } = build(item, {
+      fulfillmentMode: 'FBP',
+      platformStage: 'AWAITING_SHIPMENT',
+    });
+
+    const result = await service.retryAllocation(item.id, OPERATOR);
+
+    expect(result.reserved).toBe(false);
+    expect(statusService.transition).not.toHaveBeenCalled();
+    expect(statusService.recomputeOrderStatus).toHaveBeenCalledWith(
+      'order-1',
+      OPERATOR,
+      expect.stringContaining('外部履约'),
+    );
   });
 });

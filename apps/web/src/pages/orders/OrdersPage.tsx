@@ -19,6 +19,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import { apiGet, apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime, fmtMoney } from '../../utils/format';
+import { buildOzonProductUrl, buildPlatformProductUrl } from '../../utils/platformUrl';
 import { ListingOnboardModal, OnboardMatchIdentifiers } from '../../components/ListingOnboardModal';
 import {
   ContextAction,
@@ -466,6 +467,28 @@ function fulfillmentModeChip(mode: string | null): { short: string; hint: string
 }
 
 /**
+ * 履约方式筛选选项（用户反馈 2026-09-28）：从 FULFILLMENT_MODE_META 派生，
+ * 不再写死 4 个 OZON 短码（旧列表缺 WB 的 FBW 和 Yandex 的 FBY）。
+ * 选了平台只列该平台的有效短码；未选平台列出全部短码。短码取全码 `_` 后缀，
+ * 与订单头 fulfillment_mode 的 mapper 短码一致。
+ */
+function fulfillmentModeOptionsFor(
+  platform: string | undefined,
+): Array<{ value: string; label: string }> {
+  const byShort = new Map<string, string>();
+  for (const [fullMode, meta] of Object.entries(FULFILLMENT_MODE_META)) {
+    if (platform !== undefined && meta.platform !== platform) {
+      continue;
+    }
+    const short = fullMode.slice(fullMode.indexOf('_') + 1);
+    if (!byShort.has(short)) {
+      byShort.set(short, fulfillmentModeChip(short)?.short ?? short);
+    }
+  }
+  return [...byShort].map(([value, label]) => ({ value, label }));
+}
+
+/**
  * Sprint 9 T1.4 divergence marker: the platform reports shipped-side progress
  * (delivering / delivered) while the ERP order has not shipped. Pure display
  * of platform FACTS - ORD00000001-style offline-fulfilled orders.
@@ -518,6 +541,25 @@ function deadlineBadge(deadline: string | null): {
     return { tone: 'warning', label: `剩 ${span}`, exact };
   }
   return { tone: 'neutral', label: `剩 ${span}`, exact };
+}
+
+/**
+ * 发货时限只在「还没发出去」的阶段倒计时（用户反馈 2026-10-09）：
+ * 已发货订单仍显示红/橙倒计时会误导——SHIPPED 后改为中性「已发货」+
+ * 原截止时间；CANCELLED 的时限无意义，不再显示。
+ */
+function deadlineBadgeFor(
+  deadline: string | null,
+  erpStatus: string,
+): ReturnType<typeof deadlineBadge> {
+  if (deadline === null || erpStatus === 'CANCELLED') {
+    return null;
+  }
+  const badge = deadlineBadge(deadline);
+  if (erpStatus === 'SHIPPED') {
+    return { tone: 'neutral', label: '已发货', exact: badge === null ? '' : badge.exact };
+  }
+  return badge;
 }
 
 /**
@@ -671,12 +713,24 @@ export function OrdersPage() {
       page,
       pageSize: viewSettings.pageSize,
       ...(keyword ? { keyword } : {}),
+      // 平台筛选是真实 API 过滤（用户反馈 2026-09-28：此前只过滤店铺下拉，
+      // 列表纹丝不动，出现“选着 YANDEX 却显示 OZON 订单”）。
+      ...(platformFilter ? { platform: platformFilter } : {}),
       ...(stageOfActiveTab ? { stage: stageOfActiveTab } : {}),
       ...(goodsState ? { goodsState } : {}),
       ...(storeId ? { storeId } : {}),
       ...(fulfillmentModeFilter ? { fulfillmentMode: fulfillmentModeFilter } : {}),
     },
-    ['orders', page, keyword, stageOfActiveTab, goodsState, storeId, fulfillmentModeFilter],
+    [
+      'orders',
+      page,
+      keyword,
+      platformFilter,
+      stageOfActiveTab,
+      goodsState,
+      storeId,
+      fulfillmentModeFilter,
+    ],
   );
 
   // Tab counts: light meta.total queries, one per stage tab, ALL carrying the
@@ -686,28 +740,30 @@ export function OrdersPage() {
     page: 1,
     pageSize: 1,
     ...(keyword ? { keyword } : {}),
+    ...(platformFilter ? { platform: platformFilter } : {}),
     ...(storeId ? { storeId } : {}),
   } as Record<string, unknown>;
   const allCount = useApiQuery<Envelope<OrderListItem[]>>('/api/v1/orders', countFilters, [
     'orders-count',
     'ALL',
     keyword,
+    platformFilter,
     storeId,
   ]);
   const pendingCount = useApiQuery<Envelope<OrderListItem[]>>(
     '/api/v1/orders',
     { ...countFilters, stage: 'PENDING' },
-    ['orders-count', 'PENDING', keyword, storeId],
+    ['orders-count', 'PENDING', keyword, platformFilter, storeId],
   );
   const inTransitCount = useApiQuery<Envelope<OrderListItem[]>>(
     '/api/v1/orders',
     { ...countFilters, stage: 'IN_TRANSIT' },
-    ['orders-count', 'IN_TRANSIT', keyword, storeId],
+    ['orders-count', 'IN_TRANSIT', keyword, platformFilter, storeId],
   );
   const completedCount = useApiQuery<Envelope<OrderListItem[]>>(
     '/api/v1/orders',
     { ...countFilters, stage: 'COMPLETED' },
-    ['orders-count', 'COMPLETED', keyword, storeId],
+    ['orders-count', 'COMPLETED', keyword, platformFilter, storeId],
   );
 
   const storesQuery = useApiQuery<
@@ -977,12 +1033,16 @@ export function OrdersPage() {
 
   // ---- 快速建档（就地复用 SKU映射 的建档弹窗，不再跳转工作台） ----
   // 订单行只有平台标识：先在当前店铺反查所在商品链接（kw 命中变体级标识），
-  // 再让共享弹窗按标识预选变体。
+  // 再让共享弹窗按标识预选变体。orderItemId 供建档成功后自动重试映射。
   const [quickOnboard, setQuickOnboard] = useState<{
     listingId: string;
     match: OnboardMatchIdentifiers;
+    /** 触发建档的订单行：建档完成后对其自动重试映射（用户需求 2026-10-09）。 */
+    orderItemId: string | null;
   } | null>(null);
   const [onboardLookupPending, setOnboardLookupPending] = useState(false);
+  // 打开商品链接（ERP 建议#3）按钮的反查 pending。
+  const [platformLinkPending, setPlatformLinkPending] = useState(false);
 
   const createPickingMutation = useMutation({
     mutationFn: (orderId: string) =>
@@ -1053,7 +1113,8 @@ export function OrdersPage() {
 
   const list = query.data?.data ?? [];
   const detail = detailId !== null ? detailQuery.data?.data : undefined;
-  const detailDeadline = detail === undefined ? null : deadlineBadge(detail.shipmentDeadline);
+  const detailDeadline =
+    detail === undefined ? null : deadlineBadgeFor(detail.shipmentDeadline, detail.erpStatus);
   const selectedRow = useMemo(
     () => list.find((row) => row.id === selectedId) ?? null,
     [list, selectedId],
@@ -1238,10 +1299,67 @@ export function OrdersPage() {
               offerId: item.offerId,
               sellerSku: item.sellerSku,
             },
+            orderItemId: item.id,
           });
         })
         .catch((error: Error) => void message.error(`定位商品链接失败：${error.message}`))
         .finally(() => setOnboardLookupPending(false));
+    },
+    [message],
+  );
+
+  /**
+   * 打开商品链接（ERP 建议#3，用户指示 2026-09-28：只加在商品行侧边栏操作区）。
+   * 反查本店铺下订单行对应的商品链接：已映射行按 skuId 精确查，未映射行按
+   * 平台标识 keyword 查；命中行优先用人工维护的 listing.url，否则按平台拼
+   * 公开商品页（OZON/WB 规则已核实；Yandex 未核实 → 提示，不猜 URL §88）。
+   */
+  const openPlatformProductPage = useCallback(
+    (item: OrderItem, storeId: string, platformCode: string) => {
+      const skuId = item.skuId;
+      const keyword = mappingSearchKeyword(item);
+      if (skuId === null && (keyword === null || keyword.trim() === '')) {
+        void message.warning('该订单行没有任何 SKU / 平台标识，无法定位商品链接');
+        return;
+      }
+      // OZON（用户实测 2026-09-28）：商品页 URL 的键是订单行自带的平台 SKU
+      // ID（非 Listing 的 product_id），直接拼链接，无需反查商品链接。
+      if (platformCode === 'OZON' && item.platformSkuId !== null) {
+        window.open(buildOzonProductUrl(item.platformSkuId), '_blank', 'noopener');
+        return;
+      }
+      setPlatformLinkPending(true);
+      apiGet<
+        Array<{
+          id: string;
+          platformCode: string;
+          platformProductId: string;
+          url: string | null;
+        }>
+      >('/api/v1/listings', {
+        storeId,
+        page: 1,
+        pageSize: 20,
+        ...(skuId !== null ? { skuId } : { keyword: keyword!.trim() }),
+      })
+        .then((result) => {
+          const listing = result.data.find((row) => row.platformCode === platformCode);
+          if (listing === undefined) {
+            void message.warning('未在本店铺找到该订单行对应的商品链接');
+            return;
+          }
+          const url =
+            listing.url ?? buildPlatformProductUrl(listing.platformCode, listing.platformProductId);
+          if (url === null) {
+            void message.warning(
+              `暂不支持打开 ${listing.platformCode} 的平台商品页（该平台商品页 URL 规则未核实），可先在商品链接页维护 url`,
+            );
+            return;
+          }
+          window.open(url, '_blank', 'noopener');
+        })
+        .catch((error: Error) => void message.error(`定位商品链接失败：${error.message}`))
+        .finally(() => setPlatformLinkPending(false));
     },
     [message],
   );
@@ -1344,6 +1462,20 @@ export function OrdersPage() {
                     : '该行已有进行中/已到货的采购，不能重复登记。'}
                 </RailHint>
               )}
+              <Button
+                block
+                style={{ marginTop: 8 }}
+                loading={platformLinkPending}
+                onClick={() =>
+                  openPlatformProductPage(
+                    selectedItem,
+                    railDetail?.storeId ?? selectedRow?.storeId ?? '',
+                    railDetail?.platformCode ?? selectedRow?.platformCode ?? '',
+                  )
+                }
+              >
+                打开商品链接
+              </Button>
               {selectedItem.fulfillmentStatus === 'BACKORDERED' && selectedItem.skuId !== null && (
                 <Button
                   block
@@ -1409,7 +1541,7 @@ export function OrdersPage() {
       tone: 'neutral' as const,
       label: selectedRow.erpStatus,
     };
-    const deadline = deadlineBadge(selectedRow.shipmentDeadline);
+    const deadline = deadlineBadgeFor(selectedRow.shipmentDeadline, selectedRow.erpStatus);
     // 发货流程按钮显隐（2026-09-18）。能力来自后端的能力位——前端不判断平台，
     // 后端也不靠平台名硬编码：没接入发货能力的平台这两个按钮就不出现。
     const canPrepareShipment =
@@ -2092,8 +2224,8 @@ export function OrdersPage() {
       dataIndex: 'shipmentDeadline',
       key: 'shipmentDeadline',
       width: 130,
-      render: (value: string | null) => {
-        const badge = deadlineBadge(value);
+      render: (value: string | null, row: OrderListItem) => {
+        const badge = deadlineBadgeFor(value, row.erpStatus);
         return badge === null ? (
           '—'
         ) : (
@@ -2167,7 +2299,7 @@ export function OrdersPage() {
 
       <FilterBar>
         <Input.Search
-          placeholder="订单号 / 平台订单号"
+          placeholder="订单号 / 平台订单号 / 商品 SKU / Offer ID"
           allowClear
           value={keyword}
           onChange={(event) => setKeyword(event.target.value)}
@@ -2175,7 +2307,7 @@ export function OrdersPage() {
             setPage(1);
             setKeyword(value);
           }}
-          style={{ width: 240 }}
+          style={{ width: 320 }}
           aria-label="搜索订单"
         />
         <Select
@@ -2210,9 +2342,12 @@ export function OrdersPage() {
           )}
           value={platformFilter}
           onChange={(value) => {
+            setPage(1);
             setPlatformFilter(value);
             setStoreId(undefined);
-            setPage(1);
+            // 履约方式随平台联动（用户反馈 2026-09-28）：旧平台的短码对新平台
+            // 无效（如 OZON 的 RFBS 对 WB），切换时直接清空已选值。
+            setFulfillmentModeFilter(undefined);
           }}
         />
         <Select
@@ -2224,12 +2359,7 @@ export function OrdersPage() {
             setPage(1);
             setFulfillmentModeFilter(value);
           }}
-          options={[
-            { value: 'RFBS', label: 'realFBS' },
-            { value: 'FBS', label: 'FBS' },
-            { value: 'FBO', label: 'FBO' },
-            { value: 'FBP', label: 'FBP' },
-          ]}
+          options={fulfillmentModeOptionsFor(platformFilter)}
         />
       </FilterBar>
 
@@ -2795,7 +2925,15 @@ export function OrdersPage() {
           void queryClient.invalidateQueries({ queryKey: ['orders'] });
           void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
           void queryClient.invalidateQueries({ queryKey: ['exceptions'] });
-          void message.info('已建档并映射：请点「重试映射」重新分配库存');
+          // 建档已把 platform_listing_skus 落成 MAPPED：立即对触发行的订单行
+          // 重试映射/分配，不再要求操作员手动点「重试映射」（2026-10-09）。
+          // 结果提示由 retryMutation 的 onSuccess/onError 给出。
+          const itemId = quickOnboard?.orderItemId ?? null;
+          if (itemId !== null) {
+            retryMutation.mutate(itemId);
+          } else {
+            void message.info('已建档并映射：请点「重试映射」重新分配库存');
+          }
         }}
         zIndex={1100}
       />

@@ -103,13 +103,15 @@ export class OrderItemRepository {
       id: string;
       orderId: string;
       platformSkuId: string | null;
+      /** Yandex 行的取图键（= offerId，mapper 写入）；OZON 行为 null。 */
+      sellerSku: string | null;
     }>
   > {
     const query = this.dataSource
       .getRepository(OrderItemEntity)
       .createQueryBuilder('item')
       .innerJoin('item.order', 'order')
-      .select(['item.id', 'item.orderId', 'item.platformSkuId'])
+      .select(['item.id', 'item.orderId', 'item.platformSkuId', 'item.sellerSku'])
       .where('order.storeId = :storeId', { storeId })
       .andWhere('item.skuId IS NULL AND item.platformImageUrl IS NULL');
     if (orderId !== undefined) query.andWhere('item.orderId = :orderId', { orderId });

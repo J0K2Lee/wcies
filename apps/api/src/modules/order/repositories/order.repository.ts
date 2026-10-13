@@ -7,6 +7,8 @@ import { rawStr } from '../../../common/utils/raw';
 
 export interface OrderListFilters {
   keyword?: string;
+  /** 平台代码精确过滤（p.code，用户反馈 2026-09-28：平台筛选必须真正过滤列表）。 */
+  platform?: string;
   erpStatus?: string;
   /** Axis-1 logistics stage filter (dual-axis §2.1). */
   stage?: OrderStageFilter;
@@ -274,9 +276,24 @@ export class OrderRepository {
         'open_exceptions_count',
       );
     if (filters.keyword !== undefined && filters.keyword !== '') {
-      qb.andWhere('(o.order_no ILIKE :kw OR o.platform_order_id ILIKE :kw)', {
-        kw: `%${filters.keyword}%`,
-      });
+      // 单框混搜（用户指示 2026-09-28：订单号/平台单号与商品标识合并）：
+      // 订单号 / 平台订单号 / 内部 SKU 编码 / offer_id / seller_sku /
+      // platform_sku_id 任一命中即入选（EXISTS 仿 goodsStatePredicate）。
+      qb.andWhere(
+        `(o.order_no ILIKE :kw OR o.platform_order_id ILIKE :kw OR EXISTS (
+           SELECT 1 FROM order_items i
+           LEFT JOIN skus sk ON sk.id = i.sku_id
+           WHERE i.order_id = o.id
+             AND (i.offer_id ILIKE :kw
+                  OR i.seller_sku ILIKE :kw
+                  OR i.platform_sku_id ILIKE :kw
+                  OR sk.sku_code ILIKE :kw)
+         ))`,
+        { kw: `%${filters.keyword}%` },
+      );
+    }
+    if (filters.platform !== undefined && filters.platform !== '') {
+      qb.andWhere('p.code = :platform', { platform: filters.platform });
     }
     if (filters.erpStatus !== undefined) {
       qb.andWhere('o.erp_status = :erpStatus', { erpStatus: filters.erpStatus });

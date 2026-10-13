@@ -13,6 +13,8 @@ import { WarehouseRepository } from '../repositories/warehouse.repository';
 import {
   BatchCreateBinsRequestDto,
   BatchCreateBinsResponseDto,
+  BatchDeleteBinFailureDto,
+  BatchDeleteBinsResponseDto,
   BinListQueryDto,
   BinResponseDto,
   CreateBinRequestDto,
@@ -372,6 +374,70 @@ export class WarehouseBinService {
       changes: { deleted: { from: bin.binCode, to: null } },
       operator,
     });
+  }
+
+  /**
+   * 批量删除（用户指示 2026-09-28）：逐个执行与单删完全相同的零引用规则
+   * ——被引用/不存在/不属于该仓库的库位跳过并逐条返回原因，**部分成功**，
+   * 绝不整批回滚（一条被引用不阻塞其余清理）。每个成功删除的库位照常
+   * 写独立的 DELETE 操作日志；最后写一条 BATCH_DELETE 汇总。
+   */
+  async batchRemove(
+    warehouseId: string,
+    binIds: readonly string[],
+    operator: OperatorContext,
+  ): Promise<BatchDeleteBinsResponseDto> {
+    const warehouse = await this.assertWarehouseExists(warehouseId);
+    const unique = [...new Set(binIds)];
+    if (unique.length > MAX_BATCH_BINS) {
+      throw new WarehouseBinBatchInvalidError(
+        `Batch would delete ${unique.length} bins, exceeding the ${MAX_BATCH_BINS} limit`,
+      );
+    }
+
+    const failures: BatchDeleteBinFailureDto[] = [];
+    let deletedCount = 0;
+    for (const binId of unique) {
+      const bin = await this.repository.findBinById(binId);
+      if (bin === null || bin.warehouseId !== warehouseId) {
+        failures.push({ binId, binCode: bin?.binCode ?? null, reason: '库位不存在或不属于该仓库' });
+        continue;
+      }
+      const references = await this.repository.countBinReferences(binId);
+      const used = references.filter((reference) => reference.count > 0);
+      if (used.length > 0) {
+        failures.push({
+          binId,
+          binCode: bin.binCode,
+          reason: `该库位已被引用（${used.map((reference) => reference.table).join('、')}），只能停用不能删除`,
+        });
+        continue;
+      }
+      await this.repository.deleteBin(binId);
+      deletedCount += 1;
+      await this.operationLog.record({
+        entityType: ENTITY_TYPE,
+        entityId: binId,
+        entityCode: bin.binCode,
+        action: 'DELETE',
+        changes: { deleted: { from: bin.binCode, to: null } },
+        operator,
+      });
+    }
+
+    await this.operationLog.record({
+      entityType: ENTITY_TYPE,
+      entityId: warehouseId,
+      entityCode: warehouse.warehouseCode,
+      action: 'BATCH_DELETE',
+      changes: {
+        deletedCount: { from: null, to: deletedCount },
+        failedCount: { from: null, to: failures.length },
+      },
+      operator,
+    });
+
+    return { deletedCount, failures };
   }
 
   /** Import handler lookup: existing bin by warehouse + code. */

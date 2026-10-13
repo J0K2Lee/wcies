@@ -177,6 +177,7 @@ export class OrderService {
       id: string;
       orderId: string;
       platformSkuId: string | null;
+      sellerSku: string | null;
     }>
   > {
     return this.itemRepo.findMissingPlatformImages(storeId, orderId);
@@ -432,6 +433,42 @@ export class OrderService {
         orderItemId: item.id,
         mappingStatus: item.mappingStatus,
       });
+    }
+
+    // 外部履约（ERP 建议#6 修复 2026-09-28）：平台持货行的重试永不占用内部
+    // 库存——行直接 EXTERNAL_FULFILLED；平台已发货（IN_TRANSIT / DELIVERED）
+    // 时订单随平台事实立即 SHIPPED，与 applySyncedPlatformFacts 保持一致。
+    if (isExternalFulfillmentMode(order.fulfillmentMode)) {
+      await this.dataSource.transaction(async (runner) => {
+        await this.itemRepo.updateFulfillment(runner, item.id, {
+          fulfillmentStatus: 'EXTERNAL_FULFILLED',
+        });
+        await this.exceptionService.resolveByReferenceInTx(runner, {
+          exceptionType: 'ORDER_OUT_OF_STOCK',
+          referenceType: 'ORDER_ITEM',
+          referenceId: item.id,
+        });
+      });
+      if (order.platformStage === 'IN_TRANSIT' || order.platformStage === 'DELIVERED') {
+        await this.statusService.transition(
+          order.id,
+          'SHIPPED',
+          operator,
+          `平台履约流转：重新分配时平台已发货（${order.platformStage}，外部履约 ${order.fulfillmentMode}）`,
+        );
+      } else {
+        await this.statusService.recomputeOrderStatus(
+          order.id,
+          operator,
+          `第 ${item.lineNo} 行重新分配（外部履约，等待平台发货事实）`,
+        );
+      }
+      const afterExternal = await this.itemRepo.findById(orderItemId);
+      return {
+        orderItemId,
+        fulfillmentStatus: afterExternal?.fulfillmentStatus ?? 'EXTERNAL_FULFILLED',
+        reserved: false,
+      };
     }
 
     const outcome = await this.ingestionService.allocateMappedItem(order, item, operator);
