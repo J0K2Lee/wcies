@@ -254,6 +254,87 @@ describe('SkuService.update (V1: category/brand editable, null clears)', () => {
   });
 });
 
+describe('SkuService.createForOnboardingInTx (V1: listing quick onboarding, D2/D3/D5)', () => {
+  function buildTxService(options?: {
+    brand?: { id: string; name: string } | null;
+    category?: { id: string; nameZh: string; level: number } | null;
+  }) {
+    const saved: Array<Record<string, unknown>> = [];
+    const repository = {} as SkuRepository;
+    const manager = {
+      getRepository: vi.fn(() => ({
+        create: vi.fn((row: Record<string, unknown>) => {
+          saved.push(row);
+          return row;
+        }),
+        save: vi.fn(async (row: Record<string, unknown>) => row),
+      })),
+    };
+    const businessCode = {
+      nextSkuCodeGlobal: vi.fn(async () => 'SKU000012002'),
+    } as unknown as BusinessCodeService;
+    const operationLog = { record: vi.fn(async () => undefined) } as unknown as OperationLogService;
+    const objectStorage = {} as ObjectStorageService;
+    const catalogService = {
+      findBrandEntityById: vi.fn(async () =>
+        options?.brand === undefined ? { id: 'brand-1', name: 'VK' } : options.brand,
+      ),
+      findCategoryEntityById: vi.fn(async () =>
+        options?.category === undefined
+          ? { id: 'cat-3', nameZh: '机械键盘', level: 3 }
+          : options.category,
+      ),
+    } as unknown as CatalogService;
+    const service = new SkuService(
+      repository,
+      objectStorage,
+      businessCode,
+      operationLog,
+      catalogService,
+    );
+    return { service, manager, businessCode, saved };
+  }
+
+  it('creates an ACTIVE SKU with the global code and the given brand/category', async () => {
+    const ctx = buildTxService();
+    const created = await ctx.service.createForOnboardingInTx(ctx.manager as never, {
+      nameZh: 'VK87 MAX V2 黑色',
+      brandId: 'brand-1',
+      categoryId: 'cat-3',
+    });
+
+    expect(ctx.businessCode.nextSkuCodeGlobal).toHaveBeenCalledWith(ctx.manager);
+    expect(ctx.saved[0]?.status).toBe('ACTIVE');
+    expect(ctx.saved[0]?.skuCode).toBe('SKU000012002');
+    expect(ctx.saved[0]?.brandId).toBe('brand-1');
+    expect(ctx.saved[0]?.categoryId).toBe('cat-3');
+    expect(ctx.saved[0]).not.toHaveProperty('productId');
+    expect(created.skuCode).toBe('SKU000012002');
+  });
+
+  it('validates the category level (422 CATEGORY_LEVEL_INVALID on a level-2 node)', async () => {
+    const ctx = buildTxService({ category: { id: 'cat-2', nameZh: '键盘', level: 2 } });
+    await expect(
+      ctx.service.createForOnboardingInTx(ctx.manager as never, {
+        nameZh: 'x',
+        categoryId: 'cat-2',
+      }),
+    ).rejects.toMatchObject({ code: 'CATEGORY_LEVEL_INVALID' });
+    expect(ctx.saved.length).toBe(0);
+  });
+
+  it('validates brand existence (404 BRAND_NOT_FOUND)', async () => {
+    const ctx = buildTxService({ brand: null });
+    await expect(
+      ctx.service.createForOnboardingInTx(ctx.manager as never, {
+        nameZh: 'x',
+        brandId: 'missing',
+      }),
+    ).rejects.toMatchObject({ code: 'BRAND_NOT_FOUND' });
+    expect(ctx.saved.length).toBe(0);
+  });
+});
+
 describe('SkuService.remove (zero-reference policy, decision 0003)', () => {
   it('hard-deletes an unreferenced SKU', async () => {
     const ctx = buildService();
