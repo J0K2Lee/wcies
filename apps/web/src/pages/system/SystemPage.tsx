@@ -8,6 +8,8 @@ import {
   DeploymentUnitOutlined,
   ImportOutlined,
   ShopOutlined,
+  TeamOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
 import { Avatar } from 'antd';
 import { useApiQuery } from '../../api/hooks';
@@ -27,9 +29,8 @@ import {
 
 /**
  * System hub (Phase 2 task §26-§28): settings IA entry point — links to the
- * real existing modules (warehouses, mapping, import, notifications), shows
- * live service health and the current account. No user-management UI exists
- * (no API) so none is invented.
+ * real existing modules (warehouses, mapping, import, notifications, users,
+ * account security), shows live service health and the current account.
  */
 
 interface HealthData {
@@ -52,7 +53,13 @@ interface MeData {
   status: string;
 }
 
-const ENTRIES: Array<{ to: string; title: string; description: string; icon: React.ReactNode }> = [
+const ENTRIES: Array<{
+  to: string;
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  adminOnly?: boolean;
+}> = [
   {
     to: '/warehouses',
     title: '仓库与库位',
@@ -89,6 +96,19 @@ const ENTRIES: Array<{ to: string; title: string; description: string; icon: Rea
     description: '系统与飞书通知投递记录',
     icon: <BellOutlined />,
   },
+  {
+    to: '/system/users',
+    title: '用户管理',
+    description: '添加用户（邮箱验证激活）与账号停用启用',
+    icon: <TeamOutlined />,
+    adminOnly: true,
+  },
+  {
+    to: '/account',
+    title: '账号与安全',
+    description: '通过已验证邮箱修改密码与邮箱',
+    icon: <UserOutlined />,
+  },
 ];
 
 export function SystemPage() {
@@ -123,49 +143,51 @@ export function SystemPage() {
       <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16, marginBottom: 16 }}>
         <SectionCard title="功能入口">
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
-            {ENTRIES.map((entry) => (
-              <Link
-                key={entry.to}
-                to={entry.to}
-                className="wcies-entry-tile"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  padding: '12px 14px',
-                  borderRadius: 8,
-                  color: 'inherit',
-                  textDecoration: 'none',
-                }}
-              >
-                <span
-                  aria-hidden
+            {ENTRIES.filter((entry) => !entry.adminOnly || me.data?.data?.role === 'ADMIN').map(
+              (entry) => (
+                <Link
+                  key={entry.to}
+                  to={entry.to}
+                  className="wcies-entry-tile"
                   style={{
-                    display: 'inline-flex',
-                    fontSize: 18,
-                    color: colors.primary,
-                    flexShrink: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '12px 14px',
+                    borderRadius: 8,
+                    color: 'inherit',
+                    textDecoration: 'none',
                   }}
                 >
-                  {entry.icon}
-                </span>
-                <span style={{ minWidth: 0 }}>
                   <span
+                    aria-hidden
                     style={{
-                      display: 'block',
-                      fontSize: 14,
-                      fontWeight: 550,
-                      color: colors.textPrimary,
+                      display: 'inline-flex',
+                      fontSize: 18,
+                      color: colors.primary,
+                      flexShrink: 0,
                     }}
                   >
-                    {entry.title}
+                    {entry.icon}
                   </span>
-                  <span style={{ display: 'block', fontSize: 12.5, color: colors.textTertiary }}>
-                    {entry.description}
+                  <span style={{ minWidth: 0 }}>
+                    <span
+                      style={{
+                        display: 'block',
+                        fontSize: 14,
+                        fontWeight: 550,
+                        color: colors.textPrimary,
+                      }}
+                    >
+                      {entry.title}
+                    </span>
+                    <span style={{ display: 'block', fontSize: 12.5, color: colors.textTertiary }}>
+                      {entry.description}
+                    </span>
                   </span>
-                </span>
-              </Link>
-            ))}
+                </Link>
+              ),
+            )}
           </div>
         </SectionCard>
 
@@ -236,7 +258,8 @@ export function SystemPage() {
               </div>
             </div>
             <p style={{ fontSize: 12.5, color: colors.textTertiary, margin: '12px 0 0' }}>
-              当前系统暂无用户与权限管理 API，账号由后端种子数据维护。
+              用户由「<Link to="/system/users">用户管理</Link>」维护；修改密码/邮箱请前往「
+              <Link to="/account">账号与安全</Link>」。
             </p>
           </SectionCard>
         </div>

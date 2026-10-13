@@ -58,4 +58,17 @@ export const envValidationSchema = Joi.object({
   FEISHU_WEBHOOK_URL: Joi.string()
     .uri({ scheme: ['http', 'https'] })
     .optional(),
+
+  // Transactional email via Feishu SMTP (user management verification).
+  // All optional at boot (empty string = unconfigured) so the system keeps
+  // starting without email; the email features surface EMAIL_NOT_CONFIGURED
+  // at runtime instead.
+  SMTP_HOST: Joi.string().allow('').optional(),
+  SMTP_PORT: Joi.number().port().default(465),
+  SMTP_USER: Joi.string().allow('').optional(),
+  SMTP_PASSWORD: Joi.string().allow('').optional(),
+  SMTP_FROM_NAME: Joi.string().optional(),
+
+  // Browser-facing base URL for links inside verification emails.
+  WEB_BASE_URL: Joi.string().uri().default('http://localhost:5173'),
 }).unknown(true);

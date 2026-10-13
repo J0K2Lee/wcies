@@ -2,6 +2,15 @@ import { registerAs } from '@nestjs/config';
 
 export type NodeEnv = 'development' | 'test' | 'production';
 
+export interface SmtpConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  password: string;
+  fromName: string;
+}
+
 export interface S3Config {
   endpoint: string;
   accessKey: string;
@@ -57,6 +66,26 @@ export const appConfig = registerAs('app', () => {
      * hours are allowed so integration tests can exercise the rotation.
      */
     orderStateFallbackHours: Number.parseFloat(process.env.ORDER_STATE_FALLBACK_HOURS ?? '24'),
+    /**
+     * Transactional email (user management verification mail, Feishu SMTP).
+     * All fields OPTIONAL at boot: when host/user/password are not fully
+     * configured the email features fail with EMAIL_NOT_CONFIGURED instead
+     * of guessing a server (AGENTS.md §29 spirit - no secrets in code).
+     * Port 465 = implicit TLS; 587 = STARTTLS.
+     */
+    smtp: {
+      host: process.env.SMTP_HOST ?? '',
+      port: Number.parseInt(process.env.SMTP_PORT ?? '465', 10),
+      secure: Number.parseInt(process.env.SMTP_PORT ?? '465', 10) === 465,
+      user: process.env.SMTP_USER ?? '',
+      password: process.env.SMTP_PASSWORD ?? '',
+      fromName: process.env.SMTP_FROM_NAME ?? 'WCIES',
+    } satisfies SmtpConfig,
+    /**
+     * Browser-facing base URL used to build links inside verification emails
+     * (e.g. {webBaseUrl}/invite?token=...). Defaults to the Vite dev server.
+     */
+    webBaseUrl: process.env.WEB_BASE_URL ?? 'http://localhost:5173',
   };
 });
 

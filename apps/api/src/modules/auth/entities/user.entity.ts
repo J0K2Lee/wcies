@@ -30,6 +30,14 @@ export class UserEntity {
   @Column({ type: 'varchar', length: 20, default: 'ADMIN' })
   role!: string;
 
+  /** NULL until the mailbox is proven via a verification email link. */
+  @Column({ type: 'timestamptz', name: 'email_verified_at', nullable: true })
+  emailVerifiedAt!: Date | null;
+
+  /** Session revocation ground: JWTs issued before this instant are stale. */
+  @Column({ type: 'timestamptz', name: 'password_changed_at', default: () => 'now()' })
+  passwordChangedAt!: Date;
+
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;
 

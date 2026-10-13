@@ -8,6 +8,7 @@ import { CryptoModule } from './infrastructure/crypto/crypto.module';
 import { BusinessCodeModule } from './infrastructure/business-code/business-code.module';
 import { QueueRootModule } from './infrastructure/queue/queue-root.module';
 import { RedisModule } from './infrastructure/redis/redis.module';
+import { EmailModule } from './infrastructure/email/email.module';
 import { ObjectStorageModule } from './infrastructure/storage/object-storage.module';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -48,6 +49,7 @@ import { SyncModule } from './modules/sync/sync.module';
     LoggerModule,
     DatabaseModule,
     RedisModule,
+    EmailModule,
     QueueRootModule,
     ObjectStorageModule,
     CryptoModule,

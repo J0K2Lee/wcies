@@ -23,6 +23,13 @@ export class UserService {
       email: user.email,
       role: user.role,
       status: user.status,
+      emailVerified: user.emailVerifiedAt !== null,
+      createdAt: user.createdAt.toISOString(),
     };
+  }
+
+  /** Loads the full entity behind a session, or null when it vanished. */
+  async getEntity(id: string): Promise<UserEntity | null> {
+    return this.userRepository.findById(id);
   }
 }

@@ -1,3 +1,4 @@
 export const USER_ROLES = ['ADMIN', 'OPERATOR'] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 export const USER_ROLE_ADMIN: UserRole = 'ADMIN';
+export const USER_ROLE_OPERATOR: UserRole = 'OPERATOR';

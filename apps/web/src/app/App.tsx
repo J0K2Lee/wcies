@@ -37,12 +37,21 @@ import { TransfersPage } from '../pages/transfer/TransfersPage';
 import { ReplenishmentPage } from '../pages/inventory/ReplenishmentPage';
 import { SystemPage } from '../pages/system/SystemPage';
 import { PlatformMappingsPage } from '../pages/system/PlatformMappingsPage';
+import { UsersPage } from '../pages/system/UsersPage';
+import { AccountSecurityPage } from '../pages/system/AccountSecurityPage';
+import { InvitePage } from '../pages/auth/InvitePage';
+import { ResetPasswordPage } from '../pages/auth/ResetPasswordPage';
+import { ConfirmEmailChangePage } from '../pages/auth/ConfirmEmailChangePage';
 import { EmptyState } from '../design-system';
 
 export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      {/* 邮件验证链接的公共落地页：令牌即凭证，无需登录（users.md）。 */}
+      <Route path="/invite" element={<InvitePage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/change-email/confirm" element={<ConfirmEmailChangePage />} />
       <Route element={<AuthGate />}>
         <Route element={<AppLayout />}>
           <Route path="/" element={<DashboardPage />} />
@@ -89,6 +98,8 @@ export function App() {
           <Route path="/finance/payables" element={<FinancePayablesPage />} />
           <Route path="/transfers" element={<TransfersPage />} />
           <Route path="/system" element={<SystemPage />} />
+          <Route path="/system/users" element={<UsersPage />} />
+          <Route path="/account" element={<AccountSecurityPage />} />
           <Route path="/platform-mappings" element={<PlatformMappingsPage />} />
           {/* 404：未知路由回到空态 + 返回首页（Phase 3 G10）。 */}
           <Route path="*" element={<NotFoundPage />} />

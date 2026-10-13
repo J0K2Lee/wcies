@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, Outlet } from 'react-router';
 import { useMutation } from '@tanstack/react-query';
 import { App, Avatar, Button, Drawer, Dropdown, Menu, Tooltip } from 'antd';
-import { LogoutOutlined } from '@ant-design/icons';
+import { LogoutOutlined, UserOutlined } from '@ant-design/icons';
 import {
   AppstoreOutlined,
   BarChartOutlined,
@@ -377,6 +377,12 @@ export function AppLayout() {
             <Dropdown
               menu={{
                 items: [
+                  {
+                    key: 'account',
+                    icon: <UserOutlined />,
+                    label: '账号与安全',
+                    onClick: () => void navigate('/account'),
+                  },
                   {
                     key: 'logout',
                     icon: <LogoutOutlined />,

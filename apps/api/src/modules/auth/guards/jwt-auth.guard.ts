@@ -40,7 +40,7 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedError();
     }
 
-    let payload: { sub: string; username: string; role: string };
+    let payload: { sub: string; username: string; role: string; iat?: number };
     try {
       payload = await this.jwtService.verifyAsync(token);
     } catch {
@@ -50,6 +50,13 @@ export class JwtAuthGuard implements CanActivate {
     const user = await this.userService.findById(payload.sub);
     if (user === null || user.status !== USER_STATUS_ACTIVE) {
       throw new UnauthorizedError();
+    }
+    // Session revocation: cookies issued before the last password change
+    // stop authenticating (docs/business-rules/users.md). iat is seconds;
+    // the +1s shift tolerates tokens minted within the same second as the
+    // change without letting pre-change tokens through.
+    if (payload.iat !== undefined && (payload.iat + 1) * 1000 < user.passwordChangedAt.getTime()) {
+      throw new UnauthorizedError('Session expired or invalid');
     }
 
     request.user = { id: user.id, username: user.username, role: user.role };

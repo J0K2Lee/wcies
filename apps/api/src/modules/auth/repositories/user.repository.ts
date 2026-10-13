@@ -30,7 +30,43 @@ export class UserRepository {
     return this.repository.save(created);
   }
 
+  async listAll(): Promise<UserEntity[]> {
+    return this.repository.find({ order: { createdAt: 'ASC' } });
+  }
+
+  async existsByEmail(email: string): Promise<boolean> {
+    const found = await this.repository.findOne({ where: { email }, select: ['id'] });
+    return found !== null;
+  }
+
+  async updateStatus(id: string, status: UserEntity['status']): Promise<void> {
+    await this.repository.update({ id }, { status });
+  }
+
+  /** Password rotation: new hash + revocation ground for pre-existing JWTs. */
   async updatePasswordHash(id: string, passwordHash: string): Promise<void> {
-    await this.repository.update({ id }, { passwordHash });
+    await this.repository.update({ id }, { passwordHash, passwordChangedAt: new Date() });
+  }
+
+  /** Applied together on email verification / confirmed email change. */
+  async updateEmail(id: string, email: string, emailVerifiedAt: Date): Promise<void> {
+    await this.repository.update({ id }, { email, emailVerifiedAt });
+  }
+
+  async markEmailVerified(id: string, emailVerifiedAt: Date): Promise<void> {
+    await this.repository.update({ id }, { emailVerifiedAt });
+  }
+
+  /** Invite confirmation: verify mailbox + set password + activate, atomically. */
+  async completeInvite(id: string, passwordHash: string, now: Date): Promise<void> {
+    await this.repository.update(
+      { id },
+      {
+        passwordHash,
+        passwordChangedAt: now,
+        emailVerifiedAt: now,
+        status: 'ACTIVE',
+      },
+    );
   }
 }

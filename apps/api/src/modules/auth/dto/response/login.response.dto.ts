@@ -15,6 +15,12 @@ export class UserResponseDto {
 
   @ApiProperty({ example: 'ACTIVE' })
   status!: string;
+
+  @ApiProperty({ example: true, description: '邮箱是否已验证' })
+  emailVerified!: boolean;
+
+  @ApiProperty({ example: '2026-10-05T08:00:00.000Z' })
+  createdAt!: string;
 }
 
 export class LoginResponseDataDto {
