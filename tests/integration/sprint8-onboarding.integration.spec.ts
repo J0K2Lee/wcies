@@ -6,7 +6,8 @@ import { ApiClient, runPrefix } from './sprint1.helpers';
 
 /**
  * Sprint 8 acceptance against real PostgreSQL + Redis + S3:
- * T1 quick onboarding from an unmapped listing (one transaction),
+ * T1 quick onboarding from an unmapped listing (one transaction; V1: direct
+ * ACTIVE SKU creation - the product layer is gone),
  * T2 unmapped export -> fill -> LISTING_MAPPING import closed loop
  *    (synced rows get BOUND, not twinned),
  * T3 unmapped workbench counters + exception-first ordering.
@@ -129,9 +130,8 @@ describe('T1 quick onboarding (one transaction, no half-products)', () => {
     expect(rows[0].hasOrderException).toBe(false);
   });
 
-  it('onboards Product + SKU + barcode + mapping in one action', async () => {
+  it('onboards SKU + barcode + mapping in one action (V1: no product layer)', async () => {
     const response = await client.post<{
-      product: { productCode: string; nameZh: string };
       sku: { skuCode: string; nameZh: string };
       barcode: string | null;
       mappingStatus: string;
@@ -141,25 +141,19 @@ describe('T1 quick onboarding (one transaction, no half-products)', () => {
     expect(response.status).toBe(201);
     const data = response.body.data;
     // Names defaulted from the listing title (planning §T1.2).
-    expect(data.product.nameZh).toBe(`${PREFIX} 快捷建档测试品`);
     expect(data.sku.nameZh).toBe(`${PREFIX} 快捷建档测试品`);
     // Codes come from the centralized sequences - no new code rules (§6.6).
-    expect(data.product.productCode).toMatch(/^PN\d{6,}$/);
     expect(data.sku.skuCode).toMatch(/^SKU\d{9,}$/);
-    expect(data.barcode).toMatch(/^W\d{8}$/);
+    expect(data.barcode).toMatch(/^\d{6,}$/);
     expect(data.mappingStatus).toBe('MAPPED');
 
-    // DB facts: product + sku + PRIMARY barcode, all visible.
-    const product = await db.query<{ cnt: string }>(
-      'SELECT COUNT(*)::text AS cnt FROM products WHERE product_code = $1',
-      [data.product.productCode],
-    );
-    expect(product.rows[0].cnt).toBe('1');
-    const sku = await db.query<{ cnt: string }>(
-      'SELECT COUNT(*)::text AS cnt FROM skus WHERE sku_code = $1',
+    // DB facts: the SKU is ACTIVE (D3) with a PRIMARY barcode, all visible.
+    const sku = await db.query<{ cnt: string; status: string }>(
+      'SELECT COUNT(*)::text AS cnt, MIN(status) AS status FROM skus WHERE sku_code = $1',
       [data.sku.skuCode],
     );
     expect(sku.rows[0].cnt).toBe('1');
+    expect(sku.rows[0].status).toBe('ACTIVE');
     const barcode = await db.query<{ is_primary: boolean }>(
       'SELECT is_primary FROM sku_barcodes WHERE barcode = $1',
       [data.barcode],
@@ -201,7 +195,7 @@ describe('T1 quick onboarding (one transaction, no half-products)', () => {
     );
     expect(response.status).toBe(422);
     expect(response.body.error?.code).toBe('LISTING_ONBOARD_NAME_REQUIRED');
-    // Guard fired before any write: no product was created for it.
+    // Guard fired before any write: no SKU was created for it.
     const rows = await db.query<{ cnt: string }>(
       `SELECT COUNT(*)::text AS cnt FROM platform_listing_skus WHERE id = $1 AND sku_id IS NULL`,
       [noTitle.mappingId],
@@ -301,12 +295,8 @@ describe('T2 unmapped export -> fill -> import closed loop', () => {
   });
 
   it('imports the filled sheet and BINDS the synced rows (no twin rows)', async () => {
-    // Create one internal SKU to map the exported rows onto.
-    const product = await client.post<{ id: string }>('/api/v1/products', {
-      nameZh: `${PREFIX} 闭环商品`,
-    });
+    // Create one internal SKU to map the exported rows onto (V1: direct).
     const sku = await client.post<{ skuCode: string }>('/api/v1/skus', {
-      productId: product.body.data.id,
       nameZh: `${PREFIX} 闭环SKU`,
     });
     skuCodeForImport = sku.body.data.skuCode;

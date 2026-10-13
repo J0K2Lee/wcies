@@ -6,12 +6,16 @@ import { ApiClient, runPrefix } from './sprint1.helpers';
 /**
  * Sprint 6 forced delete (decision 0008) against real PostgreSQL.
  *
- * The rule under test: forcing cascades MASTER DATA (SKUs, barcodes, images,
+ * The rule under test: forcing cascades MASTER DATA (barcodes, images,
  * platform mappings, bundle links) but never business history. Inventory
  * ledger rows, order lines, picking/package/shipment records are evidence the
  * goods physically moved, so they must always block - this is the boundary
  * that keeps AGENTS.md §25 traceability intact while still letting a seller
- * clean up a mis-created product.
+ * clean up a mis-created SKU.
+ *
+ * V1 (2026-10-13): the forced PRODUCT delete (which cascaded the product's
+ * SKUs) is gone with the product layer - only the SKU-level force delete
+ * remains.
  */
 let api: ManagedProcess;
 const BASE = 'http://localhost:3113';
@@ -36,104 +40,19 @@ afterAll(async () => {
   await db.end();
 });
 
-/** Creates product -> SKU -> internal barcode; returns all three ids. */
-async function seedProductWithSku(label: string): Promise<{ productId: string; skuId: string }> {
-  const product = await client.post<IdDto>('/api/v1/products', {
-    nameZh: `${PREFIX} ${label}`,
-  });
-  const productId = product.body.data.id;
+/** Creates a SKU + internal barcode directly (V1: no product layer). */
+async function seedSkuWithBarcode(label: string): Promise<{ skuId: string }> {
   const sku = await client.post<IdDto>('/api/v1/skus', {
-    productId,
     nameZh: `${PREFIX} ${label} SKU`,
   });
   const skuId = sku.body.data.id;
   await client.post(`/api/v1/skus/${skuId}/barcodes/generate-internal`, {});
-  return { productId, skuId };
+  return { skuId };
 }
-
-describe('forced product delete (decision 0008)', () => {
-  it('cascades product + SKUs + barcodes when there is no business history', async () => {
-    const { productId, skuId } = await seedProductWithSku('强制删除-无流水');
-
-    const deleted = await client.del(`/api/v1/products/${productId}?force=true`);
-    expect(deleted.status).toBe(200);
-    expect(deleted.body.success).toBe(true);
-
-    const productRows = await db.query('SELECT 1 FROM products WHERE id = $1', [productId]);
-    const skuRows = await db.query('SELECT 1 FROM skus WHERE id = $1', [skuId]);
-    const barcodeRows = await db.query('SELECT 1 FROM sku_barcodes WHERE sku_id = $1', [skuId]);
-    expect(productRows.rowCount).toBe(0);
-    expect(skuRows.rowCount).toBe(0);
-    expect(barcodeRows.rowCount).toBe(0);
-  });
-
-  it('refuses when a SKU already has inventory history (PRODUCT_HAS_BUSINESS_HISTORY)', async () => {
-    const { productId, skuId } = await seedProductWithSku('强制删除-有库存');
-
-    // Real inventory movement through the Inventory module (never raw SQL on
-    // balances): the ledger row is what makes the SKU non-deletable.
-    const warehouse = await client.post<IdDto>('/api/v1/warehouses', {
-      name: `${PREFIX} 强制删除仓`,
-      warehouseType: 'SELF',
-    });
-    const warehouseId = warehouse.body.data.id;
-    const bin = await client.post<IdDto>(`/api/v1/warehouses/${warehouseId}/bins`, {
-      binCode: `${PREFIX}-FD01`,
-    });
-
-    const received = await client.post('/api/v1/inventory/initialize', {
-      skuId,
-      warehouseId,
-      binId: bin.body.data.id,
-      quantity: 3,
-      referenceType: 'TEST',
-      referenceId: skuId,
-      idempotencyKey: `${PREFIX}-force-history-1`,
-    });
-    expect(received.status).toBe(200);
-
-    const rejected = await client.del(`/api/v1/products/${productId}?force=true`);
-    expect(rejected.status).toBe(409);
-    expect(rejected.body.error?.code).toBe('PRODUCT_HAS_BUSINESS_HISTORY');
-    // The message must name the blocking table so the seller knows why.
-    expect(rejected.body.error?.message).toContain('inventory');
-
-    // Nothing was removed.
-    const productRows = await db.query('SELECT 1 FROM products WHERE id = $1', [productId]);
-    const skuRows = await db.query('SELECT 1 FROM skus WHERE id = $1', [skuId]);
-    expect(productRows.rowCount).toBe(1);
-    expect(skuRows.rowCount).toBe(1);
-  });
-
-  it('records FORCE_DELETE in the audit log with the cascade count', async () => {
-    const { productId } = await seedProductWithSku('强制删除-审计');
-
-    await client.del(`/api/v1/products/${productId}?force=true`);
-
-    const logs = await db.query<{ action: string; changes: Record<string, unknown> }>(
-      `SELECT action, changes FROM operation_logs
-        WHERE entity_id = $1 AND action = 'FORCE_DELETE'`,
-      [productId],
-    );
-    expect(logs.rows.length).toBe(1);
-    expect(logs.rows[0]?.changes).toMatchObject({ cascadedSkus: { from: 1 } });
-  });
-
-  it('plain delete still refuses a product that has SKUs (no implicit cascade)', async () => {
-    const { productId } = await seedProductWithSku('普通删除-不级联');
-
-    const rejected = await client.del(`/api/v1/products/${productId}`);
-    expect(rejected.status).toBe(409);
-    expect(rejected.body.error?.code).toBe('PRODUCT_IN_USE');
-
-    const rows = await db.query('SELECT 1 FROM products WHERE id = $1', [productId]);
-    expect(rows.rowCount).toBe(1);
-  });
-});
 
 describe('forced SKU delete (decision 0008)', () => {
   it('cascades the SKU and its master-data children', async () => {
-    const { skuId } = await seedProductWithSku('SKU强制删除');
+    const { skuId } = await seedSkuWithBarcode('SKU强制删除');
 
     const deleted = await client.del(`/api/v1/skus/${skuId}?force=true`);
     expect(deleted.status).toBe(200);
@@ -145,7 +64,7 @@ describe('forced SKU delete (decision 0008)', () => {
   });
 
   it('refuses a forced SKU delete once the SKU has inventory history', async () => {
-    const { skuId } = await seedProductWithSku('SKU强制删除-有库存');
+    const { skuId } = await seedSkuWithBarcode('SKU强制删除-有库存');
 
     const warehouse = await client.post<IdDto>('/api/v1/warehouses', {
       name: `${PREFIX} SKU强制仓`,
@@ -174,7 +93,7 @@ describe('forced SKU delete (decision 0008)', () => {
   });
 
   it('detaches the SKU from its listing but keeps the listing record', async () => {
-    const { skuId } = await seedProductWithSku('SKU强制删除-映射');
+    const { skuId } = await seedSkuWithBarcode('SKU强制删除-映射');
 
     const platforms = await client.get<Array<{ id: string; code: string }>>('/api/v1/platforms');
     const ozonId = platforms.body.data.find((platform) => platform.code === 'OZON')?.id ?? '';

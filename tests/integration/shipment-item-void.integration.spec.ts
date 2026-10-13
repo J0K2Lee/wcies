@@ -103,11 +103,7 @@ function pgMeta(error: unknown): { code?: string; constraint?: string } {
 
 async function newSku(): Promise<{ skuId: string; barcode: string }> {
   seq += 1;
-  const product = await client.post<{ id: string }>('/api/v1/products', {
-    nameZh: `${PREFIX} 作废商品${seq}`,
-  });
   const sku = await client.post<{ id: string; skuCode: string }>('/api/v1/skus', {
-    productId: product.body.data.id,
     nameZh: `${PREFIX} 作废SKU${seq}`,
   });
   const barcode = `${PREFIX}V${seq}${randomUUID().slice(0, 6)}`;

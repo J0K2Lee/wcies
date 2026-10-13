@@ -68,11 +68,7 @@ let sz01A01BinId = '';
 
 /** Fresh isolated SKU per scenario. */
 async function newSku(label: string): Promise<string> {
-  const product = await client.post<{ id: string }>('/api/v1/products', {
-    nameZh: `${PREFIX} ${label}商品`,
-  });
   const sku = await client.post<{ id: string }>('/api/v1/skus', {
-    productId: product.body.data.id,
     nameZh: `${PREFIX} ${label}SKU`,
   });
   return sku.body.data.id;
@@ -1037,30 +1033,13 @@ describe('list performance with 5000 balances (task §74)', () => {
       );
       if (Number(existing.rows[0]!.count) < 5000) {
         // Read-performance fixture only (bulk SQL, never a business movement).
-        // Reserve a block of 5000 numbers FROM the product scope (atomic,
-        // single statement) so raw fixtures never collide with numbers the
-        // scope will hand out later.
-        const reserved = await pg.query<{ first_seq: string }>(
-          `INSERT INTO business_code_sequences (scope_key, next_value, updated_at)
-           VALUES ('product', 5000, now())
-           ON CONFLICT (scope_key)
-           DO UPDATE SET next_value = business_code_sequences.next_value + 5000, updated_at = now()
-           RETURNING (next_value - 5000 + 1)::text AS first_seq`,
-        );
-        const firstSeq = Number(reserved.rows[0]?.first_seq ?? 1);
+        // V1 (2026-10-13): 5000 standalone perf SKUs - the product layer is
+        // gone, so the perf fixture inserts SKUs directly (product_id stays
+        // NULL; inventory only depends on sku_id).
         await pg.query(
-          `INSERT INTO products (product_code, code_seq, name_zh, status)
-           SELECT $1 || '-P' || g, $2 + g - 1, 'perf-product-' || g, 'ACTIVE'
+          `INSERT INTO skus (sku_code, name_zh, status)
+           SELECT 'PERF-' || $1 || '-' || lpad(g::text, 5, '0'), 'perf-sku-' || g, 'ACTIVE'
            FROM generate_series(1, 5000) g
-           ON CONFLICT DO NOTHING`,
-          [PREFIX, firstSeq],
-        );
-        await pg.query(
-          `INSERT INTO skus (product_id, sku_code, name_zh, status)
-           SELECT p.id, 'PERF-' || split_part(p.product_code, '-P', 1) || '-' || split_part(p.product_code, '-P', 2), 'perf-sku', 'ACTIVE'
-           FROM products p
-           WHERE p.product_code LIKE $1 || '-P%'
-             AND NOT EXISTS (SELECT 1 FROM skus s WHERE s.product_id = p.id)
            ON CONFLICT DO NOTHING`,
           [PREFIX],
         );
@@ -1070,9 +1049,7 @@ describe('list performance with 5000 balances (task §74)', () => {
            SELECT s.id, $1, $2, 'SELLABLE',
                   (10 + (row_number() OVER ()) % 20)::numeric(18,3), 0, 0, 0
            FROM skus s
-           WHERE s.sku_code LIKE 'PERF-%' AND s.product_id IN (
-             SELECT id FROM products WHERE product_code LIKE $3 || '-P%'
-           )
+           WHERE s.sku_code LIKE 'PERF-' || $3 || '-%'
              AND NOT EXISTS (SELECT 1 FROM inventory_balances b WHERE b.sku_id = s.id)`,
           [perfWhId, perfBinId, PREFIX],
         );

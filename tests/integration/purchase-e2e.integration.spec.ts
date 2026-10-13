@@ -28,11 +28,7 @@ let warehouseId = '';
 let binA01 = '';
 
 async function newSku(label: string): Promise<string> {
-  const product = await client.post<{ id: string }>('/api/v1/products', {
-    nameZh: `${PREFIX} ${label}商品`,
-  });
   const sku = await client.post<{ id: string }>('/api/v1/skus', {
-    productId: product.body.data.id,
     nameZh: `${PREFIX} ${label}SKU`,
   });
   return sku.body.data.id;
@@ -288,6 +284,11 @@ describe('chain B: sell-first, buy-later (task §14 链路B, the main mode)', ()
     //    RECEIVE 流水后，缺货行由 OrderAutoReallocationService 自动转
     //    RESERVED（异步监听器，轮询等待）；此前「收货绝不自动分配」的
     //    假设已被该规则取代。
+    //
+    //    负载敏感（既有备忘：负载敏感用例单独跑）：该监听器是 fire-and-forget
+    //    且**同 sku:warehouse 通道已在跑 / 在飞数达上限时本次事件被丢弃**
+    //    （设计如此：失败自吞，不阻塞库存主流程，兜底为下一笔流水或人工重试）。
+    //    全量套件并发跑时事件可能被丢弃——本用例需单独运行。
     line = await orderLine(order.orderId);
     for (let i = 0; i < 30 && line.fulfillmentStatus !== 'RESERVED'; i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 200));

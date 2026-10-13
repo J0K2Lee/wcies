@@ -7,8 +7,8 @@ import { ApiClient, runPrefix } from './sprint1.helpers';
  * Sprint 8.5 acceptance against real PostgreSQL + Redis + S3:
  * T1  concurrent double onboard - FOR UPDATE serializes, loser gets 409,
  *     zero orphan master data;
- * T2  multi-variant attach - default attach to the listing's product,
- *     explicit createNewProduct splits;
+ * T2  multi-variant onboard - every variant builds its OWN SKU (V1: the
+ *     product layer and its attach/split modes are gone, decision D5);
  * T3  category system - tree import (dry-run -> conflicts -> single-tx
  *     execute) + composite-key suggestion + remember-this-mapping;
  * T5  v4 attribute prefill (mm/g normalization) through onboard-context
@@ -70,16 +70,12 @@ interface OnboardContextVariant {
 interface OnboardContext {
   listingId: string;
   title: string | null;
-  defaultAttachProductId: string | null;
-  defaultAttachProductCode: string | null;
   variants: OnboardContextVariant[];
 }
 
 interface OnboardResultBody {
-  product: { id: string; productCode: string; nameZh: string };
   sku: { id: string; skuCode: string };
   barcode: string | null;
-  productCreated: boolean;
 }
 
 /** Seeds a synced listing + N UNMAPPED variant rows, like Listing Sync would. */
@@ -172,15 +168,10 @@ describe('T1 concurrent double onboard (FOR UPDATE serialization)', () => {
     const loser = first.status === 409 ? first : second;
     expect(loser.code).toBe('LISTING_SKU_MAPPING_INVALID_STATE');
 
-    // Exactly ONE product + ONE sku exist for this listing's onboarding -
-    // the loser created nothing (no orphan master data).
+    // Exactly ONE sku exists for this listing's onboarding - the loser
+    // created nothing (no orphan master data).
     const winner = first.status === 201 ? first : second;
-    expect(await countRows('SELECT 1 FROM products WHERE id = $1', [winner.data.product.id])).toBe(
-      1,
-    );
-    expect(
-      await countRows('SELECT 1 FROM skus WHERE product_id = $1', [winner.data.product.id]),
-    ).toBe(1);
+    expect(await countRows('SELECT 1 FROM skus WHERE id = $1', [winner.data.sku.id])).toBe(1);
     expect(
       await countRows(
         'SELECT 1 FROM platform_listing_skus WHERE listing_id = $1 AND sku_id IS NOT NULL',
@@ -190,7 +181,7 @@ describe('T1 concurrent double onboard (FOR UPDATE serialization)', () => {
   });
 });
 
-describe('T2 multi-variant attach', () => {
+describe('T2 multi-variant onboard (V1: every variant its own SKU)', () => {
   const ppid = `${PREFIX}-T2`;
   let seeded: { listingId: string; mappingIds: string[] };
 
@@ -206,30 +197,25 @@ describe('T2 multi-variant attach', () => {
     });
   });
 
-  it('first variant creates the product; second ATTACHES by default; third can split', async () => {
+  it('each variant builds its own SKU from the global sequence (no attach/split)', async () => {
     const v1 = await onboard(seeded.listingId, seeded.mappingIds[0]!, {});
     expect(v1.status).toBe(201);
-    expect(v1.data.productCreated).toBe(true);
 
     const v2 = await onboard(seeded.listingId, seeded.mappingIds[1]!, {});
     expect(v2.status).toBe(201);
-    expect(v2.data.productCreated).toBe(false);
-    expect(v2.data.product.id).toBe(v1.data.product.id);
-    // SKU codes derive from the SAME product seq: 001 / 002.
-    expect(v2.data.sku.skuCode.slice(0, 6)).toBe(v1.data.sku.skuCode.slice(0, 6));
-    expect(v2.data.sku.skuCode).not.toBe(v1.data.sku.skuCode);
 
-    const context = await getOnboardContext(seeded.listingId);
-    expect(context.defaultAttachProductId).toBe(v1.data.product.id);
-
-    const v3 = await onboard(seeded.listingId, seeded.mappingIds[2]!, {
-      createNewProduct: true,
-    });
+    const v3 = await onboard(seeded.listingId, seeded.mappingIds[2]!, {});
     expect(v3.status).toBe(201);
-    expect(v3.data.productCreated).toBe(true);
-    expect(v3.data.product.id).not.toBe(v1.data.product.id);
 
-    // 2 products, 3 SKUs, 3 MAPPED variants - no fission, no orphan.
+    // Three DISTINCT SKUs, numbered consecutively by the single global scope
+    // (decision D2) - no per-product derivation, no attach target.
+    const codes = [v1.data.sku.skuCode, v2.data.sku.skuCode, v3.data.sku.skuCode];
+    expect(new Set(codes).size).toBe(3);
+    const numbers = codes.map((code) => Number(code.replace(/^SKU/, '')));
+    expect(numbers[1]).toBe(numbers[0]! + 1);
+    expect(numbers[2]).toBe(numbers[1]! + 1);
+
+    // 3 SKUs, 3 MAPPED variants - no fission, no orphan.
     expect(
       await countRows(
         `SELECT 1 FROM skus s

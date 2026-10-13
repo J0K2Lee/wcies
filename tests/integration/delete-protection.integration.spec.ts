@@ -8,6 +8,10 @@ import { ApiClient, runPrefix } from './sprint1.helpers';
  * PostgreSQL: every entity deletes when nothing references it and answers a
  * business error (never a raw FK error) when something does; the historic
  * mapping-delete gap (order_items.listing_sku_id) is covered too.
+ *
+ * V1 (2026-10-13): brand/category references are counted on skus (category
+ * and brand are SKU fields); the product-level delete cases were removed
+ * with `POST /products`.
  */
 let api: ManagedProcess;
 const BASE = 'http://localhost:3112';
@@ -165,54 +169,6 @@ describe('brand / category delete', () => {
   });
 });
 
-describe('product / sku delete', () => {
-  it('product with SKUs -> PRODUCT_IN_USE; SKU with barcodes -> SKU_IN_USE; empty product deletes', async () => {
-    const product = await client.post<IdDto>('/api/v1/products', {
-      nameZh: `${PREFIX} 删除商品`,
-    });
-    const sku = await client.post<IdDto & { skuCode: string }>('/api/v1/skus', {
-      productId: product.body.data.id,
-      nameZh: `${PREFIX} 删除SKU`,
-    });
-
-    const productRejected = await client.del(`/api/v1/products/${product.body.data.id}`);
-    expect(productRejected.status).toBe(409);
-    expect(productRejected.body.error?.code).toBe('PRODUCT_IN_USE');
-
-    // Must be unique per run: barcodes are globally unique, and deriving the
-    // value from the digits of PREFIX collided across runs (the same digits
-    // recurred), leaving the SKU reference-free and making this assertion fail
-    // for the wrong reason.
-    const uniqueBarcode = `69${String(Date.now()).slice(-11)}`;
-    const barcode = await client.post<IdDto>(`/api/v1/skus/${sku.body.data.id}/barcodes`, {
-      barcode: uniqueBarcode,
-      barcodeType: 'EAN',
-    });
-    expect(barcode.status).toBe(201);
-
-    const skuRejected = await client.del(`/api/v1/skus/${sku.body.data.id}`);
-    expect(skuRejected.status).toBe(409);
-    expect(skuRejected.body.error?.code).toBe('SKU_IN_USE');
-    expect(skuRejected.body.error?.message).toContain('只能停用');
-  });
-
-  it('a SKU without any references deletes; then its product deletes', async () => {
-    const product = await client.post<IdDto>('/api/v1/products', {
-      nameZh: `${PREFIX} 空商品`,
-    });
-    const sku = await client.post<IdDto>('/api/v1/skus', {
-      productId: product.body.data.id,
-      nameZh: `${PREFIX} 空SKU`,
-    });
-
-    const skuDeleted = await client.del(`/api/v1/skus/${sku.body.data.id}`);
-    expect(skuDeleted.status).toBe(200);
-
-    const productDeleted = await client.del(`/api/v1/products/${product.body.data.id}`);
-    expect(productDeleted.status).toBe(200);
-  });
-});
-
 describe('listing / mapping delete (incl. the order-history gap fix)', () => {
   it('rejects a listing with mappings; deletes once the mappings are gone', async () => {
     const platforms = await client.get<Array<{ id: string; code: string }>>('/api/v1/platforms');
@@ -222,11 +178,7 @@ describe('listing / mapping delete (incl. the order-history gap fix)', () => {
       name: `${PREFIX} 列表店`,
     });
 
-    const product = await client.post<IdDto>('/api/v1/products', {
-      nameZh: `${PREFIX} 列表商品`,
-    });
     const sku = await client.post<IdDto>('/api/v1/skus', {
-      productId: product.body.data.id,
       nameZh: `${PREFIX} 列表SKU`,
     });
     // Listings are always created with >= 1 variant (skuVariants is required),
@@ -256,7 +208,6 @@ describe('listing / mapping delete (incl. the order-history gap fix)', () => {
     expect(listingDeleted.status).toBe(200);
 
     await client.del(`/api/v1/skus/${sku.body.data.id}`);
-    await client.del(`/api/v1/products/${product.body.data.id}`);
     await client.del(`/api/v1/stores/${store.body.data.id}`);
   });
 
@@ -267,11 +218,7 @@ describe('listing / mapping delete (incl. the order-history gap fix)', () => {
       platformId: ozonId,
       name: `${PREFIX} 订单店`,
     });
-    const product = await client.post<IdDto>('/api/v1/products', {
-      nameZh: `${PREFIX} 订单商品`,
-    });
     const sku = await client.post<IdDto>('/api/v1/skus', {
-      productId: product.body.data.id,
       nameZh: `${PREFIX} 订单SKU`,
     });
     const listing = await client.post<IdDto>('/api/v1/listings', {

@@ -278,11 +278,7 @@ function makePosting(
 }
 
 async function newSku(label: string): Promise<string> {
-  const product = await client.post<{ id: string }>('/api/v1/products', {
-    nameZh: `${PREFIX} ${label}商品`,
-  });
   const sku = await client.post<{ id: string; skuCode: string }>('/api/v1/skus', {
-    productId: product.body.data.id,
     nameZh: `${PREFIX} ${label}SKU`,
   });
   return sku.body.data.id;

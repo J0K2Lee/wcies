@@ -4,9 +4,9 @@ import { spawnApiEntry, waitForHttp, ManagedProcess } from './helpers';
 import { ApiClient, runPrefix } from './sprint1.helpers';
 
 /**
- * Sprint 6 business-code system (decisions 0001/0002) against real
- * PostgreSQL: scoped auto-coding, scope isolation, atomic concurrent takes,
- * overflow carry, SKU derivation from the product sequence.
+ * Sprint 6 business-code system (decision 0001) against real PostgreSQL:
+ * scoped auto-coding, scope isolation, atomic concurrent takes, overflow
+ * carry, and the V1 global SKU sequence (SKU%09d, decision D2).
  */
 let api: ManagedProcess;
 const BASE = 'http://localhost:3110';
@@ -107,85 +107,54 @@ describe('scoped auto-coding (decision 0001)', () => {
     expect(created.body.data.warehouseCode).toBe(`ZG-${base + 1}`);
   });
 
-  it('hands out N unique numbers to N concurrent creators', async () => {
+  it('hands out N unique SKU codes to N concurrent creators (global scope, D2)', async () => {
     const results = await Promise.all(
       Array.from({ length: 20 }, (_, index) =>
         client
-          .post<{ id: string; productCode: string }>('/api/v1/products', {
-            nameZh: `${PREFIX} 并发商品 ${index}`,
+          .post<{ id: string; skuCode: string }>('/api/v1/skus', {
+            nameZh: `${PREFIX} 并发SKU ${index}`,
           })
           .then((response) => {
             expect(response.body.success).toBe(true);
-            return response.body.data.productCode;
+            return response.body.data.skuCode;
           }),
       ),
     );
     expect(new Set(results).size).toBe(20);
-    const seqRows = await db.query<{ code_seq: string }>(
-      'SELECT code_seq FROM products WHERE product_code = ANY($1::text[]) ORDER BY code_seq',
-      [results],
+    // Every take advances the single 'sku' scope by exactly one.
+    const seqRows = await db.query<{ next_value: string }>(
+      "SELECT next_value FROM business_code_sequences WHERE scope_key = 'sku'",
     );
-    expect(seqRows.rows.map((row) => Number(row.code_seq))).toEqual(
-      seqRows.rows.map((row) => Number(row.code_seq)).sort((a, b) => a - b),
-    );
-    expect(new Set(seqRows.rows.map((row) => row.code_seq)).size).toBe(20);
+    expect(seqRows.rows.length).toBe(1);
+    const numbers = results.map((code) => Number(code.replace(/^SKU/, '')));
+    expect(Math.max(...numbers)).toBe(Number(seqRows.rows[0]?.next_value ?? 0));
   });
 });
 
-describe('SKU derivation from the product sequence (decision 0002)', () => {
-  it('derives SKU{product 6}{in-product 3}; every product restarts at 001', async () => {
-    const productA = await client.post<{ id: string; productCode: string }>('/api/v1/products', {
-      nameZh: `${PREFIX} 派生商品 A`,
-    });
-    const productB = await client.post<{ id: string; productCode: string }>('/api/v1/products', {
-      nameZh: `${PREFIX} 派生商品 B`,
-    });
-    const seqA = Number(productA.body.data.productCode.replace(/^PN/, ''));
-    const seqB = Number(productB.body.data.productCode.replace(/^PN/, ''));
+describe('global SKU sequence (V1 decision D2: SKU%09d, one scope for all)', () => {
+  it('numbers every SKU from the single global scope, strictly increasing', async () => {
+    const before = await db.query<{ next_value: string }>(
+      "SELECT next_value FROM business_code_sequences WHERE scope_key = 'sku'",
+    );
+    const base = Number(before.rows[0]?.next_value ?? 0);
 
-    const skuA1 = await client.post<{ skuCode: string }>('/api/v1/skus', {
-      productId: productA.body.data.id,
-      nameZh: `${PREFIX} A-1`,
+    const first = await client.post<{ skuCode: string }>('/api/v1/skus', {
+      nameZh: `${PREFIX} 全局SKU 1`,
     });
-    const skuA2 = await client.post<{ skuCode: string }>('/api/v1/skus', {
-      productId: productA.body.data.id,
-      nameZh: `${PREFIX} A-2`,
-    });
-    const skuB1 = await client.post<{ skuCode: string }>('/api/v1/skus', {
-      productId: productB.body.data.id,
-      nameZh: `${PREFIX} B-1`,
+    const second = await client.post<{ skuCode: string }>('/api/v1/skus', {
+      nameZh: `${PREFIX} 全局SKU 2`,
     });
 
-    expect(skuA1.body.data.skuCode).toBe(`SKU${String(seqA).padStart(6, '0')}001`);
-    expect(skuA2.body.data.skuCode).toBe(`SKU${String(seqA).padStart(6, '0')}002`);
-    expect(skuB1.body.data.skuCode).toBe(`SKU${String(seqB).padStart(6, '0')}001`);
+    expect(first.body.data.skuCode).toBe(`SKU${String(base + 1).padStart(9, '0')}`);
+    expect(second.body.data.skuCode).toBe(`SKU${String(base + 2).padStart(9, '0')}`);
+    // Minimum width, natural carry: never re-formatted after the fact.
+    expect(first.body.data.skuCode).toMatch(/^SKU\d{9,}$/);
   });
 });
 
 describe('immutable codes after creation (decision #7/#8/#3)', () => {
-  it('rejects productCode changes on PATCH (forbidNonWhitelisted guard)', async () => {
-    const product = await client.post<{ id: string; productCode: string }>('/api/v1/products', {
-      nameZh: `${PREFIX} 不可改编码商品`,
-    });
-    const patched = await client.patch(`/api/v1/products/${product.body.data.id}`, {
-      productCode: 'PN999999',
-      nameZh: `${PREFIX} 改名`,
-    });
-    expect(patched.status).toBe(400);
-
-    const renamed = await client.patch<{ productCode: string }>(
-      `/api/v1/products/${product.body.data.id}`,
-      { nameZh: `${PREFIX} 改名` },
-    );
-    expect(renamed.body.data.productCode).toBe(product.body.data.productCode);
-  });
-
   it('rejects skuCode changes on PATCH', async () => {
-    const product = await client.post<{ id: string }>('/api/v1/products', {
-      nameZh: `${PREFIX} SKU冻结商品`,
-    });
     const sku = await client.post<{ id: string; skuCode: string }>('/api/v1/skus', {
-      productId: product.body.data.id,
       nameZh: `${PREFIX} 冻结SKU`,
     });
     const patched = await client.patch(`/api/v1/skus/${sku.body.data.id}`, {

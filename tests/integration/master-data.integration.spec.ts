@@ -4,8 +4,12 @@ import { ApiClient, runPrefix } from './sprint1.helpers';
 
 /**
  * Sprint 1 master-data acceptance against real PostgreSQL + MinIO:
- * platforms, stores, credentials, catalog, products, SKUs, barcodes, images
+ * platforms, stores, credentials, catalog, SKUs, barcodes, images
  * (task §78-§82, §85).
+ *
+ * V1 (2026-10-13): the product layer is gone - SKUs are created directly and
+ * carry their own category/brand (decision D5); the product lifecycle and
+ * duplicate-product-code cases were removed with `POST /products`.
  */
 let api: ManagedProcess;
 const BASE = 'http://localhost:3105';
@@ -130,7 +134,10 @@ describe('catalog (task §13/§14)', () => {
 
     const tree =
       await client.get<
-        Array<{ code: string; children: Array<{ code: string; children: Array<{ code: string }> }> }>
+        Array<{
+          code: string;
+          children: Array<{ code: string; children: Array<{ code: string }> }>;
+        }>
       >('/api/v1/categories');
     const node = tree.body.data.find((category) => category.code === `${PREFIX}-3C`);
     expect(node?.children.map((leafNode) => leafNode.code)).toEqual([`${PREFIX}-KBD`]);
@@ -138,12 +145,12 @@ describe('catalog (task §13/§14)', () => {
   });
 });
 
-describe('products + skus (task §78/§79)', () => {
-  let productId = '';
+describe('skus (task §78/§79, V1: direct creation with category/brand)', () => {
   let categoryId = '';
   let brandId = '';
 
-  it('creates a product with auto code PN%06d (task §16, Sprint 6)', async () => {
+  it('creates SKUs with auto codes SKU%09d and backend-computed volume (task §79)', async () => {
+    // Level-3 leaf + brand resolved from the seeded catalog fixtures.
     const tree = await client.get<
       Array<{
         code: string;
@@ -158,45 +165,13 @@ describe('products + skus (task §78/§79)', () => {
     );
     brandId = brands.body.data[0]?.id ?? '';
 
-    const created = await client.post<IdDto & { productCode: string; status: string }>(
-      '/api/v1/products',
-      {
-        nameZh: `${PREFIX} VK87 MAX V2`,
-        nameRu: 'VK87 MAX V2',
-        categoryId,
-        brandId,
-      },
-    );
-    expect(created.body.data.productCode).toMatch(/^PN\d{6}$/);
-    expect(created.body.data.status).toBe('DRAFT');
-    productId = created.body.data.id;
-  });
-
-  it('rejects duplicate product_code (task §78)', async () => {
-    const duplicate = await client.post('/api/v1/products', {
-      productCode: `${PREFIX}-DUP`,
-      nameZh: 'x',
-    });
-    const first = await client.post<IdDto & { productCode: string }>('/api/v1/products', {
-      productCode: `${PREFIX}-DUP`,
-      nameZh: 'x1',
-    });
-    void duplicate;
-    const second = await client.post('/api/v1/products', {
-      productCode: `${PREFIX}-DUP`,
-      nameZh: 'x2',
-    });
-    expect(second.status).toBe(409);
-    expect(second.body.error?.code).toBe('PRODUCT_CODE_ALREADY_EXISTS');
-    void first;
-  });
-
-  it('creates SKUs with auto codes and backend-computed volume (task §79)', async () => {
     const black = await client.post<
-      IdDto & { skuCode: string; volumeMm3: number; serialTracking: boolean }
+      IdDto & { skuCode: string; volumeMm3: number; serialTracking: boolean; status: string }
     >('/api/v1/skus', {
-      productId,
       nameZh: `${PREFIX} 黑色`,
+      nameRu: 'VK87 MAX V2',
+      categoryId,
+      brandId,
       color: '黑色',
       weightG: 950,
       lengthMm: 355,
@@ -208,9 +183,10 @@ describe('products + skus (task §78/§79)', () => {
     expect(black.body.data.skuCode).toMatch(/^SKU\d{9}$/);
     expect(black.body.data.volumeMm3).toBe(355 * 122 * 34);
     expect(black.body.data.serialTracking).toBe(true);
+    // V1 (D3): creation lands on ACTIVE - the product DRAFT semantics are gone.
+    expect(black.body.data.status).toBe('ACTIVE');
 
     const blue = await client.post<IdDto & { skuCode: string }>('/api/v1/skus', {
-      productId,
       nameZh: `${PREFIX} 蓝色`,
       color: '蓝色',
     });
@@ -219,7 +195,6 @@ describe('products + skus (task §78/§79)', () => {
 
   it('rejects partial dimensions (volume must stay computable)', async () => {
     const bad = await client.post('/api/v1/skus', {
-      productId,
       nameZh: 'broken',
       lengthMm: 100,
     });
@@ -228,7 +203,6 @@ describe('products + skus (task §78/§79)', () => {
 
   it('rejects non-integer millimeter dimensions (DTO validation)', async () => {
     const bad = await client.post('/api/v1/skus', {
-      productId,
       nameZh: 'broken-float',
       lengthMm: 100.5,
       widthMm: 50,
@@ -237,9 +211,23 @@ describe('products + skus (task §78/§79)', () => {
     expect(bad.status).toBe(400);
   });
 
+  it('rejects a non-level-3 category (decision 0005, V1 D5)', async () => {
+    const tree = await client.get<Array<{ id: string; level: number; code: string }>>(
+      '/api/v1/categories/tree-lite',
+    );
+    const level1 = tree.body.data.find((node) => node.level === 1);
+    expect(level1).toBeDefined();
+    const bad = await client.post('/api/v1/skus', {
+      nameZh: 'wrong-level',
+      categoryId: level1?.id,
+    });
+    expect(bad.status).toBe(422);
+    expect(bad.body.error?.code).toBe('CATEGORY_LEVEL_INVALID');
+  });
+
   it('updates a SKU and recomputes volume (task §23)', async () => {
     const skus = await client.get<Array<{ id: string; nameZh: string; volumeMm3: number }>>(
-      `/api/v1/skus?productId=${productId}&sortBy=skuCode&sortOrder=asc`,
+      `/api/v1/skus?keyword=${encodeURIComponent(`${PREFIX} 黑色`)}&sortBy=skuCode&sortOrder=asc`,
     );
     const black = skus.body.data.find((sku) => sku.nameZh === `${PREFIX} 黑色`);
     expect(black).toBeDefined();
@@ -249,16 +237,6 @@ describe('products + skus (task §78/§79)', () => {
       heightMm: 100,
     });
     expect(updated.body.data.volumeMm3).toBe(4_000_000);
-  });
-
-  it('activates the product and shows SKU count in list (task §64)', async () => {
-    await client.post(`/api/v1/products/${productId}/activate`);
-    const list = await client.get<Array<{ id: string; skuCount: number; status: string }>>(
-      `/api/v1/products?keyword=${encodeURIComponent(PREFIX)}`,
-    );
-    const row = list.body.data.find((product) => product.id === productId);
-    expect(row?.skuCount).toBe(2);
-    expect(row?.status).toBe('ACTIVE');
   });
 });
 
@@ -292,12 +270,7 @@ describe('barcodes (task §80)', () => {
       barcodeType: 'EAN',
     });
     expect(bad.status).toBe(404); // unknown sku
-    const products = await client.get<Array<{ id: string }>>(
-      `/api/v1/products?keyword=${encodeURIComponent(PREFIX)}`,
-    );
-    const productId = products.body.data[0]?.id ?? '';
     const other = await client.post<{ id: string }>('/api/v1/skus', {
-      productId,
       nameZh: `${PREFIX} other`,
     });
     const conflict = await client.post(`/api/v1/skus/${other.body.data.id}/barcodes`, {

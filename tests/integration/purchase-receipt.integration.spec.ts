@@ -38,11 +38,7 @@ let binA01 = '';
 let binA02 = '';
 
 async function newSku(label: string, serialTracking = false): Promise<string> {
-  const product = await client.post<{ id: string }>('/api/v1/products', {
-    nameZh: `${PREFIX} ${label}商品`,
-  });
   const sku = await client.post<{ id: string }>('/api/v1/skus', {
-    productId: product.body.data.id,
     nameZh: `${PREFIX} ${label}SKU`,
     serialTracking,
   });

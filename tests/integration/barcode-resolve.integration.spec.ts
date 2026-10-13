@@ -35,11 +35,7 @@ afterAll(async () => {
 
 describe('barcode resolution (Sprint 7 T5)', () => {
   it('resolves a bound barcode to its SKU; unknown barcodes 404', async () => {
-    const product = await client.post<{ id: string }>('/api/v1/products', {
-      nameZh: `${PREFIX} 条码商品`,
-    });
     const sku = await client.post<{ id: string; skuCode: string }>('/api/v1/skus', {
-      productId: product.body.data.id,
       nameZh: `${PREFIX} 条码SKU`,
     });
     const barcode = `${PREFIX}-EAN-1`;
@@ -63,11 +59,7 @@ describe('barcode resolution (Sprint 7 T5)', () => {
   });
 
   it('a barcode bound on the spot resolves immediately (D13 receiving flow)', async () => {
-    const product = await client.post<{ id: string }>('/api/v1/products', {
-      nameZh: `${PREFIX} 补码商品`,
-    });
     const sku = await client.post<{ id: string }>('/api/v1/skus', {
-      productId: product.body.data.id,
       nameZh: `${PREFIX} 补码SKU`,
     });
     const vendorCode = `${PREFIX}-VENDOR-9`;
@@ -94,7 +86,8 @@ describe('barcode resolution (Sprint 7 T5)', () => {
     const generated = await client.post<{ barcode: string }>(
       `/api/v1/skus/${sku.body.data.id}/barcodes/generate-internal`,
     );
-    expect(generated.body.data.barcode).toMatch(/^W\d{8}$/);
+    // 决策 0019（2026-10-09）：内部条码为 6 位纯数字（最小宽度自然进位）。
+    expect(generated.body.data.barcode).toMatch(/^\d{6,}$/);
     const internal = await client.get<Resolved>(
       `/api/v1/barcodes/${generated.body.data.barcode}/resolve`,
     );

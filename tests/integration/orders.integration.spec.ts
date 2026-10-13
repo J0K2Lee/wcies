@@ -82,11 +82,7 @@ let warehouseId = '';
 let binA01 = '';
 
 async function newSku(label: string, serialTracking = false): Promise<string> {
-  const product = await client.post<{ id: string }>('/api/v1/products', {
-    nameZh: `${PREFIX} ${label}商品`,
-  });
   const sku = await client.post<{ id: string }>('/api/v1/skus', {
-    productId: product.body.data.id,
     nameZh: `${PREFIX} ${label}SKU`,
     serialTracking,
   });
@@ -993,7 +989,19 @@ describe('dual-axis list contract: stage + goodsState filters (T3)', () => {
     const listArrived = await client.get<ListItem[]>(
       `/api/v1/orders?keyword=${encodeURIComponent(detail.platformOrderId)}&pageSize=10`,
     );
-    expect(listArrived.body.data[0]?.backorderedOrderedCount).toBe(0);
-    expect(listArrived.body.data[0]?.backorderedArrivedCount).toBe(1);
+    // 收货确认会同时触发「库存增加 → 缺货行自动重新分配」
+    // （OrderAutoReallocationService，2026-09-17 用户指示，异步 fire-and-forget）：
+    // 该行仍是缺货时，派生标记必须显示「已到货」；若自动重分配已跑完，行转
+    // RESERVED、缺货计数归零 —— 两种都是正确事实（本断言此前只覆盖前者，
+    // 与异步重分配存在竞态，2026-10-13 T8 修正为竞态感知）。
+    const arrivedRow = listArrived.body.data[0];
+    if (arrivedRow?.backorderedCount === 1) {
+      expect(arrivedRow.backorderedOrderedCount).toBe(0);
+      expect(arrivedRow.backorderedArrivedCount).toBe(1);
+    } else {
+      expect(arrivedRow?.reservedCount).toBe(1);
+      expect(arrivedRow?.backorderedOrderedCount).toBe(0);
+      expect(arrivedRow?.backorderedArrivedCount).toBe(0);
+    }
   });
 });

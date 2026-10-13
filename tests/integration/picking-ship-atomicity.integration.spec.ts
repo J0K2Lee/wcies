@@ -57,11 +57,7 @@ let seq = 0;
 
 async function newSku(): Promise<{ skuId: string; skuCode: string; barcode: string }> {
   seq += 1;
-  const product = await client.post<{ id: string }>('/api/v1/products', {
-    nameZh: `${PREFIX} 原子性商品${seq}`,
-  });
   const sku = await client.post<{ id: string; skuCode: string }>('/api/v1/skus', {
-    productId: product.body.data.id,
     nameZh: `${PREFIX} 原子性SKU${seq}`,
   });
   const barcode = `${PREFIX}A${seq}${randomUUID().slice(0, 6)}`;

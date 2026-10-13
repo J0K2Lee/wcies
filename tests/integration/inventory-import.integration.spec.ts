@@ -57,12 +57,8 @@ beforeAll(async () => {
   );
   binA01 = bins.body.data.bins.find((bin) => bin.binCode.endsWith('A01-1'))!.id;
 
-  const product = await client.post<{ id: string }>('/api/v1/products', {
-    nameZh: `${PREFIX} 导入商品`,
-  });
   for (const suffix of ['1', '2']) {
     const sku = await client.post<{ id: string; skuCode: string }>('/api/v1/skus', {
-      productId: product.body.data.id,
       skuCode: `${PREFIX}-IMPSKU${suffix}`,
       nameZh: `${PREFIX} 导入SKU${suffix}`,
     });

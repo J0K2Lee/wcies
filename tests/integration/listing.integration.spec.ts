@@ -50,15 +50,10 @@ beforeAll(async () => {
   storeB = storeB_.body.data.id;
   wbStore = wbStore_.body.data.id;
 
-  const product = await client.post<{ id: string }>('/api/v1/products', {
-    nameZh: `${PREFIX} VK87`,
-  });
   const black = await client.post<{ id: string }>('/api/v1/skus', {
-    productId: product.body.data.id,
     nameZh: `${PREFIX} 黑`,
   });
   const blue = await client.post<{ id: string }>('/api/v1/skus', {
-    productId: product.body.data.id,
     nameZh: `${PREFIX} 蓝`,
   });
   skuBlack = black.body.data.id;
@@ -129,11 +124,7 @@ describe('Case A: one internal SKU -> multiple listings, same store (task §84)'
       storeCode: `${PREFIX}-NOID`,
       name: 'NOID',
     });
-    const product = await client.post<{ id: string }>('/api/v1/products', {
-      nameZh: `${PREFIX} NOID`,
-    });
     const sku = await client.post<{ id: string }>('/api/v1/skus', {
-      productId: product.body.data.id,
       nameZh: `${PREFIX} NOID`,
     });
     const noId = await client.post('/api/v1/listings', {
@@ -155,11 +146,7 @@ describe('Case A: one internal SKU -> multiple listings, same store (task §84)'
       storeCode: `${PREFIX}-OFFONLY`,
       name: 'OFFONLY',
     });
-    const product = await client.post<{ id: string }>('/api/v1/products', {
-      nameZh: `${PREFIX} OFFONLY`,
-    });
     const sku = await client.post<{ id: string }>('/api/v1/skus', {
-      productId: product.body.data.id,
       nameZh: `${PREFIX} OFFONLY`,
     });
     const offerOnly = await client.post('/api/v1/listings', {
@@ -179,11 +166,7 @@ describe('Case A: one internal SKU -> multiple listings, same store (task §84)'
       storeCode: `${PREFIX}-OFFPLUS`,
       name: 'OFFPLUS',
     });
-    const product = await client.post<{ id: string }>('/api/v1/products', {
-      nameZh: `${PREFIX} OFFPLUS`,
-    });
     const sku = await client.post<{ id: string }>('/api/v1/skus', {
-      productId: product.body.data.id,
       nameZh: `${PREFIX} OFFPLUS`,
     });
     const withSkuId = await client.post<{
@@ -294,11 +277,7 @@ describe('Case C: same platform SKU id in two stores, store-scoped resolution (t
       storeCode: `${PREFIX}-ERASE`,
       name: 'ERASE',
     });
-    const product = await client.post<{ id: string }>('/api/v1/products', {
-      nameZh: `${PREFIX} ERASE`,
-    });
     const sku = await client.post<{ id: string }>('/api/v1/skus', {
-      productId: product.body.data.id,
       nameZh: `${PREFIX} ERASE`,
     });
     const listing = await client.post<{
@@ -463,11 +442,7 @@ describe('keyword search spans variant identifiers and internal SKU code', () =>
       name: 'K',
     });
     storeK = store.body.data.id;
-    const product = await client.post<{ id: string }>('/api/v1/products', {
-      nameZh: `${PREFIX} 关键字搜索`,
-    });
     const sku = await client.post<{ id: string; skuCode: string }>('/api/v1/skus', {
-      productId: product.body.data.id,
       nameZh: `${PREFIX} 搜索黑`,
     });
     skuCode = sku.body.data.skuCode;

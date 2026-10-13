@@ -27,22 +27,9 @@ beforeAll(async () => {
   );
   const storeId = store.rows[0]?.id as string;
 
-  // Reserve one number from the product scope so the raw insert can never
-  // collide with numbers the scope hands out later.
-  const reserved = await db.query<{ first_seq: string }>(
-    `INSERT INTO business_code_sequences (scope_key, next_value, updated_at)
-     VALUES ('product', 1, now())
-     ON CONFLICT (scope_key)
-     DO UPDATE SET next_value = business_code_sequences.next_value + 1, updated_at = now()
-     RETURNING (next_value - 1 + 1)::text AS first_seq`,
-  );
-  const product = await db.query<{ id: string }>(
-    'INSERT INTO products (product_code, code_seq, name_zh, status) VALUES ($1, $2, $3, $4) RETURNING id',
-    [`${PREFIX}-PERFPRD`, Number(reserved.rows[0]?.first_seq ?? 1), 'perf product', 'ACTIVE'],
-  );
-  const productId = product.rows[0]?.id as string;
-
-  // 2000 SKUs in one INSERT (unnest keeps it a single round trip).
+  // 2000 SKUs in one INSERT (unnest keeps it a single round trip). V1: no
+  // product row - skus are standalone (product_id nullable since migration
+  // 20261013_001).
   const skuCount = 2000;
   const codes = Array.from(
     { length: skuCount },
@@ -50,9 +37,9 @@ beforeAll(async () => {
   );
   const names = codes.map((code) => `${code} 名称`);
   await db.query(
-    `INSERT INTO skus (product_id, sku_code, name_zh, status)
-     SELECT $1, c, n, 'ACTIVE' FROM unnest($2::text[], $3::text[]) AS t(c, n)`,
-    [productId, codes, names],
+    `INSERT INTO skus (sku_code, name_zh, status)
+     SELECT c, n, 'ACTIVE' FROM unnest($1::text[], $2::text[]) AS t(c, n)`,
+    [codes, names],
   );
   const skuIds = await db.query<{ id: string }>('SELECT id FROM skus WHERE sku_code LIKE $1', [
     `${PREFIX}-PSKU-%`,
@@ -101,7 +88,6 @@ afterAll(async () => {
     `${PREFIX}-PERF-L%`,
   ]);
   await db.query('DELETE FROM skus WHERE sku_code LIKE $1', [`${PREFIX}-PSKU-%`]);
-  await db.query('DELETE FROM products WHERE product_code = $1', [`${PREFIX}-PERFPRD`]);
   await db.query('DELETE FROM stores WHERE store_code = $1', [`${PREFIX}-PERF`]);
   await db.end();
 });
@@ -139,12 +125,6 @@ describe('list performance at 2000 SKUs / 5000 mappings (task §92)', () => {
     const { ms, ok } = await measureMs(
       `/api/v1/listings?keyword=${encodeURIComponent(PREFIX + '-PERF-L')}&pageSize=50`,
     );
-    expect(ok).toBe(true);
-    expect(ms).toBeLessThan(500);
-  });
-
-  it('pages the product list under 500ms', async () => {
-    const { ms, ok } = await measureMs('/api/v1/products?pageSize=50');
     expect(ok).toBe(true);
     expect(ms).toBeLessThan(500);
   });
