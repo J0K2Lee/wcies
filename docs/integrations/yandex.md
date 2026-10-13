@@ -51,6 +51,19 @@
   - `mapping`：`marketSku`（=平台 SKU ID，供内部 SKU 映射）、`marketCategoryName`。
 - 限流：100 req/min（无订阅）。
 - 商品图 = `pictures` 自带（无需独立图片接口）；规格 = `weightDimensions` 自带（无需独立增强同步）。
+- **尺寸重量预填（2026-10-05 已实现）**：listing 同步把 `offer.weightDimensions` 规范化为变体
+  `platform_listing_skus.raw_data.product_attributes`（`dimension_unit:'cm'` + `depth/width/height`、
+  `weight_unit:'kg'` + `weight`；Yandex `length` = 包裹长边 → OZON 风格 `depth` 键）。
+  单位依据 = 仓库内官方 OpenAPI `OfferWeightDimensionsDTO`（cm/kg）。建档并映射弹窗经
+  onboard-context 读取预填；全有全无（三维不齐只保留重量），非正数视为缺失。
+  变体行 raw_data 由 listing 同步整体刷新，product_attributes 每次随同步自愈，无需增强同步。
+- **订单行商品图（2026-09-28，已实现）**：Yandex business-orders 行内没有 `marketSku`（见 §8.3），
+  无法走 OZON 式 `fetchProductImages(platformSkuId)` 链路。改为纯 DB 反查：订单行 `seller_sku`（=offerId）
+  → 本店铺 `platform_listing_skus` → Listing `raw_data.offer.pictures[]`（vendored 官方规范
+  `GetOfferMappingDTO.offer.pictures`：**纯 URL 字符串数组，第一条即主图**；未核实到买家照片类接口，
+  Partner API 不存在普通订单照片端点）。同一 offerId 挂多条链接时取最新 Listing 先到先得；
+  发起零平台 API 调用。代码：`yandex.mapper.extractYandexOfferImageUrl` +
+  `OrderSyncService.resolveYandexImages`。
 
 ## 6. 其余能力（对齐 OZON 范围的逐项核对）
 

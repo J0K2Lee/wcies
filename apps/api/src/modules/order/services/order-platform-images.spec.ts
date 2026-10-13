@@ -188,3 +188,107 @@ describe('OrderSyncService best-effort platform images', () => {
     expect(warn).toHaveBeenCalledOnce();
   });
 });
+
+// Yandex 订单行补图（2026-09-28，ERP 建议#2）：platformSkuId 落库为 null，
+// 走 sellerSku -> 本店铺 Listing raw_data.offer.pictures 的纯 DB 反查。
+describe('OrderSyncService Yandex order-row images', () => {
+  function buildYandex(
+    rows: Array<{
+      id: string;
+      orderId: string;
+      platformSkuId: string | null;
+      sellerSku: string | null;
+    }>,
+    media: Array<{ sellerSku: string; listingUrl: string | null; listingRawData: unknown }>,
+  ) {
+    const savePlatformImages = vi.fn().mockResolvedValue(rows.length);
+    const findListingMedia = vi.fn().mockResolvedValue(media);
+    const warn = vi.fn();
+    const fetchProductImages = vi.fn();
+    const service: OrderSyncService = Object.assign(
+      Object.create(OrderSyncService.prototype) as OrderSyncService,
+      {
+        contextService: {
+          resolveSyncableStore: vi.fn().mockResolvedValue({
+            store: { id: 'store' },
+            adapter: { fetchProductImages },
+            platformCode: 'YANDEX',
+          }),
+          buildStoreContext: vi.fn(),
+        },
+        orderService: {
+          listMissingPlatformImages: vi.fn().mockResolvedValue(rows),
+          savePlatformImages,
+        },
+        listingService: { findListingMediaBySellerSkus: findListingMedia },
+        ingestionService: {
+          ingest: vi.fn().mockResolvedValue({ orderId: 'order', alreadyIngested: false }),
+        },
+        logger: { warn },
+      },
+    );
+    return { service, savePlatformImages, findListingMedia, fetchProductImages, warn };
+  }
+
+  const yandexRow = { id: 'item', orderId: 'order', platformSkuId: null, sellerSku: 'offer-1' };
+
+  it('resolves the primary picture from listing raw_data without platform API calls', async () => {
+    const ctx = buildYandex(
+      [yandexRow],
+      [
+        {
+          sellerSku: 'offer-1',
+          listingUrl: null,
+          listingRawData: { offer: { pictures: ['https://img.example/a.jpg'] } },
+        },
+      ],
+    );
+    const result = await ctx.service.enrichPlatformImages('store', 'order');
+    expect(ctx.findListingMedia).toHaveBeenCalledWith('store', ['offer-1']);
+    expect(ctx.fetchProductImages).not.toHaveBeenCalled();
+    expect(ctx.savePlatformImages).toHaveBeenCalledWith(
+      'store',
+      [{ orderItemId: 'item', imageUrl: 'https://img.example/a.jpg' }],
+      expect.anything(),
+    );
+    expect(result).toMatchObject({ candidates: 1, wouldUpdate: 1, updated: 1, failed: false });
+  });
+
+  it('first media row wins when one offer sits on several links (§25)', async () => {
+    const ctx = buildYandex(
+      [yandexRow],
+      [
+        {
+          sellerSku: 'offer-1',
+          listingUrl: null,
+          listingRawData: { offer: { pictures: ['https://img.example/first.jpg'] } },
+        },
+        {
+          sellerSku: 'offer-1',
+          listingUrl: null,
+          listingRawData: { offer: { pictures: ['https://img.example/second.jpg'] } },
+        },
+      ],
+    );
+    await ctx.service.enrichPlatformImages('store', 'order');
+    expect(ctx.savePlatformImages).toHaveBeenCalledWith(
+      'store',
+      [{ orderItemId: 'item', imageUrl: 'https://img.example/first.jpg' }],
+      expect.anything(),
+    );
+  });
+
+  it('rows without any resolvable picture warn and never save', async () => {
+    const ctx = buildYandex(
+      [yandexRow, { id: 'item-2', orderId: 'order', platformSkuId: null, sellerSku: 'offer-2' }],
+      [
+        { sellerSku: 'offer-1', listingUrl: null, listingRawData: { offer: { pictures: [] } } },
+        { sellerSku: 'offer-2', listingUrl: null, listingRawData: {} },
+      ],
+    );
+    const result = await ctx.service.enrichPlatformImages('store', 'order');
+    expect(ctx.savePlatformImages).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ candidates: 2, wouldUpdate: 0, updated: 0, failed: false });
+    expect(ctx.warn).toHaveBeenCalledOnce();
+  });
+});

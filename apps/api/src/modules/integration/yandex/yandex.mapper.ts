@@ -167,11 +167,16 @@ export function mapOfferMappingToListing(
     (row) => String(row.campaignId ?? '') === campaignId,
   )?.status;
 
+  const productAttributes = buildProductAttributes(offer);
+
   const sku: PlatformListingSkuRaw = {
     platformSkuId: marketSku,
     offerId,
     sellerSku: offerId,
-    rawData: { ...(entry.mapping ?? {}) },
+    rawData: {
+      ...(entry.mapping ?? {}),
+      ...(productAttributes !== null ? { product_attributes: productAttributes } : {}),
+    },
   };
 
   return {
@@ -190,6 +195,44 @@ export function mapOfferMappingToListing(
 // ---------------------------------------------------------------------------
 // Returns (campaign returns, docs §6)
 // ---------------------------------------------------------------------------
+
+/**
+ * offer.weightDimensions -> shared product_attributes payload (the onboarding
+ * prefill reads it via listing-onboarding readProductAttributes). Units per
+ * the vendored official OpenAPI (OfferWeightDimensionsDTO, checked 2026-10-05):
+ * length/width/height in **cm**, weight in **kg** (gross). Yandex "length" is
+ * the package long side -> written as the OZON-style `depth` key the reader
+ * maps to 内部长度. Dims are all-or-none (a partial triple cannot yield a
+ * volume); weight is independent. Non-positive values are treated as absent
+ * platform junk rather than prefilled as 0. null = nothing usable.
+ */
+export function buildProductAttributes(
+  offer: YxOfferMapping['offer'],
+): Record<string, unknown> | null {
+  const weightDimensions = offer?.weightDimensions;
+  if (typeof weightDimensions !== 'object' || weightDimensions === null) {
+    return null;
+  }
+  const positive = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+  const length = positive(weightDimensions.length);
+  const width = positive(weightDimensions.width);
+  const height = positive(weightDimensions.height);
+  const weight = positive(weightDimensions.weight);
+
+  const attributes: Record<string, unknown> = {};
+  if (length !== null && width !== null && height !== null) {
+    attributes['dimension_unit'] = 'cm';
+    attributes['depth'] = length;
+    attributes['width'] = width;
+    attributes['height'] = height;
+  }
+  if (weight !== null) {
+    attributes['weight_unit'] = 'kg';
+    attributes['weight'] = weight;
+  }
+  return Object.keys(attributes).length > 0 ? attributes : null;
+}
 
 export function mapReturnToReturn(item: YxReturnItem): PlatformReturnRaw {
   const returnId = readString(item.id);
@@ -313,6 +356,35 @@ function readString(value: unknown): string | null {
 
 function malformed(field: string, reason: string): Error {
   return new YandexMappingError(field, reason);
+}
+
+/**
+ * Yandex offer-mappings raw entry -> primary product image URL (2026-09-28,
+ * ERP 建议#2: 订单行补图). Verified against the vendored official spec
+ * (docs/yandex-partner-api-openapi.json): GetOfferMappingDTO.offer.pictures
+ * is a nullable array of plain URL strings and "изображение по первой ссылке
+ * считается основным" — the FIRST entry is the primary image
+ * (BaseOfferResponseDTO.pictures). Tolerant by design (AGENTS.md §49):
+ * missing or malformed payload yields null, never a throw.
+ */
+export function extractYandexOfferImageUrl(rawData: unknown): string | null {
+  if (typeof rawData !== 'object' || rawData === null) {
+    return null;
+  }
+  const offer = (rawData as { offer?: unknown }).offer;
+  if (typeof offer !== 'object' || offer === null) {
+    return null;
+  }
+  const pictures = (offer as { pictures?: unknown }).pictures;
+  if (!Array.isArray(pictures)) {
+    return null;
+  }
+  for (const entry of pictures) {
+    if (typeof entry === 'string' && entry.trim() !== '') {
+      return entry.trim();
+    }
+  }
+  return null;
 }
 
 /** Mapper-level schema violation -> PLATFORM_BAD_RESPONSE. */

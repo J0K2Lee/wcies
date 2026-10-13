@@ -50,6 +50,20 @@ export interface WbCard {
   readonly title?: string;
   readonly description?: string;
   readonly photos?: Record<string, unknown>;
+  /**
+   * 包装尺寸与重量（卡片级，所有尺寸变体共用）。单位（2026-10-05 经搜索索引
+   * 核对 WB 官方开发者门户 dev.wildberries.ru changelog/论坛帖）：
+   * length/width/height 为**毫米**，weightBrutto 为**千克**（毛重，
+   * 如 0.15 = 150g）。.ru 直连被反爬、本地无 content OpenAPI 副本——
+   * T0 拿到真实卡片时按量级复核。listing 同步把它规范化为变体
+   * raw_data 的 product_attributes（建档预填数据源）。
+   */
+  readonly dimensions?: {
+    readonly length?: number;
+    readonly width?: number;
+    readonly height?: number;
+    readonly weightBrutto?: number;
+  };
   readonly characteristics?: readonly Record<string, unknown>[];
   readonly sizes?: readonly WbCardSize[];
   readonly createdAt?: string;

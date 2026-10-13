@@ -2,9 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { PlatformListingRaw } from '@wcies/platform-contracts';
 import { ListingService } from '../../listing/services/listing.service';
 import { SyncJobEntity } from '../entities/sync-job.entity';
+import { ENRICHMENT_SUPPORTED_PLATFORMS } from '../sync.constants';
 import { SyncJobRepository } from '../repositories/sync-job.repository';
 import { SyncCursorRepository } from '../repositories/sync-cursor.repository';
 import { SyncContextService } from './sync-context.service';
+import { SyncDispatchService } from './sync-dispatch.service';
 import { SyncFailureAlertService } from './sync-failure-alert.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 
@@ -16,6 +18,7 @@ export interface ListingSyncOutcome {
   finalCursor: Record<string, unknown> | null;
   errorCode: string | null;
   errorMessage: string | null;
+  platformCode: string;
 }
 
 /**
@@ -33,12 +36,54 @@ export class ListingSyncService {
     private readonly jobRepo: SyncJobRepository,
     private readonly cursorRepo: SyncCursorRepository,
     private readonly failureAlert: SyncFailureAlertService,
+    private readonly dispatchService: SyncDispatchService,
     private readonly logger: AppLoggerService,
   ) {}
 
   async execute(syncJob: SyncJobEntity): Promise<void> {
     const outcome = await this.run(syncJob);
     await this.finalize(syncJob, outcome);
+    await this.chainEnrichment(syncJob, outcome);
+  }
+
+  /**
+   * Two steps in one (2026-10-05): a finished listing walk on an enrichment
+   * platform (OZON) chains the v4 attribute harvest automatically, so variant
+   * rows carry the onboarding weight/dims prefill without the manual
+   * 补齐商品属性 run. The chained job is its own ledger row (trigger SYSTEM,
+   * own counts/status). Best-effort: a dispatch refusal (single-flight) or
+   * queue failure is logged - it never retro-fails the finished listing job.
+   */
+  private async chainEnrichment(
+    syncJob: SyncJobEntity,
+    outcome: ListingSyncOutcome,
+  ): Promise<void> {
+    const advanced = outcome.status === 'SUCCESS' || outcome.status === 'PARTIAL';
+    if (!advanced || !ENRICHMENT_SUPPORTED_PLATFORMS.includes(outcome.platformCode)) {
+      return;
+    }
+    try {
+      const chained = await this.dispatchService.dispatch({
+        storeId: syncJob.storeId,
+        syncType: 'PRODUCT_ENRICHMENT_SYNC',
+        trigger: 'SYSTEM',
+      });
+      this.logger.info('enrichment chained after listing sync', {
+        module: 'sync',
+        storeId: syncJob.storeId,
+        syncJobId: syncJob.id,
+        chainedSyncJobId: chained.id,
+      });
+    } catch (error: unknown) {
+      this.logger.warn(
+        `enrichment chain not dispatched: ${error instanceof Error ? error.message : String(error)}`,
+        {
+          module: 'sync',
+          storeId: syncJob.storeId,
+          syncJobId: syncJob.id,
+        },
+      );
+    }
   }
 
   private async run(syncJob: SyncJobEntity): Promise<ListingSyncOutcome> {
@@ -79,6 +124,7 @@ export class ListingSyncService {
         finalCursor,
         errorCode: null,
         errorMessage: null,
+        platformCode: adapter.platformCode,
       };
     } catch (error: unknown) {
       // Transport/parse/system failure: job FAILED, cursor stays where it
@@ -91,6 +137,7 @@ export class ListingSyncService {
         finalCursor: null,
         errorCode: errorCodeOf(error),
         errorMessage: errorMessageOf(error),
+        platformCode: adapter.platformCode,
       };
     }
   }

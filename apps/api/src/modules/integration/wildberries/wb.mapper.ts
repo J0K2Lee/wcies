@@ -90,6 +90,9 @@ export function mapCardToListing(card: WbCard): PlatformListingRaw {
   }
   const vendorCode = readString(card.vendorCode);
   const sizes: readonly WbCardSize[] = Array.isArray(card.sizes) ? card.sizes : [];
+  // Card-level packaging dims/weight shared by every size row (normalized
+  // product_attributes payload; null when the card carries nothing usable).
+  const productAttributes = buildProductAttributes(card);
 
   // One listing-SKU row per size barcode: order lines carry exactly these
   // barcodes, so each becomes its own resolvable platformSkuId. A size
@@ -117,7 +120,10 @@ export function mapCardToListing(card: WbCard): PlatformListingRaw {
         platformSkuId: null,
         offerId: vendorCode,
         sellerSku: vendorCode,
-        rawData: { ...size },
+        rawData: {
+          ...size,
+          ...(productAttributes !== null ? { product_attributes: productAttributes } : {}),
+        },
       });
       continue;
     }
@@ -126,12 +132,20 @@ export function mapCardToListing(card: WbCard): PlatformListingRaw {
         platformSkuId: String(barcode),
         offerId: vendorCode,
         sellerSku: vendorCode,
-        rawData: { ...size },
+        rawData: {
+          ...size,
+          ...(productAttributes !== null ? { product_attributes: productAttributes } : {}),
+        },
       });
     }
   }
   if (skus.length === 0) {
-    skus.push({ platformSkuId: null, offerId: vendorCode, sellerSku: vendorCode, rawData: {} });
+    skus.push({
+      platformSkuId: null,
+      offerId: vendorCode,
+      sellerSku: vendorCode,
+      rawData: productAttributes !== null ? { product_attributes: productAttributes } : {},
+    });
   }
 
   return {
@@ -362,6 +376,45 @@ export function isWbWebhookSecretValid(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * card.dimensions -> shared product_attributes payload (the onboarding
+ * prefill reads it via listing-onboarding readProductAttributes). Units per
+ * WB's official developer portal (dev.wildberries.ru changelog/forum, checked
+ * 2026-10-05 via search index; .ru blocks direct fetch and no content OpenAPI
+ * copy exists in-repo): length/width/height in **mm**, weightBrutto in
+ * **kg** (gross, e.g. 0.15 = 150 g). WB "length" is the package long side ->
+ * written as the OZON-style `depth` key the reader maps to 内部长度. Dims are
+ * all-or-none (a partial triple cannot yield a volume); weight is
+ * independent. Non-positive values are treated as absent platform junk
+ * rather than prefilled as 0. null = nothing usable. T0: re-check magnitudes
+ * against a live card when one is available.
+ */
+export function buildProductAttributes(card: WbCard): Record<string, unknown> | null {
+  const dimensions = card.dimensions;
+  if (typeof dimensions !== 'object' || dimensions === null) {
+    return null;
+  }
+  const positive = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+  const length = positive(dimensions.length);
+  const width = positive(dimensions.width);
+  const height = positive(dimensions.height);
+  const weight = positive(dimensions.weightBrutto);
+
+  const attributes: Record<string, unknown> = {};
+  if (length !== null && width !== null && height !== null) {
+    attributes['dimension_unit'] = 'mm';
+    attributes['depth'] = length;
+    attributes['width'] = width;
+    attributes['height'] = height;
+  }
+  if (weight !== null) {
+    attributes['weight_unit'] = 'kg';
+    attributes['weight'] = weight;
+  }
+  return Object.keys(attributes).length > 0 ? attributes : null;
+}
 
 function firstBarcode(skus: readonly (number | string)[] | undefined): string | null {
   if (!Array.isArray(skus)) {

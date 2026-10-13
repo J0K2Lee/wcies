@@ -693,4 +693,49 @@ export class ListingRepository {
       storeId: input.storeId,
     }));
   }
+
+  /**
+   * Store-scoped listing media facts by seller SKU batch (2026-09-28, ERP
+   * 建议#2: Yandex 订单行补图). Returns each matching ACTIVE variant's listing
+   * url + the listing's raw platform payload; the caller owns any platform
+   * specific interpretation of raw_data. One seller SKU may sit on several
+   * links (§25) - rows come newest-listing-first and the caller dedupes
+   * first-wins.
+   */
+  async findListingMediaBySellerSkus(
+    storeId: string,
+    sellerSkus: readonly string[],
+  ): Promise<
+    Array<{
+      sellerSku: string;
+      listingUrl: string | null;
+      listingRawData: unknown;
+    }>
+  > {
+    if (sellerSkus.length === 0) return [];
+    const rows = await this.listingRepository.query<
+      Array<{ seller_sku: string | null; listing_url: string | null; listing_raw_data: unknown }>
+    >(
+      `SELECT pls.seller_sku, listing.url AS listing_url, listing.raw_data AS listing_raw_data
+       FROM platform_listing_skus pls
+       INNER JOIN platform_listings listing ON listing.id = pls.listing_id
+       WHERE listing.store_id = $1::uuid
+         AND listing.status = 'ACTIVE'
+         AND pls.status = 'ACTIVE'
+         AND pls.seller_sku = ANY($2::varchar[])
+       ORDER BY listing.updated_at DESC`,
+      [storeId, [...sellerSkus]],
+    );
+    return rows.flatMap((row) =>
+      row.seller_sku === null
+        ? []
+        : [
+            {
+              sellerSku: row.seller_sku,
+              listingUrl: row.listing_url,
+              listingRawData: row.listing_raw_data,
+            },
+          ],
+    );
+  }
 }

@@ -4,6 +4,7 @@ import { OzonProductAttributesItem } from '../../integration/ozon/types/api.type
 import { PlatformCapabilityUnsupportedError } from '../../integration/integration.errors';
 import { ListingService } from '../../listing/services/listing.service';
 import { SyncJobEntity } from '../entities/sync-job.entity';
+import { ENRICHMENT_SUPPORTED_PLATFORMS } from '../sync.constants';
 import { SyncJobRepository } from '../repositories/sync-job.repository';
 import { SyncContextService } from './sync-context.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
@@ -23,6 +24,10 @@ const ENRICHMENT_RUN_LIMIT = 5000;
  * product_attributes key - existing keys are never touched. Runs on the
  * SyncJob ledger; a partial failure keeps SUCCESS for what landed plus
  * PARTIAL/FAILED bookkeeping like the other syncs.
+ *
+ * 2026-10-05: OZON LISTING_SYNC chains this automatically after a
+ * successful walk (trigger SYSTEM, two steps in one) - the manual trigger
+ * below stays as a repair path only.
  */
 @Injectable()
 export class ProductEnrichmentSyncService {
@@ -37,9 +42,12 @@ export class ProductEnrichmentSyncService {
   async execute(syncJob: SyncJobEntity): Promise<void> {
     try {
       const { store, adapter } = await this.contextService.resolveSyncableStore(syncJob.storeId);
-      if (adapter.platformCode !== 'OZON') {
+      if (!ENRICHMENT_SUPPORTED_PLATFORMS.includes(adapter.platformCode)) {
         // WB cards / Yandex offer-mappings carry characteristics natively -
         // no separate enrichment endpoint exists (plan §P4, 2026-09-18).
+        // LISTING_SYNC only chains this for supported platforms (constant is
+        // the single source of truth), so reaching here = a manual trigger
+        // on an unsupported store.
         throw new PlatformCapabilityUnsupportedError(
           adapter.platformCode,
           '商品属性增强同步',

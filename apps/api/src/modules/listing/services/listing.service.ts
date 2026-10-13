@@ -553,7 +553,13 @@ export class ListingService {
         await this.repository.updateMapping(existingMapping.id, {
           offerId: sku.offerId,
           sellerSku: sku.sellerSku,
-          rawData: sku.rawData,
+          // The walk rebuilds raw_data from the platform DTO and knows nothing
+          // about payloads written AFTER the sync (OZON enrichment's
+          // product_attributes). Preserve one the incoming payload does not
+          // carry - same "never overwrite" rule as mergeProductAttributes.
+          // WB/Yandex mappers embed product_attributes in the payload itself,
+          // so their fresh platform facts still win.
+          rawData: preserveEnrichedAttributes(existingMapping.rawData, sku.rawData),
         });
       } else {
         await this.repository.insertMapping({
@@ -789,4 +795,41 @@ export class ListingService {
       updatedAt: row.mapping.updatedAt,
     };
   }
+
+  /**
+   * Store-scoped listing media facts by seller SKU batch (公开只读，2026-09-28
+   * ERP 建议#2)。给 sync 模块的订单行补图链路用：Yandex 订单行没有
+   * platformSkuId，只能按 seller_sku（=offerId）反查本店铺 Listing，从
+   * raw_data 提取商品图。url 优先于 raw_data 解读，同 sellerSku 首行胜出。
+   */
+  async findListingMediaBySellerSkus(
+    storeId: string,
+    sellerSkus: readonly string[],
+  ): Promise<
+    Array<{
+      sellerSku: string;
+      listingUrl: string | null;
+      listingRawData: unknown;
+    }>
+  > {
+    return this.repository.findListingMediaBySellerSkus(storeId, sellerSkus);
+  }
+}
+
+/**
+ * Listing-sync variant refresh: keep a post-sync product_attributes payload
+ * (OZON enrichment) the freshly mapped platform raw_data does not carry, so a
+ * routine listing walk cannot silently wipe the onboarding prefill data.
+ * Incoming wins when it carries its own product_attributes (WB/Yandex mappers
+ * embed it at map time - fresh platform facts must not be shadowed).
+ */
+export function preserveEnrichedAttributes(
+  existing: Record<string, unknown> | null,
+  incoming: Record<string, unknown>,
+): Record<string, unknown> {
+  const current = existing?.['product_attributes'];
+  if (current === undefined || incoming['product_attributes'] !== undefined) {
+    return incoming;
+  }
+  return { ...incoming, product_attributes: current };
 }

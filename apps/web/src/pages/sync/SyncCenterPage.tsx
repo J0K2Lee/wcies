@@ -109,6 +109,7 @@ const TRIGGER_TYPE_META: Record<string, string> = {
   SCHEDULED: '定时',
   WEBHOOK: '事件推送',
   RETRY: '重试',
+  SYSTEM: '系统链式',
 };
 
 const EVENT_STATUS_META: Record<

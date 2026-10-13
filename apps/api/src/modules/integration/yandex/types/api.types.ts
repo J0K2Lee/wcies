@@ -57,6 +57,18 @@ export interface YxOfferMapping {
       status?: string;
     }[];
     readonly archived?: boolean;
+    /**
+     * 包装尺寸与重量（docs/integrations/yandex.md §5 + 仓库内官方 OpenAPI
+     * `OfferWeightDimensionsDTO`，2026-10-05 核对）：length/width/height 单位
+     * **厘米**，weight 单位**千克**（含包装毛重）。listing 同步把它规范化为
+     * 变体 raw_data 的 product_attributes（建档预填数据源）。
+     */
+    readonly weightDimensions?: {
+      readonly length?: number;
+      readonly width?: number;
+      readonly height?: number;
+      readonly weight?: number;
+    };
     readonly [key: string]: unknown;
   };
   readonly mapping?: {

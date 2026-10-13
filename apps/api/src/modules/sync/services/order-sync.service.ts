@@ -13,6 +13,8 @@ import { errorCodeOf, errorMessageOf } from './listing-sync.service';
 import { SyncFailureAlertService } from './sync-failure-alert.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { OperatorContext } from '../../operation-log/operation-log.service';
+import { ListingService } from '../../listing/services/listing.service';
+import { extractYandexOfferImageUrl } from '../../integration/yandex/yandex.mapper';
 
 const SYSTEM_OPERATOR: OperatorContext = { userId: null, username: 'sync-engine' };
 
@@ -62,6 +64,7 @@ export class OrderSyncService {
     private readonly config: ConfigService,
     private readonly ingestionService: OrderIngestionService,
     private readonly orderService: OrderService,
+    private readonly listingService: ListingService,
     private readonly jobRepo: SyncJobRepository,
     private readonly cursorRepo: SyncCursorRepository,
     private readonly failureAlert: SyncFailureAlertService,
@@ -109,25 +112,31 @@ export class OrderSyncService {
       const rows = await this.orderService.listMissingPlatformImages(storeId, orderId);
       candidates = rows.length;
       if (candidates === 0) return { candidates, wouldUpdate, updated: 0, failed: false };
-      const { store, adapter } = await this.contextService.resolveSyncableStore(storeId);
-      const ids = [
-        ...new Set(rows.flatMap((row) => (row.platformSkuId ? [row.platformSkuId] : []))),
-      ];
-      if (adapter.fetchProductImages === undefined || ids.length === 0) {
-        this.logger.warn('platform order images unavailable', {
-          module: 'sync',
-          storeId,
-          orderId,
-          candidates,
+      const { store, adapter, platformCode } =
+        await this.contextService.resolveSyncableStore(storeId);
+      let updates: Array<{ orderItemId: string; imageUrl: string }> = [];
+      if (platformCode === 'YANDEX') {
+        updates = await this.resolveYandexImages(storeId, rows);
+      } else {
+        const ids = [
+          ...new Set(rows.flatMap((row) => (row.platformSkuId ? [row.platformSkuId] : []))),
+        ];
+        if (adapter.fetchProductImages === undefined || ids.length === 0) {
+          this.logger.warn('platform order images unavailable', {
+            module: 'sync',
+            storeId,
+            orderId,
+            candidates,
+          });
+          return { candidates, wouldUpdate, updated: 0, failed: false };
+        }
+        const context = await this.contextService.buildStoreContext(store);
+        const images = await adapter.fetchProductImages(context, ids);
+        updates = rows.flatMap((row) => {
+          const imageUrl = row.platformSkuId === null ? null : images.get(row.platformSkuId);
+          return imageUrl ? [{ orderItemId: row.id, imageUrl }] : [];
         });
-        return { candidates, wouldUpdate, updated: 0, failed: false };
       }
-      const context = await this.contextService.buildStoreContext(store);
-      const images = await adapter.fetchProductImages(context, ids);
-      const updates = rows.flatMap((row) => {
-        const imageUrl = row.platformSkuId === null ? null : images.get(row.platformSkuId);
-        return imageUrl ? [{ orderItemId: row.id, imageUrl }] : [];
-      });
       wouldUpdate = updates.length;
       if (wouldUpdate < candidates) {
         this.logger.warn('platform order images missing', {
@@ -152,6 +161,39 @@ export class OrderSyncService {
       });
       return { candidates, wouldUpdate, updated: 0, failed: true };
     }
+  }
+
+  /**
+   * Yandex 订单行补图（2026-09-28，ERP 建议#2）：Yandex business-orders 行内
+   * 没有 marketSku（docs/integrations/yandex.md §8.3），platformSkuId 落库为
+   * null，OZON 式按 platformSkuId 的 adapter 取图链路无键可用。改按
+   * seller_sku（mapper 落的就是 offerId）反查本店铺已同步 Listing，从
+   * offer-mappings 自带的 offer.pictures（vendored 官方规范：字符串数组，
+   * 第一条为主图）提取，不发起任何平台 API 调用。同一 sellerSku 挂多条
+   * 链接时（§25 允许）取最新 Listing 先到先得。
+   */
+  private async resolveYandexImages(
+    storeId: string,
+    rows: ReadonlyArray<{ id: string; sellerSku: string | null }>,
+  ): Promise<Array<{ orderItemId: string; imageUrl: string }>> {
+    const sellerSkus = [...new Set(rows.flatMap((row) => (row.sellerSku ? [row.sellerSku] : [])))];
+    if (sellerSkus.length === 0) {
+      return [];
+    }
+    const media = await this.listingService.findListingMediaBySellerSkus(storeId, sellerSkus);
+    const imageBySellerSku = new Map<string, string>();
+    for (const entry of media) {
+      if (imageBySellerSku.has(entry.sellerSku)) continue;
+      // 只从 offer.pictures 取图；listingUrl 是商品页地址不是图片地址。
+      const imageUrl = extractYandexOfferImageUrl(entry.listingRawData);
+      if (imageUrl !== null) {
+        imageBySellerSku.set(entry.sellerSku, imageUrl);
+      }
+    }
+    return rows.flatMap((row) => {
+      const imageUrl = row.sellerSku === null ? undefined : imageBySellerSku.get(row.sellerSku);
+      return imageUrl ? [{ orderItemId: row.id, imageUrl }] : [];
+    });
   }
 
   private async run(syncJob: SyncJobEntity): Promise<OrderSyncOutcome> {

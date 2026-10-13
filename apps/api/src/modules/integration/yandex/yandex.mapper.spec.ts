@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  extractYandexOfferImageUrl,
   mapOfferMappingToListing,
   mapOrderToOrder,
   mapReturnToReturn,
@@ -135,6 +136,56 @@ describe('mapOfferMappingToListing', () => {
   it('rejects entries without an offerId', () => {
     expect(() => mapOfferMappingToListing({ offer: {} }, '1001')).toThrow(YandexMappingError);
   });
+
+  it('normalizes weightDimensions into product_attributes (cm/kg, depth = length)', () => {
+    const entry: YxOfferMapping = {
+      offer: {
+        offerId: 'SKU-A',
+        weightDimensions: { length: 65.55, width: 50.7, height: 20, weight: 1.001 },
+      },
+      mapping: { marketSku: 987654 },
+    };
+    const listing = mapOfferMappingToListing(entry, '1001');
+    expect(listing.skus[0]?.rawData['product_attributes']).toEqual({
+      dimension_unit: 'cm',
+      depth: 65.55,
+      width: 50.7,
+      height: 20,
+      weight_unit: 'kg',
+      weight: 1.001,
+    });
+  });
+
+  it('omits product_attributes when weightDimensions is absent', () => {
+    const entry: YxOfferMapping = {
+      offer: { offerId: 'SKU-A' },
+      mapping: { marketSku: 987654 },
+    };
+    const listing = mapOfferMappingToListing(entry, '1001');
+    expect(listing.skus[0]?.rawData).toEqual({ marketSku: 987654 });
+  });
+
+  it('drops partial dimensions but keeps weight (all-or-none volume)', () => {
+    const entry: YxOfferMapping = {
+      offer: { offerId: 'SKU-A', weightDimensions: { width: 50, weight: 0.15 } },
+    };
+    const listing = mapOfferMappingToListing(entry, '1001');
+    expect(listing.skus[0]?.rawData['product_attributes']).toEqual({
+      weight_unit: 'kg',
+      weight: 0.15,
+    });
+  });
+
+  it('treats non-positive dimension values as absent junk', () => {
+    const entry: YxOfferMapping = {
+      offer: {
+        offerId: 'SKU-A',
+        weightDimensions: { length: 10, width: 0, height: 5, weight: -1 },
+      },
+    };
+    const listing = mapOfferMappingToListing(entry, '1001');
+    expect(listing.skus[0]?.rawData['product_attributes']).toBeUndefined();
+  });
 });
 
 describe('mapReturnToReturn', () => {
@@ -197,5 +248,32 @@ describe('mapWebhookPayload (docs §4 vocabulary)', () => {
   it('rejects payloads without notificationType', () => {
     expect(() => mapWebhookPayload({ orderId: 1 })).toThrow(YandexMappingError);
     expect(() => mapWebhookPayload('nope')).toThrow(YandexMappingError);
+  });
+});
+
+describe('extractYandexOfferImageUrl (ERP 建议#2, vendored spec verified)', () => {
+  it('takes the FIRST pictures entry as the primary image', () => {
+    expect(
+      extractYandexOfferImageUrl({
+        offer: { pictures: ['https://img.example/primary.jpg', 'https://img.example/extra.jpg'] },
+        mapping: { marketSku: 123 },
+      }),
+    ).toBe('https://img.example/primary.jpg');
+  });
+
+  it('trims and skips blank entries', () => {
+    expect(
+      extractYandexOfferImageUrl({ offer: { pictures: ['  ', 'https://img.example/a.jpg'] } }),
+    ).toBe('https://img.example/a.jpg');
+  });
+
+  it('returns null for missing/malformed payloads without throwing', () => {
+    expect(extractYandexOfferImageUrl(null)).toBeNull();
+    expect(extractYandexOfferImageUrl('nope')).toBeNull();
+    expect(extractYandexOfferImageUrl({})).toBeNull();
+    expect(extractYandexOfferImageUrl({ offer: {} })).toBeNull();
+    expect(extractYandexOfferImageUrl({ offer: { pictures: null } })).toBeNull();
+    expect(extractYandexOfferImageUrl({ offer: { pictures: [] } })).toBeNull();
+    expect(extractYandexOfferImageUrl({ offer: { pictures: [42] } })).toBeNull();
   });
 });

@@ -29,10 +29,14 @@ export class SyncContextService {
     private readonly registry: PlatformAdapterRegistry,
   ) {}
 
-  /** Resolves store + adapter; throws DomainErrors on any missing piece. */
+  /**
+   * Resolves store + adapter (+ platform code for platform-aware sync
+   * branches, e.g. the Yandex order-row image enrichment); throws
+   * DomainErrors on any missing piece.
+   */
   async resolveSyncableStore(
     storeId: string,
-  ): Promise<{ store: StoreRecord; adapter: PlatformAdapter }> {
+  ): Promise<{ store: StoreRecord; adapter: PlatformAdapter; platformCode: string }> {
     const store = await this.storeService.getEntityById(storeId);
     if (store === null || store.status !== 'ACTIVE') {
       throw new StoreNotFoundError(storeId);
@@ -41,7 +45,7 @@ export class SyncContextService {
     if (platform === null || !this.registry.has(platform.code)) {
       throw new StoreNotFoundError(storeId);
     }
-    return { store, adapter: this.registry.getAdapter(platform.code) };
+    return { store, adapter: this.registry.getAdapter(platform.code), platformCode: platform.code };
   }
 
   /** Decrypted context for adapter calls. */

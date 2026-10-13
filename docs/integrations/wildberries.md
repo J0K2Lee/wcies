@@ -81,6 +81,16 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 - 限流：100 req/min、600ms、burst 5。
 - 归档/回收站：`POST /content/v2/get/cards/trash`（cursor trashedAt+nmID；30 天后物理删除）。
 - 商品图 = `photos`（卡内自带，无需 OZON 式二次 image 接口）。
+- **dimensions 单位（2026-10-05，经搜索索引核对官方 dev.wildberries.ru changelog/论坛帖）**：
+  `length/width/height` 为**毫米**，`weightBrutto` 为**千克**（毛重，如 0.15 = 150g）。
+  ⚠ .ru 直连被反爬、本地无 content OpenAPI 副本，未能直接读到官方原文——T0 拿到真实卡片
+  按量级复核（衣物 300mm/0.65kg 量级为正确；若表现为 30/0.65 则是 cm，需改换算）。
+- **尺寸重量预填（2026-10-05 已实现，同日）**：listing 同步把卡片级 `dimensions` 规范化为每个
+  尺寸变体行 `platform_listing_skus.raw_data.product_attributes`（`dimension_unit:'mm'` +
+  `depth/width/height`、`weight_unit:'kg'` + `weight`；WB `length` = 包裹长边 → OZON 风格
+  `depth` 键）。建档并映射弹窗经 onboard-context 读取预填；全有全无（三维不齐只保留重量），
+  非正数视为缺失。WB 不走 OZON 式增强同步（卡片数据自带），product_attributes 每次随
+  listing 同步自愈。
 
 ## 5. Webhook / 推送（部分验证）
 

@@ -77,6 +77,50 @@ describe('mapCardToListing', () => {
   it('rejects a card without nmID', () => {
     expect(() => mapCardToListing({ vendorCode: 'X' } as WbCard)).toThrow(WbMappingError);
   });
+
+  it('normalizes card dimensions into product_attributes on every size row (mm/kg)', () => {
+    const card: WbCard = {
+      nmID: 123456,
+      vendorCode: 'SKU-A',
+      dimensions: { length: 300, width: 200, height: 100, weightBrutto: 0.65 },
+      sizes: [
+        { chrtID: 11, techSize: 'S', skus: ['20301'] },
+        { chrtID: 12, techSize: 'M', skus: ['20302'] },
+      ],
+    };
+    const listing = mapCardToListing(card);
+    expect(listing.skus).toHaveLength(2);
+    for (const sku of listing.skus) {
+      expect(sku.rawData['product_attributes']).toEqual({
+        dimension_unit: 'mm',
+        depth: 300,
+        width: 200,
+        height: 100,
+        weight_unit: 'kg',
+        weight: 0.65,
+      });
+    }
+  });
+
+  it('omits product_attributes when the card has no dimensions', () => {
+    const card: WbCard = { nmID: 1, vendorCode: 'SKU-B', sizes: [{ chrtID: 1, skus: ['20301'] }] };
+    const listing = mapCardToListing(card);
+    expect(listing.skus[0]?.rawData['product_attributes']).toBeUndefined();
+  });
+
+  it('drops partial dimensions but keeps weight (all-or-none volume)', () => {
+    const card: WbCard = {
+      nmID: 2,
+      vendorCode: 'SKU-C',
+      dimensions: { width: 200, weightBrutto: 0.65 },
+      sizes: [{ chrtID: 1, skus: ['20301'] }],
+    };
+    const listing = mapCardToListing(card);
+    expect(listing.skus[0]?.rawData['product_attributes']).toEqual({
+      weight_unit: 'kg',
+      weight: 0.65,
+    });
+  });
 });
 
 describe('mapFbsOrderToOrder (marketplace v3)', () => {
