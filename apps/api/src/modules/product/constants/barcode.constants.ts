@@ -10,20 +10,24 @@ export const BARCODE_COST_SOURCES = { MOVING_AVERAGE: 'MOVING_AVERAGE' } as cons
 export type BarcodeCostSource = (typeof BARCODE_COST_SOURCES)[keyof typeof BARCODE_COST_SOURCES];
 
 /**
- * Internal barcode format (decision 0017, 2026-09-14): `W%08d`, e.g.
- * `W00000014`. The `WCSKU%08d` prefix printed too many modules for a small
- * label; the sequence itself is unchanged.
+ * Internal barcode format (decision 0019, 2026-10-09): 6-digit pure numeric
+ * (e.g. `000014`), zero-padded from `seq_internal_barcode`. Labels were too
+ * long under `W%08d` (decision 0017) - digits only is the shortest usable
+ * Code128 payload for a small label, and real-world EAN/GTIN codes are 8-13
+ * digits, so 6-digit internal values cannot be confused with them at scan
+ * time.
  *
  * Kept in ONE place on purpose: the generator has two code paths (the regular
  * route and the onboarding transaction) and they may never drift.
  *
- * Previously issued `WCSKU…` barcodes stay valid - they are opaque unique
- * strings, and labels already stuck to physical goods cannot be reprinted.
+ * Existing system-generated barcodes (`WCSKU%08d` / `W%08d`) are CONVERTED
+ * by migration 20261009_001 (user instruction 2026-10-09 - supersedes the
+ * no-migration stance of decision 0017): the numeric part is preserved, so
+ * converted values never collide with newly issued ones.
  */
-export const INTERNAL_BARCODE_PREFIX = 'W';
-export const INTERNAL_BARCODE_DIGITS = 8;
+export const INTERNAL_BARCODE_DIGITS = 6;
 
-/** Formats a sequence value as an internal barcode (e.g. `W00000014`). */
+/** Formats a sequence value as an internal barcode (e.g. `000014`). */
 export function formatInternalBarcode(sequenceValue: number | string): string {
-  return `${INTERNAL_BARCODE_PREFIX}${String(sequenceValue).padStart(INTERNAL_BARCODE_DIGITS, '0')}`;
+  return String(sequenceValue).padStart(INTERNAL_BARCODE_DIGITS, '0');
 }

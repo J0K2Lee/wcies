@@ -489,7 +489,6 @@ export function ListingOnboardModal({
                               type: 'SKU_LABEL',
                               payload: {
                                 barcode: result.barcode ?? '',
-                                skuCode: result.sku.skuCode,
                                 skuName: result.sku.nameZh,
                                 copies: printCopies,
                               },

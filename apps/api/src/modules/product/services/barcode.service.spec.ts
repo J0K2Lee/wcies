@@ -31,7 +31,7 @@ function build() {
   };
   const repository = {
     findByBarcode: vi.fn().mockResolvedValue(barcode),
-    nextInternalBarcode: vi.fn().mockResolvedValue('W00000001'),
+    nextInternalBarcode: vi.fn().mockResolvedValue('000001'),
     insertWithPrimaryHandling: vi.fn(),
   };
   const skuRepository = { findById: vi.fn().mockResolvedValue(sku), update: vi.fn() };

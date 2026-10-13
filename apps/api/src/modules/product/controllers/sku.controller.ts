@@ -156,7 +156,9 @@ export class SkuController {
 
   @Post('skus/:skuId/barcodes/generate-internal')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Generate an INTERNAL barcode (W%08d, decision 0017) for the SKU' })
+  @ApiOperation({
+    summary: 'Generate an INTERNAL barcode (6-digit numeric, decision 0019) for the SKU',
+  })
   @ApiOkEnvelope(BarcodeResponseDto)
   async generateInternalBarcode(
     @Param('skuId') skuId: string,

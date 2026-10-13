@@ -52,8 +52,9 @@ export function printTasksBrowser(tasks: readonly PrintTask[]): void {
       for (let copy = 0; copy < task.payload.copies; copy += 1) {
         bodyParts.push(
           labelSvg(task.payload.barcode, {
-            title: task.payload.skuCode,
-            subtitle: task.payload.skuName,
+            // SKU code is NOT printed (2026-10-09): name + barcode identify
+            // the item and the label stays short for small label stock.
+            title: task.payload.skuName,
           }),
         );
       }

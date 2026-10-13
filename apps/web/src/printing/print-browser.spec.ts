@@ -29,7 +29,7 @@ describe('printTasksBrowser', () => {
     printTasksBrowser([
       {
         type: 'SKU_LABEL',
-        payload: { barcode: 'GUI-DEMO-69CODE', skuCode: 'SKU000010001', copies: 1 },
+        payload: { barcode: 'GUI-DEMO-69CODE', skuName: '测试商品', copies: 1 },
       },
     ]);
 
@@ -37,8 +37,10 @@ describe('printTasksBrowser', () => {
     expect(open).toHaveBeenCalledWith('', '_blank');
     const html = fake.document.write.mock.calls[0]?.[0] as string;
     expect(html).toContain('GUI-DEMO-69CODE');
-    expect(html).toContain('SKU000010001');
+    expect(html).toContain('测试商品');
     expect(html).toContain('<svg');
+    // SKU codes are deliberately NOT printed on labels (2026-10-09).
+    expect(html).not.toContain('class="s"');
     // The printed page must carry ONLY the label: zero page margin so
     // Chromium does not draw its date/title/URL/page-number header/footer.
     expect(html).toContain('@page { margin: 0; }');

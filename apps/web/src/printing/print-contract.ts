@@ -19,7 +19,9 @@ export interface SkuLabelTask {
   readonly type: 'SKU_LABEL';
   readonly payload: {
     readonly barcode: string;
-    readonly skuCode: string;
+    /** Shown as the label title; the SKU CODE is deliberately NOT printed
+     *  (2026-10-09 user instruction - the 6-digit barcode + name is enough
+     *  for identification and keeps the small label short). */
     readonly skuName?: string;
     readonly copies: number;
   };

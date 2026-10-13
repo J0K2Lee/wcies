@@ -74,7 +74,7 @@ export class BarcodeService {
     return this.toResponse(barcode);
   }
 
-  /** Generates an INTERNAL barcode (`W%08d`, decision 0017) for the SKU (task §32). */
+  /** Generates an INTERNAL barcode (6-digit numeric, decision 0019) for the SKU (task §32). */
   async generateInternal(skuId: string, operator: OperatorContext): Promise<BarcodeResponseDto> {
     await this.assertSkuExists(skuId);
     const barcodeValue = await this.repository.nextInternalBarcode();
