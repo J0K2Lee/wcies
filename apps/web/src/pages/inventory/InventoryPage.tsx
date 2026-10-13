@@ -15,6 +15,7 @@ import {
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { fmtDateTime } from '../../utils/format';
+import { newUuid } from '../../utils/uuid';
 import { apiPost, apiPut, useApiQuery } from '../../api/hooks';
 import {
   ContextAction,
@@ -262,7 +263,7 @@ export function InventoryPage() {
 
   const submitMutation = useMutation({
     mutationFn: async (values: Record<string, unknown>) => {
-      const ref = crypto.randomUUID();
+      const ref = newUuid();
       if (action === 'initialize') {
         return apiPost('/api/v1/inventory/initialize', {
           skuId: values['skuId'],
