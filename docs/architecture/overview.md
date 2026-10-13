@@ -1,6 +1,11 @@
 # WCIES 架构总览
 
 > Sprint 0 工程骨架说明。完整架构设计见 `docs/WCIES_跨境电商综合管理系统——总体技术架构设计_V1.md` 与 `docs/WCIES_工程架构与_Monorepo_目录设计_V1.md`。
+>
+> 注：上述两份设计文档是 Sprint 0/1 时期的历史快照，其中「Product / SPU → SKU
+> 双层主数据」的表述已被 2026-10-13 决策
+> `docs/decisions/0020-移除商品层级分类品牌下沉SKU.md` 取代；本文 §7 记录当前
+> 主数据模型。
 
 ## 1. 进程拓扑
 
@@ -84,3 +89,36 @@ envelope schema 为空对象（`properties: {}`），被引用的业务 DTO 完�
 2. 校验方式：导出后 `grep ShipmentDetailDto openapi.json` 必须命中，且
    `ShipmentEnvelopeDto.properties` 非空；
 3. 补齐后重新生成 api-client，并把前端手写 interface 逐步替换为生成类型。
+
+## 7. 主数据模型（2026-10-13 决策 0020 起）
+
+**Internal SKU 是唯一商品主数据**——不存在独立的 Product / SPU 层（`products`
+表已在迁移 `20261013_002` 删除）。
+
+```text
+brands ──┐
+         ├─→ skus （category_id / brand_id 为 SKU 自身字段，均可空）
+categories┘        │
+                   ├─→ sku_barcodes        （1:N，至多一个 is_primary）
+                   ├─→ sku_images          （1:N）
+                   ├─→ sku_bundle_components（自引用 N:M 组合装）
+                   └─→ platform_listing_skus（映射到平台变体；listing 记录独立保留）
+                            │
+platforms ─→ stores ─→ platform_listings ┘
+
+platform_category_mappings ─→ categories   （平台类目 → 内部三级分类，不挂 SKU/商品）
+```
+
+要点：
+
+- **模式**：`skus` 挂分类/品牌（`category_id` / `brand_id`，FK + 索引），分类仍
+  必须三级（决策 0005）；`skus.product_id` 已随商品层移除。
+- **编码**：`sku_code` = `SKU%09d`，单一 `business_code_sequences` 作用域
+  `sku`（决策 0020 D2）；品牌 `BN%05d`、分类 `CN%05d` 不变。
+- **路由**：`/api/v1/skus*`（含 `DELETE /skus/:id?force=true`）为唯一主数据
+  入口；`/api/v1/products*` 已删除（全 404）。
+- **依赖方向不变**：Controller → Service → Repository → PostgreSQL；跨模块只经
+  公开 Service（catalog 暴露 `CatalogService` 供 SKU 校验分类/品牌与名称匹配）。
+- **库存/订单/采购/调拨/财务只依赖 SKU**，本次改造未触碰这些模块的表结构。
+- **平台侧同名异物**：integration 层的 `product_id` / `description_category_id`
+  是平台字段，与已删除的内部 Product 层无关，不得混改。

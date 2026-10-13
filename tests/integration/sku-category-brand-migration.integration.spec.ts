@@ -97,7 +97,82 @@ async function runInTransaction(fn: () => Promise<void>): Promise<void> {
 }
 
 describe('migration 20261013_001: skus 加分类/品牌列 + 回填 + 全局序列', () => {
-  it('down → fixture → up：回填单射继承 + 序列起点 = max+1 + 列可空 + 幂等', async () => {
+  it('列形态与全局序列不变量（阶段二删表后仍成立）', async () => {
+    // 列 + FK + 索引 + product_id 可空
+    const columns = await db.query<{ column_name: string; is_nullable: string }>(
+      `SELECT column_name, is_nullable FROM information_schema.columns
+        WHERE table_name = 'skus' AND column_name IN ('category_id', 'brand_id', 'product_id')`,
+    );
+    const byName = new Map(columns.rows.map((row) => [row.column_name, row.is_nullable]));
+    expect(byName.size).toBe(3);
+    expect(byName.get('product_id')).toBe('YES');
+
+    const fkCategories = await db.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM pg_constraint
+        WHERE conrelid = 'skus'::regclass AND contype = 'f'
+          AND confrelid = 'categories'::regclass`,
+    );
+    expect(Number(fkCategories.rows[0]?.count ?? 0)).toBeGreaterThanOrEqual(1);
+    const fkBrands = await db.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM pg_constraint
+        WHERE conrelid = 'skus'::regclass AND contype = 'f'
+          AND confrelid = 'brands'::regclass`,
+    );
+    expect(Number(fkBrands.rows[0]?.count ?? 0)).toBeGreaterThanOrEqual(1);
+    const indexes = await db.query<{ indexname: string }>(
+      `SELECT indexname FROM pg_indexes WHERE tablename = 'skus'`,
+    );
+    const indexNames = indexes.rows.map((row) => row.indexname);
+    expect(indexNames).toContain('idx_skus_category');
+    expect(indexNames).toContain('idx_skus_brand');
+
+    // 全局 'sku' 序列存在且永不落后于存量编码（新号绝不重用旧号）。
+    const seq = await db.query<{ next_value: string }>(
+      "SELECT next_value::text AS next_value FROM business_code_sequences WHERE scope_key = 'sku'",
+    );
+    expect(seq.rows[0]).toBeDefined();
+    const maxRow = await db.query<{ m: string | null }>(
+      `SELECT MAX(substring(sku_code from 4)::bigint)::text AS m
+         FROM skus WHERE sku_code ~ '^SKU[0-9]+$'`,
+    );
+    expect(Number(seq.rows[0]?.next_value ?? 0)).toBeGreaterThanOrEqual(
+      Number(maxRow.rows[0]?.m ?? 0),
+    );
+
+    // 阶段二（20261013_002）后：products 表与 product/sku:{id} 死作用域不存在。
+    const productsTable = await db.query<{ t: string | null }>(
+      "SELECT to_regclass('public.products') AS t",
+    );
+    if (productsTable.rows[0]?.t === null) {
+      const deadScopes = await db.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM business_code_sequences
+          WHERE scope_key = 'product' OR scope_key LIKE 'sku:%'`,
+      );
+      expect(Number(deadScopes.rows[0]?.count ?? 0)).toBe(0);
+      // 存量行保留历史 product_id 值（阶段一只放开 NOT NULL、不清值；删表后
+      // 该引用成为无 FK 的历史残留，新写入路径一律不再写它）——这里只断言
+      // 该列仍存在（未随删表一起移除，属任务书阶段二既定范围之外）。
+      const legacyColumn = await db.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM information_schema.columns
+          WHERE table_name = 'skus' AND column_name = 'product_id'`,
+      );
+      expect(Number(legacyColumn.rows[0]?.count ?? 0)).toBe(1);
+    }
+  });
+
+  it('down → fixture → up：回填单射继承 + 序列起点 = max+1 + 列可空 + 幂等（仅阶段一状态）', async () => {
+    // 阶段二（20261013_002）删除 products 后，本 migration 的回填源已不存在，
+    // down→fixture→up 流程不可再执行（up 的 UPDATE ... FROM products 会失败）。
+    // 该情形下由上面的「列形态与全局序列不变量」用例覆盖当前形态；两阶段之间
+    // 的回填正确性由 T1 提交时在阶段一状态下的真实运行保证。
+    const productsTable = await db.query<{ t: string | null }>(
+      "SELECT to_regclass('public.products') AS t",
+    );
+    if (productsTable.rows[0]?.t === null) {
+      console.log('[skip] products 已删除（阶段二）：回填流程不可执行，见不变量用例');
+      return;
+    }
+
     // 0) TypeORM migrations 表已记录本 migration（ensure-test-db 应用过），
     //    这是「重复执行不炸」的保证：runMigrations 不会二次应用。
     const recorded = await db.query<{ name: string }>(

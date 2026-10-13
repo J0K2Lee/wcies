@@ -16,8 +16,7 @@
 | Store | `store_code` | `{前缀}-%03d`：OZON→`ON`、WB→`WS`、YANDEX→`YX`，如 `ON-001` | `store:{PLATFORM}` | 同上 |
 | Brand | `code` | `BN%05d`，如 `BN00001` | `brand` | 同上 |
 | Category | `code` | `CN%05d`，一/二/三级共用一条序列 | `category` | 同上 |
-| Product | `product_code` | `PN%06d`，如 `PN000001` | `product` | 创建后只读（决策 0002） |
-| SKU | `sku_code` | `SKU{商品序号 6 位}{商品内 SKU 序号 3 位}`，如 `SKU000001001` | `sku:{productId}` | 生成后冻结（决策 0002） |
+| SKU | `sku_code` | `SKU%09d`（全局单序列，最小宽度自然进位），如 `SKU000012002` | `sku` | 生成后冻结（决策 0020 D2） |
 | 内部条码 | `barcode`(INTERNAL) | PG sequence，6 位纯数字 `%06d`（决策 0019；旧 `WCSKU%08d`/`W%08d` 已由迁移 20261009_001 统一转换） | 现有 sequence | — |
 | Bin 条码 | `barcode` | `BIN-{warehouseCode}-{binCode}` | — | 可 |
 | Supplier（Sprint 7） | `code` | `SUP%04d`，如 `SUP0001` | `supplier` | 创建时可留空自动生成；创建后不可改 |
@@ -26,19 +25,21 @@
 
 序号由集中式序号表 `business_code_sequences` + `BusinessCodeService` 原子取号（单条 `INSERT ... ON CONFLICT DO UPDATE ... RETURNING`，无读-改-写窗口）；并发取同一作用域必然得到互不重复的号。
 
-作用域语义：仓库按**类型**各自递增（第一个自管仓 `ZG-01`，第一个第三方仓 `SF-01`）；店铺按**平台**各自递增（第一个 OZON 店 `ON-001`，第一个 WB 店 `WS-001`）；SKU 按**商品**各自递增（每个商品的第一个 SKU 都是 `001`）。
+作用域语义：仓库按**类型**各自递增（第一个自管仓 `ZG-01`，第一个第三方仓 `SF-01`）；店铺按**平台**各自递增（第一个 OZON 店 `ON-001`，第一个 WB 店 `WS-001`）；SKU 全局单序列（全系统所有 SKU 共用一个递增号）。
+
+> 2026-10-13（决策 0020）：商品（Product/SPU）层级已删除——SKU 是唯一商品主数据，分类/品牌为 SKU 字段，SKU 编码改为全局序列 `SKU%09d`；存量编码冻结不迁移（迁移 `20261013_001` 将序列起点置为存量 SKU 数字后缀最大值 + 1）。派生编码 `SKU{6}{3}` 与 `sku:{productId}` 作用域作废。
 
 宽度是**最小宽度**，序号溢出自然进位（`%02d` 对 100 输出 `100`），不报错。仓库**类型**创建后不可改（编码前缀依赖类型）。
 
 ## 2. 状态模型
 
-- Product/SKU：`DRAFT → ACTIVE ⇄ INACTIVE`；已被引用的主数据禁止物理删除，只允许停用。
+- SKU：`ACTIVE ⇄ INACTIVE`（创建即 ACTIVE，决策 0020 D3——商品层的 DRAFT「档案未补全」语义已废除，未迁移到 SKU）；已被引用的主数据禁止物理删除，只允许停用。
 - Store/Warehouse/Binding/Listing：`ACTIVE / INACTIVE(DISABLED)`。
-- 删除策略（决策 `docs/decisions/0003`，2026-09-11 起）：**零引用才可物理删除**。服务层逐一引用检查——存在任何引用 → 返回 `*_IN_USE` 错误码 + 提示"该记录已被引用，只能停用不能删除"；零引用 → 真删 + 记 operation log。覆盖 Warehouse / Bin / Store / Binding / Brand / Category / Product / Sku / Listing / ListingSku。Platform 只读，不提供删除。
-- **强制删除（决策 `docs/decisions/0008`）**：`DELETE /products/:id?force=true`、`DELETE /skus/:id?force=true` 可级联删除**主数据子对象**——商品的 SKU、SKU 的条码 / 图片 / 平台映射 / 捆绑关系（Listing 记录本身保留，只断开映射）。
-  **业务历史永远阻断，勾选强制也不行**：`inventory_balances`、`inventory_safety_stocks`、`inventory_reservations`、`inventory_serials`、`inventory_transactions`、`order_items`、`picking_task_items`、`package_items`、`package_item_serials`、`shipment_items` 任一有引用即返回 `PRODUCT_HAS_BUSINESS_HISTORY` / `SKU_HAS_BUSINESS_HISTORY`，消息中列出具体表名与行数并提示改用停用。
+- 删除策略（决策 `docs/decisions/0003`，2026-09-11 起）：**零引用才可物理删除**。服务层逐一引用检查——存在任何引用 → 返回 `*_IN_USE` 错误码 + 提示"该记录已被引用，只能停用不能删除"；零引用 → 真删 + 记 operation log。覆盖 Warehouse / Bin / Store / Binding / Brand / Category / Sku / Listing / ListingSku（Product 随层级删除）。Platform 只读，不提供删除。
+- **强制删除（决策 `docs/decisions/0008`；2026-10-13 决策 0020 收窄）**：`DELETE /skus/:id?force=true` 可级联删除**主数据子对象**——SKU 的条码 / 图片 / 平台映射 / 捆绑关系（Listing 记录本身保留，只断开映射）。`/products?force=true` 随商品层删除。
+  **业务历史永远阻断，勾选强制也不行**：`inventory_balances`、`inventory_safety_stocks`、`inventory_reservations`、`inventory_serials`、`inventory_transactions`、`order_items`、`picking_task_items`、`package_items`、`package_item_serials`、`shipment_items` 任一有引用即返回 `SKU_HAS_BUSINESS_HISTORY`，消息中列出具体表名与行数并提示改用停用。
   理由：主数据子对象是可重建的描述，业务历史是发生过的物理事实。删除账本行等同绕过 InventoryService 修改库存（AGENTS.md §10/§14），并使流水与余额失配（§25 可追溯性）。
-  级联在同一事务内完成；审计动作记为 `FORCE_DELETE` 并记录被级联的 SKU 数量。
+  级联在同一事务内完成；审计动作记为 `FORCE_DELETE`。
 
 ## 3. 条码规则（task §28-§32）
 
@@ -148,21 +149,21 @@ Sprint 5 起，平台同步会产生**未映射**的平台 SKU 事实：
 
 Sprint 8 起（2026-09-12，规划 §T1/T2/T3）：
 
-12. **快捷建档**：`POST /listings/:listingId/skus/:mappingId/onboard`。一个数据库事务内创建 Product + SKU +（可选）内部条码，并把该变体绑定为 MAPPED；任一步失败**整体回滚**，不存在「建了 SKU 但没映射」的半成品。编码沿用集中序号（`PN%06d` / `SKU{9}` / `W%08d`（决策 0017；历史行可能仍是 `WCSKU%08d`），不新增规则）；商品名/SKU 名默认取 `listing.title`，两者最终都为空 → 422 `LISTING_ONBOARD_NAME_REQUIRED`。只允许从 **UNMAPPED** 变体发起（已映射变体返回 409 `LISTING_SKU_MAPPING_INVALID_STATE`）。条码为该 SKU 首条码时自动为主条码。审计在各实体写入成功（提交后）记录，Action 含 `CREATE`（product/sku/barcode）与 `MAP`。
+12. **快捷建档**（2026-10-13 决策 0020 改写）：`POST /listings/:listingId/skus/:mappingId/onboard`。一个数据库事务内**直接创建 SKU（ACTIVE）+（可选）内部条码 +（可选）品牌/分类**，并把该变体绑定为 MAPPED；任一步失败**整体回滚**，不存在「建了 SKU 但没映射」的半成品。编码取自全局 SKU 序列（`SKU%09d`，决策 0020 D2）；SKU 名默认取 `listing.title`，为空 → 422 `LISTING_ONBOARD_NAME_REQUIRED`。品牌 `brandId?` / 分类 `categoryId?`（必须三级）可选，直接落 SKU 自身字段（D5）；尺寸/重量/最新采购价可编辑预填。只允许从 **UNMAPPED** 变体发起（已映射变体返回 409 `LISTING_SKU_MAPPING_INVALID_STATE`）。条码为该 SKU 首条码时自动为主条码。审计在提交后记录，Action 含 `CREATE`（sku/barcode）与 `MAP`。
 
 Sprint 8.5 起（2026-09-14，决策 0014/0015）——快捷建档增强：
 
 13. **并发语义（决策 0014）**：onboard 事务**开头**对 mapping 行 `SELECT … FOR UPDATE`，「检查 → 建档 → 映射」全程串行化；并发双请求仅一成功，另一在锁释放后 re-check 失败得到同一个 409，**不产生任何主数据孤儿**。重复提交语义保持 409，不做幂等成功。
-14. **多变体挂靠（决策 0014）**：同一 Listing 的后续变体**默认挂靠**该 Listing 首个已建档变体的 Product（`nextSkuCode` 顺延 SKU002/003…，无新编码规则）；弹窗可显式切换「另建新商品」（DTO `createNewProduct: true`）或指定挂靠目标（`existingProductId`，不存在 → 404 `PRODUCT_NOT_FOUND`）。挂靠时不改动已有 Product 的品牌/分类档案。
+14. **多变体 = 各建各的 SKU**（2026-10-13 决策 0020 推翻原决策 0014 的挂靠语义）：同一 Listing 的每个未映射变体**各自创建自己的 SKU**（全局序列顺延），不存在「挂靠同一商品 / 另建新商品 / 指定挂靠目标」的概念；`createNewProduct` / `existingProductId` / `productNameZh` 字段与「下一变体沿用挂靠」逻辑一并删除。品牌/分类随 SKU 各自选择。
 15. **新增建档字段**：
     - 品牌 `brandId?`（人工 Select + 现场快建，复用常规品牌存在性校验；**不做**自动提取）；
     - 分类 `categoryId?`（必须三级，复用 `CATEGORY_LEVEL_INVALID` 校验）；
     - 尺寸/重量 `lengthMm/widthMm/heightMm/weightG?`（可编辑预填；沿用全有或全无 + 体积后端计算规则）。
-16. **DRAFT 标记语义**：快捷建档的 Product 停留 **DRAFT** 仅作「档案未补全」标记，**不阻断任何业务**（不阻断映射、订单解析、收发货）；可见性优化放 backlog。
-17. **平台类目映射（决策 0015）**：`platform_category_mappings` 以 `(platform_id, external_category_id, external_type_id)` **复合键**精确映射内部三级分类；type 节点不携带自身 category id（T0 冒烟事实），复合键的 category 部分取其**父类目**。弹窗「记住此映射」（默认勾选）在 onboard **同一事务**内写映射行（source=ONBOARD），`ON CONFLICT DO NOTHING`——已有映射（树导入或更早的记住）永不被覆盖。**任何未命中都回退人工三级 Cascader 选择，绝不按名称相似度自动匹配**。
+16. **状态语义**（2026-10-13 决策 0020 D3）：快捷建档的 SKU 创建即 **ACTIVE**；原 Product 的 **DRAFT**「档案未补全」标记语义整体废除（不迁移到 SKU，`POST /skus` 默认状态维持现状）。
+17. **平台类目映射（决策 0015；2026-10-13 决策 0020 明确不变）**：`platform_category_mappings` 以 `(platform_id, external_category_id, external_type_id)` **复合键**精确映射内部三级分类（本表挂 categories，不挂商品/SKU，改造不触碰）；type 节点不携带自身 category id（T0 冒烟事实），复合键的 category 部分取其**父类目**。弹窗「记住此映射」（默认勾选）在 onboard **同一事务**内写映射行（source=ONBOARD），`ON CONFLICT DO NOTHING`——已有映射（树导入或更早的记住）永不被覆盖。**任何未命中都回退人工三级 Cascader 选择，绝不按名称相似度自动匹配**。
 18. **OZON 类目树导入（决策 0015）**：手动同步 `/v1/description-category/tree`（ZH_HANS + RU 双语合并）到缓存表 `platform_category_nodes`（按 SyncJob 记录）；一键导入按「一级类目→内部一级、二级类目→内部二级、type→内部三级」1:1 直映（真实树恰好三层，T0 冒烟验证；更深层级跳过并列入预演报告），仅导入 `disabled=false`，dry-run 预演报告冲突清单（与现有分类按 `name_ru` 精确查重），存在**真冲突**时执行 **409 拒绝**（§89：先查重、歧义报错、禁止静默丢弃）；确认后**单事务**批量建类目（经 catalog 公开 Service，`CN%05d` 批量取号）+ 写映射行（source=TREE_IMPORT）。
     **同父同名候选的去重命名（2026-09-14 真实数据发现）**：真实树存在同父级下同名 type（全树 57 组），内部 `(parent_id, lower(name_zh))` 唯一索引不允许——导入时对第二及以后的同名候选**确定性追加外部 id 后缀**（如 `其他 (91543)`），首 个保留原名；每一处在预演报告 `disambiguatedNames` 中列出。不丢弃、不合并、复合键映射不受影响。
-19. **SKU 图片（决策 0014）**：建档弹窗预览用 `raw_data.primary_image` CDN 直链；onboard 事务提交成功后入 BullMQ 异步转存 `color_image ?? primary_image` → 自有私有桶（`SkuImageService.upload` 通道）→ 首图 `isPrimary=true` → 首次回填 `products.main_image_id`（仅当为空）。图片失败自动重试，**不进建档事务**、不影响建档事实。
+19. **SKU 图片（决策 0014；2026-10-13 决策 0020 去掉商品回填分支）**：建档弹窗预览用 `raw_data.primary_image` CDN 直链；onboard 事务提交成功后入 BullMQ 异步转存 `color_image ?? primary_image` → 自有私有桶（`SkuImageService.upload` 通道）→ 首图 `isPrimary=true`（原「首次回填 `products.main_image_id`」分支随商品层删除）。图片失败自动重试，**不进建档事务**、不影响建档事实。
 20. **LISTING_MAPPING 导入绑定同步行**：导入行落到**已存在**的 Listing 且平台标识（优先 `platform_sku_id`，其次 `seller_sku`）命中该 Listing 一条 ACTIVE 的 UNMAPPED 同步变体时，**绑定该行**（等价人工映射，sku_id 写入、置 MAPPED），**不插入重复变体行**。「相同映射（同 Listing 同 SKU）拒绝」与决策 0012/0016（至少一个**解析**标识：Platform SKU ID 或 Seller SKU）规则不变；`offer_id` 不是绑定标识（决策 0016），仅 offer 命中的行不绑定，走新建路径并按 0016 拒绝；未命中任何同步变体时维持原有新建行为。
 21. **未映射工作台**（派生展示，不新增业务状态）：
     - `GET /listings/mapping-stats` 返回全局 MAPPED/UNMAPPED 计数，判定与第 11 条同一条件；
@@ -171,8 +172,8 @@ Sprint 8.5 起（2026-09-14，决策 0014/0015）——快捷建档增强：
 
 Sprint 8.5R1 起（2026-09-14，人工验收修复；映射规则变更见决策 0016）：
 
-22. **建档弹窗补最新采购价**：`latestPurchasePrice?`（NUMERIC，≥0）随 onboard 请求在同一事务写入 `skus.latest_purchase_price`。这是人工维护通道（§4.3）；移动加权平均成本仍**只由收货确认**维护（§4.4），两者互不覆盖。名称预填（商品名/SKU 名优先取当前变体的 Offer ID，无 Offer ID 回退 Listing 标题）属**前端预填行为**，后端缺省规则不变（仍取 `listing.title`）。
-23. **类目树精简端点**：`GET /categories/tree-lite` 返回 `id/parentId/code/nameZh/nameRu/level/sortOrder/status/children`（SQL 列裁剪，去掉 `createdAt/updatedAt` 等），供商品 / SKU / Listing 三个页面的类目选择器与「分类管理」树消费；层级语义、排序（`sort_order, code`）与 `GET /categories` 完全一致。`GET /categories` 行为不变（向后兼容），两者共用同一建树实现以免形状漂移。
+22. **建档弹窗补最新采购价**：`latestPurchasePrice?`（NUMERIC，≥0）随 onboard 请求在同一事务写入 `skus.latest_purchase_price`。这是人工维护通道（§4.3）；移动加权平均成本仍**只由收货确认**维护（§4.4），两者互不覆盖。名称预填（SKU 名优先取当前变体的 Offer ID，无 Offer ID 回退 Listing 标题）属**前端预填行为**，后端缺省规则不变（仍取 `listing.title`）。
+23. **类目树精简端点**：`GET /categories/tree-lite` 返回 `id/parentId/code/nameZh/nameRu/level/sortOrder/status/children`（SQL 列裁剪，去掉 `createdAt/updatedAt` 等），供 SKU / Listing 两个页面的类目选择器与 SKU 页的「分类管理」树消费（商品页已删除，2026-10-13 决策 0020）；层级语义、排序（`sort_order, code`）与 `GET /categories` 完全一致。`GET /categories` 行为不变（向后兼容），两者共用同一建树实现以免形状漂移。
 24. **映射解析不使用 Offer ID**（决策 0016）：见 §9 第 6 条。人工映射要求至少一个**解析标识**（Platform SKU ID 或 Seller SKU）；纯 Offer ID 被拒（422 文案见 §12）。`offer_id` 仍同步入库、列表展示、Excel 导出列保留、关键字搜索可命中，仅从解析/绑定链路移除。
 
 ## 9. Listing Resolver（订单安全边界）
@@ -191,7 +192,10 @@ Sprint 8.5R1 起（2026-09-14，人工验收修复；映射规则变更见决策
 1. 固定模板（无字段拖拽映射）：SKU / BARCODE / WAREHOUSE / BIN / LISTING_MAPPING。
 2. 流程：上传（存 MinIO）→ 同步解析+校验（错误精确到 row/field/code）→ 显式确认 → BullMQ worker（`wcies.import`）执行导入；单行失败不阻塞整批。
 3. 唯一业务键（sku_code/barcode/warehouse_code 等）重复时 **Reject 并报告**，绝不静默覆盖（task §61）。
-4. SKU 模板中 `product_code` 引用已有商品；不存在时若提供 `product_name_zh` 则一并创建。
+4. **SKU 模板**（2026-10-13 决策 0020 改写）：`sku_code | name_zh | name_ru | model | color | size | weight_g | length_mm | width_mm | height_mm | latest_purchase_price | barcode | barcode_type | serial_tracking | brand | category`。
+   - `name_zh` 为**必填**（SKU 名）；`sku_code` 留空则全局取号 `SKU%09d`。
+   - `brand` / `category` 可选，**按名称精确匹配**（品牌取一般名称 `name`、分类取 `name_zh`）；匹配不到报行错误 `BRAND_NOT_FOUND` / `CATEGORY_NOT_FOUND`，**绝不自动创建**；分类必须三级（否则 `CATEGORY_LEVEL_INVALID`）。
+   - 每行直接创建 SKU（商品层已删除），不再有 `product_code` / `product_name_zh` 列。
 
 Sprint 8 起（2026-09-12，Excel 闭环补齐）：
 
@@ -200,15 +204,15 @@ Sprint 8 起（2026-09-12，Excel 闭环补齐）：
 
 ## 11. 审计
 
-以下写操作记录 `operation_logs`：Product、SKU、Barcode、Store、Credential（不含 Secret）、Warehouse、Bin、StoreWarehouseBinding、Listing、ListingSkuMapping、ImportJob、Supplier、PurchaseOrder、PurchaseReceipt（Sprint 7 起）。
+以下写操作记录 `operation_logs`：SKU、Barcode、Store、Credential（不含 Secret）、Warehouse、Bin、StoreWarehouseBinding、Listing、ListingSkuMapping、Brand、Category、ImportJob、Supplier、PurchaseOrder、PurchaseReceipt（Sprint 7 起）。Product 随商品层删除。
 
 ## 12. 错误码（Sprint 1 集）
 
-`PRODUCT_NOT_FOUND`、`PRODUCT_CODE_ALREADY_EXISTS`、`SKU_NOT_FOUND`、`SKU_CODE_ALREADY_EXISTS`、`SKU_BARCODE_ALREADY_EXISTS`、`BRAND_NOT_FOUND`、`CATEGORY_NOT_FOUND`、`PLATFORM_NOT_FOUND`、`STORE_NOT_FOUND`、`STORE_CODE_ALREADY_EXISTS`、`WAREHOUSE_NOT_FOUND`、`WAREHOUSE_CODE_ALREADY_EXISTS`、`WAREHOUSE_BIN_ALREADY_EXISTS`、`STORE_WAREHOUSE_BINDING_INVALID`、`LISTING_NOT_FOUND`、`LISTING_ALREADY_EXISTS`、`LISTING_SKU_MAPPING_NOT_FOUND`、`LISTING_SKU_RESOLVE_FAILED`、`LISTING_SKU_RESOLVE_AMBIGUOUS`、`FILE_INVALID_TYPE`、`IMPORT_VALIDATION_FAILED` 及过程码（`SKU_DIMENSIONS_INVALID`、`CREDENTIAL_ALREADY_EXISTS` 等）。
+`SKU_NOT_FOUND`、`SKU_CODE_ALREADY_EXISTS`、`SKU_BARCODE_ALREADY_EXISTS`、`BRAND_NOT_FOUND`、`CATEGORY_NOT_FOUND`、`PLATFORM_NOT_FOUND`、`STORE_NOT_FOUND`、`STORE_CODE_ALREADY_EXISTS`、`WAREHOUSE_NOT_FOUND`、`WAREHOUSE_CODE_ALREADY_EXISTS`、`WAREHOUSE_BIN_ALREADY_EXISTS`、`STORE_WAREHOUSE_BINDING_INVALID`、`LISTING_NOT_FOUND`、`LISTING_ALREADY_EXISTS`、`LISTING_SKU_MAPPING_NOT_FOUND`、`LISTING_SKU_RESOLVE_FAILED`、`LISTING_SKU_RESOLVE_AMBIGUOUS`、`FILE_INVALID_TYPE`、`IMPORT_VALIDATION_FAILED` 及过程码（`SKU_DIMENSIONS_INVALID`、`CREDENTIAL_ALREADY_EXISTS` 等）。
 
 Sprint 6 新增（T2/T3/T4，2026-09-11）：
 
-- 删除保护（决策 0003）：`WAREHOUSE_IN_USE`、`BIN_IN_USE`、`STORE_IN_USE`、`BINDING_IN_USE`、`BRAND_IN_USE`、`CATEGORY_IN_USE`、`PRODUCT_IN_USE`、`SKU_IN_USE`、`LISTING_IN_USE`、`LISTING_SKU_MAPPING_IN_USE`。
+- 删除保护（决策 0003）：`WAREHOUSE_IN_USE`、`BIN_IN_USE`、`STORE_IN_USE`、`BINDING_IN_USE`、`BRAND_IN_USE`、`CATEGORY_IN_USE`、`SKU_IN_USE`、`LISTING_IN_USE`、`LISTING_SKU_MAPPING_IN_USE`。（2026-10-13 决策 0020：`PRODUCT_IN_USE` / `PRODUCT_HAS_BUSINESS_HISTORY` / `PRODUCT_NOT_FOUND` / `PRODUCT_CODE_ALREADY_EXISTS` / `PRODUCT_STATUS_INVALID` 随商品层删除；品牌/分类的「被引用」判据改按 SKU 计数。）
 - 分类层级（决策 0005）：`CATEGORY_DEPTH_EXCEEDED`、`CATEGORY_LEVEL_INVALID`、`CATEGORY_NAME_DUPLICATED`、`CATEGORY_HAS_CHILDREN`。
 
 Sprint 8 新增（2026-09-12）：
@@ -220,7 +224,7 @@ Sprint 8.5 新增（2026-09-14）：
 
 - 类目树未同步：`CATEGORY_TREE_NOT_SYNCED`（409，先在同步中心触发类目树同步）。
 - 类目导入冲突：`CATEGORY_IMPORT_CONFLICTS`（409，details 携带冲突清单，禁止静默跳过）。
-- 挂靠目标不存在：复用 `PRODUCT_NOT_FOUND`（404）。
+- 挂靠目标不存在：~~复用 `PRODUCT_NOT_FOUND`（404）~~ —— 2026-10-13 决策 0020 删除多变体挂靠，该错误码一并废止。
 
 Sprint 8.5R1 修订（2026-09-14）：
 
@@ -236,12 +240,12 @@ Sprint 8.5R1 修订（2026-09-14）：
 > 2026-09-11 起按决策 `docs/decisions/0005` 执行。
 
 1. 分类树**最多三级**：`level ∈ {1,2,3}`，数据库 CHECK 兜底（`level BETWEEN 1 AND 3` 且 `(level = 1) = (parent_id IS NULL)`），任何代码路径不可绕过。
-2. 商品分类**选填**；填则该分类必须为三级（`CATEGORY_LEVEL_INVALID`）。
+2. SKU 分类**选填**；填则该分类必须为三级（`CATEGORY_LEVEL_INVALID`）。
 3. **同父下名称唯一**（含根级之间）：唯一索引 `(parent_id, lower(name_zh)) NULLS NOT DISTINCT`；服务层预检给友好提示（`CATEGORY_NAME_DUPLICATED`）；跨父允许同名。
 4. 创建/改父时计算**整棵子树最终深度**，超过三级拒绝（`CATEGORY_DEPTH_EXCEEDED`）；`level` 随改父在同一事务内整棵子树更新。
-5. 已有商品的节点移动后不再是三级 → 拒绝（`CATEGORY_LEVEL_INVALID`）。
-6. 停用不级联子节点；停用节点及其子树在商品表单不可选，数据库层级与商品挂载关系不变，重新启用即恢复。
-7. 删除：有子节点 → `CATEGORY_HAS_CHILDREN`；有商品 → `CATEGORY_IN_USE`；零引用 → 真删。
+5. 已有 SKU 的节点移动后不再是三级 → 拒绝（`CATEGORY_LEVEL_INVALID`，判据按 `skus.category_id` 子树计数）。
+6. 停用不级联子节点；停用节点及其子树在 SKU 表单不可选，数据库层级与 SKU 挂载关系不变，重新启用即恢复。
+7. 删除：有子节点 → `CATEGORY_HAS_CHILDREN`；有 SKU 引用 → `CATEGORY_IN_USE`；零引用 → 真删。
 8. 分类编码 `CN%05d`，一/二/三级共用一条序列，编码不出现在前端表单。
-9. `GET /products?categoryId=` 为**含子树**筛选（递归 CTE），选一/二级分类能查出其下三级分类的商品。
+9. `GET /skus?categoryId=` 为**含子树**筛选（递归 CTE），选一/二级分类能查出其下三级分类的 SKU。
 10. 品牌命名（决策 `docs/decisions/0006`）：`name`（一般名称，必填，主显示名）/ `name_zh`（中文名，可空）/ `name_en` / `name_ru`；全站默认显示一般名称。

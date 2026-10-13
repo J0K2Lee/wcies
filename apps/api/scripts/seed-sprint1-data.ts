@@ -175,38 +175,15 @@ async function main(): Promise<void> {
     }
     log('OZON-A platform bindings ready (RFBS->SZ01, FBO->platform warehouse)');
 
-    // ---- Product + SKUs + barcodes (task §87) ----
+    // ---- SKUs + barcodes (task §87) ----
+    // 2026-10-13 决策 0020：商品层已删除——SKU 是唯一主数据，分类/品牌直接
+    // 落 SKU（categories KEYBOARD / brands VALKYRIE 由本脚本上文种入）。
     const brandId = (
       await client.query<{ id: string }>(`SELECT id FROM brands WHERE code = 'VALKYRIE'`)
     ).rows[0]?.id as string;
     const keyboardId = (
       await client.query<{ id: string }>(`SELECT id FROM categories WHERE code = 'KEYBOARD'`)
     ).rows[0]?.id as string;
-
-    let productId = (
-      await client.query<{ id: string }>(`SELECT id FROM products WHERE product_code = 'PRD-VK87'`)
-    ).rows[0]?.id;
-    if (productId === undefined) {
-      // code_seq comes from the product scope so it can never collide with
-      // future auto-generated PN codes (decision 0001/0002).
-      const codeSeq = (
-        await client.query<{ next_value: string }>(
-          `INSERT INTO business_code_sequences (scope_key, next_value, updated_at)
-           VALUES ('product', 1, now())
-           ON CONFLICT (scope_key)
-           DO UPDATE SET next_value = business_code_sequences.next_value + 1, updated_at = now()
-           RETURNING next_value`,
-        )
-      ).rows[0]?.next_value as string;
-      productId = (
-        await client.query<{ id: string }>(
-          `INSERT INTO products (product_code, code_seq, name_zh, name_ru, category_id, brand_id, status)
-           VALUES ('PRD-VK87', $1, 'VALKYRIE VK87 MAX V2 机械键盘', 'Клавиатура VALKYRIE VK87 MAX V2', $2, $3, 'ACTIVE')
-           RETURNING id`,
-          [Number(codeSeq), keyboardId, brandId],
-        )
-      ).rows[0]?.id;
-    }
 
     const skuSeeds = [
       { code: 'VK87-BLK', name: 'VK87 MAX V2 黑色', color: '黑色', barcode: '6971234560001' },
@@ -220,11 +197,12 @@ async function main(): Promise<void> {
       if (skuId === undefined) {
         skuId = (
           await client.query<{ id: string }>(
-            `INSERT INTO skus (product_id, sku_code, name_zh, model, color, weight_g,
-               length_mm, width_mm, height_mm, volume_mm3, latest_purchase_price, cost_currency, status)
-             VALUES ($1, $2, $3, 'VK87MAX', $4, 950, 355, 122, 34, 1472540, 299, 'CNY', 'ACTIVE')
+            `INSERT INTO skus (sku_code, name_zh, model, color, weight_g,
+               length_mm, width_mm, height_mm, volume_mm3, latest_purchase_price, cost_currency,
+               category_id, brand_id, status)
+             VALUES ($1, $2, 'VK87MAX', $3, 950, 355, 122, 34, 1472540, 299, 'CNY', $4, $5, 'ACTIVE')
              RETURNING id`,
-            [productId, sku.code, sku.name, sku.color],
+            [sku.code, sku.name, sku.color, keyboardId, brandId],
           )
         ).rows[0]?.id;
       }
@@ -235,7 +213,7 @@ async function main(): Promise<void> {
         [skuId, sku.barcode],
       );
     }
-    log('VK87 product + 2 SKUs + 69-codes ready');
+    log('VK87 2 SKUs（含分类/品牌）+ 69-codes ready');
 
     // ---- Multi-listing acceptance (task §91) ----
     const blackSkuId = skuIdOf.get('VK87-BLK') as string;

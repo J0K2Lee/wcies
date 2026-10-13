@@ -27,7 +27,6 @@ export type StorePlatformCode = keyof typeof PLATFORM_CODE_PREFIX;
 /** Fixed single-sequence scopes; scoped variants are built via helpers below. */
 const SCOPE_BRAND = 'brand';
 const SCOPE_CATEGORY = 'category';
-const SCOPE_PRODUCT = 'product';
 /**
  * Global SKU numbering scope (V1 refactor, decision D2, 2026-10-13): ONE
  * sequence for every internal SKU. Migration 20261013_001 seeds the start at
@@ -54,16 +53,6 @@ export function storeScope(platformCode: StorePlatformCode): string {
   return `store:${platformCode}`;
 }
 
-/**
- * Per-product SKU scope key (decision 0002).
- *
- * @deprecated V1 refactor (decision D2) moved SKU numbering to one global
- * 'sku' scope - use `nextSkuCodeGlobal()`. Removed in T9.
- */
-export function skuScope(productId: string): string {
-  return `sku:${productId}`;
-}
-
 // Width is a MINIMUM width: overflow carries naturally (%02d of 100 -> 100).
 export function formatWarehouseCode(warehouseType: WarehouseCodeType, seq: number): string {
   const prefix = WAREHOUSE_CODE_PREFIX[warehouseType];
@@ -83,14 +72,10 @@ export function formatCategoryCode(seq: number): string {
   return `CN${String(seq).padStart(5, '0')}`;
 }
 
-export function formatProductCode(seq: number): string {
-  return `PN${String(seq).padStart(6, '0')}`;
-}
-
 /**
  * Global SKU code (V1 refactor, decision D2, 2026-10-13): SKU%09d - one
- * global sequence for every internal SKU, replacing the derived
- * SKU{product seq 6}{in-product seq 3} (decision 0002).
+ * global sequence for every internal SKU (replaces the removed derived
+ * SKU{product 6}{in-product 3} shape of the deleted product layer).
  *
  * Width is a MINIMUM width: overflow carries naturally (%09d of 1000000000
  * -> "1000000000"), never an error.
@@ -236,14 +221,6 @@ export class BusinessCodeService {
     return formatCategoryCode(await this.next(SCOPE_CATEGORY));
   }
 
-  /** Returns both the formatted PN code and the raw seq (products.code_seq). */
-  async nextProductCode(
-    manager?: EntityManager,
-  ): Promise<{ productCode: string; codeSeq: number }> {
-    const codeSeq = await this.next(SCOPE_PRODUCT, manager);
-    return { productCode: formatProductCode(codeSeq), codeSeq };
-  }
-
   /**
    * Global SKU code (V1 refactor, decision D2): SKU%09d from the single
    * 'sku' scope. The scope start was seeded by migration 20261013_001 at
@@ -254,24 +231,5 @@ export class BusinessCodeService {
    */
   async nextSkuCodeGlobal(manager?: EntityManager): Promise<string> {
     return formatSkuCode(await this.next(SCOPE_SKU, manager));
-  }
-
-  /**
-   * Derived SKU code (decision 0002): SKU{product seq 6}{in-product seq 3}.
-   * The per-product scope starts at 1 for every product.
-   *
-   * @deprecated V1 refactor (decision D2) replaced derived codes with the
-   * global SKU%09d sequence - use `nextSkuCodeGlobal()`. Kept (behavior
-   * unchanged) until the last caller is migrated; removed in T9.
-   */
-  async nextSkuCode(
-    productId: string,
-    productCodeSeq: number,
-    manager?: EntityManager,
-  ): Promise<string> {
-    const inProductSeq = await this.next(skuScope(productId), manager);
-    // Formatting stays local: the shared formatSkuCode now emits the global
-    // SKU%09d shape, and this deprecated path must keep its exact old shape.
-    return `SKU${String(productCodeSeq).padStart(6, '0')}${String(inProductSeq).padStart(3, '0')}`;
   }
 }

@@ -22,7 +22,7 @@ WCIES 服务于多平台、多店铺、多仓库跨境电商业务。
 
 核心业务领域：
 
-- Product / SKU
+- SKU（唯一商品主数据；2026-10-13 决策 0020 起不再有独立 Product 层）
 - Platform Listing
 - Warehouse / Bin
 - Inventory
@@ -235,7 +235,8 @@ UPDATE inventory_balances
 
 例如：
 
-- `ProductService`
+- `SkuService`
+- `BarcodeService`
 - `InventoryService`
 - `OrderService`
 - `PurchaseService`
@@ -657,19 +658,16 @@ BACKORDERED
 
 ---
 
-# 23. Product / SKU身份规则
+# 23. SKU身份规则（唯一商品主数据）
 
-必须严格区分：
+> 2026-10-13 修订（决策 `docs/decisions/0020-移除商品层级分类品牌下沉SKU.md`）：
+> Product/SPU 层级已从系统删除。本节与原「Product / SKU 双层」表述冲突之处，
+> 以本节为准。
 
-```text
-Product / SPU
-```
+**Internal SKU 是唯一商品主数据。**
 
-与：
-
-```text
-Internal SKU
-```
+不存在独立的 Product / SPU 主数据层：分类（category）与品牌（brand）是
+SKU 自身字段（`skus.category_id` / `skus.brand_id`），SKU 可独立修改。
 
 Internal SKU 是：
 
@@ -682,6 +680,9 @@ Internal SKU 是：
 - 售后
 
 的统一商品身份。
+
+编码规则：`sku_code` = `SKU%09d` 全局单序列（决策 0020 D2），生成后冻结；
+`/api/v1/products*` 路由与商品页已删除（D6），前端不得引用。
 
 ---
 
@@ -699,6 +700,10 @@ Internal SKU 是：
 不得成为内部库存主键。
 
 必须映射到 Internal SKU。
+
+> 平台侧 `product_id` / `description_category_id` 等字段与已删除的内部
+> Product 层**同名异物**：integration 层与 `platform_category_mappings`
+> 中的这些平台字段不得因本次改造而改动。
 
 ---
 
@@ -2376,7 +2381,7 @@ lint / typecheck / test 是否通过？
 
 以下规则属于当前系统架构基本契约：
 
-1. Internal SKU 是统一库存身份。
+1. Internal SKU 是统一库存身份（2026-10-13 决策 0020：同时是唯一商品主数据）。
 2. Platform SKU只是外部映射。
 3. 一个SKU允许多个平台Listing。
 4. 同一Store一个SKU允许多个商品链接。

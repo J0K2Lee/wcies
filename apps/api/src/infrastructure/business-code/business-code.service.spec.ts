@@ -3,11 +3,9 @@ import {
   BusinessCodeService,
   formatBrandCode,
   formatCategoryCode,
-  formatProductCode,
   formatSkuCode,
   formatStoreCode,
   formatWarehouseCode,
-  skuScope,
   storeScope,
   warehouseScope,
 } from './business-code.service';
@@ -26,10 +24,9 @@ describe('business code formatting (decision 0001/0002)', () => {
     expect(formatStoreCode('YANDEX', 12)).toBe('YX-012');
   });
 
-  it('formats brand / category / product codes', () => {
+  it('formats brand / category codes', () => {
     expect(formatBrandCode(1)).toBe('BN00001');
     expect(formatCategoryCode(251)).toBe('CN00251');
-    expect(formatProductCode(1)).toBe('PN000001');
   });
 
   it('formats the global SKU code SKU%09d (V1 decision D2)', () => {
@@ -44,17 +41,12 @@ describe('business code formatting (decision 0001/0002)', () => {
     expect(formatWarehouseCode('SELF', 100)).toBe('ZG-100');
     expect(formatStoreCode('OZON', 1000)).toBe('ON-1000');
     expect(formatBrandCode(100000)).toBe('BN100000');
-    expect(formatProductCode(1000000)).toBe('PN1000000');
     expect(formatSkuCode(1000000000)).toBe('SKU1000000000');
   });
 
   it('builds scope keys', () => {
     expect(warehouseScope('SELF')).toBe('warehouse:SELF');
     expect(storeScope('WB')).toBe('store:WB');
-    // Deprecated per-product scope (decision 0002) until T9 removes it.
-    expect(skuScope('0d96d8ba-0000-0000-0000-000000000001')).toBe(
-      'sku:0d96d8ba-0000-0000-0000-000000000001',
-    );
   });
 });
 
