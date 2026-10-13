@@ -149,6 +149,19 @@ export class CatalogService {
     return this.repository.findBrandById(id);
   }
 
+  /**
+   * Cross-module exact-name lookups (SKU import, V1 T6): the import
+   * template references brands/categories by name; a miss is a row error
+   * (never an auto-create).
+   */
+  async findBrandByName(name: string): Promise<BrandEntity | null> {
+    return this.repository.findBrandByName(name);
+  }
+
+  async findCategoryByNameZh(nameZh: string): Promise<CategoryEntity | null> {
+    return this.repository.findCategoryByNameZh(nameZh);
+  }
+
   /** Zero-reference hard delete (decision 0003); referenced -> BRAND_IN_USE. */
   async removeBrand(id: string, operator: OperatorContext): Promise<void> {
     const brand = await this.repository.findBrandById(id);

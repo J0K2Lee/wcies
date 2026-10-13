@@ -6,9 +6,13 @@ import { ApiClient, runPrefix } from './sprint1.helpers';
 /**
  * Import Center acceptance (task §86):
  * 100+ SKU rows incl. normal / duplicate sku_code / duplicate barcode /
- * unknown product rows; exact row numbers reported; confirm imports only
+ * unknown brand rows; exact row numbers reported; confirm imports only
  * valid rows via the BullMQ worker; plus a LISTING_MAPPING sheet with
  * unknown store / unknown sku rows.
+ *
+ * V1 (2026-10-13): the product columns are gone - every row creates the SKU
+ * directly; brand/category are optional exact-name matches (unknown brand ->
+ * BRAND_NOT_FOUND row error).
  */
 let api: ManagedProcess;
 let worker: ManagedProcess;
@@ -44,8 +48,6 @@ async function skuSheet(): Promise<Buffer> {
   const sheet = workbook.addWorksheet('SKU');
   sheet.addRow([
     'sku_code',
-    'product_code',
-    'product_name_zh',
     'name_zh',
     'model',
     'color',
@@ -56,13 +58,14 @@ async function skuSheet(): Promise<Buffer> {
     'latest_purchase_price',
     'barcode',
     'barcode_type',
+    'brand',
+    'category',
   ]);
-  // rows 2..91: 90 normal rows (auto sku_code, product created by name)
+  // rows 2..91: 90 normal rows (auto sku_code; row 2 also references the
+  // brand + level-3 category created by the test)
   for (let i = 1; i <= 90; i += 1) {
     sheet.addRow([
       '',
-      '',
-      `${PREFIX} 导入商品`,
       `${PREFIX} 正常SKU-${String(i).padStart(3, '0')}`,
       'M1',
       '黑',
@@ -73,14 +76,15 @@ async function skuSheet(): Promise<Buffer> {
       88.8,
       `69${PREFIX}${String(i).padStart(6, '0')}`,
       'EAN',
+      i === 1 ? `${PREFIX} 导入品牌` : '',
+      i === 1 ? `${PREFIX} 导入三级` : '',
     ]);
   }
   // row 92: duplicate sku_code against DB (seed one first via API below)
   sheet.addRow([
     `${PREFIX}-DUPSKU`,
-    '',
-    `${PREFIX} 导入商品`,
     `${PREFIX} 重复SKU`,
+    '',
     '',
     '',
     '',
@@ -95,8 +99,6 @@ async function skuSheet(): Promise<Buffer> {
   // row 93: duplicate barcode (will collide with row 2's barcode)
   sheet.addRow([
     '',
-    '',
-    `${PREFIX} 导入商品`,
     `${PREFIX} 重复条码`,
     '',
     '',
@@ -107,13 +109,13 @@ async function skuSheet(): Promise<Buffer> {
     '',
     `69${PREFIX}000001`,
     'EAN',
+    '',
+    '',
   ]);
-  // row 94: unknown product without product_name_zh
+  // row 94: unknown brand name -> BRAND_NOT_FOUND (never auto-created)
   sheet.addRow([
     '',
-    'NOPE-404',
-    '',
-    `${PREFIX} 未知商品SKU`,
+    `${PREFIX} 未知品牌SKU`,
     '',
     '',
     '',
@@ -123,15 +125,15 @@ async function skuSheet(): Promise<Buffer> {
     '',
     '',
     '',
+    'GHOST-BRAND',
     '',
   ]);
   // rows 95..104: in-file duplicate sku_code
   for (let i = 1; i <= 10; i += 1) {
     sheet.addRow([
       `${PREFIX}-INDUP`,
-      '',
-      `${PREFIX} 导入商品`,
       `${PREFIX} 文件内重复-${i}`,
+      '',
       '',
       '',
       '',
@@ -150,12 +152,24 @@ async function skuSheet(): Promise<Buffer> {
 
 describe('SKU import (task §86: >=100 rows, exact error rows)', () => {
   it('seeds the DB duplicate sku_code, uploads, and gets exact row errors', async () => {
-    // create the conflicting SKU in the DB first
-    const product = await client.post<{ id: string }>('/api/v1/products', {
-      nameZh: `${PREFIX} 导入商品DB`,
+    // brand + level-3 category the first normal row references by name
+    await client.post('/api/v1/brands', {
+      name: `${PREFIX} 导入品牌`,
     });
+    const l1 = await client.post<{ id: string }>('/api/v1/categories', {
+      nameZh: `${PREFIX} 导入一级`,
+    });
+    const l2 = await client.post<{ id: string }>('/api/v1/categories', {
+      parentId: l1.body.data.id,
+      nameZh: `${PREFIX} 导入二级`,
+    });
+    await client.post('/api/v1/categories', {
+      parentId: l2.body.data.id,
+      nameZh: `${PREFIX} 导入三级`,
+    });
+
+    // create the conflicting SKU in the DB first (direct create, no product)
     await client.post('/api/v1/skus', {
-      productId: product.body.data.id,
       skuCode: `${PREFIX}-DUPSKU`,
       nameZh: 'db duplicate',
     });
@@ -175,7 +189,7 @@ describe('SKU import (task §86: >=100 rows, exact error rows)', () => {
     const byRow = new Map((job.errors ?? []).map((error) => [error.row, error]));
     expect(byRow.get(92)?.code).toBe('SKU_CODE_ALREADY_EXISTS');
     expect(byRow.get(93)?.code).toBe('SKU_BARCODE_ALREADY_EXISTS');
-    expect(byRow.get(94)?.code).toBe('PRODUCT_NOT_FOUND');
+    expect(byRow.get(94)?.code).toBe('BRAND_NOT_FOUND');
     for (let row = 96; row <= 104; row += 1) {
       expect(byRow.get(row)?.code).toBe('SKU_CODE_ALREADY_EXISTS');
     }
@@ -197,18 +211,21 @@ describe('SKU import (task §86: >=100 rows, exact error rows)', () => {
     expect(final?.importedRows).toBe(91);
     expect(final?.failedRows).toBe(0);
 
-    // imported rows are searchable with computed volume
-    const list = await client.get<unknown[]>(
-      `/api/v1/skus?keyword=${encodeURIComponent(`${PREFIX} 正常SKU-001`)}&pageSize=20`,
-    );
+    // imported rows are searchable with computed volume; the brand/category
+    // name columns landed on the SKU itself (D5)
+    const list = await client.get<
+      Array<{ nameZh: string; brandName: string | null; categoryName: string | null }>
+    >(`/api/v1/skus?keyword=${encodeURIComponent(`${PREFIX} 正常SKU-001`)}&pageSize=20`);
     expect(list.body.data.length).toBe(1);
+    expect(list.body.data[0]?.brandName).toBe(`${PREFIX} 导入品牌`);
+    expect(list.body.data[0]?.categoryName).toBe(`${PREFIX} 导入三级`);
   });
 
   it('rejects confirm on a job without valid rows', async () => {
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('SKU');
-    sheet.addRow(['sku_code', 'product_code', 'product_name_zh', 'name_zh']);
-    sheet.addRow(['', 'NOPE-404', '', 'orphan']);
+    sheet.addRow(['sku_code', 'name_zh', 'brand']);
+    sheet.addRow(['', 'orphan', 'GHOST-BRAND']);
     const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
     const uploaded = await client.upload<ImportJobDto>(`/api/v1/imports/upload?type=SKU`, {
       name: 'all-bad.xlsx',
@@ -231,11 +248,7 @@ describe('LISTING_MAPPING import (task §58: unknown store / unknown sku rows)',
       storeCode: `${PREFIX}-IMP`,
       name: 'import store',
     });
-    const product = await client.post<{ id: string }>('/api/v1/products', {
-      nameZh: `${PREFIX} IMP`,
-    });
     const sku = await client.post<{ id: string; skuCode: string }>('/api/v1/skus', {
-      productId: product.body.data.id,
       nameZh: `${PREFIX} IMP-SKU`,
     });
 

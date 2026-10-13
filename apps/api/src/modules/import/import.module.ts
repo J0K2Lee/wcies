@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ObjectStorageModule } from '../../infrastructure/storage/object-storage.module';
 import { QUEUE_NAMES } from '../../infrastructure/queue/queue.constants';
+import { CatalogModule } from '../catalog/catalog.module';
 import { ListingModule } from '../listing/listing.module';
 import { OperationLogModule } from '../operation-log/operation-log.module';
 import { PlatformModule } from '../platform/platform.module';
@@ -35,6 +36,7 @@ import { InitialInventoryImportHandler } from './handlers/initial-inventory-impo
     BullModule.registerQueue({ name: QUEUE_NAMES.import }),
     ObjectStorageModule,
     OperationLogModule,
+    CatalogModule,
     PlatformModule,
     StoreModule,
     ProductModule,

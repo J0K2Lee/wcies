@@ -37,8 +37,6 @@ describe('ImportTemplateService', () => {
     });
     expect(headers).toEqual([
       'sku_code',
-      'product_code',
-      'product_name_zh',
       'name_zh',
       'name_ru',
       'model',
@@ -52,6 +50,8 @@ describe('ImportTemplateService', () => {
       'barcode',
       'barcode_type',
       'serial_tracking',
+      'brand',
+      'category',
     ]);
     expect(sheet?.rowCount).toBe(2); // header + one example row
   });

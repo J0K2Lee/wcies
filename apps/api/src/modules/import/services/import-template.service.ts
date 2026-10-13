@@ -28,10 +28,12 @@ interface TemplateDefinition {
 const TEMPLATES: Record<string, TemplateDefinition> = {
   SKU: {
     filename: 'wcies-import-template-sku.xlsx',
+    // V1 (2026-10-13): the product columns are gone - every row creates the
+    // SKU directly (name_zh = the SKU name, required); brand/category are
+    // optional and matched by EXACT name (a miss is a row error, never an
+    // auto-create); the category must be a level-3 node (decision 0005).
     headers: [
       'sku_code',
-      'product_code',
-      'product_name_zh',
       'name_zh',
       'name_ru',
       'model',
@@ -45,11 +47,11 @@ const TEMPLATES: Record<string, TemplateDefinition> = {
       'barcode',
       'barcode_type',
       'serial_tracking',
+      'brand',
+      'category',
     ],
     example: [
       '',
-      '',
-      '示例机械键盘（自动建商品）',
       '示例SKU 黑色',
       '',
       'VK87',
@@ -63,6 +65,8 @@ const TEMPLATES: Record<string, TemplateDefinition> = {
       '',
       '',
       false,
+      '示例品牌',
+      '示例三级分类',
     ],
   },
   LISTING_MAPPING: {

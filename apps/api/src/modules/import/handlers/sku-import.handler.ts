@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { BarcodeService } from '../../product/services/barcode.service';
 import { SkuService } from '../../product/services/sku.service';
 import { assertDimensionsConsistent } from '../../product/services/sku.service';
+import { CatalogService } from '../../catalog/catalog.service';
 import { ImportRowError } from '../entities/import-job.entity';
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import { booleanField, numericField, optionalField, requiredField } from '../services/excel-parser';
@@ -23,21 +24,26 @@ interface SkuRowData {
   barcode: string | null;
   barcodeType: string | null;
   serialTracking: boolean;
+  /** Resolved in validate() from the exact-name columns (null = not provided). */
+  brandId: string | null;
+  categoryId: string | null;
 }
 
 /**
  * SKU fixed template (spec §87; units 2026-09-09: g / integer mm):
  * sku_code | name_zh | name_ru | model |
  * color | size | weight_g | length_mm | width_mm | height_mm |
- * latest_purchase_price | barcode | barcode_type | serial_tracking
+ * latest_purchase_price | barcode | barcode_type | serial_tracking |
+ * brand | category
  *
  * - sku_code empty -> auto-generated (global SKU%09d sequence, V1 decision D2);
  * - every row creates the SKU directly - the product layer is gone (V1);
+ * - brand / category are OPTIONAL and matched by EXACT name (brand: the
+ *   general name; category: name_zh). A miss is a row error
+ *   (BRAND_NOT_FOUND / CATEGORY_NOT_FOUND) - never an auto-create; the
+ *   category must be a level-3 node (decision 0005);
  * - duplicate sku_code / barcode -> rejected with the exact row (task §61).
  * - length_mm / width_mm / height_mm must be integers.
- *
- * V1 改造（2026-10-13）：模板列与品牌/分类名称匹配由 T6 收尾
- * （brand / category 可选列）。
  */
 @Injectable()
 export class SkuImportHandler implements ImportHandler {
@@ -46,6 +52,7 @@ export class SkuImportHandler implements ImportHandler {
   constructor(
     private readonly skuService: SkuService,
     private readonly barcodeService: BarcodeService,
+    private readonly catalogService: CatalogService,
   ) {}
 
   async validate(
@@ -150,6 +157,46 @@ export class SkuImportHandler implements ImportHandler {
         }
       }
 
+      // Optional brand / category by EXACT name (V1 T6): a miss is a row
+      // error - never an auto-create; the category must be level 3.
+      let brandId: string | null = null;
+      let categoryId: string | null = null;
+      const brandName = optionalField(cells, 'brand');
+      if (brandName !== null) {
+        const brand = await this.catalogService.findBrandByName(brandName);
+        if (brand === null) {
+          errors.push({
+            row: rowNumber,
+            field: 'brand',
+            code: 'BRAND_NOT_FOUND',
+            message: `品牌不存在: ${brandName}`,
+          });
+        } else {
+          brandId = brand.id;
+        }
+      }
+      const categoryName = optionalField(cells, 'category');
+      if (categoryName !== null) {
+        const category = await this.catalogService.findCategoryByNameZh(categoryName);
+        if (category === null) {
+          errors.push({
+            row: rowNumber,
+            field: 'category',
+            code: 'CATEGORY_NOT_FOUND',
+            message: `分类不存在: ${categoryName}`,
+          });
+        } else if (category.level !== 3) {
+          errors.push({
+            row: rowNumber,
+            field: 'category',
+            code: 'CATEGORY_LEVEL_INVALID',
+            message: `SKU 分类必须挂三级类目: ${categoryName}`,
+          });
+        } else {
+          categoryId = category.id;
+        }
+      }
+
       if (errors.length > rowErrorsBefore) {
         continue;
       }
@@ -169,6 +216,8 @@ export class SkuImportHandler implements ImportHandler {
         barcode,
         barcodeType,
         serialTracking: booleanField(cells, 'serial_tracking'),
+        brandId,
+        categoryId,
       };
       validRows.push({ rowNumber, data: data as unknown as Record<string, unknown> });
     }
@@ -190,6 +239,8 @@ export class SkuImportHandler implements ImportHandler {
         skuCode: row.skuCode ?? undefined,
         nameZh: row.nameZh,
         nameRu: row.nameRu ?? undefined,
+        brandId: row.brandId ?? undefined,
+        categoryId: row.categoryId ?? undefined,
         model: row.model ?? undefined,
         color: row.color ?? undefined,
         size: row.size ?? undefined,

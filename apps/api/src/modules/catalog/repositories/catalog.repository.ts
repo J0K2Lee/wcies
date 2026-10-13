@@ -46,6 +46,11 @@ export class CatalogRepository {
     return this.brandRepository.findOneBy({ code });
   }
 
+  /** Exact general-name lookup (SKU import matches brands by name; V1 T6). */
+  async findBrandByName(name: string): Promise<BrandEntity | null> {
+    return this.brandRepository.findOneBy({ name });
+  }
+
   async insertBrand(brand: Partial<BrandEntity>): Promise<BrandEntity> {
     const created = this.brandRepository.create(brand as unknown as DeepPartial<BrandEntity>);
     return this.brandRepository.save(created);
@@ -100,6 +105,11 @@ export class CatalogRepository {
 
   async findCategoryByCode(code: string): Promise<CategoryEntity | null> {
     return this.categoryRepository.findOneBy({ code });
+  }
+
+  /** Exact name_zh lookup (SKU import matches categories by name; V1 T6). */
+  async findCategoryByNameZh(nameZh: string): Promise<CategoryEntity | null> {
+    return this.categoryRepository.findOneBy({ nameZh });
   }
 
   async insertCategory(category: Partial<CategoryEntity>): Promise<CategoryEntity> {
