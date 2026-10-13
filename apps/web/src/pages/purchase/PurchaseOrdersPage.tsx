@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   App as AntdApp,
@@ -11,8 +11,10 @@ import {
   Modal,
   Select,
   Switch,
+  Tabs,
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
+import { ColumnsType } from 'antd/es/table';
 import { apiGet, apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime } from '../../utils/format';
 import {
@@ -48,6 +50,7 @@ interface PurchaseOrderRow {
   orderedAt: string;
   expectedAt: string | null;
   remark: string | null;
+  receivingWarehouseId: string | null;
   itemCount: number;
   totalQuantity: string;
 }
@@ -66,6 +69,7 @@ interface PurchaseOrderItem {
 }
 
 interface PurchaseOrderDetail extends PurchaseOrderRow {
+  receivingWarehouseName: string | null;
   items: PurchaseOrderItem[];
 }
 
@@ -143,12 +147,26 @@ const STATUS_META: Record<
 
 type Envelope<T> = { data: T; meta: { total: number } };
 
+/**
+ * 状态标签页（用户需求 2026-10-09）：默认聚焦「未到货」（已下单 + 部分
+ * 到货），到货/取消收进各自的 tab；全部 = 不筛选。未到货是两状态过滤，
+ * 走后端 statuses 数组参数（repeated query key）。
+ */
+type PoStatusTab = 'pending' | 'received' | 'cancelled' | 'all';
+
+const PO_STATUS_TAB_FILTERS: Record<PoStatusTab, { status?: string; statuses?: string[] }> = {
+  pending: { statuses: ['ORDERED', 'PARTIALLY_RECEIVED'] },
+  received: { status: 'RECEIVED' },
+  cancelled: { status: 'CANCELLED' },
+  all: {},
+};
+
 export function PurchaseOrdersPage() {
   const { message, modal } = AntdApp.useApp();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState('');
-  const [status, setStatus] = useState<string | undefined>();
+  const [statusTab, setStatusTab] = useState<PoStatusTab>('pending');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -157,16 +175,21 @@ export function PurchaseOrdersPage() {
   const [supplierCreateOpen, setSupplierCreateOpen] = useState(false);
   const [createdSupplier, setCreatedSupplier] = useState<SupplierOption | null>(null);
   const formItems = Form.useWatch('items', form) as ItemFormValues[] | undefined;
+  // 生成收货单（需求 2026-10-09）：PO 未指定收货仓库时弹窗补选。
+  const [receiptWarehouseOpen, setReceiptWarehouseOpen] = useState(false);
+  const [receiptWarehouseForm] = Form.useForm<{ warehouseId: string }>();
 
+  const tabFilter = PO_STATUS_TAB_FILTERS[statusTab];
   const list = useApiQuery<Envelope<PurchaseOrderRow[]>>(
     '/api/v1/purchase-orders',
     {
       page,
       pageSize: 50,
       ...(keyword ? { keyword } : {}),
-      ...(status ? { status } : {}),
+      ...(tabFilter.status !== undefined ? { status: tabFilter.status } : {}),
+      ...(tabFilter.statuses !== undefined ? { statuses: tabFilter.statuses } : {}),
     },
-    ['purchase-orders', page, keyword, status],
+    ['purchase-orders', page, keyword, statusTab],
   );
 
   const suppliers = useApiQuery<Envelope<SupplierOption[]>>(
@@ -299,6 +322,56 @@ export function PurchaseOrdersPage() {
     onError: (error: Error) => void message.error(`创建供应商失败: ${error.message}`),
   });
 
+  // ---- 生成收货单（用户需求 2026-10-09）：从选中的采购单一键生成草稿 ----
+  const generateReceiptMutation = useMutation({
+    mutationFn: ({ poId, warehouseId }: { poId: string; warehouseId: string }) =>
+      apiPost<{ id: string; receiptNo: string }>(
+        '/api/v1/purchase-receipts/from-po/{poId}',
+        { warehouseId },
+        { poId },
+      ),
+    onSuccess: (result) => {
+      void message.success(
+        `已生成收货单 ${result.receiptNo}（草稿）：到收货单页选库位、确认后入库`,
+      );
+      setReceiptWarehouseOpen(false);
+      receiptWarehouseForm.resetFields();
+      void queryClient.invalidateQueries({ queryKey: ['purchase-receipts'] });
+      void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+    },
+    onError: (error: Error) => void message.error(`生成收货单失败: ${error.message}`),
+  });
+
+  /**
+   * 生成收货单入口：PO 指定过收货仓库 → 二次确认后直接生成；
+   * 未指定 → 打开弹窗补选仓库（草稿仓库决定入库去向，不能默认猜）。
+   */
+  const requestGenerateReceipt = useCallback(
+    (row: PurchaseOrderRow) => {
+      const warehouseLabel =
+        warehouses.data?.data.find((w) => w.id === row.receivingWarehouseId)?.name ??
+        row.receivingWarehouseId;
+      if (row.receivingWarehouseId !== null) {
+        modal.confirm({
+          title: `为采购单 ${row.poNo} 生成收货单草稿？`,
+          content: `收货仓库：${warehouseLabel}。按采购明细的未收数量预填草稿；生成后到收货单页确认收货才入库。`,
+          okText: '生成草稿',
+          cancelText: '返回',
+          onOk: () => {
+            generateReceiptMutation.mutate({
+              poId: row.id,
+              warehouseId: row.receivingWarehouseId as string,
+            });
+          },
+        });
+        return;
+      }
+      receiptWarehouseForm.setFieldsValue({ warehouseId: undefined });
+      setReceiptWarehouseOpen(true);
+    },
+    [modal, warehouses.data, generateReceiptMutation, receiptWarehouseForm],
+  );
+
   // ---- Context rail ----
   const railContent = useMemo<ContextRailContent>(() => {
     if (selectedRow === null) {
@@ -346,6 +419,17 @@ export function PurchaseOrdersPage() {
             <Button block onClick={() => setDetailId(selectedRow.id)}>
               查看详情
             </Button>
+            {(selectedRow.status === 'ORDERED' || selectedRow.status === 'PARTIALLY_RECEIVED') && (
+              <Button
+                type="primary"
+                block
+                style={{ marginTop: 8 }}
+                loading={generateReceiptMutation.isPending}
+                onClick={() => requestGenerateReceipt(selectedRow)}
+              >
+                生成收货单
+              </Button>
+            )}
             {selectedRow.status === 'ORDERED' && (
               <Button
                 block
@@ -373,7 +457,7 @@ export function PurchaseOrdersPage() {
         </>
       ),
     };
-  }, [selectedRow, list.data]);
+  }, [selectedRow, list.data, cancelMutation, generateReceiptMutation, requestGenerateReceipt]);
   useContextRail(railContent);
 
   return (
@@ -408,21 +492,23 @@ export function PurchaseOrdersPage() {
           style={{ width: 260 }}
           aria-label="搜索采购单"
         />
-        <Select
-          allowClear
-          placeholder="状态"
-          style={{ width: 140 }}
-          options={Object.entries(STATUS_META).map(([value, meta]) => ({
-            value,
-            label: meta.label,
-          }))}
-          value={status}
-          onChange={(value) => {
-            setPage(1);
-            setStatus(value);
-          }}
-        />
       </FilterBar>
+
+      {/* 状态标签页（需求 2026-10-09）：默认聚焦未到货，替代原状态下拉。 */}
+      <Tabs
+        activeKey={statusTab}
+        onChange={(key) => {
+          setPage(1);
+          setStatusTab(key as PoStatusTab);
+          setSelectedId(null);
+        }}
+        items={[
+          { key: 'pending', label: '未到货' },
+          { key: 'received', label: '已到货' },
+          { key: 'cancelled', label: '已取消' },
+          { key: 'all', label: '全部' },
+        ]}
+      />
 
       <SectionCard flush>
         <DataTable<PurchaseOrderRow>
@@ -435,6 +521,17 @@ export function PurchaseOrdersPage() {
             total: list.data?.meta.total ?? 0,
             showTotal: (total) => `共 ${total} 单`,
             onChange: setPage,
+          }}
+          expandable={{
+            // 选中即展开（与订单页一致的用户指示 2026-09-17）：行点击选择
+            // 驱动展开，直接显示该单的采购商品明细（需求 2026-10-09）。
+            expandedRowKeys: selectedId === null ? [] : [selectedId],
+            showExpandColumn: false,
+            expandedRowRender: (row: PurchaseOrderRow) => (
+              <div onClick={(event) => event.stopPropagation()}>
+                <ExpandedPoItems poId={row.id} />
+              </div>
+            ),
           }}
           onRow={(record) => ({
             onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
@@ -510,6 +607,14 @@ export function PurchaseOrdersPage() {
             <ContextSection title="采购单信息">
               <ContextMetric label="供应商" value={detailRow.supplierName ?? '—'} />
               <ContextMetric label="货源说明" value={detailRow.sourceNote ?? '—'} />
+              <ContextMetric
+                label="收货仓库"
+                value={
+                  detailRow.receivingWarehouseId === null
+                    ? '—'
+                    : (detailRow.receivingWarehouseName ?? detailRow.receivingWarehouseId)
+                }
+              />
               <ContextMetric label="采购时间" value={fmtDateTime(detailRow.orderedAt)} />
               <ContextMetric
                 label="预计到货"
@@ -755,11 +860,140 @@ export function PurchaseOrdersPage() {
         onClose={() => setSupplierCreateOpen(false)}
         onCreate={(values) => createSupplierMutation.mutate(values)}
       />
+
+      {/* 生成收货单（需求 2026-10-09）：PO 未指定收货仓库时补选。 */}
+      <Modal
+        title={`为采购单 ${selectedRow?.poNo ?? ''} 生成收货单草稿`}
+        open={receiptWarehouseOpen}
+        onCancel={() => setReceiptWarehouseOpen(false)}
+        onOk={() => {
+          void receiptWarehouseForm
+            .validateFields()
+            .then((values) => {
+              if (selectedRow !== null) {
+                generateReceiptMutation.mutate({
+                  poId: selectedRow.id,
+                  warehouseId: values.warehouseId,
+                });
+              }
+            })
+            .catch(() => undefined);
+        }}
+        okText="生成草稿"
+        cancelText="取消"
+        confirmLoading={generateReceiptMutation.isPending}
+        destroyOnHidden
+      >
+        <Form form={receiptWarehouseForm} layout="vertical" preserve={false}>
+          <Form.Item
+            name="warehouseId"
+            label="收货仓库"
+            rules={[{ required: true, message: '请选择收货仓库' }]}
+            extra="该采购单未指定收货仓库；草稿按采购明细的未收数量预填，确认收货后入库。"
+          >
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder="选择收货仓库"
+              loading={warehouses.isLoading}
+              options={(warehouses.data?.data ?? []).map((warehouse) => ({
+                value: warehouse.id,
+                label: `${warehouse.warehouseCode} · ${warehouse.name}`,
+              }))}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 }
 
 const IMAGE_FALLBACK = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="#f0f0f0"/><text x="20" y="24" text-anchor="middle" fill="#888" font-size="10">无图</text></svg>')}`;
+
+/** 展开行明细列（需求 2026-10-09）：紧凑视图，不含图片列（详情抽屉里有）。 */
+const EXPANDED_PO_ITEM_COLUMNS: ColumnsType<PurchaseOrderItem> = [
+  {
+    title: 'SKU',
+    key: 'sku',
+    render: (_: unknown, row: PurchaseOrderItem) => (
+      <div>
+        <span style={{ fontWeight: 550 }}>{row.skuCode}</span>
+        <span style={{ fontSize: 12.5, color: colors.textSecondary, marginLeft: 8 }}>
+          {row.skuName}
+        </span>
+      </div>
+    ),
+  },
+  {
+    title: '数量',
+    dataIndex: 'quantity',
+    key: 'quantity',
+    width: 70,
+    align: 'right' as const,
+  },
+  {
+    title: '单位成本',
+    dataIndex: 'unitCost',
+    key: 'unitCost',
+    width: 90,
+    align: 'right' as const,
+    render: (value: string | null) => (value === null ? '—' : Number(value).toFixed(4)),
+  },
+  {
+    title: '已收货',
+    dataIndex: 'receivedQuantity',
+    key: 'receivedQuantity',
+    width: 70,
+    align: 'right' as const,
+  },
+  {
+    title: '小计',
+    key: 'subtotal',
+    width: 100,
+    align: 'right' as const,
+    render: (_: unknown, row: PurchaseOrderItem) => {
+      const subtotal = lineSubtotal(row);
+      return subtotal === null ? '—' : subtotal.toFixed(4);
+    },
+  },
+  {
+    title: '关联订单',
+    dataIndex: 'orderNo',
+    key: 'orderNo',
+    width: 120,
+    render: (value: string | null) => value ?? '备货采购',
+  },
+];
+
+/**
+ * 展开行内容（需求 2026-10-09）：与详情抽屉共用 `['purchase-order-detail',
+ * id]` 缓存键（§68 模式），展开选中行不产生额外请求（已查过的单直接命中）。
+ */
+function ExpandedPoItems({ poId }: { poId: string }) {
+  const detailQuery = useApiQuery<{ data: PurchaseOrderDetail }>(
+    '/api/v1/purchase-orders/{id}',
+    {},
+    ['purchase-order-detail', poId],
+    { id: poId },
+  );
+  if (detailQuery.isLoading) {
+    return <span style={{ fontSize: 12.5, color: colors.textTertiary }}>采购明细加载中…</span>;
+  }
+  const row = detailQuery.data?.data;
+  if (row === undefined || row.id !== poId) {
+    return <span style={{ fontSize: 12.5, color: colors.textTertiary }}>暂无采购明细</span>;
+  }
+  return (
+    <DataTable<PurchaseOrderItem>
+      size="small"
+      rowKey="id"
+      dataSource={row.items}
+      pagination={false}
+      emptyTitle="无明细"
+      columns={EXPANDED_PO_ITEM_COLUMNS}
+    />
+  );
+}
 
 /** Reuse the list URL; only fetch images when a selected SKU is not in that list. */
 function SkuThumbnail({ skuId, url }: { skuId?: string; url?: string | null }) {

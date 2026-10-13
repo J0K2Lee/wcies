@@ -8,6 +8,7 @@ import { ProcurementState } from '../enums/purchase.constants';
 export interface PurchaseOrderListFilters {
   keyword?: string;
   status?: string;
+  statuses?: string[];
   supplierId?: string;
   orderItemId?: string;
   orderedFrom?: Date;
@@ -111,6 +112,7 @@ export class PurchaseOrderRepository {
       expectedAt: Date | null;
       remark: string | null;
       createdBy: string | null;
+      receivingWarehouseId: string | null;
     },
     items: Array<{
       skuId: string;
@@ -203,6 +205,9 @@ export class PurchaseOrderRepository {
     }
     if (filters.status !== undefined) {
       qb.andWhere('po.status = :status', { status: filters.status });
+    }
+    if (filters.statuses !== undefined && filters.statuses.length > 0) {
+      qb.andWhere('po.status IN (:...statuses)', { statuses: filters.statuses });
     }
     if (filters.supplierId !== undefined) {
       qb.andWhere('po.supplier_id = :supplierId', { supplierId: filters.supplierId });

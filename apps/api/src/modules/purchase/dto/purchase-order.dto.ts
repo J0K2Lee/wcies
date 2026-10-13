@@ -132,6 +132,12 @@ export class PurchaseOrderListItemDto {
   @ApiProperty({ type: Date }) orderedAt!: Date;
   @ApiPropertyOptional({ nullable: true, type: Date }) expectedAt!: Date | null;
   @ApiPropertyOptional({ nullable: true }) remark!: string | null;
+  @ApiPropertyOptional({
+    nullable: true,
+    format: 'uuid',
+    description: '收货仓库意向（创建时选择，回显用；库存事实仍在收货单上）',
+  })
+  receivingWarehouseId!: string | null;
   @ApiProperty() itemCount!: number;
   @ApiProperty({ example: '2.000' }) totalQuantity!: string;
   @ApiProperty({ type: Date }) createdAt!: Date;
@@ -148,6 +154,8 @@ export class PurchaseOrderDetailDto {
   @ApiProperty({ type: Date }) orderedAt!: Date;
   @ApiPropertyOptional({ nullable: true, type: Date }) expectedAt!: Date | null;
   @ApiPropertyOptional({ nullable: true }) remark!: string | null;
+  @ApiPropertyOptional({ nullable: true, format: 'uuid' }) receivingWarehouseId!: string | null;
+  @ApiPropertyOptional({ nullable: true }) receivingWarehouseName!: string | null;
   @ApiProperty({ type: Date }) createdAt!: Date;
   @ApiProperty({ type: Date }) updatedAt!: Date;
   @ApiProperty({ type: [PurchaseOrderItemDto] }) items!: PurchaseOrderItemDto[];
@@ -163,6 +171,17 @@ export class PurchaseOrderListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsIn(PURCHASE_ORDER_STATUSES)
   status?: string;
+  @ApiPropertyOptional({
+    enum: PURCHASE_ORDER_STATUSES,
+    isArray: true,
+    description:
+      '多状态过滤（repeated query key，如 ?statuses=ORDERED&statuses=PARTIALLY_RECEIVED）',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsIn(PURCHASE_ORDER_STATUSES, { each: true })
+  statuses?: string[];
   @ApiPropertyOptional() @IsOptional() @IsUUID() supplierId?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() orderItemId?: string;
   @ApiPropertyOptional({ example: '2026-09-01T00:00:00Z' })

@@ -86,7 +86,12 @@ export class UpdatePurchaseReceiptRequestDto {
 }
 
 export class GenerateReceiptFromPoRequestDto {
-  @ApiProperty() @IsUUID() warehouseId!: string;
+  @ApiPropertyOptional({
+    description: '收货仓库（可省略：省略时使用采购单上的收货仓库意向，ERP 建议#4）',
+  })
+  @IsOptional()
+  @IsUUID()
+  warehouseId?: string;
   @ApiPropertyOptional({ description: '默认目标库位（明细可单独覆盖）' })
   @IsOptional()
   @IsUUID()

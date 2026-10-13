@@ -97,6 +97,12 @@ ORDERED → PARTIALLY_RECEIVED → RECEIVED
    草稿创建失败则采购单与草稿整体回滚，并分别记录成功创建的单据日志。
    **自动生成的只是独立草稿，不入账库存、不更新成本；仍可独立编辑，确认收货仍走 §4.3。**
    本节第 5、6 条规则来源：用户 2026-09-17 人工测试建议。
+7. **收货仓库意向回显（2026-09-28，ERP 建议#4）**：创建时传入的 `receipt.warehouseId`
+   同时落到采购单头 `purchase_orders.receiving_warehouse_id`（可空，创建后不可改）。
+   它只是"选过哪个仓库"的意向回显——库存事实仍在收货单上（decision 0013 不变）。
+   用途：① PO 详情展示收货仓库；② 收货页「从采购单生成」入口在请求未显式指定
+   `warehouseId` 时缺省使用该意向仓库；③ 历史数据由迁移按"该 PO 名下所有收货单仓库
+   唯一"回填，冲突/无收货单的 PO 保持 NULL（迁移日志输出计数，不静默猜测）。
 
 ## 3.4 防重复采购（后端强制）
 
@@ -273,6 +279,7 @@ Operation Log
 | `PURCHASE_RECEIPT_NOT_FOUND` | 收货单不存在 |
 | `PURCHASE_RECEIPT_INVALID_STATE` | 收货单状态不允许该操作 |
 | `PURCHASE_RECEIPT_EMPTY` | 收货单无明细不可确认 |
+| `PURCHASE_RECEIPT_WAREHOUSE_MISSING` | 从采购单生成收货单时请求与 PO 意向均未指定仓库（ERP 建议#4） |
 | `WAREHOUSE_NOT_FOUND` | 收货仓库不存在（含创建采购单时可选自动生成草稿） |
 
 统一错误信封（AGENTS.md §66）。

@@ -85,3 +85,16 @@ export class PurchaseReceiptEmptyError extends DomainError {
     super('收货单没有任何明细，不能确认收货', { receiptId });
   }
 }
+
+/**
+ * 从采购单生成收货单时既没有显式指定仓库、PO 上也没有收货仓库意向
+ * （2026-09-28，ERP 建议#4：PO 创建时选过的仓库应被缺省使用）。
+ */
+export class PurchaseReceiptWarehouseMissingError extends DomainError {
+  readonly code = 'PURCHASE_RECEIPT_WAREHOUSE_MISSING';
+  readonly httpStatus = 422;
+
+  constructor(poNo: string) {
+    super(`采购单 ${poNo} 未指定收货仓库，请先选择收货仓库`, { poNo });
+  }
+}

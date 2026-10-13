@@ -46,6 +46,14 @@ export class PurchaseOrderEntity {
   @Column({ type: 'uuid', name: 'created_by', nullable: true })
   createdBy!: string | null;
 
+  /**
+   * 收货仓库意向（2026-09-28，ERP 建议#4）：创建时勾选"同时生成收货单草稿"
+   * 所选仓库的回显。库存事实仍在收货单上（decision 0013 不变）——本字段
+   * 只供 PO 详情展示与收货页「从采购单生成」缺省预填，创建后不可改。
+   */
+  @Column({ type: 'uuid', name: 'receiving_warehouse_id', nullable: true })
+  receivingWarehouseId!: string | null;
+
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;
 

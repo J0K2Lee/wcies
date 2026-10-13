@@ -1,7 +1,18 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { App as AntdApp, Button, Drawer, Form, Input, InputNumber, Modal, Select } from 'antd';
+import {
+  App as AntdApp,
+  Button,
+  Drawer,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Select,
+  Tabs,
+} from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
+import { ColumnsType } from 'antd/es/table';
 import { apiPost, useApiQuery } from '../../api/hooks';
 import { apiClient } from '../../api/client';
 import { fmtDateTime } from '../../utils/format';
@@ -94,6 +105,19 @@ const STATUS_META: Record<string, { tone: 'info' | 'success' | 'neutral'; label:
 
 type Envelope<T> = { data: T; meta: { total: number } };
 
+/**
+ * 状态标签页（用户需求 2026-10-09）：默认聚焦「待收货」（草稿——尚未确认
+ * 入库的收货单）；已收货/已取消各一档，全部 = 不筛选。
+ */
+type ReceiptStatusTab = 'pending' | 'received' | 'cancelled' | 'all';
+
+const RECEIPT_STATUS_TAB_FILTERS: Record<ReceiptStatusTab, { status?: string }> = {
+  pending: { status: 'DRAFT' },
+  received: { status: 'RECEIVED' },
+  cancelled: { status: 'CANCELLED' },
+  all: {},
+};
+
 function finiteNumber(value: string | number | null | undefined): number | undefined {
   if (value === null || value === undefined || String(value).trim() === '') return undefined;
   const parsed = Number(value);
@@ -164,7 +188,7 @@ export function PurchaseReceiptsPage() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState('');
-  const [status, setStatus] = useState<string | undefined>();
+  const [statusTab, setStatusTab] = useState<ReceiptStatusTab>('pending');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -175,26 +199,27 @@ export function PurchaseReceiptsPage() {
   const [fromPoForm] = Form.useForm<{ poId: string; warehouseId: string }>();
   const watchedWarehouseId = Form.useWatch('warehouseId', form);
 
+  const tabFilter = RECEIPT_STATUS_TAB_FILTERS[statusTab];
   const list = useApiQuery<Envelope<ReceiptRow[]>>(
     '/api/v1/purchase-receipts',
     {
       page,
       pageSize: 50,
       ...(keyword ? { keyword } : {}),
-      ...(status ? { status } : {}),
+      ...(tabFilter.status !== undefined ? { status: tabFilter.status } : {}),
     },
-    ['purchase-receipts', page, keyword, status],
+    ['purchase-receipts', page, keyword, statusTab],
   );
 
   const warehouses = useApiQuery<
     Envelope<Array<{ id: string; warehouseCode: string; name: string }>>
   >('/api/v1/warehouses', { page: 1, pageSize: 100 }, ['warehouses-for-receipt']);
 
-  const openPos = useApiQuery<Envelope<Array<{ id: string; poNo: string; status: string }>>>(
-    '/api/v1/purchase-orders',
-    { page: 1, pageSize: 100 },
-    ['pos-for-receipt'],
-  );
+  const openPos = useApiQuery<
+    Envelope<
+      Array<{ id: string; poNo: string; status: string; receivingWarehouseId: string | null }>
+    >
+  >('/api/v1/purchase-orders', { page: 1, pageSize: 100 }, ['pos-for-receipt']);
 
   // One cached detail query shared by the rail (edit entry) and the drawer,
   // keyed on whichever receipt is focused (Phase 2 task §68 pattern).
@@ -353,21 +378,31 @@ export function PurchaseReceiptsPage() {
     onError: (error: Error) => void message.error(error.message),
   });
 
-  const openEditor = useCallback((receipt: ReceiptDetail) => {
-    setItems(
-      receipt.items.map((item) => ({
-        skuId: item.skuId,
-        label: `${item.skuCode} · ${item.skuName}`,
-        serialTracking: item.serialNumbers !== null,
-        quantity: Number(item.quantity),
-        unitCost: item.unitCost === null ? undefined : Number(item.unitCost),
-        binId: item.binId ?? undefined,
-        serialNumbersText: item.serialNumbers?.join('\n') ?? '',
-        purchaseOrderItemId: item.purchaseOrderItemId ?? undefined,
-      })),
-    );
-    setEditing(receipt);
-  }, []);
+  const openEditor = useCallback(
+    (receipt: ReceiptDetail) => {
+      setItems(
+        receipt.items.map((item) => ({
+          skuId: item.skuId,
+          label: `${item.skuCode} · ${item.skuName}`,
+          serialTracking: item.serialNumbers !== null,
+          quantity: Number(item.quantity),
+          unitCost: item.unitCost === null ? undefined : Number(item.unitCost),
+          binId: item.binId ?? undefined,
+          serialNumbersText: item.serialNumbers?.join('\n') ?? '',
+          purchaseOrderItemId: item.purchaseOrderItemId ?? undefined,
+        })),
+      );
+      // 草稿上已有的事实必须回显（用户反馈 2026-09-28）：仓库不可改（Select
+      // disabled），但绝不能显示成空；货源说明/备注一并回填。
+      form.setFieldsValue({
+        warehouseId: receipt.warehouseId,
+        sourceNote: receipt.sourceNote ?? undefined,
+        remark: receipt.remark ?? undefined,
+      });
+      setEditing(receipt);
+    },
+    [form],
+  );
 
   const [checkingReceipt, setCheckingReceipt] = useState(false);
   const requestConfirm = useCallback(
@@ -600,21 +635,23 @@ export function PurchaseReceiptsPage() {
           style={{ width: 240 }}
           aria-label="搜索收货单"
         />
-        <Select
-          allowClear
-          placeholder="状态"
-          style={{ width: 120 }}
-          options={Object.entries(STATUS_META).map(([value, meta]) => ({
-            value,
-            label: meta.label,
-          }))}
-          value={status}
-          onChange={(value) => {
-            setPage(1);
-            setStatus(value);
-          }}
-        />
       </FilterBar>
+
+      {/* 状态标签页（需求 2026-10-09）：默认聚焦待收货（草稿），替代原状态下拉。 */}
+      <Tabs
+        activeKey={statusTab}
+        onChange={(key) => {
+          setPage(1);
+          setStatusTab(key as ReceiptStatusTab);
+          setSelectedId(null);
+        }}
+        items={[
+          { key: 'pending', label: '待收货' },
+          { key: 'received', label: '已收货' },
+          { key: 'cancelled', label: '已取消' },
+          { key: 'all', label: '全部' },
+        ]}
+      />
 
       <SectionCard flush>
         <DataTable<ReceiptRow>
@@ -627,6 +664,17 @@ export function PurchaseReceiptsPage() {
             total: list.data?.meta.total ?? 0,
             showTotal: (total) => `共 ${total} 单`,
             onChange: setPage,
+          }}
+          expandable={{
+            // 选中即展开（与订单/采购单页一致）：行点击选择驱动展开，
+            // 直接显示该单的收货商品明细（需求 2026-10-09）。
+            expandedRowKeys: selectedId === null ? [] : [selectedId],
+            showExpandColumn: false,
+            expandedRowRender: (row: ReceiptRow) => (
+              <div onClick={(event) => event.stopPropagation()}>
+                <ExpandedReceiptItems receiptId={row.id} />
+              </div>
+            ),
           }}
           onRow={(record) => ({
             onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
@@ -921,6 +969,12 @@ export function PurchaseReceiptsPage() {
               options={(openPos.data?.data ?? [])
                 .filter((po) => po.status === 'ORDERED' || po.status === 'PARTIALLY_RECEIVED')
                 .map((po) => ({ value: po.id, label: `${po.poNo}（${po.status}）` }))}
+              onChange={(value: string) => {
+                // 收货仓库自动预填（ERP 建议#4）：PO 创建时选过的仓库直接带出，
+                // 仍可手动改。
+                const po = (openPos.data?.data ?? []).find((row) => row.id === value);
+                fromPoForm.setFieldValue('warehouseId', po?.receivingWarehouseId ?? undefined);
+              }}
             />
           </Form.Item>
           <Form.Item
@@ -936,6 +990,90 @@ export function PurchaseReceiptsPage() {
         </Form>
       </Modal>
     </div>
+  );
+}
+
+/**
+ * 展开行明细列（需求 2026-10-09）：紧凑视图——SKU/数量/成本/小计/库位/S。
+ */
+const EXPANDED_RECEIPT_ITEM_COLUMNS: ColumnsType<ReceiptItem> = [
+  {
+    title: 'SKU',
+    key: 'sku',
+    render: (_: unknown, row: ReceiptItem) => (
+      <div>
+        <span style={{ fontWeight: 550 }}>{row.skuCode}</span>
+        <span style={{ fontSize: 12.5, color: colors.textSecondary, marginLeft: 8 }}>
+          {row.skuName}
+        </span>
+      </div>
+    ),
+  },
+  {
+    title: '数量',
+    dataIndex: 'quantity',
+    key: 'quantity',
+    width: 70,
+    align: 'right' as const,
+  },
+  {
+    title: '单位成本',
+    dataIndex: 'unitCost',
+    key: 'unitCost',
+    width: 90,
+    align: 'right' as const,
+    render: (value: string | null) => (value === null ? '—' : Number(value).toFixed(4)),
+  },
+  {
+    title: '小计',
+    key: 'subtotal',
+    width: 110,
+    align: 'right' as const,
+    render: (_: unknown, row: ReceiptItem) => lineSubtotal(row)?.toFixed(4) ?? '—',
+  },
+  {
+    title: '入库库位',
+    key: 'bin',
+    width: 130,
+    render: (_: unknown, row: ReceiptItem) =>
+      row.binCode ?? <span style={{ color: colors.textTertiary }}>自动（DEFAULT）</span>,
+  },
+  {
+    title: 'SN',
+    key: 'sn',
+    width: 70,
+    render: (_: unknown, row: ReceiptItem) =>
+      row.serialNumbers === null ? '—' : `${row.serialNumbers.length} 件`,
+  },
+];
+
+/**
+ * 展开行内容（需求 2026-10-09）：与详情抽屉/右栏共用
+ * `['purchase-receipt-detail', id]` 缓存键，展开选中行不产生额外请求。
+ */
+function ExpandedReceiptItems({ receiptId }: { receiptId: string }) {
+  const detailQuery = useApiQuery<{ data: ReceiptDetail }>(
+    '/api/v1/purchase-receipts/{id}',
+    {},
+    ['purchase-receipt-detail', receiptId],
+    { id: receiptId },
+  );
+  if (detailQuery.isLoading) {
+    return <span style={{ fontSize: 12.5, color: colors.textTertiary }}>收货明细加载中…</span>;
+  }
+  const row = detailQuery.data?.data;
+  if (row === undefined || row.id !== receiptId) {
+    return <span style={{ fontSize: 12.5, color: colors.textTertiary }}>暂无收货明细</span>;
+  }
+  return (
+    <DataTable<ReceiptItem>
+      size="small"
+      rowKey="id"
+      dataSource={row.items}
+      pagination={false}
+      emptyTitle="无明细"
+      columns={EXPANDED_RECEIPT_ITEM_COLUMNS}
+    />
   );
 }
 

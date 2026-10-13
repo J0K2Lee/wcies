@@ -32,6 +32,7 @@ import {
   PurchaseReceiptEmptyError,
   PurchaseReceiptInvalidStateError,
   PurchaseReceiptNotFoundError,
+  PurchaseReceiptWarehouseMissingError,
   SupplierNotFoundError,
 } from '../errors/purchase-errors';
 import { SupplierService } from './supplier.service';
@@ -107,7 +108,7 @@ export class PurchaseReceiptService {
   /** One-click prefill from a purchase order (task §T4.4). */
   async generateFromPo(
     poId: string,
-    dto: { warehouseId: string; defaultBinId?: string },
+    dto: { warehouseId?: string; defaultBinId?: string },
     operator: OperatorContext,
   ): Promise<PurchaseReceiptDetailDto> {
     const po = await this.poRepository.findById(poId);
@@ -120,7 +121,13 @@ export class PurchaseReceiptService {
         status: po.status,
       });
     }
-    await this.assertWarehouseExists(dto.warehouseId);
+    // 仓库来源（ERP 建议#4）：请求显式指定优先，否则用 PO 上的收货仓库意向；
+    // 两者皆无才是错误（前端会对已选仓库的 PO 自动预填，正常到不了这里）。
+    const warehouseId = dto.warehouseId ?? po.receivingWarehouseId;
+    if (warehouseId === null || warehouseId === undefined) {
+      throw new PurchaseReceiptWarehouseMissingError(po.poNo);
+    }
+    await this.assertWarehouseExists(warehouseId);
 
     const items = (await this.poRepository.findItemsWithRefs(poId))
       .map((row) => ({
@@ -144,7 +151,7 @@ export class PurchaseReceiptService {
           purchaseOrderId: po.id,
           supplierId: po.supplierId,
           sourceNote: po.sourceNote,
-          warehouseId: dto.warehouseId,
+          warehouseId,
           status: 'DRAFT',
           remark: `从采购单 ${po.poNo} 生成`,
           createdBy: operator.userId,

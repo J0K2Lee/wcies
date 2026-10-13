@@ -105,6 +105,8 @@ export class PurchaseOrderService {
           expectedAt: dto.expectedAt ?? null,
           remark: dto.remark ?? null,
           createdBy: operator.userId,
+          // 收货仓库意向回显（ERP 建议#4）：与收货草稿同源同值。
+          receivingWarehouseId: dto.receipt?.warehouseId ?? null,
         },
         dto.items.map((item) => ({
           skuId: item.skuId,
@@ -297,6 +299,7 @@ export class PurchaseOrderService {
     const filters: PurchaseOrderListFilters = {
       keyword: query.keyword?.trim() || undefined,
       status: query.status,
+      statuses: query.statuses,
       supplierId: query.supplierId,
       orderItemId: query.orderItemId,
       orderedFrom: query.orderedFrom,
@@ -314,6 +317,7 @@ export class PurchaseOrderService {
         orderedAt: row.order.orderedAt,
         expectedAt: row.order.expectedAt,
         remark: row.order.remark,
+        receivingWarehouseId: row.order.receivingWarehouseId,
         itemCount: row.itemCount,
         totalQuantity: row.totalQuantity,
         createdAt: row.order.createdAt,
@@ -326,6 +330,11 @@ export class PurchaseOrderService {
   async getDetail(id: string): Promise<PurchaseOrderDetailDto> {
     const order = await this.findOrThrow(id);
     const items = await this.repository.findItemsWithRefs(order.id);
+    // 收货仓库名称解析（ERP 建议#4 回显）：仅详情单查一次，列表不 join。
+    const receivingWarehouse =
+      order.receivingWarehouseId === null
+        ? null
+        : await this.warehouseService.getEntityById(order.receivingWarehouseId);
     return {
       id: order.id,
       poNo: order.poNo,
@@ -336,6 +345,8 @@ export class PurchaseOrderService {
       orderedAt: order.orderedAt,
       expectedAt: order.expectedAt,
       remark: order.remark,
+      receivingWarehouseId: order.receivingWarehouseId,
+      receivingWarehouseName: receivingWarehouse?.name ?? null,
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,
       items: items.map((row) => ({

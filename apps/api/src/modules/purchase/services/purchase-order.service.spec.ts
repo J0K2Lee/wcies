@@ -29,6 +29,7 @@ const po: PurchaseOrderEntity = {
   expectedAt: null,
   remark: null,
   createdBy: null,
+  receivingWarehouseId: null,
   createdAt: new Date(),
   updatedAt: new Date(),
 };
@@ -143,6 +144,10 @@ describe('purchase order optional receiving draft', () => {
         remark: null,
       })),
     );
+    // 收货仓库意向与收货草稿同源落库（ERP 建议#4）。
+    expect(ctx.repository.insertWithItems.mock.calls[0]?.[1]).toMatchObject({
+      receivingWarehouseId: 'wh-1',
+    });
     expect(ctx.log.record).toHaveBeenCalledWith(
       expect.objectContaining({
         entityType: 'PURCHASE_RECEIPT',
@@ -169,9 +174,13 @@ describe('purchase order optional receiving draft', () => {
     expect(ctx.receipts.insertWithItems).not.toHaveBeenCalled();
     expect(ctx.codes.nextPurchaseReceiptNo).not.toHaveBeenCalled();
     expect(ctx.warehouse.getEntityById).not.toHaveBeenCalled();
-    const header = ctx.repository.insertWithItems.mock.calls[0]?.[1] as { orderedAt: Date };
+    const header = ctx.repository.insertWithItems.mock.calls[0]?.[1] as {
+      orderedAt: Date;
+      receivingWarehouseId: string | null;
+    };
     expect(header.orderedAt.getTime()).toBeGreaterThanOrEqual(before);
     expect(header.orderedAt.getTime()).toBeLessThanOrEqual(Date.now());
+    expect(header.receivingWarehouseId).toBeNull();
     expect(ctx.log.record).toHaveBeenCalledTimes(1);
   });
 
