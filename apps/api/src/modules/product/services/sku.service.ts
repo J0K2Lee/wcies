@@ -8,11 +8,14 @@ import {
 } from '../../operation-log/operation-log.service';
 import { BusinessCodeService } from '../../../infrastructure/business-code/business-code.service';
 import { ObjectStorageService } from '../../../infrastructure/storage/object-storage.service';
+import { CatalogService } from '../../catalog/catalog.service';
+import {
+  BrandNotFoundError,
+  CategoryLevelInvalidError,
+  CategoryNotFoundError,
+} from '../../catalog/errors/catalog-errors';
 import { SKU_HISTORY_TABLES } from '../constants/sku-delete.constants';
 import { SkuEntity } from '../entities/sku.entity';
-import { ProductEntity } from '../entities/product.entity';
-import { ImageNotFoundError } from '../errors/image-errors';
-import { ProductNotFoundError } from '../errors/product-errors';
 import {
   SkuCodeAlreadyExistsError,
   SkuDimensionsInvalidError,
@@ -21,8 +24,6 @@ import {
   SkuNotFoundError,
 } from '../errors/sku-errors';
 import { SkuRepository } from '../repositories/sku.repository';
-import { SkuImageRepository } from '../repositories/sku-image.repository';
-import { ProductRepository } from '../repositories/product.repository';
 import {
   CreateSkuRequestDto,
   SkuListItemDto,
@@ -62,21 +63,27 @@ export function assertDimensionsConsistent(
 /**
  * Internal SKU master data (task §20-§27).
  *
- * sku_code: auto-generated (SKU{product seq 6}{in-product seq 3}, decision
- * 0002) when omitted, always globally unique and frozen after creation.
- * Units (2026-09-09 convention): weight in g, dimensions in integer mm;
- * volume_mm3 is backend-computed from L x W x H, never accepted from clients.
- * moving_average_cost: reserved, stays null until the purchase sprint.
+ * V1 refactor (2026-10-13, decisions D2/D3/D5): the product layer is gone -
+ * a SKU is created directly (no productId), coded from the single global
+ * sequence (SKU%09d), and carries its own category/brand (optional; the
+ * category must be level 3, decision 0005). The DRAFT "incomplete archive"
+ * semantics of the deleted Product layer did NOT migrate: every creation
+ * path lands on ACTIVE, and `POST /skus` keeps its previous default.
+ *
+ * sku_code: auto-generated when omitted, always globally unique and frozen
+ * after creation. Units (2026-09-09 convention): weight in g, dimensions in
+ * integer mm; volume_mm3 is backend-computed from L x W x H, never accepted
+ * from clients. moving_average_cost: reserved, stays null until the purchase
+ * sprint.
  */
 @Injectable()
 export class SkuService {
   constructor(
     private readonly repository: SkuRepository,
-    private readonly productRepository: ProductRepository,
-    private readonly imageRepository: SkuImageRepository,
     private readonly objectStorage: ObjectStorageService,
     private readonly businessCode: BusinessCodeService,
     private readonly operationLog: OperationLogService,
+    private readonly catalogService: CatalogService,
   ) {}
 
   async list(
@@ -86,7 +93,6 @@ export class SkuService {
     const { rows, total } = await this.repository.listWithAggregates(
       {
         keyword: query.keyword?.trim() || undefined,
-        productId: query.productId,
         brandId: query.brandId,
         categoryId: query.categoryId,
         status: query.status,
@@ -104,9 +110,7 @@ export class SkuService {
 
     const items = await Promise.all(
       rows.map(async (row) => ({
-        ...this.toResponse(row.sku, row.productCode, row.productName),
-        brandId: row.brandId,
-        brandName: row.brandName,
+        ...this.toResponse(row.sku, row.brandName, row.categoryName),
         primaryBarcode: row.primaryBarcode,
         primaryImageUrl:
           row.primaryImageKey === null
@@ -119,14 +123,20 @@ export class SkuService {
   }
 
   async create(dto: CreateSkuRequestDto, operator: OperatorContext): Promise<SkuResponseDto> {
-    const product = await this.productRepository.findById(dto.productId);
-    if (product === null) {
-      throw new ProductNotFoundError(dto.productId);
-    }
+    // Optional brand/category (D5): same rules the product create used -
+    // brand must exist; category must exist and be level 3 (decision 0005).
+    const brand =
+      dto.brandId === undefined || dto.brandId === null
+        ? null
+        : await this.assertBrandExists(dto.brandId);
+    const category =
+      dto.categoryId === undefined || dto.categoryId === null
+        ? null
+        : await this.assertCategoryExists(dto.categoryId);
 
     let skuCode = dto.skuCode?.trim();
     if (skuCode === undefined || skuCode === '') {
-      skuCode = await this.businessCode.nextSkuCode(product.id, product.codeSeq);
+      skuCode = await this.businessCode.nextSkuCodeGlobal();
     } else {
       const existing = await this.repository.findByCode(skuCode);
       if (existing !== null) {
@@ -141,10 +151,11 @@ export class SkuService {
     const volumeMm3 = computeVolumeMm3(lengthMm, widthMm, heightMm);
 
     const sku = await this.repository.insert({
-      productId: product.id,
       skuCode,
       nameZh: dto.nameZh,
       nameRu: dto.nameRu ?? null,
+      categoryId: category?.id ?? null,
+      brandId: brand?.id ?? null,
       model: dto.model ?? null,
       color: dto.color ?? null,
       size: dto.size ?? null,
@@ -170,12 +181,13 @@ export class SkuService {
       changes: { skuCode: { from: null, to: sku.skuCode }, nameZh: { from: null, to: sku.nameZh } },
       operator,
     });
-    return this.toResponse(sku, product.productCode, product.nameZh);
+    return this.toResponse(sku, brand?.name ?? null, category?.nameZh ?? null);
   }
 
   async getById(id: string): Promise<SkuResponseDto> {
-    const found = await this.findWithProductOrThrow(id);
-    return this.toResponse(found.sku, found.productCode, found.productName);
+    const sku = await this.findOrThrow(id);
+    const names = await this.resolveNames(sku);
+    return this.toResponse(sku, names.brandName, names.categoryName);
   }
 
   async update(
@@ -183,21 +195,31 @@ export class SkuService {
     dto: UpdateSkuRequestDto,
     operator: OperatorContext,
   ): Promise<SkuResponseDto> {
-    const found = await this.findWithProductOrThrow(id);
-    const before = this.snapshot(found.sku);
+    const existing = await this.findOrThrow(id);
+    const before = this.snapshot(existing);
 
     // skuCode is frozen after generation (decision 0002): printed labels and
     // historical documents reference it.
 
-    const mergedLength = dto.lengthMm !== undefined ? dto.lengthMm : found.sku.lengthMm;
-    const mergedWidth = dto.widthMm !== undefined ? dto.widthMm : found.sku.widthMm;
-    const mergedHeight = dto.heightMm !== undefined ? dto.heightMm : found.sku.heightMm;
+    const mergedLength = dto.lengthMm !== undefined ? dto.lengthMm : existing.lengthMm;
+    const mergedWidth = dto.widthMm !== undefined ? dto.widthMm : existing.widthMm;
+    const mergedHeight = dto.heightMm !== undefined ? dto.heightMm : existing.heightMm;
     assertDimensionsConsistent(mergedLength, mergedWidth, mergedHeight);
     const volumeMm3 = computeVolumeMm3(mergedLength, mergedWidth, mergedHeight);
+
+    // category/brand follow the same rules as create(); null explicitly clears.
+    if (dto.brandId !== undefined && dto.brandId !== null) {
+      await this.assertBrandExists(dto.brandId);
+    }
+    if (dto.categoryId !== undefined && dto.categoryId !== null) {
+      await this.assertCategoryExists(dto.categoryId);
+    }
 
     const patch: Partial<SkuEntity> = {};
     if (dto.nameZh !== undefined) patch.nameZh = dto.nameZh;
     if (dto.nameRu !== undefined) patch.nameRu = dto.nameRu;
+    if (dto.categoryId !== undefined) patch.categoryId = dto.categoryId;
+    if (dto.brandId !== undefined) patch.brandId = dto.brandId;
     if (dto.model !== undefined) patch.model = dto.model;
     if (dto.color !== undefined) patch.color = dto.color;
     if (dto.size !== undefined) patch.size = dto.size;
@@ -217,16 +239,17 @@ export class SkuService {
     if (dto.remark !== undefined) patch.remark = dto.remark;
 
     await this.repository.update(id, patch);
-    const updated = await this.findWithProductOrThrow(id);
+    const updated = await this.findOrThrow(id);
+    const names = await this.resolveNames(updated);
     await this.operationLog.record({
       entityType: ENTITY_TYPE,
       entityId: id,
-      entityCode: updated.sku.skuCode,
+      entityCode: updated.skuCode,
       action: 'UPDATE',
-      changes: diffOf(before, this.snapshot(updated.sku)),
+      changes: diffOf(before, this.snapshot(updated)),
       operator,
     });
-    return this.toResponse(updated.sku, updated.productCode, updated.productName);
+    return this.toResponse(updated, names.brandName, names.categoryName);
   }
 
   async setStatus(
@@ -234,28 +257,20 @@ export class SkuService {
     status: 'DRAFT' | 'ACTIVE' | 'INACTIVE',
     operator: OperatorContext,
   ): Promise<SkuResponseDto> {
-    const found = await this.findWithProductOrThrow(id);
+    const existing = await this.findOrThrow(id);
     await this.repository.update(id, { status });
     await this.operationLog.record({
       entityType: ENTITY_TYPE,
       entityId: id,
-      entityCode: found.sku.skuCode,
+      entityCode: existing.skuCode,
       action:
         status === 'ACTIVE' ? 'ACTIVATE' : status === 'INACTIVE' ? 'DEACTIVATE' : 'STATUS_CHANGE',
-      changes: { status: { from: found.sku.status, to: status } },
+      changes: { status: { from: existing.status, to: status } },
       operator,
     });
-    const updated = await this.findWithProductOrThrow(id);
-    return this.toResponse(updated.sku, updated.productCode, updated.productName);
-  }
-
-  async listByProductId(productId: string): Promise<SkuResponseDto[]> {
-    const product = await this.productRepository.findById(productId);
-    if (product === null) {
-      throw new ProductNotFoundError(productId);
-    }
-    const skus = await this.repository.listByProductIds([productId]);
-    return skus.map((sku) => this.toResponse(sku, product.productCode, product.nameZh));
+    const updated = await this.findOrThrow(id);
+    const names = await this.resolveNames(updated);
+    return this.toResponse(updated, names.brandName, names.categoryName);
   }
 
   /** Cross-module lookups (listing / import services). */
@@ -302,8 +317,8 @@ export class SkuService {
   }
 
   /**
-   * Cross-module tx participant (Sprint 8 T1): creates the SKU row on the
-   * CALLER's transaction with the standard derived code (decision 0002).
+   * Cross-module tx participant (Sprint 8 T1; V1 refactor D2/D3/D5): creates
+   * the SKU row on the CALLER's transaction with the global code (SKU%09d).
    * Logging stays with the caller (after commit).
    *
    * Sprint 8.5 T5: optional physical attributes (v4-enriched prefills,
@@ -314,12 +329,16 @@ export class SkuService {
    * Sprint 8.5R1: optional latest purchase price - the human-entry channel
    * for master-data §4.3 (`latest_purchase_price` is operator-maintained and
    * independent of the moving average cost, which only receipts confirm).
+   *
+   * V1: brand/category land on the SKU itself (D5) with the same validation
+   * rules as create(); the SKU is ACTIVE from birth (D3).
    */
   async createForOnboardingInTx(
     manager: EntityManager,
     input: {
-      productId: string;
       nameZh: string;
+      brandId?: string | null;
+      categoryId?: string | null;
       weightG?: number | null;
       lengthMm?: number | null;
       widthMm?: number | null;
@@ -327,23 +346,29 @@ export class SkuService {
       latestPurchasePrice?: number | null;
     },
   ): Promise<SkuEntity> {
-    const product = await manager.getRepository(ProductEntity).findOneBy({
-      id: input.productId,
-    });
-    if (product === null) {
-      throw new ProductNotFoundError(input.productId);
-    }
+    const brand =
+      input.brandId === undefined || input.brandId === null
+        ? null
+        : await this.assertBrandExists(input.brandId);
+    const category =
+      input.categoryId === undefined || input.categoryId === null
+        ? null
+        : await this.assertCategoryExists(input.categoryId);
+
     const lengthMm = input.lengthMm ?? null;
     const widthMm = input.widthMm ?? null;
     const heightMm = input.heightMm ?? null;
     assertDimensionsConsistent(lengthMm, widthMm, heightMm);
-    const skuCode = await this.businessCode.nextSkuCode(product.id, product.codeSeq, manager);
+    // Global sequence consumed INSIDE the caller's transaction: a rollback
+    // returns the number instead of burning it.
+    const skuCode = await this.businessCode.nextSkuCodeGlobal(manager);
     const repository = manager.getRepository(SkuEntity);
     const created = repository.create({
-      productId: product.id,
       skuCode,
       nameZh: input.nameZh,
       nameRu: null,
+      categoryId: category?.id ?? null,
+      brandId: brand?.id ?? null,
       model: null,
       color: null,
       size: null,
@@ -365,7 +390,7 @@ export class SkuService {
 
   /** Zero-reference hard delete (decision 0003); referenced -> SKU_IN_USE. */
   async remove(id: string, operator: OperatorContext): Promise<void> {
-    const found = await this.findWithProductOrThrow(id);
+    const existing = await this.findOrThrow(id);
     const references = await this.repository.countReferences(id);
     const used = references.filter((reference) => reference.count > 0);
     if (used.length > 0) {
@@ -375,9 +400,9 @@ export class SkuService {
     await this.operationLog.record({
       entityType: ENTITY_TYPE,
       entityId: id,
-      entityCode: found.sku.skuCode,
+      entityCode: existing.skuCode,
       action: 'DELETE',
-      changes: { deleted: { from: found.sku.skuCode, to: null } },
+      changes: { deleted: { from: existing.skuCode, to: null } },
       operator,
     });
   }
@@ -394,7 +419,7 @@ export class SkuService {
    * never erase what actually happened.
    */
   async forceRemove(id: string, operator: OperatorContext): Promise<void> {
-    const found = await this.findWithProductOrThrow(id);
+    const existing = await this.findOrThrow(id);
     const blocking = await this.repository.countReferencesIn(id, SKU_HISTORY_TABLES);
     const used = blocking.filter((reference) => reference.count > 0);
     if (used.length > 0) {
@@ -404,9 +429,9 @@ export class SkuService {
     await this.operationLog.record({
       entityType: ENTITY_TYPE,
       entityId: id,
-      entityCode: found.sku.skuCode,
+      entityCode: existing.skuCode,
       action: 'FORCE_DELETE',
-      changes: { deleted: { from: found.sku.skuCode, to: null } },
+      changes: { deleted: { from: existing.skuCode, to: null } },
       operator,
     });
   }
@@ -415,55 +440,56 @@ export class SkuService {
     return this.repository.findByCode(skuCode);
   }
 
-  /**
-   * Business-history references of every SKU under a product, so a forced
-   * product delete can report exactly which SKU and table blocks it
-   * (decision 0008).
-   */
-  async findHistoryBlockersForProduct(
-    skuIds: string[],
-  ): Promise<Array<{ skuId: string; table: string; count: number }>> {
-    const blockers: Array<{ skuId: string; table: string; count: number }> = [];
-    for (const skuId of skuIds) {
-      const references = await this.repository.countReferencesIn(skuId, SKU_HISTORY_TABLES);
-      for (const reference of references) {
-        if (reference.count > 0) {
-          blockers.push({ skuId, table: reference.table, count: reference.count });
-        }
-      }
-    }
-    return blockers;
-  }
-
-  async assertImageBelongsToProduct(imageId: string, productId: string): Promise<void> {
-    const image = await this.imageRepository.findById(imageId);
-    if (image === null) {
-      throw new ImageNotFoundError(imageId);
-    }
-    const sku = await this.repository.findById(image.skuId);
-    if (sku === null || sku.productId !== productId) {
-      throw new ImageNotFoundError(imageId);
-    }
-  }
-
-  private async findWithProductOrThrow(
-    id: string,
-  ): Promise<{ sku: SkuEntity; productCode: string; productName: string }> {
+  private async findOrThrow(id: string): Promise<SkuEntity> {
     const sku = await this.repository.findById(id);
     if (sku === null) {
       throw new SkuNotFoundError(id);
     }
-    const product = await this.productRepository.findById(sku.productId);
-    if (product === null) {
-      throw new ProductNotFoundError(sku.productId);
+    return sku;
+  }
+
+  /** Brand must exist (reuses the catalog public Service; decision 0003 rules). */
+  private async assertBrandExists(brandId: string): Promise<{ id: string; name: string }> {
+    const brand = await this.catalogService.findBrandEntityById(brandId);
+    if (brand === null) {
+      throw new BrandNotFoundError(brandId);
     }
-    return { sku, productCode: product.productCode, productName: product.nameZh };
+    return brand;
+  }
+
+  /** Category must exist AND be level 3 (decision 0005). */
+  private async assertCategoryExists(categoryId: string): Promise<{ id: string; nameZh: string }> {
+    const category = await this.catalogService.findCategoryEntityById(categoryId);
+    if (category === null) {
+      throw new CategoryNotFoundError(categoryId);
+    }
+    if (category.level !== 3) {
+      throw new CategoryLevelInvalidError(categoryId, category.level);
+    }
+    return category;
+  }
+
+  private async resolveNames(sku: SkuEntity): Promise<{
+    brandName: string | null;
+    categoryName: string | null;
+  }> {
+    const brandName =
+      sku.brandId === null
+        ? null
+        : ((await this.catalogService.findBrandEntityById(sku.brandId))?.name ?? null);
+    const categoryName =
+      sku.categoryId === null
+        ? null
+        : ((await this.catalogService.findCategoryEntityById(sku.categoryId))?.nameZh ?? null);
+    return { brandName, categoryName };
   }
 
   private snapshot(sku: SkuEntity): Record<string, unknown> {
     return {
       skuCode: sku.skuCode,
       nameZh: sku.nameZh,
+      categoryId: sku.categoryId,
+      brandId: sku.brandId,
       model: sku.model,
       color: sku.color,
       size: sku.size,
@@ -480,15 +506,20 @@ export class SkuService {
     };
   }
 
-  toResponse(sku: SkuEntity, productCode: string, productName: string): SkuResponseDto {
+  private toResponse(
+    sku: SkuEntity,
+    brandName: string | null,
+    categoryName: string | null,
+  ): SkuResponseDto {
     return {
       id: sku.id,
       skuCode: sku.skuCode,
       nameZh: sku.nameZh,
       nameRu: sku.nameRu,
-      productId: sku.productId,
-      productCode,
-      productName,
+      categoryId: sku.categoryId,
+      categoryName,
+      brandId: sku.brandId,
+      brandName,
       model: sku.model,
       color: sku.color,
       size: sku.size,

@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { BarcodeService } from '../../product/services/barcode.service';
-import { ProductService } from '../../product/services/product.service';
 import { SkuService } from '../../product/services/sku.service';
 import { assertDimensionsConsistent } from '../../product/services/sku.service';
 import { ImportRowError } from '../entities/import-job.entity';
@@ -11,8 +10,6 @@ import { BARCODE_TYPES, BarcodeType } from '../../product/constants/barcode.cons
 
 interface SkuRowData {
   skuCode: string | null;
-  productCode: string | null;
-  productNameZh: string | null;
   nameZh: string;
   nameRu: string | null;
   model: string | null;
@@ -30,22 +27,23 @@ interface SkuRowData {
 
 /**
  * SKU fixed template (spec §87; units 2026-09-09: g / integer mm):
- * sku_code | product_code | product_name_zh | name_zh | name_ru | model |
+ * sku_code | name_zh | name_ru | model |
  * color | size | weight_g | length_mm | width_mm | height_mm |
  * latest_purchase_price | barcode | barcode_type | serial_tracking
  *
- * - sku_code empty -> auto-generated;
- * - product_code references an existing product, or creates one when
- *   product_name_zh is provided (task §58 lets SKU+product create together);
+ * - sku_code empty -> auto-generated (global SKU%09d sequence, V1 decision D2);
+ * - every row creates the SKU directly - the product layer is gone (V1);
  * - duplicate sku_code / barcode -> rejected with the exact row (task §61).
  * - length_mm / width_mm / height_mm must be integers.
+ *
+ * V1 改造（2026-10-13）：模板列与品牌/分类名称匹配由 T6 收尾
+ * （brand / category 可选列）。
  */
 @Injectable()
 export class SkuImportHandler implements ImportHandler {
   readonly type = 'SKU';
 
   constructor(
-    private readonly productService: ProductService,
     private readonly skuService: SkuService,
     private readonly barcodeService: BarcodeService,
   ) {}
@@ -62,16 +60,6 @@ export class SkuImportHandler implements ImportHandler {
       const rowErrorsBefore = errors.length;
 
       const nameZh = requiredField(rowNumber, cells, 'name_zh', errors);
-      const productCode = optionalField(cells, 'product_code');
-      const productNameZh = optionalField(cells, 'product_name_zh');
-      if (productCode === null && productNameZh === null) {
-        errors.push({
-          row: rowNumber,
-          field: 'product_code',
-          code: 'REQUIRED_FIELD_MISSING',
-          message: 'product_code 不存在时必须提供 product_name_zh 以便创建商品',
-        });
-      }
 
       const skuCode = optionalField(cells, 'sku_code');
       if (skuCode !== null) {
@@ -162,27 +150,12 @@ export class SkuImportHandler implements ImportHandler {
         }
       }
 
-      // Resolve product reference (existing or to-be-created).
-      if (productCode !== null) {
-        const product = await this.productService.getEntityByCode(productCode);
-        if (product === null && productNameZh === null) {
-          errors.push({
-            row: rowNumber,
-            field: 'product_code',
-            code: 'PRODUCT_NOT_FOUND',
-            message: `商品不存在: ${productCode}`,
-          });
-        }
-      }
-
       if (errors.length > rowErrorsBefore) {
         continue;
       }
 
       const data: SkuRowData = {
         skuCode,
-        productCode,
-        productNameZh,
         nameZh,
         nameRu: optionalField(cells, 'name_ru'),
         model: optionalField(cells, 'model'),
@@ -211,31 +184,9 @@ export class SkuImportHandler implements ImportHandler {
   ): Promise<void> {
     const row = raw as unknown as SkuRowData;
 
-    // Existing product or create one with the provided name (task §58).
-    let productId: string;
-    if (row.productCode !== null) {
-      const product = await this.productService.getEntityByCode(row.productCode);
-      if (product !== null) {
-        productId = product.id;
-      } else {
-        const created = await this.productService.createForImport(
-          { nameZh: row.productNameZh ?? row.nameZh },
-          operator,
-        );
-        productId = created.id;
-      }
-    } else {
-      const created = await this.productService.createForImport(
-        { nameZh: row.productNameZh ?? row.nameZh },
-        operator,
-      );
-      productId = created.id;
-    }
-
     assertDimensionsConsistent(row.lengthMm, row.widthMm, row.heightMm);
     const sku = await this.skuService.create(
       {
-        productId,
         skuCode: row.skuCode ?? undefined,
         nameZh: row.nameZh,
         nameRu: row.nameRu ?? undefined,

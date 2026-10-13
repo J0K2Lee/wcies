@@ -5,7 +5,6 @@ import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { QUEUE_NAMES } from '../../../infrastructure/queue/queue.constants';
 import { IMAGE_MIME_TYPES, MAX_IMAGE_SIZE_BYTES } from '../entities/sku-image.entity';
 import { OperatorContext } from '../../operation-log/operation-log.service';
-import { ProductService } from './product.service';
 import { SkuImageService } from './sku-image.service';
 import { SkuService } from './sku.service';
 
@@ -23,9 +22,13 @@ const SYSTEM_OPERATOR: OperatorContext = { userId: null, username: 'system' };
  * STRICTLY post-commit: quick onboarding enqueues AFTER its transaction
  * succeeds, so an image failure never rolls back (or blocks) master-data
  * facts, and no external HTTP ever runs inside the onboarding transaction.
- * The processor downloads `color_image ?? primary_image`, stores it through
- * the regular SkuImageService channel (private bucket + signed URLs) and
- * backfills products.main_image_id only while it is still empty.
+ * The processor downloads `color_image ?? primary_image` and stores it
+ * through the regular SkuImageService channel (private bucket + signed
+ * URLs).
+ *
+ * V1 (2026-10-13): the `products.main_image_id` backfill branch is gone
+ * with the product layer - the first imported image is the SKU's primary
+ * image, full stop.
  */
 @Injectable()
 export class SkuImageImportService {
@@ -34,7 +37,6 @@ export class SkuImageImportService {
     private readonly queue: Queue<SkuImageImportJobPayload>,
     private readonly skuImageService: SkuImageService,
     private readonly skuService: SkuService,
-    private readonly productService: ProductService,
     private readonly logger: AppLoggerService,
   ) {}
 
@@ -83,7 +85,6 @@ export class SkuImageImportService {
       // Fresh onboarding SKU has no images yet - first import is primary.
       { isPrimary: true },
     );
-    await this.productService.setMainImageIfEmpty(sku.productId, image.id);
     this.logger.info('sku image imported from platform cdn', {
       module: 'product',
       skuId: payload.skuId,

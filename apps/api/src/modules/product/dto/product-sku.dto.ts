@@ -13,7 +13,6 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { PRODUCT_STATUSES } from '../entities/product.entity';
 import { SKU_STATUSES } from '../entities/sku.entity';
 import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
 
@@ -33,182 +32,18 @@ const MAX_WEIGHT_G = 999_999_999.999;
 const MAX_PURCHASE_PRICE = 99_999_999_999_999;
 
 // ---------------------------------------------------------------------------
-// Product
-// ---------------------------------------------------------------------------
-
-export class CreateProductRequestDto {
-  @ApiPropertyOptional({
-    example: 'PN000001',
-    description: 'Auto-generated (PN%06d) when omitted; read-only after creation',
-  })
-  @IsOptional()
-  @IsString()
-  @Length(1, 100)
-  productCode?: string;
-
-  @ApiProperty({ example: 'VALKYRIE VK87 MAX V2 机械键盘', maxLength: 500 })
-  @IsString()
-  @Length(1, 500)
-  nameZh!: string;
-
-  @ApiPropertyOptional({ maxLength: 500 })
-  @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  nameRu?: string;
-
-  @ApiPropertyOptional({ format: 'uuid' })
-  @IsOptional()
-  @IsUUID()
-  categoryId?: string;
-
-  @ApiPropertyOptional({ format: 'uuid' })
-  @IsOptional()
-  @IsUUID()
-  brandId?: string;
-
-  @ApiPropertyOptional({ maxLength: 2000 })
-  @IsOptional()
-  @IsString()
-  remark?: string;
-}
-
-export class UpdateProductRequestDto {
-  @ApiPropertyOptional({ maxLength: 500 })
-  @IsOptional()
-  @IsString()
-  @Length(1, 500)
-  nameZh?: string;
-
-  @ApiPropertyOptional({ maxLength: 500 })
-  @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  nameRu?: string;
-
-  @ApiPropertyOptional({ format: 'uuid' })
-  @IsOptional()
-  @IsUUID()
-  categoryId?: string | null;
-
-  @ApiPropertyOptional({ format: 'uuid' })
-  @IsOptional()
-  @IsUUID()
-  brandId?: string | null;
-
-  @ApiPropertyOptional({
-    format: 'uuid',
-    description: 'Must reference one of this product SKU images',
-  })
-  @IsOptional()
-  @IsUUID()
-  mainImageId?: string | null;
-
-  @ApiPropertyOptional({ maxLength: 2000 })
-  @IsOptional()
-  @IsString()
-  remark?: string;
-}
-
-export class ProductListQueryDto extends PaginationQueryDto {
-  @ApiPropertyOptional({ description: 'Matches product_code / name_zh / name_ru' })
-  @IsOptional()
-  @IsString()
-  keyword?: string;
-
-  @ApiPropertyOptional({ format: 'uuid' })
-  @IsOptional()
-  @IsUUID()
-  brandId?: string;
-
-  @ApiPropertyOptional({ format: 'uuid' })
-  @IsOptional()
-  @IsUUID()
-  categoryId?: string;
-
-  @ApiPropertyOptional({ enum: PRODUCT_STATUSES })
-  @IsOptional()
-  @IsIn(PRODUCT_STATUSES)
-  status?: (typeof PRODUCT_STATUSES)[number];
-
-  @ApiPropertyOptional({
-    enum: ['createdAt', 'updatedAt', 'productCode', 'nameZh'],
-    default: 'createdAt',
-  })
-  @IsOptional()
-  @IsIn(['createdAt', 'updatedAt', 'productCode', 'nameZh'])
-  sortBy?: 'createdAt' | 'updatedAt' | 'productCode' | 'nameZh';
-
-  @ApiPropertyOptional({ enum: ['asc', 'desc'], default: 'desc' })
-  @IsOptional()
-  @IsIn(['asc', 'desc'])
-  sortOrder?: 'asc' | 'desc';
-}
-
-export class ProductResponseDto {
-  @ApiProperty({ format: 'uuid' })
-  id!: string;
-
-  @ApiProperty({ example: 'PRD000001' })
-  productCode!: string;
-
-  @ApiProperty({ example: 'VALKYRIE VK87 MAX V2 机械键盘' })
-  nameZh!: string;
-
-  @ApiProperty({ nullable: true })
-  nameRu!: string | null;
-
-  @ApiProperty({ format: 'uuid', nullable: true })
-  categoryId!: string | null;
-
-  @ApiProperty({ nullable: true })
-  categoryName!: string | null;
-
-  @ApiProperty({ format: 'uuid', nullable: true })
-  brandId!: string | null;
-
-  @ApiProperty({ nullable: true })
-  brandName!: string | null;
-
-  @ApiProperty({ format: 'uuid', nullable: true })
-  mainImageId!: string | null;
-
-  @ApiProperty({ example: 'ACTIVE' })
-  status!: string;
-
-  @ApiProperty({ nullable: true })
-  remark!: string | null;
-
-  @ApiProperty({ format: 'date-time' })
-  createdAt!: Date;
-
-  @ApiProperty({ format: 'date-time' })
-  updatedAt!: Date;
-}
-
-export class ProductListItemDto extends ProductResponseDto {
-  @ApiProperty({ example: 2 })
-  skuCount!: number;
-}
-
-// ---------------------------------------------------------------------------
 // SKU
 // ---------------------------------------------------------------------------
 
 export class CreateSkuRequestDto {
   @ApiPropertyOptional({
-    example: 'SKU000001001',
-    description:
-      'Auto-generated (SKU{product seq 6}{in-product seq 3}) when omitted; frozen after creation',
+    example: 'SKU000012002',
+    description: 'Auto-generated (SKU%09d global sequence) when omitted; frozen after creation',
   })
   @IsOptional()
   @IsString()
   @Length(1, 100)
   skuCode?: string;
-
-  @ApiProperty({ format: 'uuid' })
-  @IsUUID()
-  productId!: string;
 
   @ApiProperty({ example: 'VK87 MAX V2 黑色', maxLength: 500 })
   @IsString()
@@ -220,6 +55,22 @@ export class CreateSkuRequestDto {
   @IsString()
   @MaxLength(500)
   nameRu?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'Brand (optional; must exist). V1: category/brand are SKU fields (decision D5)',
+  })
+  @IsOptional()
+  @IsUUID()
+  brandId?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'Category (optional; must exist and be level 3, decision 0005)',
+  })
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string;
 
   @ApiPropertyOptional({ example: 'VK87MAX', maxLength: 200 })
   @IsOptional()
@@ -325,6 +176,24 @@ export class UpdateSkuRequestDto {
   @MaxLength(500)
   nameRu?: string;
 
+  @ApiPropertyOptional({
+    format: 'uuid',
+    nullable: true,
+    description: 'Brand; null clears the assignment (V1 decision D5)',
+  })
+  @IsOptional()
+  @IsUUID()
+  brandId?: string | null;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    nullable: true,
+    description: 'Category (level 3); null clears the assignment (decision 0005)',
+  })
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string | null;
+
   @ApiPropertyOptional({ maxLength: 200 })
   @IsOptional()
   @IsString()
@@ -414,17 +283,19 @@ export class SkuListQueryDto extends PaginationQueryDto {
   @IsString()
   keyword?: string;
 
-  @ApiPropertyOptional({ format: 'uuid' })
-  @IsOptional()
-  @IsUUID()
-  productId?: string;
-
-  @ApiPropertyOptional({ format: 'uuid' })
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'SKUs of this brand (V1: brand is a SKU field, decision D5)',
+  })
   @IsOptional()
   @IsUUID()
   brandId?: string;
 
-  @ApiPropertyOptional({ format: 'uuid' })
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'SKUs in this category INCLUDING all descendant categories (recursive subtree filter, decision 0005 §9.5)',
+  })
   @IsOptional()
   @IsUUID()
   categoryId?: string;
@@ -472,7 +343,7 @@ export class SkuResponseDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
-  @ApiProperty({ example: 'SKU000001' })
+  @ApiProperty({ example: 'SKU000012002' })
   skuCode!: string;
 
   @ApiProperty({ example: 'VK87 MAX V2 黑色' })
@@ -481,14 +352,17 @@ export class SkuResponseDto {
   @ApiProperty({ nullable: true })
   nameRu!: string | null;
 
-  @ApiProperty({ format: 'uuid' })
-  productId!: string;
+  @ApiProperty({ format: 'uuid', nullable: true, description: 'Category (level 3, decision 0005)' })
+  categoryId!: string | null;
 
-  @ApiProperty({ example: 'PRD000001' })
-  productCode!: string;
+  @ApiProperty({ nullable: true })
+  categoryName!: string | null;
 
-  @ApiProperty({ example: 'VALKYRIE VK87 MAX V2 机械键盘' })
-  productName!: string;
+  @ApiProperty({ format: 'uuid', nullable: true })
+  brandId!: string | null;
+
+  @ApiProperty({ nullable: true })
+  brandName!: string | null;
 
   @ApiProperty({ nullable: true })
   model!: string | null;
@@ -549,12 +423,6 @@ export class SkuResponseDto {
 }
 
 export class SkuListItemDto extends SkuResponseDto {
-  @ApiProperty({ format: 'uuid', nullable: true })
-  brandId!: string | null;
-
-  @ApiProperty({ nullable: true })
-  brandName!: string | null;
-
   @ApiProperty({ nullable: true, description: 'Primary barcode value' })
   primaryBarcode!: string | null;
 
@@ -563,13 +431,4 @@ export class SkuListItemDto extends SkuResponseDto {
 
   @ApiProperty({ example: 3 })
   listingCount!: number;
-}
-
-/** Product detail response: the product plus its SKUs (product detail page). */
-export class ProductDetailDto {
-  @ApiProperty({ type: ProductResponseDto })
-  product!: ProductResponseDto;
-
-  @ApiProperty({ type: [SkuResponseDto] })
-  skus!: SkuResponseDto[];
 }

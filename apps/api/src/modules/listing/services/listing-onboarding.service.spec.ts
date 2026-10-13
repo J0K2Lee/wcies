@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { DataSource, EntityManager } from 'typeorm';
 import { ListingOnboardingService } from './listing-onboarding.service';
 import { ListingRepository } from '../repositories/listing.repository';
-import { ProductService } from '../../product/services/product.service';
 import { SkuService } from '../../product/services/sku.service';
 import { BarcodeService } from '../../product/services/barcode.service';
 import { ListingService } from './listing.service';
@@ -13,10 +12,11 @@ import { PlatformListingEntity } from '../entities/platform-listing.entity';
 import { PlatformListingSkuEntity } from '../entities/platform-listing-sku.entity';
 
 /**
- * Sprint 8.5 orchestration unit tests: lock-first transaction shape, the
- * T2 attach resolution, T3c remember-mapping, and post-commit side effects.
- * DB-level atomicity and FOR UPDATE serialization are proven by the Sprint
- * 8.5 integration spec against real PostgreSQL.
+ * V1 onboarding unit tests: lock-first transaction shape, direct SKU
+ * creation (no product layer, D2/D3/D5), remember-mapping in the same
+ * transaction, and post-commit side effects. DB-level atomicity and FOR
+ * UPDATE serialization are proven by the Sprint 8.5 integration spec
+ * against real PostgreSQL.
  */
 
 const operator = { userId: null, username: 'tester' };
@@ -60,8 +60,6 @@ interface BuildOptions {
   mapping?: PlatformListingSkuEntity | null;
   /** Row seen by the IN-TRANSACTION lock (defaults to `mapping`). */
   lockedMapping?: PlatformListingSkuEntity | null;
-  /** Default attach target found inside the tx (null = create new). */
-  attachProduct?: { id: string; productCode: string; nameZh: string } | null;
 }
 
 function buildService(overrides?: BuildOptions) {
@@ -81,35 +79,19 @@ function buildService(overrides?: BuildOptions) {
       invocationOrder.push('lock');
       return lockedMapping;
     }),
-    findFirstMappedProductInTx: vi.fn(async () => {
-      invocationOrder.push('attach-resolve');
-      return overrides?.attachProduct === undefined ? null : overrides.attachProduct;
-    }),
   } as unknown as ListingRepository;
-
-  const productService = {
-    createForOnboardingInTx: vi.fn(async () => {
-      invocationOrder.push('product');
-      return { id: 'prod-1', productCode: 'PN000001', nameZh: 'Тестовый товар' };
-    }),
-    getEntityByIdInTx: vi.fn(async (_manager: EntityManager, id: string) => ({
-      id,
-      productCode: `PN-${id}`,
-      nameZh: 'existing',
-    })),
-  } as unknown as ProductService;
 
   const skuService = {
     createForOnboardingInTx: vi.fn(async () => {
       invocationOrder.push('sku');
-      return { id: 'sku-1', skuCode: 'SKU000001001', nameZh: 'Тестовый товар' };
+      return { id: 'sku-1', skuCode: 'SKU000012002', nameZh: 'Тестовый товар' };
     }),
   } as unknown as SkuService;
 
   const barcodeService = {
     generateInternalInTx: vi.fn(async () => {
       invocationOrder.push('barcode');
-      return { id: 'bc-1', barcode: '000001' };
+      return { id: 'bc-1', barcode: '000042' };
     }),
   } as unknown as BarcodeService;
 
@@ -146,7 +128,6 @@ function buildService(overrides?: BuildOptions) {
   const service = new ListingOnboardingService(
     dataSource,
     repository,
-    productService,
     skuService,
     barcodeService,
     listingService,
@@ -157,7 +138,6 @@ function buildService(overrides?: BuildOptions) {
   return {
     service,
     repository,
-    productService,
     skuService,
     barcodeService,
     listingService,
@@ -169,25 +149,30 @@ function buildService(overrides?: BuildOptions) {
   };
 }
 
-describe('ListingOnboardingService', () => {
-  it('locks the mapping row FIRST, then product -> sku -> barcode -> mapping in ONE transaction', async () => {
+describe('ListingOnboardingService (V1: direct SKU onboarding)', () => {
+  it('locks the mapping row FIRST, then sku -> barcode -> mapping in ONE transaction', async () => {
     const ctx = buildService();
     const result = await ctx.service.onboard('listing-1', 'mapping-1', {}, operator);
 
     expect(ctx.transaction).toHaveBeenCalledTimes(1);
-    expect(ctx.invocationOrder).toEqual([
-      'lock',
-      'attach-resolve',
-      'product',
-      'sku',
-      'barcode',
-      'mapping',
-    ]);
+    expect(ctx.invocationOrder).toEqual(['lock', 'sku', 'barcode', 'mapping']);
     expect(ctx.repository.lockMappingByIdInTx).toHaveBeenCalledWith(expect.anything(), 'mapping-1');
-    expect(result.sku.skuCode).toBe('SKU000001001');
-    expect(result.barcode).toBe('000001');
+    expect(ctx.skuService.createForOnboardingInTx).toHaveBeenCalledWith(expect.anything(), {
+      nameZh: 'Тестовый товар',
+      brandId: null,
+      categoryId: null,
+      weightG: null,
+      lengthMm: null,
+      widthMm: null,
+      heightMm: null,
+      latestPurchasePrice: null,
+    });
+    expect(result.sku.skuCode).toBe('SKU000012002');
+    expect(result.barcode).toBe('000042');
     expect(result.mappingStatus).toBe('MAPPED');
-    expect(result.productCreated).toBe(true);
+    // The response no longer carries any product surface (D6).
+    expect(result).not.toHaveProperty('product');
+    expect(result).not.toHaveProperty('productCreated');
   });
 
   it('re-checks UNMAPPED under the lock - a concurrent double submit gets the same 409', async () => {
@@ -199,63 +184,11 @@ describe('ListingOnboardingService', () => {
       { code: 'LISTING_SKU_MAPPING_INVALID_STATE' },
     );
     // Nothing was built inside the transaction.
-    expect(ctx.productService.createForOnboardingInTx).not.toHaveBeenCalled();
     expect(ctx.skuService.createForOnboardingInTx).not.toHaveBeenCalled();
     expect(ctx.operationLog.record).not.toHaveBeenCalled();
   });
 
-  it('attaches to the listing first onboarded product by default (T2)', async () => {
-    const ctx = buildService({
-      attachProduct: { id: 'prod-9', productCode: 'PN000009', nameZh: '已有商品' },
-    });
-    const result = await ctx.service.onboard('listing-1', 'mapping-1', {}, operator);
-    expect(ctx.productService.createForOnboardingInTx).not.toHaveBeenCalled();
-    expect(ctx.skuService.createForOnboardingInTx).toHaveBeenCalledWith(expect.anything(), {
-      productId: 'prod-9',
-      nameZh: 'Тестовый товар',
-      weightG: null,
-      lengthMm: null,
-      widthMm: null,
-      heightMm: null,
-      latestPurchasePrice: null,
-    });
-    expect(result.product.id).toBe('prod-9');
-    expect(result.productCreated).toBe(false);
-  });
-
-  it('createNewProduct forces a new product even when an attach target exists (T2)', async () => {
-    const ctx = buildService({
-      attachProduct: { id: 'prod-9', productCode: 'PN000009', nameZh: '已有商品' },
-    });
-    const result = await ctx.service.onboard(
-      'listing-1',
-      'mapping-1',
-      { createNewProduct: true },
-      operator,
-    );
-    expect(ctx.productService.createForOnboardingInTx).toHaveBeenCalledTimes(1);
-    expect(result.productCreated).toBe(true);
-  });
-
-  it('existingProductId pins an explicit attach target; unknown id -> 404', async () => {
-    const ctx = buildService();
-    const result = await ctx.service.onboard(
-      'listing-1',
-      'mapping-1',
-      { existingProductId: 'prod-7' },
-      operator,
-    );
-    expect(ctx.productService.getEntityByIdInTx).toHaveBeenCalledWith(expect.anything(), 'prod-7');
-    expect(result.product.id).toBe('prod-7');
-
-    const missing = buildService();
-    vi.mocked(missing.productService.getEntityByIdInTx).mockResolvedValue(null);
-    await expect(
-      missing.service.onboard('listing-1', 'mapping-1', { existingProductId: 'nope' }, operator),
-    ).rejects.toMatchObject({ code: 'PRODUCT_NOT_FOUND', httpStatus: 404 });
-  });
-
-  it('passes brand/category to the product create, dims + purchase price to the sku create (T3c/T4/T5/R1)', async () => {
+  it('passes brand/category to the SKU create, dims + purchase price through (T3c/T4/T5/R1, D5)', async () => {
     const ctx = buildService();
     await ctx.service.onboard(
       'listing-1',
@@ -271,14 +204,10 @@ describe('ListingOnboardingService', () => {
       },
       operator,
     );
-    expect(ctx.productService.createForOnboardingInTx).toHaveBeenCalledWith(
-      expect.anything(),
-      { nameZh: 'Тестовый товар', brandId: 'brand-1', categoryId: 'cat-3' },
-      operator,
-    );
     expect(ctx.skuService.createForOnboardingInTx).toHaveBeenCalledWith(expect.anything(), {
-      productId: 'prod-1',
       nameZh: 'Тестовый товар',
+      brandId: 'brand-1',
+      categoryId: 'cat-3',
       weightG: 700,
       lengthMm: 300,
       widthMm: 220,
@@ -377,21 +306,10 @@ describe('ListingOnboardingService', () => {
     expect(result.barcode).toBeNull();
   });
 
-  it('writes audit entries only AFTER the commit; product CREATE only when created', async () => {
-    const created = buildService();
-    await created.service.onboard('listing-1', 'mapping-1', {}, operator);
-    const createdActions = vi
-      .mocked(created.operationLog.record)
-      .mock.calls.map((call) => call[0].action);
-    expect(createdActions).toEqual(['CREATE', 'CREATE', 'CREATE', 'MAP']);
-
-    const attached = buildService({
-      attachProduct: { id: 'prod-9', productCode: 'PN000009', nameZh: '已有商品' },
-    });
-    await attached.service.onboard('listing-1', 'mapping-1', {}, operator);
-    const attachedActions = vi
-      .mocked(attached.operationLog.record)
-      .mock.calls.map((call) => call[0].action);
-    expect(attachedActions).toEqual(['CREATE', 'CREATE', 'MAP']);
+  it('writes audit entries only AFTER the commit (sku + barcode + map)', async () => {
+    const ctx = buildService();
+    await ctx.service.onboard('listing-1', 'mapping-1', {}, operator);
+    const actions = vi.mocked(ctx.operationLog.record).mock.calls.map((call) => call[0].action);
+    expect(actions).toEqual(['CREATE', 'CREATE', 'MAP']);
   });
 });

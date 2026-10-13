@@ -1,11 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager } from 'typeorm';
-import { DomainError } from '../../../common/errors/domain.error';
+import { DataSource } from 'typeorm';
 import { OperatorContext, OperationLogService } from '../../operation-log/operation-log.service';
 import { SkuImageImportService } from '../../product/services/sku-image-import.service';
 import { BarcodeService } from '../../product/services/barcode.service';
-import { ProductService } from '../../product/services/product.service';
 import { SkuService } from '../../product/services/sku.service';
 import {
   ListingNotFoundError,
@@ -23,7 +21,6 @@ import {
   OnboardContextVariantDto,
 } from '../dto/listing.dto';
 
-const PRODUCT_ENTITY = 'PRODUCT';
 const SKU_ENTITY = 'SKU';
 const BARCODE_ENTITY = 'SKU_BARCODE';
 const MAPPING_ENTITY = 'PLATFORM_LISTING_SKU';
@@ -33,18 +30,6 @@ const MAPPING_ENTITY = 'PLATFORM_LISTING_SKU';
  * Entity CLASSES stay inside the product module (AGENTS.md §9 / arch Rule 4) -
  * the orchestrator only consumes these fields.
  */
-interface ProductRow {
-  id: string;
-  productCode: string;
-  nameZh: string;
-}
-
-interface OnboardedProduct {
-  id: string;
-  productCode: string;
-  nameZh: string;
-}
-
 interface OnboardedSku {
   id: string;
   skuCode: string;
@@ -57,48 +42,36 @@ interface OnboardedBarcode {
 }
 
 export interface OnboardingOutcome {
-  product: OnboardedProduct;
-  /** Sprint 8.5 T2: false when an existing product was attached. */
-  productCreated: boolean;
   sku: OnboardedSku;
   barcode: OnboardedBarcode | null;
   mapping: { id: string; mappingStatus: string };
 }
 
-/** Sprint 8.5 T2: the explicit attach target does not exist. */
-export class ListingOnboardProductNotFoundForAttachError extends DomainError {
-  readonly code = 'PRODUCT_NOT_FOUND';
-  readonly httpStatus = 404;
-
-  constructor(productId: string) {
-    super(`挂靠目标商品不存在: ${productId}`, { productId });
-  }
-}
-
 /**
  * Sprint 8 T1 - quick onboarding from an unmapped listing variant.
  *
- * Compresses "create Product -> create SKU -> (optional) internal barcode ->
- * map the variant" into ONE action. The writes span the product and listing
- * modules, so THIS service owns the transaction boundary and the modules
- * participate through their public *InTx methods (AGENTS.md §7/§9 - no
- * cross-module repository imports). Any failure rolls everything back: a
- * "SKU created but never mapped" half-product must not exist.
+ * Compresses "create SKU -> (optional) internal barcode -> map the variant"
+ * into ONE action. The writes span the product and listing modules, so THIS
+ * service owns the transaction boundary and the modules participate through
+ * their public *InTx methods (AGENTS.md §7/§9 - no cross-module repository
+ * imports). Any failure rolls everything back: a "SKU created but never
+ * mapped" half-product must not exist.
  *
  * Quick-onboarding may only start from an UNMAPPED variant row - a mapped
  * row keeps its binding until explicitly changed (planning §T1.6).
  * Operation logs are written AFTER the commit, so a rollback leaves no
  * audit orphans.
  *
- * Sprint 8.5 (planning §T1/T2/T3c/T4/T5/T6):
+ * V1 refactor (2026-10-13, decisions D2/D3/D5): the product layer is gone -
+ * the transaction creates the SKU directly (ACTIVE, global SKU%09d code,
+ * brand/category landing on the SKU itself); multi-variant "attach to the
+ * first product" no longer exists - every variant gets its own SKU.
+ *
+ * Sprint 8.5 (planning §T1/T3c/T5/T6):
  * - T1: the transaction STARTS by locking the mapping row (FOR UPDATE) and
  *   re-checking UNMAPPED under the lock - the check-create-map sequence is
  *   fully serialized, concurrent double onboards leave the loser with the
  *   same 409 and zero master-data side effects.
- * - T2: later variants of the same listing ATTACH to the listing's first
- *   onboarded product by default (SKU002/003... derive from the same
- *   product seq); the dialog may force a new product (createNewProduct) or
- *   pin a specific one (existingProductId).
  * - T3c: an optional "remember this mapping" row (platform composite
  *   category key -> internal category) is written in the SAME transaction.
  * - T5: editable prefilled dimensions/weight with the regular all-or-none
@@ -111,7 +84,6 @@ export class ListingOnboardingService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly repository: ListingRepository,
-    private readonly productService: ProductService,
     private readonly skuService: SkuService,
     private readonly barcodeService: BarcodeService,
     private readonly listingService: ListingService,
@@ -136,14 +108,13 @@ export class ListingOnboardingService {
     }
 
     const fallbackName = listing.title?.trim() ?? '';
-    const productName = (dto.productNameZh ?? '').trim() || fallbackName;
     const skuName = (dto.skuNameZh ?? '').trim() || fallbackName;
 
     const generateBarcode = dto.generateBarcode ?? true;
 
     const outcome: OnboardingOutcome = await this.dataSource.transaction(async (manager) => {
-      // T1: lock the mapping row FIRST; everything below (including the
-      // attach resolution) runs serialized against concurrent onboards.
+      // T1: lock the mapping row FIRST; everything below runs serialized
+      // against concurrent onboards.
       const locked = await this.repository.lockMappingByIdInTx(manager, mappingId);
       if (locked === null || locked.listingId !== listingId) {
         throw new ListingSkuMappingNotFoundError(mappingId);
@@ -152,36 +123,14 @@ export class ListingOnboardingService {
         throw new ListingSkuMappingInvalidStateError(mappingId, 'already mapped');
       }
 
-      // Names are only needed for a NEW product; attaching reuses the
-      // existing one. (SKU name still required either way.)
-      let productCreated = false;
-      let product: OnboardedProduct;
-      const attach = await this.resolveAttachTarget(manager, listingId, dto);
-      if (attach !== null) {
-        product = attach;
-      } else {
-        if (productName === '') {
-          throw new ListingOnboardNameRequiredError();
-        }
-        const created = await this.productService.createForOnboardingInTx(
-          manager,
-          {
-            nameZh: productName,
-            brandId: dto.brandId ?? null,
-            categoryId: dto.categoryId ?? null,
-          },
-          operator,
-        );
-        productCreated = true;
-        product = toProductView(created);
-      }
       if (skuName === '') {
         throw new ListingOnboardNameRequiredError();
       }
 
       const sku = await this.skuService.createForOnboardingInTx(manager, {
-        productId: product.id,
         nameZh: skuName,
+        brandId: dto.brandId ?? null,
+        categoryId: dto.categoryId ?? null,
         weightG: dto.weightG ?? null,
         lengthMm: dto.lengthMm ?? null,
         widthMm: dto.widthMm ?? null,
@@ -220,8 +169,6 @@ export class ListingOnboardingService {
       }
 
       return {
-        product,
-        productCreated,
         sku,
         barcode,
         mapping: updatedMapping,
@@ -229,19 +176,6 @@ export class ListingOnboardingService {
     });
 
     // Post-commit audit trail (best-effort by design, OperationLogService).
-    if (outcome.productCreated) {
-      await this.operationLog.record({
-        entityType: PRODUCT_ENTITY,
-        entityId: outcome.product.id,
-        entityCode: outcome.product.productCode,
-        action: 'CREATE',
-        changes: {
-          productCode: { from: null, to: outcome.product.productCode },
-          source: { from: null, to: `LISTING_ONBOARD:${listingId}` },
-        },
-        operator,
-      });
-    }
     await this.operationLog.record({
       entityType: SKU_ENTITY,
       entityId: outcome.sku.id,
@@ -249,7 +183,6 @@ export class ListingOnboardingService {
       action: 'CREATE',
       changes: {
         skuCode: { from: null, to: outcome.sku.skuCode },
-        attachedToExistingProduct: { from: null, to: !outcome.productCreated },
         source: { from: null, to: `LISTING_ONBOARD:${listingId}` },
       },
       operator,
@@ -352,30 +285,6 @@ export class ListingOnboardingService {
     };
   }
 
-  /**
-   * T2 attach resolution (INSIDE the locked transaction): explicit
-   * createNewProduct wins, then explicit existingProductId, then the
-   * listing's default (first onboarded product) - else null = create new.
-   */
-  private async resolveAttachTarget(
-    manager: EntityManager,
-    listingId: string,
-    dto: ListingOnboardRequestDto,
-  ): Promise<OnboardedProduct | null> {
-    if (dto.createNewProduct === true) {
-      return null;
-    }
-    if (dto.existingProductId !== undefined) {
-      const product = await this.productService.getEntityByIdInTx(manager, dto.existingProductId);
-      if (product === null) {
-        throw new ListingOnboardProductNotFoundForAttachError(dto.existingProductId);
-      }
-      return toProductView(product);
-    }
-    const first = await this.repository.findFirstMappedProductInTx(manager, listingId);
-    return first;
-  }
-
   private async scheduleImageImport(mappingId: string, skuId: string): Promise<void> {
     try {
       const mapping = await this.repository.findMappingById(mappingId);
@@ -392,24 +301,14 @@ export class ListingOnboardingService {
       listingId,
       mappingId: outcome.mapping.id,
       mappingStatus: outcome.mapping.mappingStatus,
-      product: {
-        id: outcome.product.id,
-        productCode: outcome.product.productCode,
-        nameZh: outcome.product.nameZh,
-      },
       sku: {
         id: outcome.sku.id,
         skuCode: outcome.sku.skuCode,
         nameZh: outcome.sku.nameZh,
       },
       barcode: outcome.barcode === null ? null : outcome.barcode.barcode,
-      productCreated: outcome.productCreated,
     };
   }
-}
-
-function toProductView(product: ProductRow): OnboardedProduct {
-  return { id: product.id, productCode: product.productCode, nameZh: product.nameZh };
 }
 
 /** Reads (description_category_id, type_id) from the flat v3 raw_data. */

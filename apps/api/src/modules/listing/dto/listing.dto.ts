@@ -132,17 +132,8 @@ export class MapListingSkuRequestDto {
   skuId!: string;
 }
 
-/** Sprint 8 T1: quick-create Product+SKU(+barcode) and map the variant in one action. */
+/** V1 改造（2026-10-13）：一动作直建 SKU（+可选条码）并映射变体；无商品层。 */
 export class ListingOnboardRequestDto {
-  @ApiPropertyOptional({
-    description: '商品名；缺省取 Listing 标题',
-    maxLength: 255,
-  })
-  @IsOptional()
-  @IsString()
-  @MaxLength(255)
-  productNameZh?: string;
-
   @ApiPropertyOptional({
     description: 'SKU 名；缺省取 Listing 标题',
     maxLength: 255,
@@ -154,29 +145,14 @@ export class ListingOnboardRequestDto {
 
   @ApiPropertyOptional({
     default: true,
-    description: '同时生成内部条码（W…，决策 0017），生成后可直接打印标签',
+    description: '同时生成内部条码（6 位纯数字，决策 0019），生成后可直接打印标签',
   })
   @IsOptional()
   @IsBoolean()
   generateBarcode?: boolean;
 
   @ApiPropertyOptional({
-    description: 'Sprint 8.5 T2：挂靠到该已有商品（多变体同挂一个 Product）',
-    format: 'uuid',
-  })
-  @IsOptional()
-  @IsUUID()
-  existingProductId?: string;
-
-  @ApiPropertyOptional({
-    description: 'Sprint 8.5 T2：显式另建新商品（覆盖「缺省自动挂靠已有商品」）',
-  })
-  @IsOptional()
-  @IsBoolean()
-  createNewProduct?: boolean;
-
-  @ApiPropertyOptional({
-    description: 'Sprint 8.5 T4：商品品牌（仅新建商品时生效）',
+    description: 'SKU 品牌（可选；V1 起品牌是 SKU 字段，决策 D5）',
     format: 'uuid',
   })
   @IsOptional()
@@ -184,7 +160,7 @@ export class ListingOnboardRequestDto {
   brandId?: string;
 
   @ApiPropertyOptional({
-    description: 'Sprint 8.5 T3c：商品分类（三级，仅新建商品时生效）',
+    description: 'SKU 分类（三级，可选；V1 起分类是 SKU 字段，决策 D5）',
     format: 'uuid',
   })
   @IsOptional()
@@ -234,22 +210,11 @@ export class ListingOnboardRequestDto {
   latestPurchasePrice?: number;
 }
 
-export class ListingOnboardProductDto {
-  @ApiProperty({ format: 'uuid' })
-  id!: string;
-
-  @ApiProperty({ example: 'PN000012' })
-  productCode!: string;
-
-  @ApiProperty({ example: 'VK87 MAX V2 机械键盘' })
-  nameZh!: string;
-}
-
 export class ListingOnboardSkuDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
-  @ApiProperty({ example: 'SKU000012001' })
+  @ApiProperty({ example: 'SKU000012002' })
   skuCode!: string;
 
   @ApiProperty({ example: 'VK87 MAX V2 机械键盘' })
@@ -266,22 +231,13 @@ export class ListingOnboardResponseDto {
   @ApiProperty({ enum: ['MAPPED'], description: '成功后恒为 MAPPED' })
   mappingStatus!: string;
 
-  @ApiProperty({ type: ListingOnboardProductDto })
-  product!: ListingOnboardProductDto;
-
   @ApiProperty({
     type: ListingOnboardSkuDto,
   })
   sku!: ListingOnboardSkuDto;
 
-  @ApiProperty({ nullable: true, example: 'W00000042', description: '未勾选生成时为 null' })
+  @ApiProperty({ nullable: true, example: '000042', description: '未勾选生成时为 null' })
   barcode!: string | null;
-
-  @ApiProperty({
-    example: false,
-    description: 'Sprint 8.5 T2：本次是否新建了商品（false = 挂靠已有商品）',
-  })
-  productCreated!: boolean;
 }
 
 /** Sprint 8.5: one feed powering the enhanced onboarding dialog. */

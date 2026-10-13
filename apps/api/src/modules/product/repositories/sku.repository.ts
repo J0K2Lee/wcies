@@ -6,8 +6,8 @@ import { SkuEntity } from '../entities/sku.entity';
 
 export interface SkuListFilters {
   keyword?: string;
-  productId?: string;
   brandId?: string;
+  /** Subtree filter (decision 0005 §9.5): a level-1/2 id includes all descendants. */
   categoryId?: string;
   status?: string;
   serialTracking?: boolean;
@@ -20,10 +20,8 @@ export interface SkuListFilters {
 
 export interface SkuRowWithAggregates {
   sku: SkuEntity;
-  productCode: string;
-  productName: string;
-  brandId: string | null;
   brandName: string | null;
+  categoryName: string | null;
   primaryBarcode: string | null;
   primaryImageKey: string | null;
   listingCount: number;
@@ -32,8 +30,12 @@ export interface SkuRowWithAggregates {
 /**
  * Data access only - no business rules here (AGENTS.md §8).
  *
- * List aggregates (product/brand names, primary barcode, primary image,
+ * List aggregates (brand/category names, primary barcode, primary image,
  * listing count) are computed in ONE query with subselects (task §93).
+ *
+ * V1 refactor (2026-10-13, decision D5): category/brand are SKU columns -
+ * the query joins brands/categories directly off skus; the products join is
+ * gone with the product layer.
  */
 @Injectable()
 export class SkuRepository {
@@ -49,11 +51,10 @@ export class SkuRepository {
   ): Promise<{ rows: SkuRowWithAggregates[]; total: number }> {
     const qb = this.repository
       .createQueryBuilder('sku')
-      .innerJoin('products', 'product', 'product.id = sku.product_id')
-      .addSelect('product.productCode', 'product_code')
-      .addSelect('product.nameZh', 'product_name')
-      .addSelect('product.brand_id', 'brand_id')
+      .leftJoin('brands', 'brand', 'brand.id = sku.brand_id')
+      .leftJoin('categories', 'category', 'category.id = sku.category_id')
       .addSelect('brand.name', 'brand_name')
+      .addSelect('category.name_zh', 'category_name')
       .addSelect(
         (sub) =>
           sub
@@ -84,8 +85,7 @@ export class SkuRepository {
             .where('pls.sku_id = sku.id')
             .andWhere("pls.status = 'ACTIVE'"),
         'listing_count',
-      )
-      .leftJoin('brands', 'brand', 'brand.id = product.brand_id');
+      );
 
     if (filters.keyword !== undefined && filters.keyword !== '') {
       qb.andWhere(
@@ -93,14 +93,19 @@ export class SkuRepository {
         { kw: `%${filters.keyword}%` },
       );
     }
-    if (filters.productId !== undefined) {
-      qb.andWhere('sku.product_id = :productId', { productId: filters.productId });
-    }
     if (filters.brandId !== undefined) {
-      qb.andWhere('product.brand_id = :brandId', { brandId: filters.brandId });
+      qb.andWhere('sku.brand_id = :brandId', { brandId: filters.brandId });
     }
     if (filters.categoryId !== undefined) {
-      qb.andWhere('product.category_id = :categoryId', { categoryId: filters.categoryId });
+      // Subtree filter (decision 0005 §9.5): selecting a level-1/2 category
+      // must include SKUs of all descendant categories. Recursive CTE migrated
+      // from the deleted product.repository.
+      const subtreeIds = await this.findCategorySubtreeIds(filters.categoryId);
+      if (subtreeIds.length === 0) {
+        qb.andWhere('1 = 0');
+      } else {
+        qb.andWhere('sku.category_id IN (:...subtreeIds)', { subtreeIds });
+      }
     }
     if (filters.status !== undefined) {
       qb.andWhere('sku.status = :status', { status: filters.status });
@@ -174,10 +179,8 @@ export class SkuRepository {
 
     const rows: SkuRowWithAggregates[] = rawList.map((raw, index) => ({
       sku: entities[index] as SkuEntity,
-      productCode: String(raw['product_code'] as string),
-      productName: String(raw['product_name'] as string),
-      brandId: raw['brand_id'] === null ? null : String(raw['brand_id'] as string),
       brandName: raw['brand_name'] === null ? null : String(raw['brand_name'] as string),
+      categoryName: raw['category_name'] === null ? null : String(raw['category_name'] as string),
       primaryBarcode:
         raw['primary_barcode'] === null ? null : String(raw['primary_barcode'] as string),
       primaryImageKey:
@@ -282,14 +285,17 @@ export class SkuRepository {
     });
   }
 
-  async listByProductIds(productIds: string[]): Promise<SkuEntity[]> {
-    if (productIds.length === 0) {
-      return [];
-    }
-    return this.repository
-      .createQueryBuilder('sku')
-      .where('sku.product_id IN (:...productIds)', { productIds })
-      .orderBy('sku.skuCode', 'ASC')
-      .getMany();
+  /** Category id plus every descendant id (recursive CTE). */
+  private async findCategorySubtreeIds(categoryId: string): Promise<string[]> {
+    const rows = await this.repository.query<Array<{ id: string }>>(
+      `WITH RECURSIVE t AS (
+         SELECT id FROM categories WHERE id = $1
+         UNION ALL
+         SELECT c.id FROM categories c JOIN t ON c.parent_id = t.id
+       )
+       SELECT id::text AS id FROM t`,
+      [categoryId],
+    );
+    return rows.map((row) => row.id);
   }
 }

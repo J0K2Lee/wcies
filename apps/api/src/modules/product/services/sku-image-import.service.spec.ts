@@ -1,22 +1,18 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { Queue } from 'bullmq';
 import { SkuImageImportService } from './sku-image-import.service';
-import { ProductService } from './product.service';
 import { SkuImageService } from './sku-image.service';
 import { SkuService } from './sku.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 
 /**
  * Sprint 8.5 T6: CDN -> own-bucket image import. Upload goes through the
- * regular SkuImageService channel (whitelist + size cap), the first image
- * of a fresh SKU becomes primary, and products.main_image_id is backfilled
- * only while empty. Failures throw so BullMQ retries.
+ * regular SkuImageService channel (whitelist + size cap) and the first image
+ * of a fresh SKU becomes primary. V1: the products.main_image_id backfill is
+ * gone with the product layer. Failures throw so BullMQ retries.
  */
 
-function buildService(overrides?: {
-  sku?: { id: string; productId: string } | null;
-  existingImages?: unknown[];
-}) {
+function buildService(overrides?: { sku?: { id: string } | null; existingImages?: unknown[] }) {
   const queue = { add: vi.fn(async () => ({})) } as unknown as Queue;
   const skuImageService = {
     listBySku: vi.fn(async () => overrides?.existingImages ?? []),
@@ -25,18 +21,9 @@ function buildService(overrides?: {
   const skuService = {
     getEntityById: vi.fn(async () => overrides?.sku ?? null),
   } as unknown as SkuService;
-  const productService = {
-    setMainImageIfEmpty: vi.fn(async () => true),
-  } as unknown as ProductService;
   const logger = { info: vi.fn(), warn: vi.fn() } as unknown as AppLoggerService;
-  const service = new SkuImageImportService(
-    queue,
-    skuImageService,
-    skuService,
-    productService,
-    logger,
-  );
-  return { service, queue, skuImageService, skuService, productService };
+  const service = new SkuImageImportService(queue, skuImageService, skuService, logger);
+  return { service, queue, skuImageService, skuService };
 }
 
 describe('SkuImageImportService', () => {
@@ -73,8 +60,8 @@ describe('SkuImageImportService', () => {
     expect(ctx.queue.add).not.toHaveBeenCalled();
   });
 
-  it('downloads, uploads as primary and backfills the product main image', async () => {
-    const ctx = buildService({ sku: { id: 'sku-1', productId: 'prod-1' } });
+  it('downloads and uploads as the primary SKU image', async () => {
+    const ctx = buildService({ sku: { id: 'sku-1' } });
     const status = await ctx.service.process({ skuId: 'sku-1', imageUrl: 'https://cdn/img.jpg' });
     expect(status).toBe('imported');
     expect(ctx.skuImageService.upload).toHaveBeenCalledWith(
@@ -83,12 +70,11 @@ describe('SkuImageImportService', () => {
       expect.anything(),
       { isPrimary: true },
     );
-    expect(ctx.productService.setMainImageIfEmpty).toHaveBeenCalledWith('prod-1', 'img-1');
   });
 
   it('skips when the SKU already has images (idempotent retry)', async () => {
     const ctx = buildService({
-      sku: { id: 'sku-1', productId: 'prod-1' },
+      sku: { id: 'sku-1' },
       existingImages: [{ id: 'old' }],
     });
     const status = await ctx.service.process({ skuId: 'sku-1', imageUrl: 'https://cdn/img.jpg' });
@@ -109,7 +95,7 @@ describe('SkuImageImportService', () => {
         async () => new Response('nope', { status: 200, headers: { 'content-type': 'text/html' } }),
       ),
     );
-    const ctx = buildService({ sku: { id: 'sku-1', productId: 'prod-1' } });
+    const ctx = buildService({ sku: { id: 'sku-1' } });
     await expect(
       ctx.service.process({ skuId: 'sku-1', imageUrl: 'https://cdn/img.jpg' }),
     ).rejects.toThrow(/unsupported content-type/);
@@ -120,7 +106,7 @@ describe('SkuImageImportService', () => {
       'fetch',
       vi.fn(async () => new Response('missing', { status: 404 })),
     );
-    const ctx = buildService({ sku: { id: 'sku-1', productId: 'prod-1' } });
+    const ctx = buildService({ sku: { id: 'sku-1' } });
     await expect(
       ctx.service.process({ skuId: 'sku-1', imageUrl: 'https://cdn/img.jpg' }),
     ).rejects.toThrow(/HTTP 404/);
