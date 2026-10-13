@@ -6,7 +6,6 @@ import { DashboardPage } from '../pages/DashboardPage';
 import { LoginPage } from '../pages/LoginPage';
 import { AuthGate } from './AuthGate';
 import { AppLayout } from './AppLayout';
-import { ProductsPage } from '../pages/products/ProductsPage';
 import { SkusPage } from '../pages/skus/SkusPage';
 import { ListingsPage } from '../pages/listings/ListingsPage';
 import { WarehousesPage } from '../pages/warehouses/WarehousesPage';
@@ -56,7 +55,6 @@ export function App() {
         <Route element={<AppLayout />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/health-test" element={<HealthTestPage />} />
-          <Route path="/products" element={<ProductsPage />} />
           <Route path="/skus" element={<SkusPage />} />
           <Route path="/listings" element={<ListingsPage />} />
           <Route path="/warehouses" element={<WarehousesPage />} />

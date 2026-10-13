@@ -1,67 +1,106 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { App, Form, Input, InputNumber, Modal, Select, Space, Switch } from 'antd';
-import { useEffect, useState } from 'react';
-import { apiPost, useApiQuery, useDebouncedValue } from '../api/hooks';
+import {
+  App,
+  Button,
+  Cascader,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Select,
+  Space,
+  Switch,
+} from 'antd';
+import { useEffect, useMemo, useState } from 'react';
+import { apiPost, useApiQuery } from '../api/hooks';
+import { BrandQuickCreateModal, CategoryQuickCreateModal } from './QuickCreateModals';
 
-export interface FixedProduct {
-  id: string;
-  productCode: string;
-  nameZh: string;
-}
-
+/**
+ * Shared SKU creation form (SKU管理 page).
+ *
+ * V1 改造（2026-10-13，决策 D5）：商品层移除——SKU 直建，不再选择所属商品；
+ * 品牌/分类成为 SKU 自身字段（均可选，分类必须三级），支持现场快建。
+ *
+ * Units (2026-09-09): weight g, dimensions integer mm; purchase price CNY.
+ */
 interface SkuCreateModalProps {
   open: boolean;
   onClose: () => void;
-  /** When provided the product is fixed (quick-create from a product detail). */
-  fixedProduct?: FixedProduct;
   onCreated?: () => void;
 }
 
-/**
- * Shared SKU creation form (SKU管理 page + quick-create from product detail).
- * Units (2026-09-09): weight g, dimensions integer mm; purchase price CNY.
- */
-export function SkuCreateModal({ open, onClose, fixedProduct, onCreated }: SkuCreateModalProps) {
+interface CategoryNode {
+  id: string;
+  nameZh: string;
+  status: string;
+  level: number;
+  children?: CategoryNode[];
+}
+
+interface CategoryOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+  children?: CategoryOption[];
+}
+
+/** Cascader options: only level-3 leaves are pickable (decision 0005). */
+function toCategoryOption(node: CategoryNode): CategoryOption {
+  const children = (node.children ?? [])
+    .filter((child) => child.status === 'ACTIVE')
+    .map((child) => toCategoryOption(child));
+  return {
+    value: node.id,
+    label: node.nameZh,
+    // Childless level-1/2 nodes would be selectable leaves — block them.
+    disabled: node.level < 3 && (node.children ?? []).length === 0,
+    ...(children.length > 0 ? { children } : {}),
+  };
+}
+
+export function SkuCreateModal({ open, onClose, onCreated }: SkuCreateModalProps) {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const [form] = Form.useForm();
-  const [productKeyword, setProductKeyword] = useState('');
-  const debouncedKeyword = useDebouncedValue(productKeyword);
+  const [brandModalOpen, setBrandModalOpen] = useState(false);
+  const [categoryCreateOpen, setCategoryCreateOpen] = useState(false);
 
   useEffect(() => {
     if (open) {
       form.resetFields();
-      setProductKeyword('');
     }
   }, [open, form]);
 
-  // Server-side keyword search: the SKU picker must reach beyond the first
-  // page of a large catalog (dev DB has tens of thousands of products).
-  const products = useApiQuery<{
-    data: Array<{ id: string; productCode: string; nameZh: string }>;
-  }>(
-    '/api/v1/products',
-    fixedProduct === undefined
-      ? { page: 1, pageSize: 50, keyword: debouncedKeyword || undefined }
-      : { page: 1, pageSize: 1 },
-    ['products-for-sku-create', fixedProduct === undefined ? debouncedKeyword : fixedProduct.id],
-    undefined,
-    open && fixedProduct === undefined,
+  const brands = useApiQuery<{ data: Array<{ id: string; name: string; status: string }> }>(
+    '/api/v1/brands',
+    { keyword: '' },
+    ['brands'],
+  );
+  // Sprint 8.5R1: tree-lite (column-pruned) - the cascader only reads these
+  // fields, and the full 8k-node tree cost megabytes per page load.
+  const categories = useApiQuery<{ data: CategoryNode[] }>('/api/v1/categories/tree-lite', {}, [
+    'categories',
+  ]);
+  const categoryOptions = useMemo(
+    () => (categories.data?.data ?? []).map((node) => toCategoryOption(node)),
+    [categories.data],
   );
 
   const createMutation = useMutation({
-    mutationFn: (values: Record<string, unknown>) =>
-      apiPost('/api/v1/skus', {
+    mutationFn: (values: Record<string, unknown>) => {
+      const categoryPath = values.categoryPath as string[] | undefined;
+      return apiPost('/api/v1/skus', {
         ...values,
-        productId: fixedProduct?.id ?? values.productId,
-      }),
+        categoryPath: undefined,
+        categoryId:
+          categoryPath !== undefined && categoryPath.length === 3 ? categoryPath[2] : undefined,
+      });
+    },
     onSuccess: () => {
       void message.success('SKU 已创建');
       onClose();
       form.resetFields();
       void queryClient.invalidateQueries({ queryKey: ['skus'] });
-      void queryClient.invalidateQueries({ queryKey: ['product-detail'] });
-      void queryClient.invalidateQueries({ queryKey: ['products'] });
       onCreated?.();
     },
     onError: (error: Error) => void message.error(`创建失败: ${error.message}`),
@@ -76,34 +115,73 @@ export function SkuCreateModal({ open, onClose, fixedProduct, onCreated }: SkuCr
       confirmLoading={createMutation.isPending}
     >
       <Form form={form} layout="vertical">
-        {fixedProduct === undefined ? (
-          <Form.Item
-            name="productId"
-            label="所属商品"
-            rules={[{ required: true, message: '请选择商品' }]}
-          >
-            <Select
-              showSearch
-              filterOption={false}
-              onSearch={setProductKeyword}
-              notFoundContent={products.isLoading ? '搜索中...' : '无匹配商品'}
-              options={(products.data?.data ?? []).map((product) => ({
-                value: product.id,
-                label: `${product.productCode} ${product.nameZh}`,
-              }))}
-            />
-          </Form.Item>
-        ) : (
-          <Form.Item label="所属商品">
-            <Input value={`${fixedProduct.productCode} ${fixedProduct.nameZh}`} disabled />
-          </Form.Item>
-        )}
         <Form.Item
           name="nameZh"
           label="中文名称"
           rules={[{ required: true, message: '请输入名称' }]}
         >
           <Input />
+        </Form.Item>
+        <Form.Item
+          name="brandId"
+          label={
+            <Space size={4}>
+              品牌
+              <Button
+                type="link"
+                size="small"
+                style={{ padding: 0, height: 'auto' }}
+                onClick={() => setBrandModalOpen(true)}
+              >
+                + 新建品牌
+              </Button>
+            </Space>
+          }
+        >
+          <Select
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            placeholder="选择品牌（可搜可现场快建）"
+            options={(brands.data?.data ?? []).map((brand) => ({
+              value: brand.id,
+              // 停用品牌保留可选但带后缀（与分类筛选一致）。
+              label: brand.status === 'ACTIVE' ? brand.name : `${brand.name}（停用）`,
+            }))}
+          />
+        </Form.Item>
+        <Form.Item
+          name="categoryPath"
+          label={
+            <Space size={4}>
+              分类（三级）
+              <Button
+                type="link"
+                size="small"
+                style={{ padding: 0, height: 'auto' }}
+                onClick={() => setCategoryCreateOpen(true)}
+              >
+                + 新建分类
+              </Button>
+            </Space>
+          }
+          rules={[
+            {
+              validator: (_rule, value: string[] | undefined) =>
+                value === undefined || value.length === 0
+                  ? Promise.resolve()
+                  : value.length === 3
+                    ? Promise.resolve()
+                    : Promise.reject(new Error('必须选择到三级分类')),
+            },
+          ]}
+        >
+          <Cascader<CategoryOption>
+            allowClear
+            showSearch
+            placeholder="选择三级分类（支持搜索中文名）"
+            options={categoryOptions}
+          />
         </Form.Item>
         <Space wrap>
           <Form.Item name="model" label="型号">
@@ -147,6 +225,24 @@ export function SkuCreateModal({ open, onClose, fixedProduct, onCreated }: SkuCr
           <Switch />
         </Form.Item>
       </Form>
+
+      {/* 共享快建弹窗（G9）：从建档弹窗内打开，永远叠在其上（zIndex 1200）。 */}
+      <BrandQuickCreateModal
+        open={brandModalOpen}
+        zIndex={1200}
+        onClose={() => setBrandModalOpen(false)}
+        onCreated={(brandId) => {
+          form.setFieldValue('brandId', brandId);
+        }}
+      />
+      <CategoryQuickCreateModal
+        open={categoryCreateOpen}
+        zIndex={1200}
+        onClose={() => setCategoryCreateOpen(false)}
+        onCreated={(path) => {
+          form.setFieldValue('categoryPath', path);
+        }}
+      />
     </Modal>
   );
 }

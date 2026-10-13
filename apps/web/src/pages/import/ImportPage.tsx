@@ -36,7 +36,7 @@ interface ImportJob {
 }
 
 const IMPORT_TYPES = [
-  { value: 'SKU', label: 'SKU（含条码/商品）' },
+  { value: 'SKU', label: 'SKU（含条码）' },
   { value: 'BARCODE', label: '条码' },
   { value: 'WAREHOUSE', label: '仓库' },
   { value: 'BIN', label: '库位' },
@@ -212,7 +212,7 @@ export function ImportPage() {
               </li>
               <li>
                 本地补填 <code>internal_sku_code</code>：SKU 未建档的，先下载
-                <b>SKU 模板</b>建档（可同时建商品/条码）并导入；已有 SKU 的直接填编码。
+                <b>SKU 模板</b>建档（可同时建条码/品牌/分类）并导入；已有 SKU 的直接填编码。
               </li>
               <li>
                 选类型 <b>LISTING_MAPPING</b> 上传补好的清单并确认导入——标识与已同步变体匹配的行会

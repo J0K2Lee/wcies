@@ -10,7 +10,6 @@ import {
   Input,
   InputNumber,
   Modal,
-  Radio,
   Select,
   Space,
 } from 'antd';
@@ -31,15 +30,17 @@ import { BrandQuickCreateModal, CategoryQuickCreateModal } from './QuickCreateMo
  * 组件自包含：onboard-context 拉取、变体选择、表单预填、类目/品牌/条码/尺寸、
  * 快建入口、提交与结果态、连续建档，全部在内部管理；宿主只传 listingId 与
  * 打开/关闭/完成回调。
+ *
+ * V1 改造（2026-10-13，决策 D2/D3/D5）：商品层移除——一个事务内直建 ACTIVE
+ * SKU（全局编码 SKU%09d）+ 可选内部条码 + 绑定映射；多变体不再挂靠商品
+ * （每个变体各建各的 SKU），品牌/分类直接落 SKU。
  */
 
 export interface OnboardResult {
   listingId: string;
   mappingId: string;
-  product: { id: string; productCode: string; nameZh: string };
   sku: { id: string; skuCode: string; nameZh: string };
   barcode: string | null;
-  productCreated: boolean;
 }
 
 interface OnboardContextVariant {
@@ -49,8 +50,6 @@ interface OnboardContextVariant {
   offerId: string | null;
   sellerSku: string | null;
   skuCode: string | null;
-  productId: string | null;
-  productCode: string | null;
   primaryImage: string | null;
   colorImage: string | null;
   descriptionCategoryId: string | null;
@@ -65,9 +64,6 @@ interface OnboardContextVariant {
 interface OnboardContext {
   listingId: string;
   title: string | null;
-  defaultAttachProductId: string | null;
-  defaultAttachProductCode: string | null;
-  defaultAttachProductName: string | null;
   variants: OnboardContextVariant[];
 }
 
@@ -150,8 +146,6 @@ export function ListingOnboardModal({
   const queryClient = useQueryClient();
   const [form] = Form.useForm();
   const [manualVariantId, setManualVariantId] = useState<string | null>(null);
-  const [mode, setMode] = useState<'attach' | 'new'>('new');
-  const [pinnedProductId, setPinnedProductId] = useState<string | null>(null);
   const [result, setResult] = useState<OnboardResult | null>(null);
   const [printCopies, setPrintCopies] = useState(1);
   const [brandModalOpen, setBrandModalOpen] = useState(false);
@@ -163,8 +157,6 @@ export function ListingOnboardModal({
       form.resetFields();
       form.setFieldsValue({ generateBarcode: true, rememberCategoryMapping: true });
       setManualVariantId(null);
-      setPinnedProductId(null);
-      setMode('new');
       setResult(null);
     }
   }, [open, form]);
@@ -252,18 +244,6 @@ export function ListingOnboardModal({
     label: brand.name,
   }));
 
-  /**
-   * T2 attach resolution, mirrored from the backend default: a pinned
-   * product (save-and-next-variant) wins, else the attach radio's target
-   * when the listing already has an onboarded product. null = create new.
-   */
-  const attachTargetId =
-    pinnedProductId !== null
-      ? pinnedProductId
-      : mode === 'attach'
-        ? (ctx?.defaultAttachProductId ?? null)
-        : null;
-
   /** T3c hint under the category cascader: exact-match suggestion or miss. */
   const categoryExtraHint = (): string => {
     const variant = selectedVariant;
@@ -280,9 +260,6 @@ export function ListingOnboardModal({
     mutationFn: (input: {
       listingId: string;
       mappingId: string;
-      createNewProduct: boolean;
-      existingProductId?: string;
-      productNameZh?: string;
       skuNameZh: string;
       brandId?: string;
       categoryId?: string;
@@ -297,11 +274,8 @@ export function ListingOnboardModal({
       apiPost<OnboardResult>(
         '/api/v1/listings/{listingId}/skus/{id}/onboard',
         {
-          productNameZh: input.productNameZh,
           skuNameZh: input.skuNameZh,
           generateBarcode: input.generateBarcode,
-          createNewProduct: input.createNewProduct,
-          existingProductId: input.existingProductId,
           brandId: input.brandId,
           categoryId: input.categoryId,
           rememberCategoryMapping: input.rememberCategoryMapping,
@@ -328,7 +302,6 @@ export function ListingOnboardModal({
   const handleClose = () => {
     setManualVariantId(null);
     setResult(null);
-    setPinnedProductId(null);
     form.resetFields();
     onClose();
   };
@@ -346,7 +319,6 @@ export function ListingOnboardModal({
     const variantName =
       selectedVariant === null ? (ctx.title ?? '') : buildVariantName(ctx.title, selectedVariant);
     form.setFieldsValue({
-      productNameZh: form.getFieldValue('productNameZh') || variantName,
       skuNameZh: variantName,
       categoryPath: suggested !== null ? (categoryPathById.get(suggested) ?? undefined) : undefined,
       weightG: selectedVariant?.weightG ?? undefined,
@@ -384,11 +356,8 @@ export function ListingOnboardModal({
       rememberCategoryMapping: form.getFieldValue('rememberCategoryMapping') !== false,
     };
     setResult(null);
-    setPinnedProductId(result.product.id);
-    setMode('attach');
     setManualVariantId(next.id);
     form.setFieldsValue({
-      productNameZh: result.product.nameZh,
       generateBarcode: previous.generateBarcode,
       rememberCategoryMapping: previous.rememberCategoryMapping,
       brandId: previous.brandId,
@@ -417,11 +386,7 @@ export function ListingOnboardModal({
   return (
     <>
       <Modal
-        title={
-          attachTargetId !== null
-            ? '建档并映射（挂靠已有商品 + 新建SKU + 映射）'
-            : '建档并映射（新建商品 + SKU + 映射）'
-        }
+        title="建档并映射（新建 SKU + 映射）"
         open={open}
         zIndex={zIndex ?? 1100}
         width={680}
@@ -449,19 +414,10 @@ export function ListingOnboardModal({
                       mutation.mutate({
                         listingId,
                         mappingId: selectedVariantId,
-                        createNewProduct: attachTargetId === null,
-                        existingProductId: attachTargetId === null ? undefined : attachTargetId,
-                        productNameZh:
-                          attachTargetId === null ? (values.productNameZh as string) : undefined,
                         skuNameZh: values.skuNameZh as string,
-                        brandId:
-                          attachTargetId === null
-                            ? (values.brandId as string | undefined)
-                            : undefined,
+                        brandId: values.brandId as string | undefined,
                         categoryId:
-                          attachTargetId === null &&
-                          categoryPath !== undefined &&
-                          categoryPath.length === 3
+                          categoryPath !== undefined && categoryPath.length === 3
                             ? categoryPath[2]
                             : undefined,
                         rememberCategoryMapping: values.rememberCategoryMapping !== false,
@@ -519,19 +475,11 @@ export function ListingOnboardModal({
               type="success"
               showIcon
               title="建档、条码、映射已在一个事务中完成"
-              description={
-                result.productCreated
-                  ? '失败会整体回滚，不会留下「建了 SKU 但没映射」的半成品。商品图将从平台 CDN 异步转存到自有桶。'
-                  : '本次 SKU 挂靠到已有商品（同商品链接变体不裂变）。商品图将从平台 CDN 异步转存到自有桶。'
-              }
+              description="失败会整体回滚，不会留下「建了 SKU 但没映射」的半成品。商品图将从平台 CDN 异步转存到自有桶。"
             />
             <InfoGrid
               columns={2}
               items={[
-                {
-                  label: '商品',
-                  children: `${result.product.productCode} ${result.product.nameZh}`,
-                },
                 { label: '内部SKU', children: result.sku.skuCode },
                 {
                   label: '内部条码',
@@ -619,118 +567,71 @@ export function ListingOnboardModal({
                 </span>
               </Space>
             )}
-            {(ctx?.defaultAttachProductId !== null && ctx?.defaultAttachProductId !== undefined) ||
-            pinnedProductId !== null ? (
-              <Form.Item label="多变体挂靠（同商品链接变体默认共用一个商品）" required>
-                <Radio.Group
-                  value={mode}
-                  onChange={(event) => setMode(event.target.value as 'attach' | 'new')}
-                  disabled={pinnedProductId !== null}
-                >
-                  <Radio value="attach">
-                    挂靠已有商品
-                    {ctx?.defaultAttachProductCode != null &&
-                      `（${ctx.defaultAttachProductCode} ${ctx.defaultAttachProductName ?? ''}）`}
-                  </Radio>
-                  <Radio value="new">另建新商品（变体实为不同商品时使用）</Radio>
-                </Radio.Group>
-                {pinnedProductId !== null && (
-                  <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
-                    连续建档模式：已锁定挂靠本次新建的商品。
-                  </span>
-                )}
-              </Form.Item>
-            ) : null}
-            {attachTargetId === null ? (
-              <>
-                <Form.Item
-                  name="productNameZh"
-                  label="商品名"
-                  rules={[{ required: true, message: '请填写商品名' }]}
-                >
-                  <Input maxLength={255} placeholder="默认取商品链接标题" />
-                </Form.Item>
-                <Form.Item
-                  name="brandId"
-                  label={
-                    <Space size={4}>
-                      品牌
-                      <Button
-                        type="link"
-                        size="small"
-                        style={{ padding: 0, height: 'auto' }}
-                        onClick={() => setBrandModalOpen(true)}
-                      >
-                        + 新建品牌
-                      </Button>
-                    </Space>
-                  }
-                >
-                  <Select
-                    allowClear
-                    showSearch
-                    optionFilterProp="label"
-                    placeholder="选择品牌（可搜可现场快建）"
-                    options={brandOptions}
-                  />
-                </Form.Item>
-                <Form.Item
-                  name="categoryPath"
-                  label={
-                    <Space size={4}>
-                      商品分类（三级）
-                      <Button
-                        type="link"
-                        size="small"
-                        style={{ padding: 0, height: 'auto' }}
-                        onClick={() => setCategoryCreateOpen(true)}
-                      >
-                        + 新建分类
-                      </Button>
-                    </Space>
-                  }
-                  extra={categoryExtraHint()}
-                  rules={[
-                    {
-                      validator: (_rule, value: string[] | undefined) =>
-                        value === undefined || value.length === 0
-                          ? Promise.resolve()
-                          : value.length === 3
-                            ? Promise.resolve()
-                            : Promise.reject(new Error('必须选择到三级分类')),
-                    },
-                  ]}
-                >
-                  <Cascader<CategoryOption>
-                    allowClear
-                    showSearch
-                    placeholder="选择三级分类（支持搜索中文名）"
-                    options={categoryOptions}
-                  />
-                </Form.Item>
-                {selectedVariant?.descriptionCategoryId != null && (
-                  <Form.Item
-                    name="rememberCategoryMapping"
-                    valuePropName="checked"
-                    initialValue={true}
+            <Form.Item
+              name="brandId"
+              label={
+                <Space size={4}>
+                  品牌
+                  <Button
+                    type="link"
+                    size="small"
+                    style={{ padding: 0, height: 'auto' }}
+                    onClick={() => setBrandModalOpen(true)}
                   >
-                    <Checkbox>
-                      记住此映射（OZON 类目 {selectedVariant.descriptionCategoryId}:
-                      {selectedVariant.descriptionTypeId} → 所选内部类目；同类目后续自动命中）
-                    </Checkbox>
-                  </Form.Item>
-                )}
-              </>
-            ) : (
-              <Alert
-                type="info"
-                showIcon
-                style={{ marginBottom: 12 }}
-                title={`挂靠已有商品：${ctx?.defaultAttachProductCode ?? ''} ${
-                  ctx?.defaultAttachProductName ?? ''
-                }`}
-                description="品牌/分类沿用该商品已有档案；本次只新建 SKU 并映射变体。"
+                    + 新建品牌
+                  </Button>
+                </Space>
+              }
+            >
+              <Select
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                placeholder="选择品牌（可搜可现场快建；V1 起落 SKU 自身）"
+                options={brandOptions}
               />
+            </Form.Item>
+            <Form.Item
+              name="categoryPath"
+              label={
+                <Space size={4}>
+                  SKU 分类（三级）
+                  <Button
+                    type="link"
+                    size="small"
+                    style={{ padding: 0, height: 'auto' }}
+                    onClick={() => setCategoryCreateOpen(true)}
+                  >
+                    + 新建分类
+                  </Button>
+                </Space>
+              }
+              extra={categoryExtraHint()}
+              rules={[
+                {
+                  validator: (_rule, value: string[] | undefined) =>
+                    value === undefined || value.length === 0
+                      ? Promise.resolve()
+                      : value.length === 3
+                        ? Promise.resolve()
+                        : Promise.reject(new Error('必须选择到三级分类')),
+                },
+              ]}
+            >
+              <Cascader<CategoryOption>
+                allowClear
+                showSearch
+                placeholder="选择三级分类（支持搜索中文名）"
+                options={categoryOptions}
+              />
+            </Form.Item>
+            {selectedVariant?.descriptionCategoryId != null && (
+              <Form.Item name="rememberCategoryMapping" valuePropName="checked" initialValue={true}>
+                <Checkbox>
+                  记住此映射（OZON 类目 {selectedVariant.descriptionCategoryId}:
+                  {selectedVariant.descriptionTypeId} → 所选内部类目；同类目后续自动命中）
+                </Checkbox>
+              </Form.Item>
             )}
             <Form.Item
               name="skuNameZh"

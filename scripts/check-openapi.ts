@@ -25,7 +25,6 @@ const REQUIRED_SCHEMAS = [
   'OrderDetailDto',
   'OrderListItemDto',
   'StoreResponseDto',
-  'ProductDetailDto',
   'SkuResponseDto',
   'ListingDetailDto',
   'ListingResponseDto',

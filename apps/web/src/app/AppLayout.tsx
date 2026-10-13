@@ -50,7 +50,6 @@ const MENU_ITEMS = [
     label: '商品',
     icon: <AppstoreOutlined />,
     children: [
-      { key: '/products', label: '商品管理' },
       { key: '/skus', label: 'SKU管理' },
       { key: '/listings', label: 'SKU映射' },
       { key: '/platform-mappings', label: '映射总览' },

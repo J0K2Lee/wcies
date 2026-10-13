@@ -191,6 +191,355 @@
         "tags": ["auth"]
       }
     },
+    "/api/v1/auth/verify-email/confirm": {
+      "post": {
+        "operationId": "AccountController_confirmInvite",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteConfirmRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Confirm an invite link: verify email + set initial password",
+        "tags": ["auth"]
+      }
+    },
+    "/api/v1/auth/password/change/request": {
+      "post": {
+        "operationId": "AccountController_requestPasswordChange",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Email a password-reset link to the verified mailbox",
+        "tags": ["auth"]
+      }
+    },
+    "/api/v1/auth/password/change/confirm": {
+      "post": {
+        "operationId": "AccountController_confirmPasswordChange",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChangeConfirmRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Confirm a password-reset link and set the new password",
+        "tags": ["auth"]
+      }
+    },
+    "/api/v1/auth/email/change/request": {
+      "post": {
+        "operationId": "AccountController_requestEmailChange",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailChangeRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Request an email change: link is sent to the NEW mailbox",
+        "tags": ["auth"]
+      }
+    },
+    "/api/v1/auth/email/change/confirm": {
+      "post": {
+        "operationId": "AccountController_confirmEmailChange",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenOnlyRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Confirm an email-change link from the new mailbox",
+        "tags": ["auth"]
+      }
+    },
+    "/api/v1/users": {
+      "get": {
+        "operationId": "UsersController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UserResponseDto"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "List all users (admin)",
+        "tags": ["users"]
+      },
+      "post": {
+        "operationId": "UsersController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CreateUserResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create a user (admin) and send the email verification invite",
+        "tags": ["users"]
+      }
+    },
+    "/api/v1/users/{id}/resend-invite": {
+      "post": {
+        "operationId": "UsersController_resendInvite",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/UserResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Re-send the verification invite (unverified accounts only)",
+        "tags": ["users"]
+      }
+    },
+    "/api/v1/users/{id}/status": {
+      "patch": {
+        "operationId": "UsersController_updateStatus",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserStatusRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/UserResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Enable / disable a user (admin)",
+        "tags": ["users"]
+      }
+    },
     "/api/v1/platforms": {
       "get": {
         "operationId": "PlatformController_list",
@@ -1253,355 +1602,8 @@
             }
           }
         },
-        "summary": "Delete a category with zero references (children -> CATEGORY_HAS_CHILDREN, products -> CATEGORY_IN_USE)",
+        "summary": "Delete a category with zero references (children -> CATEGORY_HAS_CHILDREN, skus -> CATEGORY_IN_USE)",
         "tags": ["catalog"]
-      }
-    },
-    "/api/v1/products": {
-      "get": {
-        "operationId": "ProductController_list",
-        "parameters": [
-          {
-            "name": "keyword",
-            "required": false,
-            "in": "query",
-            "description": "Matches product_code / name_zh / name_ru",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "brandId",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          },
-          {
-            "name": "categoryId",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          },
-          {
-            "name": "status",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": ["DRAFT", "ACTIVE", "INACTIVE"]
-            }
-          },
-          {
-            "name": "sortBy",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "default": "createdAt",
-              "type": "string",
-              "enum": ["createdAt", "updatedAt", "productCode", "nameZh"]
-            }
-          },
-          {
-            "name": "sortOrder",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "default": "desc",
-              "type": "string",
-              "enum": ["asc", "desc"]
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data", "meta"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/ProductListItemDto"
-                      }
-                    },
-                    "meta": {
-                      "type": "object",
-                      "required": ["page", "pageSize", "total"],
-                      "properties": {
-                        "page": {
-                          "type": "integer",
-                          "minimum": 1
-                        },
-                        "pageSize": {
-                          "type": "integer",
-                          "minimum": 1
-                        },
-                        "total": {
-                          "type": "integer",
-                          "minimum": 0
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "List products (paged, keyword/brand/category/status filters)",
-        "tags": ["products"]
-      },
-      "post": {
-        "operationId": "ProductController_create",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateProductRequestDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/ProductResponseDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "Create a product (code auto-generated when omitted)",
-        "tags": ["products"]
-      }
-    },
-    "/api/v1/products/{id}": {
-      "get": {
-        "operationId": "ProductController_getById",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/ProductDetailDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "Product detail incl. its SKUs",
-        "tags": ["products"]
-      },
-      "patch": {
-        "operationId": "ProductController_update",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateProductRequestDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/ProductResponseDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "Update product fields (code read-only after creation)",
-        "tags": ["products"]
-      },
-      "delete": {
-        "operationId": "ProductController_remove",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "type": "object"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "Delete a product with zero references (else PRODUCT_IN_USE)",
-        "tags": ["products"]
-      }
-    },
-    "/api/v1/products/{id}/activate": {
-      "post": {
-        "operationId": "ProductController_activate",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/ProductResponseDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "Activate a product",
-        "tags": ["products"]
-      }
-    },
-    "/api/v1/products/{id}/deactivate": {
-      "post": {
-        "operationId": "ProductController_deactivate",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/ProductResponseDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "Deactivate a product (no hard delete once referenced)",
-        "tags": ["products"]
       }
     },
     "/api/v1/skus": {
@@ -1618,18 +1620,10 @@
             }
           },
           {
-            "name": "productId",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          },
-          {
             "name": "brandId",
             "required": false,
             "in": "query",
+            "description": "SKUs of this brand (V1: brand is a SKU field, decision D5)",
             "schema": {
               "format": "uuid",
               "type": "string"
@@ -1639,6 +1633,7 @@
             "name": "categoryId",
             "required": false,
             "in": "query",
+            "description": "SKUs in this category INCLUDING all descendant categories (recursive subtree filter, decision 0005 §9.5)",
             "schema": {
               "format": "uuid",
               "type": "string"
@@ -2122,7 +2117,7 @@
             }
           }
         },
-        "summary": "Generate an INTERNAL barcode (W%08d, decision 0017) for the SKU",
+        "summary": "Generate an INTERNAL barcode (6-digit numeric, decision 0019) for the SKU",
         "tags": ["skus"]
       }
     },
@@ -2946,6 +2941,55 @@
           }
         },
         "summary": "Batch-create bins (rack A01~A05 x level 01~04)",
+        "tags": ["warehouse-bins"]
+      }
+    },
+    "/api/v1/warehouses/{warehouseId}/bins/batch-delete": {
+      "post": {
+        "operationId": "WarehouseBinController_batchDeleteBins",
+        "parameters": [
+          {
+            "name": "warehouseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchDeleteBinsRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/BatchDeleteBinsResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Batch-delete bins (per-bin zero-reference rule; failures reported item by item)",
         "tags": ["warehouse-bins"]
       }
     },
@@ -5817,7 +5861,16 @@
             "name": "keyword",
             "required": false,
             "in": "query",
-            "description": "订单号 / 平台订单号模糊搜索",
+            "description": "混合搜索（用户指示 2026-09-28）：订单号 / 平台订单号 / 内部 SKU 编码 / offer_id / seller_sku / platform_sku_id 任一命中",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "platform",
+            "required": false,
+            "in": "query",
+            "description": "平台代码精确过滤（stores 所属平台 code，如 OZON/WB/YANDEX）",
             "schema": {
               "type": "string"
             }
@@ -7375,6 +7428,19 @@
             "schema": {
               "type": "string",
               "enum": ["ORDERED", "PARTIALLY_RECEIVED", "RECEIVED", "CANCELLED"]
+            }
+          },
+          {
+            "name": "statuses",
+            "required": false,
+            "in": "query",
+            "description": "多状态过滤（repeated query key，如 ?statuses=ORDERED&statuses=PARTIALLY_RECEIVED）",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["ORDERED", "PARTIALLY_RECEIVED", "RECEIVED", "CANCELLED"]
+              }
             }
           },
           {
@@ -9309,6 +9375,119 @@
         "tags": ["webhooks"]
       }
     },
+    "/api/v1/stores/{storeId}/webhooks/ozon/subscription": {
+      "get": {
+        "operationId": "OzonWebhookManageController_status",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/OzonWebhookSubscriptionDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "查询店铺的 OZON 事件订阅状态（只读，不调平台写端点）",
+        "tags": ["stores"]
+      },
+      "post": {
+        "operationId": "OzonWebhookManageController_subscribe",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/OzonWebhookSubscriptionDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "订阅/对齐 OZON 事件（本店 URL 设为 WCIES 推荐事件集，真实平台写操作）",
+        "tags": ["stores"]
+      },
+      "delete": {
+        "operationId": "OzonWebhookManageController_unsubscribe",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/OzonWebhookUnsubscribeResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "退订 OZON 事件（按本店回调 URL 精确匹配删除，真实平台写操作）",
+        "tags": ["stores"]
+      }
+    },
     "/api/v1/webhooks/yandex/stores/{storeCode}": {
       "post": {
         "operationId": "YandexWebhookController_receive",
@@ -11142,9 +11321,18 @@
           "status": {
             "type": "string",
             "example": "ACTIVE"
+          },
+          "emailVerified": {
+            "type": "boolean",
+            "example": true,
+            "description": "邮箱是否已验证"
+          },
+          "createdAt": {
+            "type": "string",
+            "example": "2026-10-05T08:00:00.000Z"
           }
         },
-        "required": ["id", "username", "email", "role", "status"]
+        "required": ["id", "username", "email", "role", "status", "emailVerified", "createdAt"]
       },
       "LoginResponseDataDto": {
         "type": "object",
@@ -11169,6 +11357,113 @@
           }
         },
         "required": ["usernameOrEmail", "password"]
+      },
+      "InviteConfirmRequestDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "邮件链接中的 token",
+            "example": "64位十六进制字符串"
+          },
+          "newPassword": {
+            "type": "string",
+            "description": "初始登录密码（仅在本次激活时设置）"
+          }
+        },
+        "required": ["token", "newPassword"]
+      },
+      "PasswordChangeConfirmRequestDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "邮件链接中的 token",
+            "example": "64位十六进制字符串"
+          },
+          "newPassword": {
+            "type": "string",
+            "description": "新登录密码"
+          }
+        },
+        "required": ["token", "newPassword"]
+      },
+      "EmailChangeRequestDto": {
+        "type": "object",
+        "properties": {
+          "newEmail": {
+            "type": "string",
+            "example": "new-mailbox@example.com",
+            "description": "新邮箱（验证链接发往该地址）"
+          },
+          "password": {
+            "type": "string",
+            "description": "当前登录密码（账号控制权证明）"
+          }
+        },
+        "required": ["newEmail", "password"]
+      },
+      "TokenOnlyRequestDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "邮件链接中的 token",
+            "example": "64位十六进制字符串"
+          }
+        },
+        "required": ["token"]
+      },
+      "CreateUserResponseDto": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/UserResponseDto"
+          },
+          "inviteSent": {
+            "type": "boolean",
+            "example": true,
+            "description": "邀请邮件是否发送成功"
+          },
+          "inviteError": {
+            "type": "object",
+            "example": null,
+            "nullable": true,
+            "description": "邀请邮件发送失败原因（inviteSent=false 时存在）"
+          }
+        },
+        "required": ["user", "inviteSent", "inviteError"]
+      },
+      "CreateUserRequestDto": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "example": "ops-alice"
+          },
+          "email": {
+            "type": "string",
+            "example": "alice@example.com",
+            "description": "必须真实可达：邀请邮件发往该地址"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["ADMIN", "OPERATOR"],
+            "default": "OPERATOR"
+          }
+        },
+        "required": ["username", "email", "role"]
+      },
+      "UpdateUserStatusRequestDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["ACTIVE", "DISABLED"],
+            "example": "DISABLED"
+          }
+        },
+        "required": ["status"]
       },
       "PlatformResponseDto": {
         "type": "object",
@@ -11851,377 +12146,6 @@
           }
         }
       },
-      "ProductListItemDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "productCode": {
-            "type": "string",
-            "example": "PRD000001"
-          },
-          "nameZh": {
-            "type": "string",
-            "example": "VALKYRIE VK87 MAX V2 机械键盘"
-          },
-          "nameRu": {
-            "type": "object",
-            "nullable": true
-          },
-          "categoryId": {
-            "type": "object",
-            "format": "uuid",
-            "nullable": true
-          },
-          "categoryName": {
-            "type": "object",
-            "nullable": true
-          },
-          "brandId": {
-            "type": "object",
-            "format": "uuid",
-            "nullable": true
-          },
-          "brandName": {
-            "type": "object",
-            "nullable": true
-          },
-          "mainImageId": {
-            "type": "object",
-            "format": "uuid",
-            "nullable": true
-          },
-          "status": {
-            "type": "string",
-            "example": "ACTIVE"
-          },
-          "remark": {
-            "type": "object",
-            "nullable": true
-          },
-          "createdAt": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "updatedAt": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "skuCount": {
-            "type": "number",
-            "example": 2
-          }
-        },
-        "required": [
-          "id",
-          "productCode",
-          "nameZh",
-          "nameRu",
-          "categoryId",
-          "categoryName",
-          "brandId",
-          "brandName",
-          "mainImageId",
-          "status",
-          "remark",
-          "createdAt",
-          "updatedAt",
-          "skuCount"
-        ]
-      },
-      "ProductResponseDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "productCode": {
-            "type": "string",
-            "example": "PRD000001"
-          },
-          "nameZh": {
-            "type": "string",
-            "example": "VALKYRIE VK87 MAX V2 机械键盘"
-          },
-          "nameRu": {
-            "type": "object",
-            "nullable": true
-          },
-          "categoryId": {
-            "type": "object",
-            "format": "uuid",
-            "nullable": true
-          },
-          "categoryName": {
-            "type": "object",
-            "nullable": true
-          },
-          "brandId": {
-            "type": "object",
-            "format": "uuid",
-            "nullable": true
-          },
-          "brandName": {
-            "type": "object",
-            "nullable": true
-          },
-          "mainImageId": {
-            "type": "object",
-            "format": "uuid",
-            "nullable": true
-          },
-          "status": {
-            "type": "string",
-            "example": "ACTIVE"
-          },
-          "remark": {
-            "type": "object",
-            "nullable": true
-          },
-          "createdAt": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "updatedAt": {
-            "format": "date-time",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "productCode",
-          "nameZh",
-          "nameRu",
-          "categoryId",
-          "categoryName",
-          "brandId",
-          "brandName",
-          "mainImageId",
-          "status",
-          "remark",
-          "createdAt",
-          "updatedAt"
-        ]
-      },
-      "CreateProductRequestDto": {
-        "type": "object",
-        "properties": {
-          "productCode": {
-            "type": "string",
-            "example": "PN000001",
-            "description": "Auto-generated (PN%06d) when omitted; read-only after creation"
-          },
-          "nameZh": {
-            "type": "string",
-            "example": "VALKYRIE VK87 MAX V2 机械键盘",
-            "maxLength": 500
-          },
-          "nameRu": {
-            "type": "string",
-            "maxLength": 500
-          },
-          "categoryId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "brandId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "remark": {
-            "type": "string",
-            "maxLength": 2000
-          }
-        },
-        "required": ["nameZh"]
-      },
-      "SkuResponseDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "skuCode": {
-            "type": "string",
-            "example": "SKU000001"
-          },
-          "nameZh": {
-            "type": "string",
-            "example": "VK87 MAX V2 黑色"
-          },
-          "nameRu": {
-            "type": "object",
-            "nullable": true
-          },
-          "productId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "productCode": {
-            "type": "string",
-            "example": "PRD000001"
-          },
-          "productName": {
-            "type": "string",
-            "example": "VALKYRIE VK87 MAX V2 机械键盘"
-          },
-          "model": {
-            "type": "object",
-            "nullable": true
-          },
-          "color": {
-            "type": "object",
-            "nullable": true
-          },
-          "size": {
-            "type": "object",
-            "nullable": true
-          },
-          "weightG": {
-            "type": "object",
-            "nullable": true,
-            "example": 950,
-            "description": "Grams (g)"
-          },
-          "lengthMm": {
-            "type": "object",
-            "nullable": true,
-            "example": 355,
-            "description": "Millimeters (integer)"
-          },
-          "widthMm": {
-            "type": "object",
-            "nullable": true,
-            "example": 122,
-            "description": "Millimeters (integer)"
-          },
-          "heightMm": {
-            "type": "object",
-            "nullable": true,
-            "example": 34,
-            "description": "Millimeters (integer)"
-          },
-          "volumeMm3": {
-            "type": "object",
-            "nullable": true,
-            "description": "Backend-computed: length_mm x width_mm x height_mm (read-only)"
-          },
-          "purchaseUrl": {
-            "type": "object",
-            "nullable": true,
-            "maxLength": 1000,
-            "description": "Procurement link"
-          },
-          "latestPurchasePrice": {
-            "type": "object",
-            "nullable": true
-          },
-          "movingAverageCost": {
-            "type": "object",
-            "nullable": true,
-            "description": "Reserved; null until the purchase sprint (task §24)"
-          },
-          "costCurrency": {
-            "type": "string",
-            "example": "CNY"
-          },
-          "serialTracking": {
-            "type": "boolean",
-            "example": false
-          },
-          "status": {
-            "type": "string",
-            "example": "ACTIVE"
-          },
-          "remark": {
-            "type": "object",
-            "nullable": true
-          },
-          "createdAt": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "updatedAt": {
-            "format": "date-time",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "skuCode",
-          "nameZh",
-          "nameRu",
-          "productId",
-          "productCode",
-          "productName",
-          "model",
-          "color",
-          "size",
-          "weightG",
-          "lengthMm",
-          "widthMm",
-          "heightMm",
-          "volumeMm3",
-          "purchaseUrl",
-          "latestPurchasePrice",
-          "movingAverageCost",
-          "costCurrency",
-          "serialTracking",
-          "status",
-          "remark",
-          "createdAt",
-          "updatedAt"
-        ]
-      },
-      "ProductDetailDto": {
-        "type": "object",
-        "properties": {
-          "product": {
-            "$ref": "#/components/schemas/ProductResponseDto"
-          },
-          "skus": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SkuResponseDto"
-            }
-          }
-        },
-        "required": ["product", "skus"]
-      },
-      "UpdateProductRequestDto": {
-        "type": "object",
-        "properties": {
-          "nameZh": {
-            "type": "string",
-            "maxLength": 500
-          },
-          "nameRu": {
-            "type": "string",
-            "maxLength": 500
-          },
-          "categoryId": {
-            "type": "object",
-            "format": "uuid"
-          },
-          "brandId": {
-            "type": "object",
-            "format": "uuid"
-          },
-          "mainImageId": {
-            "type": "object",
-            "format": "uuid",
-            "description": "Must reference one of this product SKU images"
-          },
-          "remark": {
-            "type": "string",
-            "maxLength": 2000
-          }
-        }
-      },
       "SkuListItemDto": {
         "type": "object",
         "properties": {
@@ -12231,7 +12155,7 @@
           },
           "skuCode": {
             "type": "string",
-            "example": "SKU000001"
+            "example": "SKU000012002"
           },
           "nameZh": {
             "type": "string",
@@ -12241,17 +12165,24 @@
             "type": "object",
             "nullable": true
           },
-          "productId": {
-            "type": "string",
-            "format": "uuid"
+          "categoryId": {
+            "type": "object",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Category (level 3, decision 0005)"
           },
-          "productCode": {
-            "type": "string",
-            "example": "PRD000001"
+          "categoryName": {
+            "type": "object",
+            "nullable": true
           },
-          "productName": {
-            "type": "string",
-            "example": "VALKYRIE VK87 MAX V2 机械键盘"
+          "brandId": {
+            "type": "object",
+            "format": "uuid",
+            "nullable": true
+          },
+          "brandName": {
+            "type": "object",
+            "nullable": true
           },
           "model": {
             "type": "object",
@@ -12332,15 +12263,6 @@
           "updatedAt": {
             "format": "date-time",
             "type": "string"
-          },
-          "brandId": {
-            "type": "object",
-            "format": "uuid",
-            "nullable": true
-          },
-          "brandName": {
-            "type": "object",
-            "nullable": true
           },
           "primaryBarcode": {
             "type": "object",
@@ -12362,9 +12284,10 @@
           "skuCode",
           "nameZh",
           "nameRu",
-          "productId",
-          "productCode",
-          "productName",
+          "categoryId",
+          "categoryName",
+          "brandId",
+          "brandName",
           "model",
           "color",
           "size",
@@ -12382,11 +12305,156 @@
           "remark",
           "createdAt",
           "updatedAt",
-          "brandId",
-          "brandName",
           "primaryBarcode",
           "primaryImageUrl",
           "listingCount"
+        ]
+      },
+      "SkuResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skuCode": {
+            "type": "string",
+            "example": "SKU000012002"
+          },
+          "nameZh": {
+            "type": "string",
+            "example": "VK87 MAX V2 黑色"
+          },
+          "nameRu": {
+            "type": "object",
+            "nullable": true
+          },
+          "categoryId": {
+            "type": "object",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Category (level 3, decision 0005)"
+          },
+          "categoryName": {
+            "type": "object",
+            "nullable": true
+          },
+          "brandId": {
+            "type": "object",
+            "format": "uuid",
+            "nullable": true
+          },
+          "brandName": {
+            "type": "object",
+            "nullable": true
+          },
+          "model": {
+            "type": "object",
+            "nullable": true
+          },
+          "color": {
+            "type": "object",
+            "nullable": true
+          },
+          "size": {
+            "type": "object",
+            "nullable": true
+          },
+          "weightG": {
+            "type": "object",
+            "nullable": true,
+            "example": 950,
+            "description": "Grams (g)"
+          },
+          "lengthMm": {
+            "type": "object",
+            "nullable": true,
+            "example": 355,
+            "description": "Millimeters (integer)"
+          },
+          "widthMm": {
+            "type": "object",
+            "nullable": true,
+            "example": 122,
+            "description": "Millimeters (integer)"
+          },
+          "heightMm": {
+            "type": "object",
+            "nullable": true,
+            "example": 34,
+            "description": "Millimeters (integer)"
+          },
+          "volumeMm3": {
+            "type": "object",
+            "nullable": true,
+            "description": "Backend-computed: length_mm x width_mm x height_mm (read-only)"
+          },
+          "purchaseUrl": {
+            "type": "object",
+            "nullable": true,
+            "maxLength": 1000,
+            "description": "Procurement link"
+          },
+          "latestPurchasePrice": {
+            "type": "object",
+            "nullable": true
+          },
+          "movingAverageCost": {
+            "type": "object",
+            "nullable": true,
+            "description": "Reserved; null until the purchase sprint (task §24)"
+          },
+          "costCurrency": {
+            "type": "string",
+            "example": "CNY"
+          },
+          "serialTracking": {
+            "type": "boolean",
+            "example": false
+          },
+          "status": {
+            "type": "string",
+            "example": "ACTIVE"
+          },
+          "remark": {
+            "type": "object",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "skuCode",
+          "nameZh",
+          "nameRu",
+          "categoryId",
+          "categoryName",
+          "brandId",
+          "brandName",
+          "model",
+          "color",
+          "size",
+          "weightG",
+          "lengthMm",
+          "widthMm",
+          "heightMm",
+          "volumeMm3",
+          "purchaseUrl",
+          "latestPurchasePrice",
+          "movingAverageCost",
+          "costCurrency",
+          "serialTracking",
+          "status",
+          "remark",
+          "createdAt",
+          "updatedAt"
         ]
       },
       "CreateSkuRequestDto": {
@@ -12394,12 +12462,8 @@
         "properties": {
           "skuCode": {
             "type": "string",
-            "example": "SKU000001001",
-            "description": "Auto-generated (SKU{product seq 6}{in-product seq 3}) when omitted; frozen after creation"
-          },
-          "productId": {
-            "type": "string",
-            "format": "uuid"
+            "example": "SKU000012002",
+            "description": "Auto-generated (SKU%09d global sequence) when omitted; frozen after creation"
           },
           "nameZh": {
             "type": "string",
@@ -12409,6 +12473,16 @@
           "nameRu": {
             "type": "string",
             "maxLength": 500
+          },
+          "brandId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Brand (optional; must exist). V1: category/brand are SKU fields (decision D5)"
+          },
+          "categoryId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Category (optional; must exist and be level 3, decision 0005)"
           },
           "model": {
             "type": "string",
@@ -12472,7 +12546,7 @@
             "maxLength": 2000
           }
         },
-        "required": ["productId", "nameZh"]
+        "required": ["nameZh"]
       },
       "UpdateSkuRequestDto": {
         "type": "object",
@@ -12484,6 +12558,18 @@
           "nameRu": {
             "type": "string",
             "maxLength": 500
+          },
+          "brandId": {
+            "type": "object",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Brand; null clears the assignment (V1 decision D5)"
+          },
+          "categoryId": {
+            "type": "object",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Category (level 3); null clears the assignment (decision 0005)"
           },
           "model": {
             "type": "string",
@@ -13143,6 +13229,57 @@
         },
         "required": ["rackStart", "rackCount", "levelsPerRack"]
       },
+      "BatchDeleteBinFailureDto": {
+        "type": "object",
+        "properties": {
+          "binId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "binCode": {
+            "type": "object",
+            "nullable": true,
+            "example": "ZG-01-A03-1"
+          },
+          "reason": {
+            "type": "string",
+            "example": "该库位已被引用（inventory_balances），只能停用不能删除"
+          }
+        },
+        "required": ["binId", "binCode", "reason"]
+      },
+      "BatchDeleteBinsResponseDto": {
+        "type": "object",
+        "properties": {
+          "deletedCount": {
+            "type": "number",
+            "example": 18,
+            "description": "成功删除的库位数"
+          },
+          "failures": {
+            "description": "未删除的库位及原因",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BatchDeleteBinFailureDto"
+            }
+          }
+        },
+        "required": ["deletedCount", "failures"]
+      },
+      "BatchDeleteBinsRequestDto": {
+        "type": "object",
+        "properties": {
+          "binIds": {
+            "description": "要删除的库位 ID 列表（1~2000 个，重复自动去重）",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": ["binIds"]
+      },
       "UpdateBinRequestDto": {
         "type": "object",
         "properties": {
@@ -13728,16 +13865,6 @@
             "nullable": true,
             "description": "已映射时该变体绑定的内部 SKU 编码"
           },
-          "productId": {
-            "type": "object",
-            "nullable": true,
-            "description": "已映射时该变体绑定的内部商品 id（挂靠目标）"
-          },
-          "productCode": {
-            "type": "object",
-            "nullable": true,
-            "description": "已映射时该变体绑定的内部商品编码"
-          },
           "primaryImage": {
             "type": "object",
             "nullable": true,
@@ -13792,8 +13919,6 @@
           "offerId",
           "sellerSku",
           "skuCode",
-          "productId",
-          "productCode",
           "primaryImage",
           "colorImage",
           "descriptionCategoryId",
@@ -13816,22 +13941,6 @@
             "type": "object",
             "nullable": true
           },
-          "defaultAttachProductId": {
-            "type": "object",
-            "nullable": true,
-            "format": "uuid",
-            "description": "缺省挂靠目标：该 Listing 首个已建档变体的商品；无则为 null（新建）"
-          },
-          "defaultAttachProductCode": {
-            "type": "object",
-            "nullable": true,
-            "example": "PN000012"
-          },
-          "defaultAttachProductName": {
-            "type": "object",
-            "nullable": true,
-            "example": "VK87 MAX V2 机械键盘"
-          },
           "variants": {
             "type": "array",
             "items": {
@@ -13839,14 +13948,7 @@
             }
           }
         },
-        "required": [
-          "listingId",
-          "title",
-          "defaultAttachProductId",
-          "defaultAttachProductCode",
-          "defaultAttachProductName",
-          "variants"
-        ]
+        "required": ["listingId", "title", "variants"]
       },
       "UnmappedListingExportResponseDto": {
         "type": "object",
@@ -14029,24 +14131,6 @@
         },
         "required": ["skuId"]
       },
-      "ListingOnboardProductDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "productCode": {
-            "type": "string",
-            "example": "PN000012"
-          },
-          "nameZh": {
-            "type": "string",
-            "example": "VK87 MAX V2 机械键盘"
-          }
-        },
-        "required": ["id", "productCode", "nameZh"]
-      },
       "ListingOnboardSkuDto": {
         "type": "object",
         "properties": {
@@ -14056,7 +14140,7 @@
           },
           "skuCode": {
             "type": "string",
-            "example": "SKU000012001"
+            "example": "SKU000012002"
           },
           "nameZh": {
             "type": "string",
@@ -14081,42 +14165,21 @@
             "enum": ["MAPPED"],
             "description": "成功后恒为 MAPPED"
           },
-          "product": {
-            "$ref": "#/components/schemas/ListingOnboardProductDto"
-          },
           "sku": {
             "$ref": "#/components/schemas/ListingOnboardSkuDto"
           },
           "barcode": {
             "type": "object",
             "nullable": true,
-            "example": "W00000042",
+            "example": "000042",
             "description": "未勾选生成时为 null"
-          },
-          "productCreated": {
-            "type": "boolean",
-            "example": false,
-            "description": "Sprint 8.5 T2：本次是否新建了商品（false = 挂靠已有商品）"
           }
         },
-        "required": [
-          "listingId",
-          "mappingId",
-          "mappingStatus",
-          "product",
-          "sku",
-          "barcode",
-          "productCreated"
-        ]
+        "required": ["listingId", "mappingId", "mappingStatus", "sku", "barcode"]
       },
       "ListingOnboardRequestDto": {
         "type": "object",
         "properties": {
-          "productNameZh": {
-            "type": "string",
-            "description": "商品名；缺省取 Listing 标题",
-            "maxLength": 255
-          },
           "skuNameZh": {
             "type": "string",
             "description": "SKU 名；缺省取 Listing 标题",
@@ -14125,25 +14188,16 @@
           "generateBarcode": {
             "type": "boolean",
             "default": true,
-            "description": "同时生成内部条码（W…，决策 0017），生成后可直接打印标签"
-          },
-          "existingProductId": {
-            "type": "string",
-            "description": "Sprint 8.5 T2：挂靠到该已有商品（多变体同挂一个 Product）",
-            "format": "uuid"
-          },
-          "createNewProduct": {
-            "type": "boolean",
-            "description": "Sprint 8.5 T2：显式另建新商品（覆盖「缺省自动挂靠已有商品」）"
+            "description": "同时生成内部条码（6 位纯数字，决策 0019），生成后可直接打印标签"
           },
           "brandId": {
             "type": "string",
-            "description": "Sprint 8.5 T4：商品品牌（仅新建商品时生效）",
+            "description": "SKU 品牌（可选；V1 起品牌是 SKU 字段，决策 D5）",
             "format": "uuid"
           },
           "categoryId": {
             "type": "string",
-            "description": "Sprint 8.5 T3c：商品分类（三级，仅新建商品时生效）",
+            "description": "SKU 分类（三级，可选；V1 起分类是 SKU 字段，决策 D5）",
             "format": "uuid"
           },
           "rememberCategoryMapping": {
@@ -17318,6 +17372,12 @@
             "type": "object",
             "nullable": true
           },
+          "receivingWarehouseId": {
+            "type": "object",
+            "nullable": true,
+            "format": "uuid",
+            "description": "收货仓库意向（创建时选择，回显用；库存事实仍在收货单上）"
+          },
           "itemCount": {
             "type": "number"
           },
@@ -17427,6 +17487,15 @@
             "nullable": true
           },
           "remark": {
+            "type": "object",
+            "nullable": true
+          },
+          "receivingWarehouseId": {
+            "type": "object",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "receivingWarehouseName": {
             "type": "object",
             "nullable": true
           },
@@ -17819,14 +17888,14 @@
         "type": "object",
         "properties": {
           "warehouseId": {
-            "type": "string"
+            "type": "string",
+            "description": "收货仓库（可省略：省略时使用采购单上的收货仓库意向，ERP 建议#4）"
           },
           "defaultBinId": {
             "type": "string",
             "description": "默认目标库位（明细可单独覆盖）"
           }
-        },
-        "required": ["warehouseId"]
+        }
       },
       "UpdatePurchaseReceiptRequestDto": {
         "type": "object",
@@ -19305,6 +19374,61 @@
           "errorMessage"
         ]
       },
+      "OzonWebhookSubscriptionDto": {
+        "type": "object",
+        "properties": {
+          "subscribed": {
+            "type": "boolean",
+            "description": "本店回调 URL 是否已在 OZON 侧订阅"
+          },
+          "subscriptionId": {
+            "type": "number",
+            "nullable": true,
+            "description": "OZON 侧订阅 ID"
+          },
+          "url": {
+            "type": "string",
+            "description": "本店回调 URL（配置到 OZON 的地址）"
+          },
+          "enabled": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "订阅是否启用（平台自动暂停后为 false）"
+          },
+          "types": {
+            "description": "该订阅当前的事件类型（平台侧事实）",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expectedTypes": {
+            "description": "WCIES 推荐订阅的事件类型",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "otherUrlCount": {
+            "type": "number",
+            "description": "同一 Client-Id 下其他订阅 URL 的数量"
+          }
+        },
+        "required": ["subscribed", "url", "types", "expectedTypes", "otherUrlCount"]
+      },
+      "OzonWebhookUnsubscribeResultDto": {
+        "type": "object",
+        "properties": {
+          "deleted": {
+            "type": "number",
+            "description": "平台侧删除的订阅数量"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": ["deleted", "url"]
+      },
       "WbWebhookSubscriptionDto": {
         "type": "object",
         "properties": {
@@ -19435,9 +19559,13 @@
             "type": "boolean",
             "description": "平台此前已受理该订单（本次未再写平台）"
           },
+          "assemblyPending": {
+            "type": "boolean",
+            "description": "平台已受理组包但尚未确认（OZON 异步处理，正常中间态）：运单号暂不可读，稍后再次点击即可收敛"
+          },
           "platformWritePerformed": {
             "type": "boolean",
-            "description": "本次是否真的调用了平台写接口"
+            "description": "本次点击是否完成平台组包写（受理中/已组包过则为 false）"
           }
         },
         "required": [
@@ -19447,6 +19575,7 @@
           "trackingNumber",
           "platformStatus",
           "alreadyPrepared",
+          "assemblyPending",
           "platformWritePerformed"
         ]
       },

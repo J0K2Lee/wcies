@@ -106,6 +106,143 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/verify-email/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm an invite link: verify email + set initial password */
+        post: operations["AccountController_confirmInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/password/change/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Email a password-reset link to the verified mailbox */
+        post: operations["AccountController_requestPasswordChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/password/change/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm a password-reset link and set the new password */
+        post: operations["AccountController_confirmPasswordChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/email/change/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request an email change: link is sent to the NEW mailbox */
+        post: operations["AccountController_requestEmailChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/email/change/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm an email-change link from the new mailbox */
+        post: operations["AccountController_confirmEmailChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List all users (admin) */
+        get: operations["UsersController_list"];
+        put?: never;
+        /** Create a user (admin) and send the email verification invite */
+        post: operations["UsersController_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}/resend-invite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Re-send the verification invite (unverified accounts only) */
+        post: operations["UsersController_resendInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Enable / disable a user (admin) */
+        patch: operations["UsersController_updateStatus"];
+        trace?: never;
+    };
     "/api/v1/platforms": {
         parameters: {
             query?: never;
@@ -379,83 +516,12 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Delete a category with zero references (children -> CATEGORY_HAS_CHILDREN, products -> CATEGORY_IN_USE) */
+        /** Delete a category with zero references (children -> CATEGORY_HAS_CHILDREN, skus -> CATEGORY_IN_USE) */
         delete: operations["CatalogController_removeCategory"];
         options?: never;
         head?: never;
         /** Update a category (cycle-safe parent changes) */
         patch: operations["CatalogController_updateCategory"];
-        trace?: never;
-    };
-    "/api/v1/products": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List products (paged, keyword/brand/category/status filters) */
-        get: operations["ProductController_list"];
-        put?: never;
-        /** Create a product (code auto-generated when omitted) */
-        post: operations["ProductController_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/products/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Product detail incl. its SKUs */
-        get: operations["ProductController_getById"];
-        put?: never;
-        post?: never;
-        /** Delete a product with zero references (else PRODUCT_IN_USE) */
-        delete: operations["ProductController_remove"];
-        options?: never;
-        head?: never;
-        /** Update product fields (code read-only after creation) */
-        patch: operations["ProductController_update"];
-        trace?: never;
-    };
-    "/api/v1/products/{id}/activate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Activate a product */
-        post: operations["ProductController_activate"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/products/{id}/deactivate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Deactivate a product (no hard delete once referenced) */
-        post: operations["ProductController_deactivate"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/api/v1/skus": {
@@ -556,7 +622,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Generate an INTERNAL barcode (W%08d, decision 0017) for the SKU */
+        /** Generate an INTERNAL barcode (6-digit numeric, decision 0019) for the SKU */
         post: operations["SkuController_generateInternalBarcode"];
         delete?: never;
         options?: never;
@@ -735,6 +801,23 @@ export interface paths {
         put?: never;
         /** Batch-create bins (rack A01~A05 x level 01~04) */
         post: operations["WarehouseBinController_batchCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/warehouses/{warehouseId}/bins/batch-delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Batch-delete bins (per-bin zero-reference rule; failures reported item by item) */
+        post: operations["WarehouseBinController_batchDeleteBins"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2578,6 +2661,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/stores/{storeId}/webhooks/ozon/subscription": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询店铺的 OZON 事件订阅状态（只读，不调平台写端点） */
+        get: operations["OzonWebhookManageController_status"];
+        put?: never;
+        /** 订阅/对齐 OZON 事件（本店 URL 设为 WCIES 推荐事件集，真实平台写操作） */
+        post: operations["OzonWebhookManageController_subscribe"];
+        /** 退订 OZON 事件（按本店回调 URL 精确匹配删除，真实平台写操作） */
+        delete: operations["OzonWebhookManageController_unsubscribe"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/webhooks/yandex/stores/{storeCode}": {
         parameters: {
             query?: never;
@@ -3163,6 +3265,13 @@ export interface components {
             role: string;
             /** @example ACTIVE */
             status: string;
+            /**
+             * @description 邮箱是否已验证
+             * @example true
+             */
+            emailVerified: boolean;
+            /** @example 2026-10-05T08:00:00.000Z */
+            createdAt: string;
         };
         LoginResponseDataDto: {
             user: components["schemas"]["UserResponseDto"];
@@ -3175,6 +3284,74 @@ export interface components {
             usernameOrEmail: string;
             /** @description Plain password (transit only, never stored) */
             password: string;
+        };
+        InviteConfirmRequestDto: {
+            /**
+             * @description 邮件链接中的 token
+             * @example 64位十六进制字符串
+             */
+            token: string;
+            /** @description 初始登录密码（仅在本次激活时设置） */
+            newPassword: string;
+        };
+        PasswordChangeConfirmRequestDto: {
+            /**
+             * @description 邮件链接中的 token
+             * @example 64位十六进制字符串
+             */
+            token: string;
+            /** @description 新登录密码 */
+            newPassword: string;
+        };
+        EmailChangeRequestDto: {
+            /**
+             * @description 新邮箱（验证链接发往该地址）
+             * @example new-mailbox@example.com
+             */
+            newEmail: string;
+            /** @description 当前登录密码（账号控制权证明） */
+            password: string;
+        };
+        TokenOnlyRequestDto: {
+            /**
+             * @description 邮件链接中的 token
+             * @example 64位十六进制字符串
+             */
+            token: string;
+        };
+        CreateUserResponseDto: {
+            user: components["schemas"]["UserResponseDto"];
+            /**
+             * @description 邀请邮件是否发送成功
+             * @example true
+             */
+            inviteSent: boolean;
+            /**
+             * @description 邀请邮件发送失败原因（inviteSent=false 时存在）
+             * @example null
+             */
+            inviteError: Record<string, never> | null;
+        };
+        CreateUserRequestDto: {
+            /** @example ops-alice */
+            username: string;
+            /**
+             * @description 必须真实可达：邀请邮件发往该地址
+             * @example alice@example.com
+             */
+            email: string;
+            /**
+             * @default OPERATOR
+             * @enum {string}
+             */
+            role: "ADMIN" | "OPERATOR";
+        };
+        UpdateUserStatusRequestDto: {
+            /**
+             * @example DISABLED
+             * @enum {string}
+             */
+            status: "ACTIVE" | "DISABLED";
         };
         PlatformResponseDto: {
             /** Format: uuid */
@@ -3452,159 +3629,23 @@ export interface components {
             /** @enum {string} */
             status?: "ACTIVE" | "INACTIVE";
         };
-        ProductListItemDto: {
-            /** Format: uuid */
-            id: string;
-            /** @example PRD000001 */
-            productCode: string;
-            /** @example VALKYRIE VK87 MAX V2 机械键盘 */
-            nameZh: string;
-            nameRu: Record<string, never> | null;
-            /** Format: uuid */
-            categoryId: Record<string, never> | null;
-            categoryName: Record<string, never> | null;
-            /** Format: uuid */
-            brandId: Record<string, never> | null;
-            brandName: Record<string, never> | null;
-            /** Format: uuid */
-            mainImageId: Record<string, never> | null;
-            /** @example ACTIVE */
-            status: string;
-            remark: Record<string, never> | null;
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            updatedAt: string;
-            /** @example 2 */
-            skuCount: number;
-        };
-        ProductResponseDto: {
-            /** Format: uuid */
-            id: string;
-            /** @example PRD000001 */
-            productCode: string;
-            /** @example VALKYRIE VK87 MAX V2 机械键盘 */
-            nameZh: string;
-            nameRu: Record<string, never> | null;
-            /** Format: uuid */
-            categoryId: Record<string, never> | null;
-            categoryName: Record<string, never> | null;
-            /** Format: uuid */
-            brandId: Record<string, never> | null;
-            brandName: Record<string, never> | null;
-            /** Format: uuid */
-            mainImageId: Record<string, never> | null;
-            /** @example ACTIVE */
-            status: string;
-            remark: Record<string, never> | null;
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            updatedAt: string;
-        };
-        CreateProductRequestDto: {
-            /**
-             * @description Auto-generated (PN%06d) when omitted; read-only after creation
-             * @example PN000001
-             */
-            productCode?: string;
-            /** @example VALKYRIE VK87 MAX V2 机械键盘 */
-            nameZh: string;
-            nameRu?: string;
-            /** Format: uuid */
-            categoryId?: string;
-            /** Format: uuid */
-            brandId?: string;
-            remark?: string;
-        };
-        SkuResponseDto: {
-            /** Format: uuid */
-            id: string;
-            /** @example SKU000001 */
-            skuCode: string;
-            /** @example VK87 MAX V2 黑色 */
-            nameZh: string;
-            nameRu: Record<string, never> | null;
-            /** Format: uuid */
-            productId: string;
-            /** @example PRD000001 */
-            productCode: string;
-            /** @example VALKYRIE VK87 MAX V2 机械键盘 */
-            productName: string;
-            model: Record<string, never> | null;
-            color: Record<string, never> | null;
-            size: Record<string, never> | null;
-            /**
-             * @description Grams (g)
-             * @example 950
-             */
-            weightG: Record<string, never> | null;
-            /**
-             * @description Millimeters (integer)
-             * @example 355
-             */
-            lengthMm: Record<string, never> | null;
-            /**
-             * @description Millimeters (integer)
-             * @example 122
-             */
-            widthMm: Record<string, never> | null;
-            /**
-             * @description Millimeters (integer)
-             * @example 34
-             */
-            heightMm: Record<string, never> | null;
-            /** @description Backend-computed: length_mm x width_mm x height_mm (read-only) */
-            volumeMm3: Record<string, never> | null;
-            /** @description Procurement link */
-            purchaseUrl: Record<string, never> | null;
-            latestPurchasePrice: Record<string, never> | null;
-            /** @description Reserved; null until the purchase sprint (task §24) */
-            movingAverageCost: Record<string, never> | null;
-            /** @example CNY */
-            costCurrency: string;
-            /** @example false */
-            serialTracking: boolean;
-            /** @example ACTIVE */
-            status: string;
-            remark: Record<string, never> | null;
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            updatedAt: string;
-        };
-        ProductDetailDto: {
-            product: components["schemas"]["ProductResponseDto"];
-            skus: components["schemas"]["SkuResponseDto"][];
-        };
-        UpdateProductRequestDto: {
-            nameZh?: string;
-            nameRu?: string;
-            /** Format: uuid */
-            categoryId?: Record<string, never>;
-            /** Format: uuid */
-            brandId?: Record<string, never>;
-            /**
-             * Format: uuid
-             * @description Must reference one of this product SKU images
-             */
-            mainImageId?: Record<string, never>;
-            remark?: string;
-        };
         SkuListItemDto: {
             /** Format: uuid */
             id: string;
-            /** @example SKU000001 */
+            /** @example SKU000012002 */
             skuCode: string;
             /** @example VK87 MAX V2 黑色 */
             nameZh: string;
             nameRu: Record<string, never> | null;
+            /**
+             * Format: uuid
+             * @description Category (level 3, decision 0005)
+             */
+            categoryId: Record<string, never> | null;
+            categoryName: Record<string, never> | null;
             /** Format: uuid */
-            productId: string;
-            /** @example PRD000001 */
-            productCode: string;
-            /** @example VALKYRIE VK87 MAX V2 机械键盘 */
-            productName: string;
+            brandId: Record<string, never> | null;
+            brandName: Record<string, never> | null;
             model: Record<string, never> | null;
             color: Record<string, never> | null;
             size: Record<string, never> | null;
@@ -3646,9 +3687,6 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
-            /** Format: uuid */
-            brandId: Record<string, never> | null;
-            brandName: Record<string, never> | null;
             /** @description Primary barcode value */
             primaryBarcode: Record<string, never> | null;
             /** @description Signed URL of the primary image */
@@ -3656,17 +3694,84 @@ export interface components {
             /** @example 3 */
             listingCount: number;
         };
+        SkuResponseDto: {
+            /** Format: uuid */
+            id: string;
+            /** @example SKU000012002 */
+            skuCode: string;
+            /** @example VK87 MAX V2 黑色 */
+            nameZh: string;
+            nameRu: Record<string, never> | null;
+            /**
+             * Format: uuid
+             * @description Category (level 3, decision 0005)
+             */
+            categoryId: Record<string, never> | null;
+            categoryName: Record<string, never> | null;
+            /** Format: uuid */
+            brandId: Record<string, never> | null;
+            brandName: Record<string, never> | null;
+            model: Record<string, never> | null;
+            color: Record<string, never> | null;
+            size: Record<string, never> | null;
+            /**
+             * @description Grams (g)
+             * @example 950
+             */
+            weightG: Record<string, never> | null;
+            /**
+             * @description Millimeters (integer)
+             * @example 355
+             */
+            lengthMm: Record<string, never> | null;
+            /**
+             * @description Millimeters (integer)
+             * @example 122
+             */
+            widthMm: Record<string, never> | null;
+            /**
+             * @description Millimeters (integer)
+             * @example 34
+             */
+            heightMm: Record<string, never> | null;
+            /** @description Backend-computed: length_mm x width_mm x height_mm (read-only) */
+            volumeMm3: Record<string, never> | null;
+            /** @description Procurement link */
+            purchaseUrl: Record<string, never> | null;
+            latestPurchasePrice: Record<string, never> | null;
+            /** @description Reserved; null until the purchase sprint (task §24) */
+            movingAverageCost: Record<string, never> | null;
+            /** @example CNY */
+            costCurrency: string;
+            /** @example false */
+            serialTracking: boolean;
+            /** @example ACTIVE */
+            status: string;
+            remark: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
         CreateSkuRequestDto: {
             /**
-             * @description Auto-generated (SKU{product seq 6}{in-product seq 3}) when omitted; frozen after creation
-             * @example SKU000001001
+             * @description Auto-generated (SKU%09d global sequence) when omitted; frozen after creation
+             * @example SKU000012002
              */
             skuCode?: string;
-            /** Format: uuid */
-            productId: string;
             /** @example VK87 MAX V2 黑色 */
             nameZh: string;
             nameRu?: string;
+            /**
+             * Format: uuid
+             * @description Brand (optional; must exist). V1: category/brand are SKU fields (decision D5)
+             */
+            brandId?: string;
+            /**
+             * Format: uuid
+             * @description Category (optional; must exist and be level 3, decision 0005)
+             */
+            categoryId?: string;
             /** @example VK87MAX */
             model?: string;
             /** @example 黑色 */
@@ -3718,6 +3823,16 @@ export interface components {
         UpdateSkuRequestDto: {
             nameZh?: string;
             nameRu?: string;
+            /**
+             * Format: uuid
+             * @description Brand; null clears the assignment (V1 decision D5)
+             */
+            brandId?: Record<string, never> | null;
+            /**
+             * Format: uuid
+             * @description Category (level 3); null clears the assignment (decision 0005)
+             */
+            categoryId?: Record<string, never> | null;
             model?: string;
             color?: string;
             size?: string;
@@ -4001,6 +4116,27 @@ export interface components {
              */
             levelsPerRack: number;
         };
+        BatchDeleteBinFailureDto: {
+            /** Format: uuid */
+            binId: string;
+            /** @example ZG-01-A03-1 */
+            binCode: Record<string, never> | null;
+            /** @example 该库位已被引用（inventory_balances），只能停用不能删除 */
+            reason: string;
+        };
+        BatchDeleteBinsResponseDto: {
+            /**
+             * @description 成功删除的库位数
+             * @example 18
+             */
+            deletedCount: number;
+            /** @description 未删除的库位及原因 */
+            failures: components["schemas"]["BatchDeleteBinFailureDto"][];
+        };
+        BatchDeleteBinsRequestDto: {
+            /** @description 要删除的库位 ID 列表（1~2000 个，重复自动去重） */
+            binIds: string[];
+        };
         UpdateBinRequestDto: {
             zone?: string;
             rack?: string;
@@ -4260,10 +4396,6 @@ export interface components {
             sellerSku: Record<string, never> | null;
             /** @description 已映射时该变体绑定的内部 SKU 编码 */
             skuCode: Record<string, never> | null;
-            /** @description 已映射时该变体绑定的内部商品 id（挂靠目标） */
-            productId: Record<string, never> | null;
-            /** @description 已映射时该变体绑定的内部商品编码 */
-            productCode: Record<string, never> | null;
             /** @description raw_data.primary_image CDN 直链 */
             primaryImage: Record<string, never> | null;
             /** @description raw_data.color_image CDN 直链（转存优先用它） */
@@ -4290,15 +4422,6 @@ export interface components {
             /** Format: uuid */
             listingId: string;
             title: Record<string, never> | null;
-            /**
-             * Format: uuid
-             * @description 缺省挂靠目标：该 Listing 首个已建档变体的商品；无则为 null（新建）
-             */
-            defaultAttachProductId: Record<string, never> | null;
-            /** @example PN000012 */
-            defaultAttachProductCode: Record<string, never> | null;
-            /** @example VK87 MAX V2 机械键盘 */
-            defaultAttachProductName: Record<string, never> | null;
             variants: components["schemas"]["OnboardContextVariantDto"][];
         };
         UnmappedListingExportResponseDto: {
@@ -4381,18 +4504,10 @@ export interface components {
              */
             skuId: string;
         };
-        ListingOnboardProductDto: {
-            /** Format: uuid */
-            id: string;
-            /** @example PN000012 */
-            productCode: string;
-            /** @example VK87 MAX V2 机械键盘 */
-            nameZh: string;
-        };
         ListingOnboardSkuDto: {
             /** Format: uuid */
             id: string;
-            /** @example SKU000012001 */
+            /** @example SKU000012002 */
             skuCode: string;
             /** @example VK87 MAX V2 机械键盘 */
             nameZh: string;
@@ -4407,44 +4522,29 @@ export interface components {
              * @enum {string}
              */
             mappingStatus: "MAPPED";
-            product: components["schemas"]["ListingOnboardProductDto"];
             sku: components["schemas"]["ListingOnboardSkuDto"];
             /**
              * @description 未勾选生成时为 null
-             * @example W00000042
+             * @example 000042
              */
             barcode: Record<string, never> | null;
-            /**
-             * @description Sprint 8.5 T2：本次是否新建了商品（false = 挂靠已有商品）
-             * @example false
-             */
-            productCreated: boolean;
         };
         ListingOnboardRequestDto: {
-            /** @description 商品名；缺省取 Listing 标题 */
-            productNameZh?: string;
             /** @description SKU 名；缺省取 Listing 标题 */
             skuNameZh?: string;
             /**
-             * @description 同时生成内部条码（W…，决策 0017），生成后可直接打印标签
+             * @description 同时生成内部条码（6 位纯数字，决策 0019），生成后可直接打印标签
              * @default true
              */
             generateBarcode: boolean;
             /**
              * Format: uuid
-             * @description Sprint 8.5 T2：挂靠到该已有商品（多变体同挂一个 Product）
-             */
-            existingProductId?: string;
-            /** @description Sprint 8.5 T2：显式另建新商品（覆盖「缺省自动挂靠已有商品」） */
-            createNewProduct?: boolean;
-            /**
-             * Format: uuid
-             * @description Sprint 8.5 T4：商品品牌（仅新建商品时生效）
+             * @description SKU 品牌（可选；V1 起品牌是 SKU 字段，决策 D5）
              */
             brandId?: string;
             /**
              * Format: uuid
-             * @description Sprint 8.5 T3c：商品分类（三级，仅新建商品时生效）
+             * @description SKU 分类（三级，可选；V1 起分类是 SKU 字段，决策 D5）
              */
             categoryId?: string;
             /**
@@ -5540,6 +5640,11 @@ export interface components {
             /** Format: date-time */
             expectedAt?: string | null;
             remark?: Record<string, never> | null;
+            /**
+             * Format: uuid
+             * @description 收货仓库意向（创建时选择，回显用；库存事实仍在收货单上）
+             */
+            receivingWarehouseId?: Record<string, never> | null;
             itemCount: number;
             /** @example 2.000 */
             totalQuantity: string;
@@ -5580,6 +5685,9 @@ export interface components {
             /** Format: date-time */
             expectedAt?: string | null;
             remark?: Record<string, never> | null;
+            /** Format: uuid */
+            receivingWarehouseId?: Record<string, never> | null;
+            receivingWarehouseName?: Record<string, never> | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -5728,7 +5836,8 @@ export interface components {
             items: components["schemas"]["PurchaseReceiptItemInputDto"][];
         };
         GenerateReceiptFromPoRequestDto: {
-            warehouseId: string;
+            /** @description 收货仓库（可省略：省略时使用采购单上的收货仓库意向，ERP 建议#4） */
+            warehouseId?: string;
             /** @description 默认目标库位（明细可单独覆盖） */
             defaultBinId?: string;
         };
@@ -6217,6 +6326,27 @@ export interface components {
             errorCode: string | null;
             errorMessage: string | null;
         };
+        OzonWebhookSubscriptionDto: {
+            /** @description 本店回调 URL 是否已在 OZON 侧订阅 */
+            subscribed: boolean;
+            /** @description OZON 侧订阅 ID */
+            subscriptionId?: number | null;
+            /** @description 本店回调 URL（配置到 OZON 的地址） */
+            url: string;
+            /** @description 订阅是否启用（平台自动暂停后为 false） */
+            enabled?: boolean | null;
+            /** @description 该订阅当前的事件类型（平台侧事实） */
+            types: string[];
+            /** @description WCIES 推荐订阅的事件类型 */
+            expectedTypes: string[];
+            /** @description 同一 Client-Id 下其他订阅 URL 的数量 */
+            otherUrlCount: number;
+        };
+        OzonWebhookUnsubscribeResultDto: {
+            /** @description 平台侧删除的订阅数量 */
+            deleted: number;
+            url: string;
+        };
         WbWebhookSubscriptionDto: {
             /** @description 平台侧是否存在本店铺的订阅 */
             subscribed: boolean;
@@ -6269,7 +6399,9 @@ export interface components {
             platformStatus: string | null;
             /** @description 平台此前已受理该订单（本次未再写平台） */
             alreadyPrepared: boolean;
-            /** @description 本次是否真的调用了平台写接口 */
+            /** @description 平台已受理组包但尚未确认（OZON 异步处理，正常中间态）：运单号暂不可读，稍后再次点击即可收敛 */
+            assemblyPending: boolean;
+            /** @description 本次点击是否完成平台组包写（受理中/已组包过则为 false） */
             platformWritePerformed: boolean;
         };
         QuickShipShipmentDto: {
@@ -6782,6 +6914,241 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: Record<string, never>;
+                    };
+                };
+            };
+        };
+    };
+    AccountController_confirmInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InviteConfirmRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
+            };
+        };
+    };
+    AccountController_requestPasswordChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
+            };
+        };
+    };
+    AccountController_confirmPasswordChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordChangeConfirmRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
+            };
+        };
+    };
+    AccountController_requestEmailChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailChangeRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
+            };
+        };
+    };
+    AccountController_confirmEmailChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TokenOnlyRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: Record<string, never>;
+                    };
+                };
+            };
+        };
+    };
+    UsersController_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["UserResponseDto"][];
+                    };
+                };
+            };
+        };
+    };
+    UsersController_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateUserRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["CreateUserResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    UsersController_resendInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["UserResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    UsersController_updateStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateUserStatusRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["UserResponseDto"];
                     };
                 };
             };
@@ -7445,205 +7812,14 @@ export interface operations {
             };
         };
     };
-    ProductController_list: {
-        parameters: {
-            query?: {
-                /** @description Matches product_code / name_zh / name_ru */
-                keyword?: string;
-                brandId?: string;
-                categoryId?: string;
-                status?: "DRAFT" | "ACTIVE" | "INACTIVE";
-                sortBy?: "createdAt" | "updatedAt" | "productCode" | "nameZh";
-                sortOrder?: "asc" | "desc";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["ProductListItemDto"][];
-                        meta: {
-                            page: number;
-                            pageSize: number;
-                            total: number;
-                        };
-                    };
-                };
-            };
-        };
-    };
-    ProductController_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateProductRequestDto"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["ProductResponseDto"];
-                    };
-                };
-            };
-        };
-    };
-    ProductController_getById: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["ProductDetailDto"];
-                    };
-                };
-            };
-        };
-    };
-    ProductController_remove: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: Record<string, never>;
-                    };
-                };
-            };
-        };
-    };
-    ProductController_update: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateProductRequestDto"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["ProductResponseDto"];
-                    };
-                };
-            };
-        };
-    };
-    ProductController_activate: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["ProductResponseDto"];
-                    };
-                };
-            };
-        };
-    };
-    ProductController_deactivate: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["ProductResponseDto"];
-                    };
-                };
-            };
-        };
-    };
     SkuController_list: {
         parameters: {
             query?: {
                 /** @description Matches sku_code / name_zh / name_ru / model */
                 keyword?: string;
-                productId?: string;
+                /** @description SKUs of this brand (V1: brand is a SKU field, decision D5) */
                 brandId?: string;
+                /** @description SKUs in this category INCLUDING all descendant categories (recursive subtree filter, decision 0005 §9.5) */
                 categoryId?: string;
                 status?: "DRAFT" | "ACTIVE" | "INACTIVE";
                 /** @description Filter SKUs with/without platform listings */
@@ -8381,6 +8557,35 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["BatchCreateBinsResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    WarehouseBinController_batchDeleteBins: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                warehouseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchDeleteBinsRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BatchDeleteBinsResponseDto"];
                     };
                 };
             };
@@ -9917,8 +10122,10 @@ export interface operations {
     OrderController_list: {
         parameters: {
             query?: {
-                /** @description 订单号 / 平台订单号模糊搜索 */
+                /** @description 混合搜索（用户指示 2026-09-28）：订单号 / 平台订单号 / 内部 SKU 编码 / offer_id / seller_sku / platform_sku_id 任一命中 */
                 keyword?: string;
+                /** @description 平台代码精确过滤（stores 所属平台 code，如 OZON/WB/YANDEX） */
+                platform?: string;
                 erpStatus?: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
                 /** @description 一级 · 物流阶段（双轴 §2.1）：PENDING=erp_status 非 SHIPPED/CANCELLED（缺货/分歧单均在内）；IN_TRANSIT=已发货且平台未妥投（platform_stage 非 DELIVERED，含未同步）；COMPLETED=已发货且平台已妥投 */
                 stage?: "PENDING" | "IN_TRANSIT" | "COMPLETED";
@@ -10780,6 +10987,8 @@ export interface operations {
                 /** @description PO号 / 货源说明 / 供应商名 模糊搜索 */
                 keyword?: string;
                 status?: "ORDERED" | "PARTIALLY_RECEIVED" | "RECEIVED" | "CANCELLED";
+                /** @description 多状态过滤（repeated query key，如 ?statuses=ORDERED&statuses=PARTIALLY_RECEIVED） */
+                statuses?: ("ORDERED" | "PARTIALLY_RECEIVED" | "RECEIVED" | "CANCELLED")[];
                 supplierId?: string;
                 orderItemId?: string;
                 orderedFrom?: string;
@@ -11883,6 +12092,81 @@ export interface operations {
                          * @example 2026-09-14T15:30:00Z
                          */
                         time: string;
+                    };
+                };
+            };
+        };
+    };
+    OzonWebhookManageController_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                storeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OzonWebhookSubscriptionDto"];
+                    };
+                };
+            };
+        };
+    };
+    OzonWebhookManageController_subscribe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                storeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OzonWebhookSubscriptionDto"];
+                    };
+                };
+            };
+        };
+    };
+    OzonWebhookManageController_unsubscribe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                storeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OzonWebhookUnsubscribeResultDto"];
                     };
                 };
             };

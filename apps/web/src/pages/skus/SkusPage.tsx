@@ -21,6 +21,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { apiDelete, apiPatch, apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
 import { SkuCreateModal } from '../../components/SkuCreateModal';
+import { CategoryManageModal } from '../../components/CategoryManageModal';
+import { BrandManageModal } from '../../components/BrandManageModal';
+import {
+  BrandQuickCreateModal,
+  CategoryQuickCreateModal,
+} from '../../components/QuickCreateModals';
 import { printTasksBrowser } from '../../printing/print-browser';
 import {
   DeleteConfirmModal,
@@ -49,16 +55,20 @@ import {
  * SKU management (redesign task §26-§30): header + unified filter bar +
  * dense table, with a context-rail quick view (row click) and a full detail
  * drawer (查看 action). Business mutations are unchanged from Sprint 1/5.
+ *
+ * V1 改造（2026-10-13）：商品层移除——SKU 是唯一商品主数据，分类/品牌是
+ * SKU 字段（D5）；分类管理与品牌管理入口从已删除的商品页迁入本页（D4）。
  */
 
 interface SkuRow {
   id: string;
   skuCode: string;
   nameZh: string;
-  productId: string;
-  productCode: string;
-  productName: string;
   nameRu: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
+  brandId: string | null;
+  brandName: string | null;
   model: string | null;
   color: string | null;
   size: string | null;
@@ -73,7 +83,6 @@ interface SkuRow {
   primaryBarcode: string | null;
   primaryImageUrl: string | null;
   listingCount: number;
-  brandName: string | null;
   updatedAt: string;
 }
 
@@ -134,6 +143,7 @@ type Envelope<T> = { data: T; meta: { total: number } };
 interface CategoryOption {
   value: string;
   label: string;
+  disabled?: boolean;
   children?: CategoryOption[];
 }
 
@@ -144,6 +154,20 @@ function toCategoryOption(node: CategoryNode): CategoryOption {
   return {
     value: node.id,
     label: node.nameZh,
+    ...(children.length > 0 ? { children } : {}),
+  };
+}
+
+/** Cascader options for create/edit forms: only level-3 leaves are pickable. */
+function toLeafCategoryOption(node: CategoryNode): CategoryOption {
+  const children = (node.children ?? [])
+    .filter((child) => child.status === 'ACTIVE')
+    .map((child) => toLeafCategoryOption(child));
+  return {
+    value: node.id,
+    label: node.nameZh,
+    // Childless level-1/2 nodes would be selectable leaves — block them.
+    disabled: node.level < 3 && (node.children ?? []).length === 0,
     ...(children.length > 0 ? { children } : {}),
   };
 }
@@ -168,11 +192,21 @@ function categoryPathOf(options: CategoryOption[], id: string): string[] | undef
  * Every value the edit form shows (Sprint 8.5R1): the form previously omitted
  * 长/宽/高/SN管理, so opening 编辑 asked for fields the operator could not even
  * see. `undefined` (not null) keeps the PATCH body a partial update.
+ *
+ * V1（D5）：品牌/分类是 SKU 字段，随表单编辑（分类以路径回填级联）。
  */
-function editFormValues(sku: SkuRow): Record<string, unknown> {
+function editFormValues(
+  sku: SkuRow,
+  leafCategoryOptions: CategoryOption[],
+): Record<string, unknown> {
   return {
     nameZh: sku.nameZh,
     nameRu: sku.nameRu ?? undefined,
+    brandId: sku.brandId ?? undefined,
+    categoryPath:
+      sku.categoryId !== null
+        ? (categoryPathOf(leafCategoryOptions, sku.categoryId) ?? undefined)
+        : undefined,
     model: sku.model ?? undefined,
     color: sku.color ?? undefined,
     size: sku.size ?? undefined,
@@ -248,6 +282,12 @@ export function SkusPage() {
   const [mapPlatformForm] = Form.useForm();
   const [listingKeyword, setListingKeyword] = useState('');
   const debouncedListingKeyword = useDebouncedValue(listingKeyword);
+  // V1（D4）：分类/品牌管理入口（弹窗从已删除的商品页迁入 + 新建）。
+  const [categoryManageOpen, setCategoryManageOpen] = useState(false);
+  const [brandManageOpen, setBrandManageOpen] = useState(false);
+  // 编辑表单内的品牌/分类现场快建（G9）。
+  const [brandQuickOpen, setBrandQuickOpen] = useState(false);
+  const [categoryQuickOpen, setCategoryQuickOpen] = useState(false);
 
   // Deep link from the global palette: focus=<skuId> selects the row and opens
   // its drawer (Phase 2 task §33 — jump straight to the entity).
@@ -286,6 +326,19 @@ export function SkusPage() {
         .map((node) => toCategoryOption(node)),
     [categories.data],
   );
+  /** Create/edit cascader options: only level-3 leaves are pickable (D5). */
+  const leafCategoryOptions = useMemo(
+    () =>
+      (categories.data?.data ?? [])
+        .filter((node) => node.status === 'ACTIVE')
+        .map((node) => toLeafCategoryOption(node)),
+    [categories.data],
+  );
+  const brandOptions = (brands.data?.data ?? []).map((brand) => ({
+    value: brand.id,
+    // 停用品牌保留可选但带后缀（与分类筛选一致，不过滤无标注）。
+    label: brand.status === 'ACTIVE' ? brand.name : `${brand.name}（停用）`,
+  }));
 
   const selectedRow = useMemo(
     () => (list.data?.data ?? []).find((row) => row.id === selectedId) ?? null,
@@ -366,8 +419,22 @@ export function SkusPage() {
   };
 
   const updateMutation = useMutation({
-    mutationFn: (values: Record<string, unknown>) =>
-      apiPatch('/api/v1/skus/{id}', values, { id: drawerId ?? '' }),
+    mutationFn: (values: Record<string, unknown>) => {
+      const { categoryPath, brandId, ...rest } = values;
+      const path = categoryPath as string[] | undefined;
+      return apiPatch(
+        '/api/v1/skus/{id}',
+        {
+          ...rest,
+          // V1（D5）：品牌/分类随 SKU 编辑；清空选择 = 解除挂载（null），
+          // 与商品页编辑表单的旧约定一致。
+          brandId: (brandId as string | undefined) ?? null,
+          categoryId:
+            path !== undefined && path.length > 0 ? (path[path.length - 1] ?? null) : null,
+        },
+        { id: drawerId ?? '' },
+      );
+    },
     onSuccess: () => {
       void message.success('SKU 已更新');
       setEditOpen(false);
@@ -613,8 +680,8 @@ export function SkusPage() {
       return;
     }
     editPrefilledFor.current = sku.id;
-    editForm.setFieldsValue(editFormValues(sku));
-  }, [editOpen, sku, editForm]);
+    editForm.setFieldsValue(editFormValues(sku, leafCategoryOptions));
+  }, [editOpen, sku, editForm, leafCategoryOptions]);
   const printBarcodes = useApiQuery<{
     data: Array<{ barcode: string; isPrimary: boolean; barcodeType: string }>;
   }>(
@@ -803,11 +870,16 @@ export function SkusPage() {
     <div>
       <PageHeader
         title="SKU管理"
-        description="管理内部 SKU、条码、成本、库存及平台映射"
+        description="管理内部 SKU、条码、成本、库存及平台映射；分类与品牌现为 SKU 自身字段"
         primary={
-          <Button type="primary" onClick={() => setCreateOpen(true)}>
-            新建SKU
-          </Button>
+          <Space>
+            <Button type="primary" onClick={() => setCreateOpen(true)}>
+              新建SKU
+            </Button>
+            {/* V1（D4）：分类/品牌管理入口（原商品页能力迁入 + 品牌管理补齐）。 */}
+            <Button onClick={() => setCategoryManageOpen(true)}>分类管理</Button>
+            <Button onClick={() => setBrandManageOpen(true)}>品牌管理</Button>
+          </Space>
         }
       />
 
@@ -937,8 +1009,8 @@ export function SkusPage() {
           emptyDescription="调整筛选条件或新建 SKU。"
           columns={[
             {
-              title: '商品',
-              key: 'product',
+              title: '品牌/分类',
+              key: 'brandCategory',
               width: 300,
               render: (_: unknown, record: SkuRow) => (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -976,6 +1048,7 @@ export function SkusPage() {
                     <div style={{ fontSize: 12.5, color: colors.textSecondary, marginTop: 1 }}>
                       {record.skuCode}
                       {record.brandName !== null && ` · ${record.brandName}`}
+                      {record.categoryName !== null && ` · ${record.categoryName}`}
                     </div>
                   </div>
                 </div>
@@ -1091,6 +1164,28 @@ export function SkusPage() {
 
       <SkuCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
 
+      {/* V1（D4）：分类/品牌管理（弹窗能力自商品页迁入 + 新建）。 */}
+      <CategoryManageModal open={categoryManageOpen} onClose={() => setCategoryManageOpen(false)} />
+      <BrandManageModal open={brandManageOpen} onClose={() => setBrandManageOpen(false)} />
+
+      {/* 编辑表单内的品牌/分类现场快建（G9）。 */}
+      <BrandQuickCreateModal
+        open={brandQuickOpen}
+        zIndex={1200}
+        onClose={() => setBrandQuickOpen(false)}
+        onCreated={(brandId) => {
+          editForm.setFieldValue('brandId', brandId);
+        }}
+      />
+      <CategoryQuickCreateModal
+        open={categoryQuickOpen}
+        zIndex={1200}
+        onClose={() => setCategoryQuickOpen(false)}
+        onCreated={(path) => {
+          editForm.setFieldValue('categoryPath', path);
+        }}
+      />
+
       {/* ---- Delete confirmation (normal vs forced cascade) ---- */}
       <DeleteConfirmModal
         open={deleteTarget !== null}
@@ -1157,7 +1252,7 @@ export function SkusPage() {
                     return;
                   }
                   editForm.resetFields();
-                  editForm.setFieldsValue(editFormValues(sku));
+                  editForm.setFieldsValue(editFormValues(sku, leafCategoryOptions));
                   setEditOpen(true);
                 }}
               >
@@ -1187,11 +1282,8 @@ export function SkusPage() {
                   items={[
                     { label: 'SKU 编码', children: sku.skuCode },
                     { label: '中文名称', children: sku.nameZh },
-                    {
-                      label: '商品',
-                      children: `${sku.productCode} ${sku.productName}`,
-                    },
                     { label: '品牌', children: sku.brandName ?? '—' },
+                    { label: '分类', children: sku.categoryName ?? '—' },
                     { label: '型号', children: sku.model ?? '—' },
                     {
                       label: '颜色 / 尺寸',
@@ -1458,6 +1550,63 @@ export function SkusPage() {
           </Form.Item>
           <Form.Item name="nameRu" label="俄文名称">
             <Input />
+          </Form.Item>
+          <Form.Item
+            name="brandId"
+            label={
+              <Space size={4}>
+                品牌
+                <Button
+                  type="link"
+                  size="small"
+                  style={{ padding: 0, height: 'auto' }}
+                  onClick={() => setBrandQuickOpen(true)}
+                >
+                  + 新建品牌
+                </Button>
+              </Space>
+            }
+          >
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder="选择品牌（可清空解除挂载）"
+              options={brandOptions}
+            />
+          </Form.Item>
+          <Form.Item
+            name="categoryPath"
+            label={
+              <Space size={4}>
+                分类（三级）
+                <Button
+                  type="link"
+                  size="small"
+                  style={{ padding: 0, height: 'auto' }}
+                  onClick={() => setCategoryQuickOpen(true)}
+                >
+                  + 新建分类
+                </Button>
+              </Space>
+            }
+            rules={[
+              {
+                validator: (_rule, value: string[] | undefined) =>
+                  value === undefined || value.length === 0
+                    ? Promise.resolve()
+                    : value.length === 3
+                      ? Promise.resolve()
+                      : Promise.reject(new Error('必须选择到三级分类')),
+              },
+            ]}
+          >
+            <Cascader<CategoryOption>
+              allowClear
+              showSearch
+              placeholder="选择三级分类（可清空解除挂载）"
+              options={leafCategoryOptions}
+            />
           </Form.Item>
           <Form.Item name="model" label="型号">
             <Input />

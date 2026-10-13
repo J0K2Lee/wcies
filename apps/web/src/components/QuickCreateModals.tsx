@@ -6,8 +6,8 @@ import { colors } from '../design-system';
 
 /**
  * Shared quick-create dialogs for brand & category (Phase 3 G9): one
- * implementation for the Products page forms and the Listings onboarding
- * dialog. Both follow the same contract — a created brand is reported via
+ * implementation for the SKU page forms and the Listings onboarding
+ * dialog (V1: the Products page is gone with the product layer). Both follow the same contract — a created brand is reported via
  * onCreated(brandId); a created level-3 category reports its full path so the
  * host form can fill a cascader value.
  */
@@ -313,7 +313,7 @@ export function CategoryQuickCreateModal({
       destroyOnHidden
     >
       <p style={{ marginTop: 0, fontSize: 12.5, color: colors.textTertiary }}>
-        分类编码无需填写，创建后自动生成。商品只能挂载三级分类。
+        分类编码无需填写，创建后自动生成。SKU 只能挂载三级分类。
       </p>
       <Form form={categoryForm} layout="vertical" preserve={false}>
         <Form.Item
