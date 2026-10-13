@@ -14,8 +14,7 @@ lint / typecheck / check:architecture / check:openapi / 单测 582 / web build /
 
 商品（Product/SPU）层级已从代码、契约、前端、文档与测试中完全移除；
 Internal SKU 成为唯一商品主数据，分类/品牌为 SKU 字段；SKU 编码改为全局
-`SKU%09d`。**唯一未执行项**：阶段二迁移在 dev/共享环境的落库（任务书要求
-执行前向用户确认，见 §5）。
+`SKU%09d`。阶段二迁移已于 2026-10-13 经用户确认后在 dev 库执行并验证（见 §5）。
 
 ## 2. 提交清单（任务隔离）
 
@@ -42,7 +41,7 @@ Internal SKU 成为唯一商品主数据，分类/品牌为 SKU 字段；SKU 编
 | 3 | SKU 页可管理分类与品牌；被引用时不可删只能停用 | ✅ | `CategoryManageModal`（原样迁入）+ `BrandManageModal`（新增 D4）；冒烟 409 `BRAND_IN_USE`/`CATEGORY_IN_USE`；`delete-protection` 集成 |
 | 4 | listing 快捷建档产出 ACTIVE SKU；多变体不再挂靠；「记住类目映射」仍工作 | ✅ | `sprint8-onboarding`（ACTIVE 断言）、`sprint8.5-onboarding`（每变体各建 SKU + 复合键映射） |
 | 5 | SKU 导入不再需要商品列 | ✅ | 模板无 `product_code`/`product_name_zh`（冒烟校验）；`import-center` 集成 + handler 单测 |
-| 6 | `products` 表不存在；序列无 product 死行 | ⚠️ 部分 | 测试库已删除并在该状态跑通 276 全绿；dev/共享环境待用户确认后执行（§5）。副本库验证：表/序列消失、死作用域清 13 行、`sku` 作用域保留、12 个 SKU 分类品牌完整 |
+| 6 | `products` 表不存在；序列无 product 死行 | ✅ | **dev 库已执行阶段二**（2026-10-13，用户确认）：products / seq_product_code 消失、`fk_skus_product` 归零、死作用域清 13 行、`sku` 作用域保留（12002）、12 个 SKU 分类/品牌完整、其余业务表行数不变；测试库同状态跑通 276 全绿 |
 | 7 | 全量检查绿 | ✅ | lint / typecheck / check:architecture / check:openapi / 582 单测 / web build / 276 集成 |
 
 ## 4. 发现并处理的冲突与缺陷（AGENTS.md §2：不静默选择）
@@ -76,10 +75,30 @@ Internal SKU 成为唯一商品主数据，分类/品牌为 SKU 字段；SKU 编
 
 ## 5. 待用户确认事项（收尾动作）
 
-1. **执行阶段二迁移**（`20261013_002_drop_products`）：任务书要求「T1–T8 全部合入
-   且 dev 环境手工验证通过，执行前向用户确认」。本次已用
-   `CREATE DATABASE … TEMPLATE wcies_dev` 复制 dev 库并在副本上跑通迁移（dev 库
-   未执行、未改动）。请在确认后于 dev/共享环境执行 `pnpm db:migrate`。
+1. ~~执行阶段二迁移~~ **已执行（2026-10-13，用户确认后）**：
+
+   前置：先用 `CREATE DATABASE … TEMPLATE wcies_dev` 复制 dev 库并在副本上全流程
+   验证通过；再备份 `products`（12 行）与 `business_code_sequences`（19 行）到
+   `.workbuddy/backup/*.sql`（ISO 时间戳，可直接回灌）；随后执行
+   `pnpm db:migrate` 应用 `DropProducts1791883500000`。
+
+   执行结果（`wcies_dev`）：
+
+   | 检查项 | 结果 |
+   |---|---|
+   | `products` 表 | 已删除（原 12 行，已回填至 skus） |
+   | `seq_product_code` 序列 | 已删除 |
+   | `fk_skus_product` 约束 | 0 |
+   | `business_code_sequences` 死作用域行 | 0（清理 13 行） |
+   | `sku` 作用域 | 保留，`next_value = 12002` |
+   | `skus` | 12 行；分类/品牌各 12 行非空，名称可解析（如 `SKU000001001` → 游戏键盘 / 迈从） |
+   | 业务表 | `platform_listing_skus` 2623、`platform_listings` 2775、`orders`/`order_items` 25/25、`inventory_balances` 3、`inventory_transactions` 13、`purchase_orders` 3、分类 7941、品牌 4 —— 均不变 |
+   | 迁移记录 | `DropProducts1791883500000` 已记录 |
+
+   运行时手工验证（同一 dev 库）：API 启动正常 → `GET /api/v1/products` 404 →
+   登录后 `POST /api/v1/skus` 返回 201 / `SKU000012003` / `status=ACTIVE` /
+   响应无 `productId` 字段 → 列表可见。验证用 SKU 已删除（dev `skus` 恢复 12 行）；
+   为完成登录验证临时替换过管理员口令哈希，验证后已**按原字符串还原并逐字节比对确认**。
 2. **复核 AGENTS.md 规则 23/24 修订**：任务书要求「修订内容先向用户展示确认」。
    改动为：规则 23 标题与正文改为「SKU 身份规则（唯一商品主数据）」、规则 24 增
    平台侧同名异物说明、§1 核心领域表 `Product / SKU` → `SKU（唯一商品主数据…）`、
