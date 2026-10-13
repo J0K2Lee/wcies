@@ -13,6 +13,13 @@ apps/api/src/worker.ts  # 队列 Worker 进程（BullMQ 消费者，无 HTTP）
 
 两者通过 Redis（BullMQ）通信。开发期以 `pnpm dev` / `pnpm dev:worker` 分别启动；未来部署时拆分为两个容器（同镜像、不同入口）。
 
+> 同步调度 tick（`sync-scheduler-tick`，每 30s）由 `SyncModule.onModuleInit` 注册——
+> API 与 Worker 进程都加载 `SyncModule`，任一进程在即可保证调度存在（BullMQ 按
+> jobId 幂等去重，双进程注册安全）。此前注册只放在 Worker 进程，dev 只跑 API 时
+> 自动同步静默失效（2026-10-12 修复，ON-003 实证）。订单自动同步的实际频率仍由
+> `ORDER_SYNC_INTERVAL_SECONDS`（默认 0=关）+ 店铺 `settings.sync.orderSyncEnabled`
+> 双门槛控制。
+
 ## 2. 基础设施依赖
 
 | 组件 | 用途 | 说明 |

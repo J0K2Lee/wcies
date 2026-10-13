@@ -1,5 +1,6 @@
-import { Module } from '@nestjs/common';
-import { BullModule } from '@nestjs/bullmq';
+import { Module, OnModuleInit } from '@nestjs/common';
+import { BullModule, InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { QUEUE_NAMES } from '../../infrastructure/queue/queue.constants';
 import { IntegrationModule } from '../integration/integration.module';
@@ -29,10 +30,14 @@ import { SyncFailureAlertService } from './services/sync-failure-alert.service';
 import { SyncJobService } from './services/sync-job.service';
 import { WebhookIngestService, WebhookProcessService } from './services/webhook.service';
 import { WbWebhookService } from './services/wb-webhook.service';
+import { OzonWebhookService } from './services/ozon-webhook.service';
 import { PlatformWarehouseQueryService } from './services/platform-warehouse-query.service';
 import { OrderPlatformShipService } from './services/order-platform-ship.service';
 import { SyncController } from './controllers/sync.controller';
-import { OzonWebhookController } from './controllers/ozon-webhook.controller';
+import {
+  OzonWebhookController,
+  OzonWebhookManageController,
+} from './controllers/ozon-webhook.controller';
 import { YandexWebhookController } from './controllers/yandex-webhook.controller';
 import {
   WbWebhookManageController,
@@ -84,6 +89,7 @@ import {
   controllers: [
     SyncController,
     OzonWebhookController,
+    OzonWebhookManageController,
     YandexWebhookController,
     WbWebhookReceiverController,
     WbWebhookManageController,
@@ -107,6 +113,7 @@ import {
     WebhookIngestService,
     WebhookProcessService,
     WbWebhookService,
+    OzonWebhookService,
     OrderSyncProcessor,
     ListingSyncProcessor,
     CategoryTreeSyncProcessor,
@@ -116,4 +123,30 @@ import {
   ],
   exports: [SyncJobService, SyncDispatchService, SyncContextService],
 })
-export class SyncModule {}
+export class SyncModule implements OnModuleInit {
+  constructor(@InjectQueue(QUEUE_NAMES.scheduler) private readonly schedulerQueue: Queue) {}
+
+  /**
+   * Registers the sync scheduler tick (every 30s). Lives HERE, not only in
+   * the standalone worker: dev compose runs the API without a worker
+   * container, and a worker-only registration silently disabled auto-sync
+   * even with ENV interval + store toggle both on (diagnosed 2026-10-12,
+   * ON-003: zero SCHEDULED jobs ever). BullMQ dedupes the repeatable job
+   * by jobId, so API + worker both booting is safe. Frequencies are read
+   * from ENV per tick (ORDER_SYNC_INTERVAL_SECONDS /
+   * LISTING_SYNC_INTERVAL_SECONDS, default OFF) and a store still has to
+   * opt in via settings.sync (task §30/§57 staged rollout).
+   */
+  async onModuleInit(): Promise<void> {
+    await this.schedulerQueue.add(
+      'tick',
+      {},
+      {
+        repeat: { every: 30_000 },
+        jobId: 'sync-scheduler-tick',
+        removeOnComplete: { count: 4 },
+        removeOnFail: { count: 10 },
+      },
+    );
+  }
+}

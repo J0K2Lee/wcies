@@ -12,7 +12,9 @@ import {
   Select,
   Space,
   Switch,
+  Tag,
   Tooltip,
+  Typography,
 } from 'antd';
 import {
   CloudSyncOutlined,
@@ -1511,6 +1513,8 @@ function StoreDetailBody({
         </p>
       </section>
 
+      {store.platformCode === 'OZON' && <OzonWebhookSection store={store} />}
+
       <section>
         <div
           style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary, marginBottom: 10 }}
@@ -1688,5 +1692,203 @@ function StoreDetailBody({
         />
       </section>
     </Space>
+  );
+}
+
+/** OZON 事件订阅状态视图（GET /stores/{id}/webhooks/ozon/subscription）。 */
+interface OzonWebhookSubscriptionView {
+  subscribed: boolean;
+  subscriptionId: number | null;
+  url: string;
+  enabled: boolean | null;
+  types: string[];
+  expectedTypes: string[];
+  otherUrlCount: number;
+}
+
+/**
+ * OZON 店铺详情的「事件订阅」分节（用户需求 2026-10-09：找不到 OZON 事件
+ * 订阅的配置入口）。
+ *
+ * OZON 的 push notifications 既能去卖家后台配置，也能通过平台 API 管理；
+ * 这里暴露 API 管理入口：查看订阅状态、一键订阅/对齐推荐事件集、退订。
+ * 订阅/退订是真实平台写操作（AGENTS.md §92），按钮均经二次确认。
+ */
+function OzonWebhookSection({ store }: { store: StoreRow }) {
+  const { message, modal } = AntdApp.useApp();
+  const queryClient = useQueryClient();
+
+  const query = useApiQuery<{ data: OzonWebhookSubscriptionView }>(
+    '/api/v1/stores/{storeId}/webhooks/ozon/subscription',
+    {},
+    ['ozon-webhook-subscription', store.id],
+    { storeId: store.id },
+  );
+  const view = query.data?.data ?? null;
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['ozon-webhook-subscription', store.id] });
+  };
+
+  const subscribeMutation = useMutation({
+    mutationFn: () =>
+      apiPost<OzonWebhookSubscriptionView>(
+        '/api/v1/stores/{storeId}/webhooks/ozon/subscription',
+        {},
+        { storeId: store.id },
+      ),
+    onSuccess: (result) => {
+      message.success(
+        result.enabled === false
+          ? '已写入订阅配置（平台侧仍处于暂停，稍后自动复测）'
+          : '已订阅/对齐事件推送',
+      );
+      invalidate();
+    },
+    onError: (error: Error) => void message.error(`订阅失败：${error.message}`),
+  });
+
+  const unsubscribeMutation = useMutation({
+    mutationFn: () =>
+      apiDelete('/api/v1/stores/{storeId}/webhooks/ozon/subscription', { storeId: store.id }),
+    onSuccess: () => {
+      message.success('已退订：订单等事件回到轮询同步兜底');
+      invalidate();
+    },
+    onError: (error: Error) => void message.error(`退订失败：${error.message}`),
+  });
+
+  const requestSubscribe = () => {
+    modal.confirm({
+      title: '订阅/对齐 OZON 事件推送？',
+      content:
+        '将在 OZON 平台侧把本店回调地址订阅为推荐事件集（新发货单、发货单取消/状态变化、商品创建/更新）。已在卖家后台订阅过也能执行：事件类型会收敛为推荐集合。轮询同步始终兜底，退订不影响历史数据。',
+      okText: '确认订阅',
+      cancelText: '返回',
+      onOk: () => {
+        subscribeMutation.mutate();
+      },
+    });
+  };
+
+  const requestUnsubscribe = () => {
+    modal.confirm({
+      title: '退订 OZON 事件推送？',
+      content:
+        '删除平台侧本店回调地址的订阅（只删本店地址，不影响同账户其他系统的订阅）。订单/商品变化回到轮询同步，实时性下降。',
+      okText: '确认退订',
+      okButtonProps: { danger: true },
+      cancelText: '返回',
+      onOk: () => {
+        unsubscribeMutation.mutate();
+      },
+    });
+  };
+
+  const missingTypes =
+    view === null ? [] : view.expectedTypes.filter((type) => !view.types.includes(type));
+
+  return (
+    <section>
+      <div style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary, marginBottom: 10 }}>
+        事件订阅（Push notifications）
+      </div>
+      {query.isLoading ? (
+        <span style={{ fontSize: 12.5, color: colors.textTertiary }}>订阅状态加载中…</span>
+      ) : query.isError ? (
+        <span style={{ fontSize: 12.5, color: colors.danger }}>
+          读取订阅状态失败：
+          {query.error instanceof Error ? query.error.message : String(query.error)}
+        </span>
+      ) : view === null ? (
+        <span style={{ fontSize: 12.5, color: colors.textTertiary }}>暂无订阅数据</span>
+      ) : (
+        <>
+          <InfoGrid
+            columns={2}
+            items={[
+              {
+                label: '订阅状态',
+                children: !view.subscribed ? (
+                  <StatusBadge
+                    tone="neutral"
+                    label="未订阅"
+                    hint="轮询同步兜底中"
+                    showDot={false}
+                  />
+                ) : view.enabled === false ? (
+                  <StatusBadge
+                    tone="warning"
+                    label="已暂停"
+                    hint="平台自动暂停（长期失败/超时）；点「订阅/对齐」可恢复"
+                    showDot={false}
+                  />
+                ) : (
+                  <StatusBadge tone="success" label="推送中" showDot={false} />
+                ),
+              },
+              {
+                label: '回调地址',
+                children: (
+                  <Typography.Text
+                    copyable={{ text: view.url }}
+                    style={{ fontSize: 12, fontFamily: typography.monoFamily }}
+                  >
+                    {view.url}
+                  </Typography.Text>
+                ),
+              },
+            ]}
+          />
+          <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {view.types.length === 0 ? (
+              <span style={{ fontSize: 12.5, color: colors.textTertiary }}>未订阅任何事件类型</span>
+            ) : (
+              view.types.map((type) => (
+                <Tag key={type} style={{ margin: 0 }}>
+                  {type}
+                </Tag>
+              ))
+            )}
+          </div>
+          {view.subscribed && missingTypes.length > 0 && (
+            <p style={{ fontSize: 12.5, color: colors.warning, margin: '8px 0 0' }}>
+              缺少推荐事件：{missingTypes.join('、')}（点「订阅/对齐事件」补齐）
+            </p>
+          )}
+          {view.otherUrlCount > 0 && (
+            <p style={{ fontSize: 12.5, color: colors.textTertiary, margin: '8px 0 0' }}>
+              该 OZON 账户下还有 {view.otherUrlCount} 个其他回调地址的订阅（可能属于其他系
+              统）；本入口只管理本店地址。
+            </p>
+          )}
+          <Space style={{ marginTop: 12 }}>
+            <Button
+              type="primary"
+              size="small"
+              loading={subscribeMutation.isPending}
+              disabled={store.status !== 'ACTIVE'}
+              onClick={requestSubscribe}
+            >
+              订阅 / 对齐事件
+            </Button>
+            {view.subscribed && (
+              <Button
+                size="small"
+                danger
+                loading={unsubscribeMutation.isPending}
+                onClick={requestUnsubscribe}
+              >
+                退订
+              </Button>
+            )}
+          </Space>
+          <p style={{ fontSize: 12.5, color: colors.textTertiary, margin: '8px 0 0' }}>
+            也可在 OZON 卖家后台 Settings → Push notifications 用上方回调地址手工配置；
+            接收失败平台会自动补送，轮询调度始终兜底。
+          </p>
+        </>
+      )}
+    </section>
   );
 }

@@ -81,6 +81,14 @@ Request：`{offer_id: string[]}`（也接受 `product_id[]` / `sku[]`）；Respo
 
 ### 字段映射（Mapper）
 
+**属性增强链式自动触发（2026-10-05，两步合一）**：LISTING_SYNC 成功/PARTIAL 结束后，自动以
+`trigger_type = SYSTEM` 派发一次 `PRODUCT_ENRICHMENT_SYNC`（/v4/product/info/attributes 批量拉取
+尺寸/重量 → 变体 `raw_data.product_attributes` → 建档预填）。OZON listing 同步一次做完两步，
+**无需再手动点「补齐商品属性」**（OZON类目工具里的手动按钮保留为修复路径）。链式仅对
+`ENRICHMENT_SUPPORTED_PLATFORMS`（= OZON）派发；派发失败只 warn，不回改已完成的 listing job。
+注意 v3 product/info 的 `volume_weight` 是标量（升/千克量级，非结构化尺寸），不可用作预填来源，
+v4 仍是尺寸重量唯一来源。
+
 | OZON | WCIES |
 |---|---|
 | `product_id` | `platform_listings.platform_product_id`（String） |
@@ -225,6 +233,34 @@ posting/fbs/list` 的请求过滤器存在，`changed_state_date` 只在 webhook
   [ozon-webhook-tunnel.md](./ozon-webhook-tunnel.md)。开发环境回调地址：
   `https://ozon-hook.wulaoula.cn/api/v1/webhooks/ozon/stores/{storeCode}`，
   公网域名由 `PUBLIC_BASE_URL` 配置提供。）
+
+- **订阅管理已接入系统**（2026-10-09）：店铺页详情抽屉「事件订阅」分节 +
+  认证 API `GET/POST/DELETE /api/v1/stores/{storeId}/webhooks/ozon/subscription`
+  （`OzonWebhookService`，模式对齐 WB 订阅管理）。实现事实：
+  - client 实现 `list` / `set` / `update` / `enable` / `delete` 五个端点
+    （spec v2.1 `notification.v1.*` 逐字段核对；set/update/delete/enable 响应
+    无 body——client 以 `tolerateEmptyBody` 容忍空响应）；
+  - 订阅模型是 **Client-Id 级 URL 列表**：list 返回账户下全部订阅（可能含
+    其他系统），服务层只按本店回调 URL 精确匹配操作；
+  - 「订阅/对齐」= 无则 `set`、有则 `update`（事件类型收敛为推荐集：
+    `TYPE_NEW_POSTING / TYPE_POSTING_CANCELLED / TYPE_STATE_CHANGED /
+    TYPE_CREATE_ITEM / TYPE_UPDATE_ITEM`，即接收端 mapper 能分类的集合），
+    且订阅处于 `enable=false` 时顺带 `enable` 恢复（对应 §6.5 平台自动暂停）；
+  - 退订按 URL 匹配 `delete`，同 URL 多条报 `OZON_WEBHOOK_STATE_ERROR` 转人工；
+  - 写操作均记操作日志（`PLATFORM_WEBHOOK` 实体），不落任何密钥。
+    首次真实订阅效果待 T0 复核（ON-001 现有订阅是后台人工配的）。
+  - **T0 实测（2026-10-12，店铺 ON-003）**：`set` 可能被平台回
+    `[3] PING: REQUEST_ERROR` 拒绝 —— 这是 set 时平台的**连通性检查**（向回调
+    地址发 PING 探测）网络层失败：访问日志证实探测请求未到达 WCIES（同日
+    稍后外部直连同一 URL 得到 200 `{version,name,time}`，隧道/API/应答格式
+    均正常）。属瞬时失败，重试即恢复；服务层已把该错误翻译为
+    `OZON_WEBHOOK_CONFIG_ERROR`（提示确认回调地址公网可达后重试）。
+  - **T0 实测续（2026-10-12）**：重试后 ON-003 订阅成功，平台侧 PING 探测
+    到达并落库（`external_raw_events`，推送链路端到端验证通过）。另证实
+    **请求/响应形态不对称**：`set`/`update` 的请求体 `types` 是字符串数组，
+    但 `list` 响应的 `types` 元素是 `{type, description}` 对象（spec schema
+    `NotificationListResponse.Notification.NotificationType`，两字段必填）——
+    服务层在 `listSubscriptions` 边界归一化为字符串，视图/DTO 只见字符串。
 
 ### 6.1 订阅类型完整清单（规范 v2.1 `notification.v1.*.Type.Enum`，2026-09-13 逐项核对）
 

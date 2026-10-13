@@ -1,6 +1,5 @@
-import { Module, OnModuleInit } from '@nestjs/common';
-import { BullModule, InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
+import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
 import { QUEUE_NAMES } from '../infrastructure/queue/queue.constants';
 import { TestProcessor } from './processors/test.processor';
 import { ImportProcessor } from '../modules/import/processors/import.processor';
@@ -30,25 +29,4 @@ import { SyncModule } from '../modules/sync/sync.module';
   ],
   providers: [TestProcessor, ImportProcessor, NotificationProcessor],
 })
-export class WorkersModule implements OnModuleInit {
-  constructor(@InjectQueue(QUEUE_NAMES.scheduler) private readonly schedulerQueue: Queue) {}
-
-  /**
-   * Registers the sync scheduler tick (every 30s). Frequencies are read from
-   * ENV per tick (ORDER_SYNC_INTERVAL_SECONDS / LISTING_SYNC_INTERVAL_SECONDS,
-   * default OFF) - the tick is inert until a store opts in via
-   * settings.sync (task §30/§57 staged rollout).
-   */
-  async onModuleInit(): Promise<void> {
-    await this.schedulerQueue.add(
-      'tick',
-      {},
-      {
-        repeat: { every: 30_000 },
-        jobId: 'sync-scheduler-tick',
-        removeOnComplete: { count: 4 },
-        removeOnFail: { count: 10 },
-      },
-    );
-  }
-}
+export class WorkersModule {}

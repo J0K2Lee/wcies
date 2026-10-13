@@ -355,3 +355,42 @@ export interface OzonPackageLabelResponse {
   readonly file_content?: string | null;
   readonly [key: string]: unknown;
 }
+
+// ---------------------------------------------------------------------------
+// Push-notification subscription management (/v1/notification/*)
+//
+// Source: vendored official spec v2.1, schemas notification.v1.* (checked
+// field-by-field 2026-10-09); management endpoints are documented in
+// docs/integrations/ozon.md §6. Responses of set/update/delete carry NO body
+// (spec declares no 200 content) - OzonClient tolerates that.
+// ---------------------------------------------------------------------------
+
+/**
+ * One entry of the list response's `types` array. Live shape (2026-10-12):
+ * an OBJECT `{type, description}` (spec schema NotificationListResponse
+ * .Notification.NotificationType, both fields required) — NOT a plain string
+ * like in set/update REQUEST bodies (request/response asymmetry). Legacy
+ * string values are tolerated defensively.
+ */
+export type OzonNotificationTypeInfo =
+  | string
+  | {
+      readonly type: string;
+      readonly description?: string;
+      readonly [key: string]: unknown;
+    };
+
+/** One subscribed URL as returned by `POST /v1/notification/list`. */
+export interface OzonNotificationSubscription {
+  readonly id: number;
+  readonly url: string;
+  readonly enable: boolean;
+  readonly types: readonly OzonNotificationTypeInfo[];
+  readonly created_at?: string;
+  readonly [key: string]: unknown;
+}
+
+export interface OzonNotificationListResponse {
+  readonly urls?: readonly OzonNotificationSubscription[];
+  readonly [key: string]: unknown;
+}

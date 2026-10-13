@@ -26,7 +26,13 @@ import { OzonShipmentService } from './ozon-shipment.service';
     OzonWarehouseService,
     OzonShipmentService,
   ],
-  exports: [OzonAdapter, OzonCategoryTreeService, OzonWarehouseService, OzonShipmentService],
+  exports: [
+    OzonAdapter,
+    OzonClient,
+    OzonCategoryTreeService,
+    OzonWarehouseService,
+    OzonShipmentService,
+  ],
 })
 export class OzonModule implements OnModuleInit {
   constructor(

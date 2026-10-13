@@ -5,6 +5,7 @@ import {
   OzonFbsPostingListResponse,
   OzonFbsShipResponse,
   OzonFbpWarehouseListResponse,
+  OzonNotificationListResponse,
   OzonOwnWarehouseListResponse,
   OzonProductAttributesResponse,
   OzonProductInfoListResponse,
@@ -69,6 +70,12 @@ interface RequestCall {
    * The transport then hands back the raw bytes instead of parsing.
    */
   readonly raw?: boolean;
+  /**
+   * True for endpoints whose 200 response may carry an EMPTY body (the
+   * notification set/update/delete endpoints declare no response content).
+   * The transport then resolves `{}` instead of failing JSON parsing.
+   */
+  readonly tolerateEmptyBody?: boolean;
 }
 
 /**
@@ -307,6 +314,76 @@ export class OzonClient {
   }
 
   // -----------------------------------------------------------------------
+  // Push-notification subscription management (/v1/notification/*).
+  //
+  // REAL platform writes (set/update/delete) - only invoked from the
+  // operator-facing subscription endpoints (AGENTS.md §92). Request/response
+  // shapes verified against the vendored official spec v2.1
+  // (notification.v1.* schemas); set/update/delete declare NO response body.
+  // -----------------------------------------------------------------------
+
+  /** List every subscribed URL with its event types (account-wide for the Client-Id). */
+  async notificationList(auth: OzonAuth, storeId: string): Promise<OzonNotificationListResponse> {
+    return this.request<OzonNotificationListResponse>(auth, {
+      endpoint: '/v1/notification/list',
+      storeId,
+      body: {},
+    });
+  }
+
+  /** Subscribe a URL to event types (creates a new subscription). */
+  async notificationSet(
+    auth: OzonAuth,
+    storeId: string,
+    input: { url: string; types: readonly string[] },
+  ): Promise<void> {
+    await this.request<Record<string, never>>(auth, {
+      endpoint: '/v1/notification/set',
+      storeId,
+      body: { url: input.url, types: [...input.types] },
+      tolerateEmptyBody: true,
+    });
+  }
+
+  /** Update the event types of an existing subscription (by its id). */
+  async notificationUpdate(
+    auth: OzonAuth,
+    storeId: string,
+    input: { id: number; types: readonly string[] },
+  ): Promise<void> {
+    await this.request<Record<string, never>>(auth, {
+      endpoint: '/v1/notification/update',
+      storeId,
+      body: { id: input.id, types: [...input.types] },
+      tolerateEmptyBody: true,
+    });
+  }
+
+  /** Enable/disable a subscription (e.g. re-enable after the platform's auto-pause). */
+  async notificationEnable(
+    auth: OzonAuth,
+    storeId: string,
+    input: { id: number; enabled: boolean },
+  ): Promise<void> {
+    await this.request<Record<string, never>>(auth, {
+      endpoint: '/v1/notification/enable',
+      storeId,
+      body: { id: input.id, enabled: input.enabled },
+      tolerateEmptyBody: true,
+    });
+  }
+
+  /** Remove a subscribed URL by its id. */
+  async notificationDelete(auth: OzonAuth, storeId: string, input: { id: number }): Promise<void> {
+    await this.request<Record<string, never>>(auth, {
+      endpoint: '/v1/notification/delete',
+      storeId,
+      body: { id: input.id },
+      tolerateEmptyBody: true,
+    });
+  }
+
+  // -----------------------------------------------------------------------
   // Transport: auth headers + timeout + retry + rate limit + error mapping
   // -----------------------------------------------------------------------
 
@@ -469,6 +546,11 @@ export class OzonClient {
     try {
       parsed = await response.json();
     } catch (error: unknown) {
+      if (call.tolerateEmptyBody === true) {
+        // Documented no-content 200 (notification set/update/delete): the
+        // platform-side effect already happened; an empty body is success.
+        return { ok: true, value: {} as TResponse };
+      }
       return {
         ok: false,
         retryable: false,
@@ -483,6 +565,9 @@ export class OzonClient {
       };
     }
     if (typeof parsed !== 'object' || parsed === null) {
+      if (call.tolerateEmptyBody === true) {
+        return { ok: true, value: {} as TResponse };
+      }
       return {
         ok: false,
         retryable: false,
