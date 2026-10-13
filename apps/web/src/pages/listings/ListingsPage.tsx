@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { App, Alert, Button, Drawer, Form, Input, Modal, Select, Space } from 'antd';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { apiDelete, apiPatch, apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
 import {
@@ -74,6 +74,47 @@ interface ListingDetail {
   skus: ListingSkuRow[];
 }
 
+/**
+ * 新建映射弹窗：变体标识字段按平台显示（事实来源 = 各平台 mapper 写入规则 +
+ * 决策 0016：订单只按 platform_sku_id / seller_sku 反查，offer_id 仅记录）：
+ * - OZON：platform_sku_id = 平台 sku；seller_sku 同步不采集；offer_id 仅记录。
+ * - WB：platform_sku_id = 尺寸条码（cards sizes[].skus）；seller_sku = 货号
+ *   vendorCode（条码缺失时兜底解析）；offer_id 与 seller_sku 同值，不单独填写。
+ * - YANDEX：seller_sku = offerId（订单解析键）；platform_sku_id = marketSku；
+ *   offer_id 与 seller_sku 同值，不单独填写。
+ * null = 该平台不使用此字段，表单中隐藏。
+ */
+interface VariantIdFieldConfig {
+  platformSkuId: string;
+  sellerSku: string | null;
+  offerId: string | null;
+  note: string;
+}
+
+const VARIANT_ID_FIELDS: Record<string, VariantIdFieldConfig> = {
+  OZON: {
+    platformSkuId: 'OZON sku',
+    sellerSku: null,
+    offerId: '仅记录',
+    note: 'OZON：平台 SKU ID 填平台返回的 sku，订单按它反查内部 SKU；Offer ID 仅作平台事实记录，不参与解析。',
+  },
+  WB: {
+    platformSkuId: '尺寸条码 sizes[].skus',
+    sellerSku: '货号 vendorCode',
+    offerId: null,
+    note: 'Wildberries：平台 SKU ID 填尺寸条码（订单按它反查）；Seller SKU 填货号 vendorCode，条码缺失时兜底解析。',
+  },
+  YANDEX: {
+    platformSkuId: 'marketSku',
+    sellerSku: 'offerId',
+    offerId: null,
+    note: 'Yandex：Seller SKU 填 offerId（卖家 SKU 标识，订单按它反查）；平台 SKU ID 填 marketSku（offer-mappings 商品 SKU）。',
+  },
+};
+
+const VARIANT_NOTE_GENERIC =
+  '每个变体至少要填平台 SKU ID 或 Seller SKU：订单只按这两个标识反查内部 SKU（Offer ID 可被运营在平台侧修改，不作为解析依据）。选择平台后，标识字段按该平台的实际含义显示。';
+
 const listingStatusBadge = (value: string, showDot = true) => (
   <StatusBadge
     tone={value === 'ACTIVE' ? 'success' : 'neutral'}
@@ -109,6 +150,10 @@ export function ListingsPage() {
   const [mappingEditForm] = Form.useForm();
   const [skuKeyword, setSkuKeyword] = useState('');
   const debouncedSkuKeyword = useDebouncedValue(skuKeyword);
+  // Rail quick action (task: SKU映射): snapshot the listing row the modal was
+  // opened for — the rail selection may change while the modal is open.
+  const [railMapTarget, setRailMapTarget] = useState<ListingRow | null>(null);
+  const [railMapForm] = Form.useForm();
   // Sprint 8 T1: quick onboarding (Product + SKU + optional barcode + mapping
   // in one transaction) from an unmapped listing / variant row. The dialog
   // itself is the shared ListingOnboardModal component.
@@ -163,6 +208,14 @@ export function ListingsPage() {
   // Reactive platform -> store cascading for the create-mapping modal:
   // server-side filtered so large store lists are never truncated.
   const createPlatformId = Form.useWatch('platformId', form);
+  // Variant identifier fields display per selected platform (VARIANT_ID_FIELDS);
+  // before a platform is chosen the generic triple stays visible.
+  const createPlatformCode = (platforms.data?.data ?? []).find(
+    (platform) => platform.id === createPlatformId,
+  )?.code;
+  const variantFieldConfig =
+    createPlatformCode === undefined ? null : (VARIANT_ID_FIELDS[createPlatformCode] ?? null);
+  const sellerSkuVisible = variantFieldConfig === null || variantFieldConfig.sellerSku !== null;
   const storesForPlatform = useApiQuery<{
     data: Array<{ id: string; platformId: string; storeCode: string; name: string }>;
   }>('/api/v1/stores', { page: 1, pageSize: 100, platformId: createPlatformId }, [
@@ -184,6 +237,30 @@ export function ListingsPage() {
     detailId !== null,
   );
   const listingDetail = detail.data?.data;
+  // Rail「SKU映射」modal: variants of the snapshotted listing (map endpoint
+  // only accepts UNMAPPED variant rows, so the picker lists those only).
+  const railMapDetail = useApiQuery<{ data: ListingDetail }>(
+    '/api/v1/listings/{id}',
+    {},
+    ['listing-detail', railMapTarget?.id],
+    { id: railMapTarget?.id ?? '' },
+    railMapTarget !== null,
+  );
+  const railMapVariants = useMemo(
+    () => (railMapDetail.data?.data.skus ?? []).filter((row) => row.mappingStatus === 'UNMAPPED'),
+    [railMapDetail.data],
+  );
+  // Preselect the first unmapped variant once the detail arrives (or when the
+  // selection is no longer among the options).
+  useEffect(() => {
+    if (railMapTarget === null || railMapVariants.length === 0) {
+      return;
+    }
+    const current = railMapForm.getFieldValue('mappingId') as string | undefined;
+    if (!railMapVariants.some((row) => row.id === current)) {
+      railMapForm.setFieldValue('mappingId', railMapVariants[0]!.id);
+    }
+  }, [railMapTarget, railMapVariants, railMapForm]);
   // Sprint 8 T3: unmapped-workbench counters (reuse the drawer's cache key).
   const mappingStats = useApiQuery<{ data: { mapped: number; unmapped: number } }>(
     '/api/v1/listings/mapping-stats',
@@ -282,6 +359,7 @@ export function ListingsPage() {
     onSuccess: () => {
       void message.success('映射完成（后续同步不会覆盖）');
       setMapTarget(null);
+      setRailMapTarget(null);
       refreshListings();
     },
     onError: (error: Error) => void message.error(error.message),
@@ -470,6 +548,20 @@ export function ListingsPage() {
           <ContextAction>
             <Button block onClick={() => setDetailId(selectedRow.id)}>
               查看详情
+            </Button>
+            <Button
+              block
+              style={{ marginTop: 8 }}
+              disabled={selectedRow.mappingCount === 0}
+              title={
+                selectedRow.mappingCount === 0 ? '该商品链接没有变体记录，无法映射' : undefined
+              }
+              onClick={() => {
+                railMapForm.resetFields();
+                setRailMapTarget(selectedRow);
+              }}
+            >
+              SKU映射
             </Button>
             {selectedRow.mappingStatus === 'UNMAPPED' && (
               <Button
@@ -772,9 +864,7 @@ export function ListingsPage() {
             {(fields, { add, remove }) => (
               <>
                 <p style={{ fontSize: 12.5, color: colors.textTertiary, marginBottom: 10 }}>
-                  每个变体至少要填平台 SKU ID 或 Seller SKU：订单只按这两个标识反查内部 SKU（Offer
-                  ID 可被运营在平台侧修改，不作为解析依据； 仍会作为平台事实记录）。OZON 的平台 SKU
-                  ID 填平台返回的 sku。
+                  {variantFieldConfig?.note ?? VARIANT_NOTE_GENERIC}
                 </p>
                 {fields.map((field) => (
                   <Space key={field.key} align="baseline" wrap>
@@ -808,26 +898,48 @@ export function ListingsPage() {
                             const row = variants?.[field.name];
                             const text = (input: unknown): string =>
                               typeof input === 'string' ? input.trim() : '';
-                            const hasAny = text(value) !== '' || text(row?.sellerSku) !== '';
+                            const hasAny =
+                              text(value) !== '' ||
+                              (sellerSkuVisible && text(row?.sellerSku) !== '');
                             return hasAny
                               ? Promise.resolve()
                               : Promise.reject(
                                   new Error(
-                                    '至少填平台 SKU ID 或 Seller SKU（Offer ID 不作为解析依据）',
+                                    sellerSkuVisible
+                                      ? '至少填平台 SKU ID 或 Seller SKU（Offer ID 不作为解析依据）'
+                                      : '请填写平台 SKU ID（订单按它反查内部 SKU）',
                                   ),
                                 );
                           },
                         }),
                       ]}
                     >
-                      <Input placeholder="平台 SKU ID" style={{ width: 150 }} />
+                      <Input
+                        placeholder={
+                          variantFieldConfig === null
+                            ? '平台 SKU ID'
+                            : `平台 SKU ID（${variantFieldConfig.platformSkuId}）`
+                        }
+                        style={{ width: 190 }}
+                      />
                     </Form.Item>
-                    <Form.Item name={[field.name, 'sellerSku']}>
-                      <Input placeholder="Seller SKU" style={{ width: 130 }} />
-                    </Form.Item>
-                    <Form.Item name={[field.name, 'offerId']}>
-                      <Input placeholder="Offer ID（仅记录）" style={{ width: 140 }} />
-                    </Form.Item>
+                    {sellerSkuVisible && (
+                      <Form.Item name={[field.name, 'sellerSku']}>
+                        <Input
+                          placeholder={
+                            variantFieldConfig === null || variantFieldConfig.sellerSku === null
+                              ? 'Seller SKU'
+                              : `Seller SKU（${variantFieldConfig.sellerSku}）`
+                          }
+                          style={{ width: 170 }}
+                        />
+                      </Form.Item>
+                    )}
+                    {(variantFieldConfig === null || variantFieldConfig.offerId !== null) && (
+                      <Form.Item name={[field.name, 'offerId']}>
+                        <Input placeholder="Offer ID（仅记录）" style={{ width: 150 }} />
+                      </Form.Item>
+                    )}
                     <Button danger onClick={() => remove(field.name)}>
                       删除
                     </Button>
@@ -1185,6 +1297,85 @@ export function ListingsPage() {
           onCancel={() => setMappingDeleteTarget(null)}
         />
       </Drawer>
+
+      {/* ---- Rail「SKU映射」：把该商品链接的未映射变体绑定到已有内部 SKU ---- */}
+      <Modal
+        title={`SKU映射：${railMapTarget?.platformProductId ?? ''}`}
+        open={railMapTarget !== null}
+        zIndex={1100}
+        afterOpenChange={(open) => {
+          if (!open) {
+            railMapForm.resetFields();
+          }
+        }}
+        onCancel={() => setRailMapTarget(null)}
+        onOk={() =>
+          void railMapForm.validateFields().then((values) => {
+            if (railMapTarget === null) {
+              void message.error('映射上下文丢失，请重新打开后重试');
+              return;
+            }
+            mapMutation.mutate({
+              listingId: railMapTarget.id,
+              mappingId: values.mappingId,
+              skuId: values.skuId,
+            });
+          })
+        }
+        confirmLoading={mapMutation.isPending}
+      >
+        <p style={{ color: colors.textTertiary, fontSize: 12.5 }}>
+          {railMapTarget === null
+            ? ''
+            : `${railMapTarget.storeCode} ${railMapTarget.title ?? ''} — 选择未映射变体与已有内部 SKU，确认后建立映射；后续平台同步不会覆盖。`}
+        </p>
+        <Form form={railMapForm} layout="vertical">
+          <Form.Item
+            name="mappingId"
+            label="未映射变体"
+            rules={[{ required: true, message: '请选择要映射的变体' }]}
+          >
+            <Select
+              loading={railMapDetail.isLoading}
+              placeholder="选择变体"
+              options={railMapVariants.map((variant) => ({
+                value: variant.id,
+                label:
+                  variant.platformSkuId ??
+                  variant.sellerSku ??
+                  variant.offerId ??
+                  variant.id.slice(0, 8),
+              }))}
+            />
+          </Form.Item>
+          {railMapTarget !== null && !railMapDetail.isLoading && railMapVariants.length === 0 && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message="该商品链接没有未映射变体"
+              description="变体均已映射或不存在变体记录；无变体记录的链接请走「新建映射」补充。"
+            />
+          )}
+          <Form.Item
+            name="skuId"
+            label="内部SKU"
+            rules={[{ required: true, message: '请选择内部SKU' }]}
+          >
+            <Select
+              showSearch
+              filterOption={false}
+              onSearch={setSkuKeyword}
+              notFoundContent={skus.isLoading ? '搜索中...' : '无匹配SKU'}
+              placeholder="内部SKU（可输入编码/名称搜索）"
+              options={(skus.data?.data ?? []).map((sku) => ({
+                value: sku.id,
+                label: `${sku.skuCode} ${sku.nameZh}`,
+              }))}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       {/* ---- 快速建档弹窗（Phase 3 提取为共享组件；订单页复用同一弹窗） ---- */}
       <ListingOnboardModal

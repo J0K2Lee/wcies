@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
+  Alert,
   App,
   Button,
   Cascader,
@@ -18,7 +19,7 @@ import {
 } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { apiDelete, apiPatch, apiPost, useApiQuery } from '../../api/hooks';
+import { apiDelete, apiPatch, apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
 import { SkuCreateModal } from '../../components/SkuCreateModal';
 import { printTasksBrowser } from '../../printing/print-browser';
 import {
@@ -234,11 +235,19 @@ export function SkusPage() {
   const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [listingCreateOpen, setListingCreateOpen] = useState(false);
-  const [mapExistingOpen, setMapExistingOpen] = useState(false);
+  // 映射平台商品 (rail quick action): snapshot the SKU to bind — the rail
+  // selection may change while the modal is open.
+  const [mapPlatformOpen, setMapPlatformOpen] = useState(false);
+  const [mapPlatformTarget, setMapPlatformTarget] = useState<{
+    id: string;
+    skuCode: string;
+  } | null>(null);
   const [barcodeForm] = Form.useForm();
   const [editForm] = Form.useForm();
   const [listingForm] = Form.useForm();
-  const [mapExistingForm] = Form.useForm();
+  const [mapPlatformForm] = Form.useForm();
+  const [listingKeyword, setListingKeyword] = useState('');
+  const debouncedListingKeyword = useDebouncedValue(listingKeyword);
 
   // Deep link from the global palette: focus=<skuId> selects the row and opens
   // its drawer (Phase 2 task §33 — jump straight to the entity).
@@ -471,8 +480,9 @@ export function SkusPage() {
     onError: (error: Error) => void message.error(error.message),
   });
 
-  // ---- Platform mapping entries (§11.6): map existing UNMAPPED variant or
-  // create a brand-new listing with this SKU as its first variant. ----
+  // ---- Platform mapping entries: map an existing UNMAPPED variant via the
+  // searchable「映射平台商品」picker, or create a brand-new listing with this
+  // SKU as its first variant. ----
   const platforms = useApiQuery<Envelope<Array<{ id: string; name: string; code: string }>>>(
     '/api/v1/platforms',
     {},
@@ -516,46 +526,72 @@ export function SkusPage() {
     onError: (error: Error) => void message.error(`创建失败: ${error.message}`),
   });
 
-  const unmappedListings = useApiQuery<
+  // 映射平台商品 picker: server-side keyword search across ALL platforms
+  // (partial-mapped listings are listed too — only their UNMAPPED variants
+  // are offered below).
+  const listingOptions = useApiQuery<
     Envelope<
-      Array<{ id: string; storeCode: string; platformProductId: string; title: string | null }>
+      Array<{
+        id: string;
+        platformCode: string;
+        storeCode: string;
+        platformProductId: string;
+        title: string | null;
+      }>
     >
   >(
     '/api/v1/listings',
-    { page: 1, pageSize: 100, mappingState: 'UNMAPPED' },
-    ['listings', 'unmapped'],
+    { page: 1, pageSize: 50, keyword: debouncedListingKeyword || undefined },
+    ['listings', 'for-sku-map', debouncedListingKeyword],
     undefined,
-    mapExistingOpen,
+    mapPlatformOpen,
   );
-  const mapExistingListingId = Form.useWatch('listingId', mapExistingForm);
-  const unmappedDetail = useApiQuery<{
+  const mapPlatformListingId = Form.useWatch('listingId', mapPlatformForm);
+  const mapPlatformDetail = useApiQuery<{
     data: {
       skus: Array<{
         id: string;
         platformSkuId: string | null;
         offerId: string | null;
+        sellerSku: string | null;
         mappingStatus: string;
       }>;
     };
   }>(
     '/api/v1/listings/{id}',
     {},
-    ['listing-detail', mapExistingListingId],
-    { id: mapExistingListingId ?? '' },
-    mapExistingListingId !== undefined && mapExistingOpen,
+    ['listing-detail', mapPlatformListingId],
+    { id: mapPlatformListingId ?? '' },
+    mapPlatformListingId !== undefined && mapPlatformOpen,
   );
+  const mapPlatformVariants = useMemo(
+    () =>
+      (mapPlatformDetail.data?.data.skus ?? []).filter((row) => row.mappingStatus === 'UNMAPPED'),
+    [mapPlatformDetail.data],
+  );
+  // Preselect the first unmapped variant once the detail arrives (or when the
+  // current selection is no longer among the options).
+  useEffect(() => {
+    if (!mapPlatformOpen || mapPlatformVariants.length === 0) {
+      return;
+    }
+    const current = mapPlatformForm.getFieldValue('mappingId') as string | undefined;
+    if (!mapPlatformVariants.some((row) => row.id === current)) {
+      mapPlatformForm.setFieldValue('mappingId', mapPlatformVariants[0]!.id);
+    }
+  }, [mapPlatformOpen, mapPlatformVariants, mapPlatformForm]);
 
-  const mapExistingMutation = useMutation({
+  const mapPlatformMutation = useMutation({
     mutationFn: (values: { listingId: string; mappingId: string }) =>
       apiPost(
         '/api/v1/listings/{listingId}/skus/{id}/map',
-        { skuId: drawerId ?? '' },
+        { skuId: mapPlatformTarget?.id ?? '' },
         { listingId: values.listingId, id: values.mappingId },
       ),
     onSuccess: () => {
       void message.success('映射完成（后续同步不会覆盖）');
-      setMapExistingOpen(false);
-      mapExistingForm.resetFields();
+      setMapPlatformOpen(false);
+      mapPlatformForm.resetFields();
       refreshSku();
       void queryClient.invalidateQueries({ queryKey: ['listings'] });
     },
@@ -714,6 +750,18 @@ export function SkusPage() {
           <ContextAction>
             <Button block onClick={() => setDrawerId(selectedRow.id)}>
               查看详情
+            </Button>
+            <Button
+              block
+              style={{ marginTop: 8 }}
+              onClick={() => {
+                mapPlatformForm.resetFields();
+                setListingKeyword('');
+                setMapPlatformTarget({ id: selectedRow.id, skuCode: selectedRow.skuCode });
+                setMapPlatformOpen(true);
+              }}
+            >
+              映射平台商品
             </Button>
             <Button
               block
@@ -1006,7 +1054,6 @@ export function SkusPage() {
               type: 'SKU_LABEL',
               payload: {
                 barcode: printBarcode,
-                skuCode: printFor?.skuCode ?? '',
                 skuName: printFor?.nameZh,
                 copies: printCopies,
               },
@@ -1091,7 +1138,18 @@ export function SkusPage() {
         extra={
           sku !== undefined && (
             <>
-              {/* 编辑唯一入口（行菜单双开行为已废除）；启停在右栏 StatusSwitch。 */}
+              {/* 操作区（任务3）：新建商品链接并映射自平台映射 tab 移入；编辑唯一入口（行菜单双开行为已废除）；启停在右栏 StatusSwitch。 */}
+              <Button
+                size="small"
+                type="primary"
+                disabled={drawerId === null}
+                onClick={() => {
+                  listingForm.resetFields();
+                  setListingCreateOpen(true);
+                }}
+              >
+                新建商品链接并映射
+              </Button>
               <Button
                 size="small"
                 onClick={() => {
@@ -1295,27 +1353,7 @@ export function SkusPage() {
               label: `平台映射 (${mappings.data?.data.length ?? 0})`,
               children: (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <div style={{ display: 'flex', gap: 8, paddingBottom: 4 }}>
-                    <Button
-                      type="primary"
-                      disabled={drawerId === null}
-                      onClick={() => {
-                        listingForm.resetFields();
-                        setListingCreateOpen(true);
-                      }}
-                    >
-                      新建商品链接并映射
-                    </Button>
-                    <Button
-                      disabled={drawerId === null}
-                      onClick={() => {
-                        mapExistingForm.resetFields();
-                        setMapExistingOpen(true);
-                      }}
-                    >
-                      映射未映射变体
-                    </Button>
-                  </div>
+                  {/* 操作入口已上移至抽屉操作区（新建商品链接并映射）与右栏（映射平台商品）。 */}
                   <DataTable<MappingRow>
                     rowKey="id"
                     size="small"
@@ -1545,65 +1583,87 @@ export function SkusPage() {
         </Form>
       </Modal>
 
-      {/* ---- Map an existing UNMAPPED platform variant to this SKU (§11.6) ---- */}
+      {/* ---- 映射平台商品：搜索任意平台的商品链接，把当前 SKU 绑定到其未映射变体 ---- */}
       <Modal
-        title="映射未映射变体"
-        open={mapExistingOpen}
+        title={`映射平台商品：${mapPlatformTarget?.skuCode ?? ''}`}
+        open={mapPlatformOpen}
         zIndex={1100}
         afterOpenChange={(open) => {
           if (!open) {
-            mapExistingForm.resetFields();
+            mapPlatformForm.resetFields();
           }
         }}
-        onCancel={() => setMapExistingOpen(false)}
+        onCancel={() => setMapPlatformOpen(false)}
         onOk={() =>
-          void mapExistingForm.validateFields().then((values) => {
-            if (drawerId === null) {
+          void mapPlatformForm.validateFields().then((values) => {
+            if (mapPlatformTarget === null) {
               void message.error('SKU 上下文丢失，请重新打开后重试');
               return;
             }
-            mapExistingMutation.mutate({
+            mapPlatformMutation.mutate({
               listingId: values.listingId,
               mappingId: values.mappingId,
             });
           })
         }
-        confirmLoading={mapExistingMutation.isPending}
+        confirmLoading={mapPlatformMutation.isPending}
       >
         <p style={{ color: colors.textTertiary, fontSize: 12.5 }}>
-          选择一个同步而来的未映射变体，将其绑定到当前 SKU；后续平台同步不会覆盖该映射。
+          选择平台商品链接及其未映射变体，绑定到当前 SKU；后续平台同步不会覆盖该映射。
         </p>
-        <Form form={mapExistingForm} layout="vertical">
+        <Form form={mapPlatformForm} layout="vertical">
           <Form.Item
             name="listingId"
-            label="商品链接"
+            label="平台商品（商品链接）"
             rules={[{ required: true, message: '请选择商品链接' }]}
           >
             <Select
               showSearch
-              optionFilterProp="label"
-              options={(unmappedListings.data?.data ?? []).map((listing) => ({
+              filterOption={false}
+              onSearch={setListingKeyword}
+              placeholder="搜索平台商品（ID / 标题 / 平台SKU / 内部SKU）"
+              notFoundContent={listingOptions.isLoading ? '搜索中...' : '无匹配商品链接'}
+              options={(listingOptions.data?.data ?? []).map((listing) => ({
                 value: listing.id,
-                label: `${listing.storeCode} / ${listing.platformProductId}${listing.title !== null ? ` · ${listing.title}` : ''}`,
+                label: `${listing.platformCode} / ${listing.storeCode} / ${listing.platformProductId}${
+                  listing.title !== null ? ` · ${listing.title}` : ''
+                }`,
               }))}
             />
           </Form.Item>
           <Form.Item noStyle shouldUpdate={(prev, next) => prev.listingId !== next.listingId}>
             {() => (
-              <Form.Item
-                name="mappingId"
-                label="未映射变体"
-                rules={[{ required: true, message: '请选择要映射的变体' }]}
-              >
-                <Select
-                  options={(unmappedDetail.data?.data.skus ?? [])
-                    .filter((variant) => variant.mappingStatus === 'UNMAPPED')
-                    .map((variant) => ({
+              <>
+                {mapPlatformListingId !== undefined &&
+                  !mapPlatformDetail.isLoading &&
+                  mapPlatformVariants.length === 0 && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      style={{ marginBottom: 12 }}
+                      message="所选商品链接没有未映射变体"
+                      description="变体均已映射或不存在变体记录；请选择其他商品。"
+                    />
+                  )}
+                <Form.Item
+                  name="mappingId"
+                  label="未映射变体"
+                  rules={[{ required: true, message: '请选择要映射的变体' }]}
+                >
+                  <Select
+                    loading={mapPlatformDetail.isLoading}
+                    placeholder="选择变体"
+                    options={mapPlatformVariants.map((variant) => ({
                       value: variant.id,
-                      label: variant.platformSkuId ?? variant.offerId ?? variant.id.slice(0, 8),
+                      label:
+                        variant.platformSkuId ??
+                        variant.sellerSku ??
+                        variant.offerId ??
+                        variant.id.slice(0, 8),
                     }))}
-                />
-              </Form.Item>
+                  />
+                </Form.Item>
+              </>
             )}
           </Form.Item>
         </Form>
