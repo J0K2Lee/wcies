@@ -15,9 +15,15 @@ import {
  * volume_mm3 is ALWAYS recomputed by the backend from length x width x height;
  * clients cannot write it (task §23). moving_average_cost exists as a reserved
  * field and stays null until the purchase sprint (task §24).
+ *
+ * 2026-10-13 V1 改造（任务 T1，决策 D5）：category_id / brand_id 成为 SKU
+ * 自身字段（从原属 Product 单射继承一份，之后可独立修改）；product_id 仍
+ * 在（数据库层已置空），阶段二删 products 表后一并移除。
  */
 @Entity('skus')
 @Index('idx_skus_product', ['productId'])
+@Index('idx_skus_category', ['categoryId'])
+@Index('idx_skus_brand', ['brandId'])
 export class SkuEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -27,6 +33,13 @@ export class SkuEntity {
 
   @Column({ type: 'varchar', length: 100, name: 'sku_code', unique: true })
   skuCode!: string;
+
+  /** V1 改造（任务 T1）：分类/品牌是 SKU 字段；可空，无 relation（与 products 旧列风格一致）。 */
+  @Column({ type: 'uuid', name: 'category_id', nullable: true })
+  categoryId!: string | null;
+
+  @Column({ type: 'uuid', name: 'brand_id', nullable: true })
+  brandId!: string | null;
 
   @Column({ type: 'varchar', length: 500, name: 'name_zh' })
   nameZh!: string;
