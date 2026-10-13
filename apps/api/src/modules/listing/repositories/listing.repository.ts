@@ -344,52 +344,23 @@ export class ListingRepository {
   }
 
   /**
-   * Sprint 8.5 T2: the listing's default attach target - the product of the
-   * earliest mapped variant (read on the CALLER's locked transaction so a
-   * concurrent onboard of a sibling variant is ordered by the same lock).
-   */
-  async findFirstMappedProductInTx(
-    manager: EntityManager,
-    listingId: string,
-  ): Promise<{ id: string; productCode: string; nameZh: string } | null> {
-    const rows = await manager.query<Array<{ id: string; product_code: string; name_zh: string }>>(
-      `SELECT p.id, p.product_code, p.name_zh
-       FROM platform_listing_skus pls
-       INNER JOIN skus s ON s.id = pls.sku_id
-       INNER JOIN products p ON p.id = s.product_id
-       WHERE pls.listing_id = $1 AND pls.sku_id IS NOT NULL
-       ORDER BY pls.created_at ASC, pls.id ASC
-       LIMIT 1`,
-      [listingId],
-    );
-    const first = rows[0];
-    return first === undefined
-      ? null
-      : { id: first.id, productCode: first.product_code, nameZh: first.name_zh };
-  }
-
-  /**
    * Sprint 8.5: one join feed for the onboarding dialog - variant rows with
-   * their mapped internal refs plus the raw_data fields the dialog consumes
-   * (images, platform category keys, v4-enriched dimensions).
+   * their mapped internal SKU code plus the raw_data fields the dialog
+   * consumes (images, platform category keys, v4-enriched dimensions).
+   *
+   * V1 (2026-10-13): the products join is gone with the product layer -
+   * a mapped variant references its internal SKU directly.
    */
   async listOnboardContextVariants(listingId: string): Promise<
     Array<{
       mapping: PlatformListingSkuEntity;
       skuCode: string | null;
-      productId: string | null;
-      productCode: string | null;
-      productName: string | null;
     }>
   > {
     const qb = this.mappingRepository
       .createQueryBuilder('pls')
       .leftJoin('skus', 'sku', 'sku.id = pls.sku_id')
-      .leftJoin('products', 'product', 'product.id = sku.product_id')
       .addSelect('sku.sku_code', 'sku_code')
-      .addSelect('product.id', 'product_id')
-      .addSelect('product.product_code', 'product_code')
-      .addSelect('product.name_zh', 'product_name')
       .where('pls.listing_id = :listingId', { listingId })
       .orderBy('pls.createdAt', 'ASC');
     const { raw: rawRows, entities } = await qb.getRawAndEntities();
@@ -397,9 +368,6 @@ export class ListingRepository {
     return rawList.map((raw, index) => ({
       mapping: entities[index] as PlatformListingSkuEntity,
       skuCode: raw['sku_code'] === null ? null : String(raw['sku_code'] as string),
-      productId: raw['product_id'] === null ? null : String(raw['product_id'] as string),
-      productCode: raw['product_code'] === null ? null : String(raw['product_code'] as string),
-      productName: raw['product_name'] === null ? null : String(raw['product_name'] as string),
     }));
   }
 

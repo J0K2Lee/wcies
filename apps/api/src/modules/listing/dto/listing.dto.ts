@@ -260,12 +260,6 @@ export class OnboardContextVariantDto {
   @ApiProperty({ nullable: true, description: '已映射时该变体绑定的内部 SKU 编码' })
   skuCode!: string | null;
 
-  @ApiProperty({ nullable: true, description: '已映射时该变体绑定的内部商品 id（挂靠目标）' })
-  productId!: string | null;
-
-  @ApiProperty({ nullable: true, description: '已映射时该变体绑定的内部商品编码' })
-  productCode!: string | null;
-
   @ApiProperty({ nullable: true, description: 'raw_data.primary_image CDN 直链' })
   primaryImage!: string | null;
 
@@ -304,19 +298,6 @@ export class ListingOnboardContextDto {
 
   @ApiProperty({ nullable: true })
   title!: string | null;
-
-  @ApiProperty({
-    nullable: true,
-    format: 'uuid',
-    description: '缺省挂靠目标：该 Listing 首个已建档变体的商品；无则为 null（新建）',
-  })
-  defaultAttachProductId!: string | null;
-
-  @ApiProperty({ nullable: true, example: 'PN000012' })
-  defaultAttachProductCode!: string | null;
-
-  @ApiProperty({ nullable: true, example: 'VK87 MAX V2 机械键盘' })
-  defaultAttachProductName!: string | null;
 
   @ApiProperty({ type: [OnboardContextVariantDto] })
   variants!: OnboardContextVariantDto[];

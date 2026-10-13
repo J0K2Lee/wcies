@@ -219,8 +219,11 @@ export class ListingOnboardingService {
 
   /**
    * Sprint 8.5: one feed for the enhanced onboarding dialog. Everything the
-   * dialog needs to prefill (images, category suggestion, dims) plus the
-   * attach target resolution - derived, read-only, no new state.
+   * dialog needs to prefill (images, category suggestion, dims) - derived,
+   * read-only, no new state.
+   *
+   * V1 (2026-10-13): no attach-target resolution - every variant onboards
+   * its own SKU, so there is no "default product" to report.
    */
   async getOnboardContext(listingId: string): Promise<ListingOnboardContextDto> {
     const listing = await this.repository.findListingById(listingId);
@@ -259,8 +262,6 @@ export class ListingOnboardingService {
         offerId: row.mapping.offerId,
         sellerSku: row.mapping.sellerSku,
         skuCode: row.skuCode,
-        productId: row.productId,
-        productCode: row.productCode,
         primaryImage: readImageUrl(row.mapping.rawData, 'primary_image'),
         colorImage: readImageUrl(row.mapping.rawData, 'color_image'),
         descriptionCategoryId: externalKey?.externalCategoryId ?? null,
@@ -273,14 +274,9 @@ export class ListingOnboardingService {
       };
     });
 
-    const attach =
-      rows.find((row) => row.productId !== null && row.mapping.mappingStatus === 'MAPPED') ?? null;
     return {
       listingId,
       title: listing.title,
-      defaultAttachProductId: attach?.productId ?? null,
-      defaultAttachProductCode: attach?.productCode ?? null,
-      defaultAttachProductName: attach?.productName ?? null,
       variants,
     };
   }
