@@ -31,9 +31,16 @@ export class CatalogRepository {
   async listBrands(keyword?: string): Promise<BrandEntity[]> {
     const qb = this.brandRepository.createQueryBuilder('brand');
     if (keyword !== undefined && keyword !== '') {
-      qb.andWhere('(brand.code ILIKE :kw OR brand.name ILIKE :kw OR brand.name_en ILIKE :kw)', {
-        kw: `%${keyword}%`,
-      });
+      // 模糊搜索覆盖编码与四个名称（一般/中文/英文/俄文，决策 0006）：
+      // 运营可能只知道中文名或俄文名，漏掉任一列都会表现为"搜不到"。
+      qb.andWhere(
+        `(brand.code ILIKE :kw
+          OR brand.name ILIKE :kw
+          OR brand.name_zh ILIKE :kw
+          OR brand.name_en ILIKE :kw
+          OR brand.name_ru ILIKE :kw)`,
+        { kw: `%${keyword}%` },
+      );
     }
     return qb.orderBy('brand.code', 'ASC').getMany();
   }

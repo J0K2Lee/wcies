@@ -14,6 +14,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { apiPost, useApiQuery } from '../api/hooks';
 import { BrandQuickCreateModal, CategoryQuickCreateModal } from './QuickCreateModals';
+import { brandSearchText } from '../utils/brandSearch';
 
 /**
  * Shared SKU creation form (SKU管理 page).
@@ -71,11 +72,17 @@ export function SkuCreateModal({ open, onClose, onCreated }: SkuCreateModalProps
     }
   }, [open, form]);
 
-  const brands = useApiQuery<{ data: Array<{ id: string; name: string; status: string }> }>(
-    '/api/v1/brands',
-    { keyword: '' },
-    ['brands'],
-  );
+  const brands = useApiQuery<{
+    data: Array<{
+      id: string;
+      code: string;
+      name: string;
+      nameZh: string | null;
+      nameEn: string | null;
+      nameRu: string | null;
+      status: string;
+    }>;
+  }>('/api/v1/brands', { keyword: '' }, ['brands']);
   // Sprint 8.5R1: tree-lite (column-pruned) - the cascader only reads these
   // fields, and the full 8k-node tree cost megabytes per page load.
   const categories = useApiQuery<{ data: CategoryNode[] }>('/api/v1/categories/tree-lite', {}, [
@@ -141,12 +148,13 @@ export function SkuCreateModal({ open, onClose, onCreated }: SkuCreateModalProps
           <Select
             allowClear
             showSearch
-            optionFilterProp="label"
-            placeholder="选择品牌（可搜可现场快建）"
+            optionFilterProp="searchText"
+            placeholder="选择品牌（可按一般/中文/英文/俄文名或编码搜索）"
             options={(brands.data?.data ?? []).map((brand) => ({
               value: brand.id,
               // 停用品牌保留可选但带后缀（与分类筛选一致）。
               label: brand.status === 'ACTIVE' ? brand.name : `${brand.name}（停用）`,
+              searchText: brandSearchText(brand),
             }))}
           />
         </Form.Item>

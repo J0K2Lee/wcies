@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { App, Button, Form, Input, Modal, Popconfirm, Table, Tag } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
-import { apiDelete, apiPatch, useApiQuery } from '../api/hooks';
+import { apiDelete, apiPatch, useApiQuery, useDebouncedValue } from '../api/hooks';
 import {
   ACTIVE_STATUS_LABEL,
   DeleteConfirmModal,
@@ -48,10 +48,15 @@ export function BrandManageModal({ open, onClose }: BrandManageModalProps) {
   const [form] = Form.useForm();
   const [deleting, setDeleting] = useState<BrandItem | null>(null);
 
+  // 搜索：关键字进 queryKey，否则 react-query 视为同一查询、输入后不会重新请求
+  // （2026-10-14 修复"品牌管理里搜索不生效"）；输入做 300ms 防抖，避免逐字打请求。
+  const debouncedKeyword = useDebouncedValue(keyword);
   const brands = useApiQuery<{ data: BrandItem[] }>(
     '/api/v1/brands',
-    { keyword: keyword || undefined },
-    ['brands'],
+    { keyword: debouncedKeyword || undefined },
+    // 无关键字时沿用页面级 ['brands'] 缓存（共享同一份全量数据），
+    // 有关键字才分键；失效仍按前缀命中（invalidateQueries(['brands'])）。
+    debouncedKeyword === '' ? ['brands'] : ['brands', { keyword: debouncedKeyword }],
   );
   const rows = brands.data?.data ?? [];
 
@@ -144,7 +149,7 @@ export function BrandManageModal({ open, onClose }: BrandManageModalProps) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <Input.Search
             allowClear
-            placeholder="搜索品牌（一般名称 / 中文名 / 英文名 / 编码）"
+            placeholder="搜索品牌（编码 / 一般名称 / 中文名 / 英文名 / 俄文名）"
             aria-label="搜索品牌"
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
@@ -166,16 +171,21 @@ export function BrandManageModal({ open, onClose }: BrandManageModalProps) {
             columns={[
               { title: '编码', dataIndex: 'code', width: 110 },
               {
-                title: '一般名称',
+                title: '名称（一般 / 中文 / 英文 / 俄文）',
                 dataIndex: 'name',
-                render: (value: string, record) => (
-                  <span>
-                    {value}
-                    {record.nameZh !== null && (
-                      <span style={{ color: colors.textTertiary }}>（{record.nameZh}）</span>
-                    )}
-                  </span>
-                ),
+                render: (value: string, record) => {
+                  const others = [record.nameZh, record.nameEn, record.nameRu].filter(
+                    (part): part is string => part !== null && part !== '',
+                  );
+                  return (
+                    <span>
+                      {value}
+                      {others.length > 0 && (
+                        <span style={{ color: colors.textTertiary }}>（{others.join(' / ')}）</span>
+                      )}
+                    </span>
+                  );
+                },
               },
               {
                 title: '状态',

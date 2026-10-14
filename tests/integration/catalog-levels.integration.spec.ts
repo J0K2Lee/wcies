@@ -228,6 +228,35 @@ describe('same-parent name uniqueness (decision 0005 #13)', () => {
 });
 
 describe('brand naming (decision 0006)', () => {
+  it('searches brands by code and all four names (一般/中文/英文/俄文)', async () => {
+    const created = await client.post<{ id: string; code: string }>('/api/v1/brands', {
+      name: `${PREFIX} Seek General`,
+      nameZh: `${PREFIX} 寻牌中文`,
+      nameEn: `${PREFIX} Seek English`,
+      nameRu: `${PREFIX} ПоискРус`,
+    });
+    expect(created.body.success).toBe(true);
+    const brandId = created.body.data.id;
+
+    // 关键字按编码 + 四个名称的任一模糊匹配（2026-10-14 修正：原先只匹配
+    // code/name/name_en，导致"按中文名或俄文名搜索搜不到品牌"）。
+    const hit = async (keyword: string): Promise<boolean> => {
+      const list = await client.get<Array<{ id: string }>>(
+        `/api/v1/brands?keyword=${encodeURIComponent(keyword)}`,
+      );
+      return list.body.data.some((brand) => brand.id === brandId);
+    };
+    expect(await hit(created.body.data.code)).toBe(true);
+    expect(await hit(`${PREFIX} Seek General`)).toBe(true);
+    expect(await hit(`${PREFIX} 寻牌中文`)).toBe(true);
+    expect(await hit(`${PREFIX} Seek English`)).toBe(true);
+    expect(await hit(`${PREFIX} ПоискРус`)).toBe(true);
+    // 大小写不敏感（ILIKE）。
+    expect(await hit(`${PREFIX.toLowerCase()} seek general`)).toBe(true);
+    // 未命中不返回该品牌。
+    expect(await hit(`${PREFIX} 根本不存在的品牌`)).toBe(false);
+  });
+
   it('requires the general name; name_zh is optional', async () => {
     const missing = await client.post('/api/v1/brands', { nameZh: '只有中文名' });
     expect(missing.status).toBe(400);

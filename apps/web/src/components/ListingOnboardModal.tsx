@@ -18,6 +18,7 @@ import { apiPost, useApiQuery } from '../api/hooks';
 import { printTasksBrowser } from '../printing/print-browser';
 import { colors, InfoGrid, StatusBadge } from '../design-system';
 import { BrandQuickCreateModal, CategoryQuickCreateModal } from './QuickCreateModals';
+import { brandSearchText } from '../utils/brandSearch';
 
 /**
  * 共享的「建档并映射」弹窗（Sprint 8 / 8.5 的快速建档，Phase 3 提取为组件）。
@@ -85,8 +86,11 @@ interface CategoryOption {
 
 interface BrandItem {
   id: string;
+  code: string;
   name: string;
   nameZh: string | null;
+  nameEn: string | null;
+  nameRu: string | null;
   status: string;
 }
 
@@ -239,9 +243,12 @@ export function ListingOnboardModal({
       }));
     return toOptions(categories.data?.data ?? []);
   }, [categories.data]);
+  // 搜索文本汇总编码 + 四个名称（一般/中文/英文/俄文）：现场建档时运营常只记得
+  // 中文名或俄文名，仅按一般名称过滤会"搜不到已有品牌"。
   const brandOptions = (brands.data?.data ?? []).map((brand) => ({
     value: brand.id,
     label: brand.name,
+    searchText: brandSearchText(brand),
   }));
 
   /** T3c hint under the category cascader: exact-match suggestion or miss. */
@@ -586,8 +593,8 @@ export function ListingOnboardModal({
               <Select
                 allowClear
                 showSearch
-                optionFilterProp="label"
-                placeholder="选择品牌（可搜可现场快建；V1 起落 SKU 自身）"
+                optionFilterProp="searchText"
+                placeholder="选择品牌（可按一般/中文/英文/俄文名或编码搜索，可现场快建）"
                 options={brandOptions}
               />
             </Form.Item>

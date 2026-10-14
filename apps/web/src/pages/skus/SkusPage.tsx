@@ -28,6 +28,7 @@ import {
   CategoryQuickCreateModal,
 } from '../../components/QuickCreateModals';
 import { printTasksBrowser } from '../../printing/print-browser';
+import { brandSearchText } from '../../utils/brandSearch';
 import {
   DeleteConfirmModal,
   ContextAction,
@@ -126,7 +127,11 @@ interface SkuInventorySummary {
 
 interface BrandItem {
   id: string;
+  code: string;
   name: string;
+  nameZh: string | null;
+  nameEn: string | null;
+  nameRu: string | null;
   status: string;
 }
 
@@ -334,10 +339,13 @@ export function SkusPage() {
         .map((node) => toLeafCategoryOption(node)),
     [categories.data],
   );
+  // 品牌选项：可见 label 保持简洁；searchText 汇总编码 + 四个名称（一般/中文/
+  // 英文/俄文），配合 optionFilterProp="searchText" 让"只知道中文名也能搜到"。
   const brandOptions = (brands.data?.data ?? []).map((brand) => ({
     value: brand.id,
     // 停用品牌保留可选但带后缀（与分类筛选一致，不过滤无标注）。
     label: brand.status === 'ACTIVE' ? brand.name : `${brand.name}（停用）`,
+    searchText: brandSearchText(brand),
   }));
 
   const selectedRow = useMemo(
@@ -922,19 +930,15 @@ export function SkusPage() {
         <Select
           allowClear
           placeholder="品牌"
-          style={{ width: 140 }}
+          style={{ width: 160 }}
           showSearch
-          optionFilterProp="label"
+          optionFilterProp="searchText"
           value={brandId}
           onChange={(value) => {
             setPage(1);
             setBrandId(value);
           }}
-          options={(brands.data?.data ?? []).map((brand) => ({
-            value: brand.id,
-            // 停用品牌保留可选但带后缀（与分类筛选一致，不过滤无标注）。
-            label: brand.status === 'ACTIVE' ? brand.name : `${brand.name}（停用）`,
-          }))}
+          options={brandOptions}
         />
         <Cascader
           allowClear
@@ -1570,8 +1574,8 @@ export function SkusPage() {
             <Select
               allowClear
               showSearch
-              optionFilterProp="label"
-              placeholder="选择品牌（可清空解除挂载）"
+              optionFilterProp="searchText"
+              placeholder="选择品牌（可按一般/中文/英文/俄文名或编码搜索，可清空解除挂载）"
               options={brandOptions}
             />
           </Form.Item>
