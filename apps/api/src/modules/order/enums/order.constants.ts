@@ -4,6 +4,22 @@
  * reflected in docs/business-rules/orders.md).
  */
 
+import { PlatformOrderStage } from '@wcies/platform-contracts';
+
+/**
+ * 平台已事实发货的阶段（用户指示 2026-10-14）：货物在平台侧已经发走
+ * （运输中 / 已妥投）。此时 WCIES 内部「预发货」状态与现实矛盾——缺货
+ * 行与缺货/时限异常按平台事实收敛，见 OrderPlatformShippedService
+ * （docs/business-rules/orders.md §7a.0）。
+ */
+const PLATFORM_SHIPPED_STAGES: readonly PlatformOrderStage[] = ['IN_TRANSIT', 'DELIVERED'];
+
+export function isPlatformShippedStage(stage: string | null | undefined): boolean {
+  return (
+    typeof stage === 'string' && (PLATFORM_SHIPPED_STAGES as readonly string[]).includes(stage)
+  );
+}
+
 /**
  * ERP order status (task §5). ALLOCATING is a reserved value - Sprint 3
  * ingestion allocates in one pass and never enters it. SHIPPED and

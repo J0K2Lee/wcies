@@ -24,7 +24,8 @@ import { OrderItemRepository } from '../repositories/order-item.repository';
 import { OrderStatusHistoryRepository } from '../repositories/order-status-history.repository';
 import { OrderStatusService } from './order-status.service';
 import { OrderDeadlineExceptionService } from './order-deadline-exception.service';
-import { orderReserveKey } from '../enums/order.constants';
+import { OrderPlatformShippedService } from './order-platform-shipped.service';
+import { orderReserveKey, isPlatformShippedStage } from '../enums/order.constants';
 import { OrderIngestInvalidError } from '../errors/order.errors';
 
 export interface OrderIngestResult {
@@ -72,6 +73,12 @@ export class OrderIngestionService {
     private readonly historyRepo: OrderStatusHistoryRepository,
     private readonly statusService: OrderStatusService,
     private readonly deadlineExceptionService: OrderDeadlineExceptionService,
+    /**
+     * 平台已事实发货的收敛（用户指示 2026-10-14）：摄入时 / 映射修复时
+     * 平台阶段已 IN_TRANSIT / DELIVERED 的订单，按平台事实关闭内部缺货
+     * 状态，除未映射异常外不阻塞。
+     */
+    private readonly platformShipped: OrderPlatformShippedService,
     private readonly logger: AppLoggerService,
   ) {}
 
@@ -159,14 +166,25 @@ export class OrderIngestionService {
       await this.allocateItem(order, item, operator);
     }
 
-    const erpStatus = await this.statusService.recomputeOrderStatus(
+    let erpStatus = await this.statusService.recomputeOrderStatus(
       order.id,
       operator,
       '订单摄入完成，按行结果汇总',
     );
-    // 外部履约订单（FBO/FBP）发货由平台负责，发货时限不构成内部作业压力，
-    // 不评估 ORDER_SHIPMENT_DEADLINE_NEAR（用户指示 2026-09-17）。
-    if (!isExternalFulfillmentMode(order.fulfillmentMode)) {
+    // 平台已事实发货（stage IN_TRANSIT / DELIVERED，用户指示 2026-10-14）：
+    // 订单摄入时平台上就已发走——内部缺货/时限状态与现实矛盾，按平台事实
+    // 收敛（缺货行已在上方 2a 转外部履约完成）；除未映射异常外不阻塞，
+    // 无未映射行时订单随平台事实转 SHIPPED。外部履约订单（FBO/FBP）发货
+    // 由平台负责，同样不评估 ORDER_SHIPMENT_DEADLINE_NEAR（用户指示
+    // 2026-09-17）。
+    if (isPlatformShippedStage(order.platformStage)) {
+      const converged = await this.platformShipped.apply(
+        order,
+        operator,
+        `订单摄入时平台已事实发货（${order.platformStage}）：内部缺货/时限状态与现实矛盾，按平台事实关闭`,
+      );
+      erpStatus = converged.erpStatus;
+    } else if (!isExternalFulfillmentMode(order.fulfillmentMode)) {
       await this.deadlineExceptionService.evaluate(order);
     }
     return {
@@ -220,6 +238,11 @@ export class OrderIngestionService {
   /**
    * Maps one line to an internal SKU and reserves stock; every outcome is
    * persisted line-locally (task §17/§19/§22).
+   *
+   * 平台已事实发货（用户指示 2026-10-14）：订单同步到时平台阶段已是
+   * IN_TRANSIT / DELIVERED（OZON delivering / delivered）——货物在平台侧
+   * 已经发走，内部不预留、不拣货、不产生缺货异常，行直接进入
+   * EXTERNAL_FULFILLED（订单头收敛见 ingest 末尾）。
    *
    * 外部履约（用户指示 2026-09-17）：FBO / FBP 模式的订单行由平台仓库持货
    * 发货——不解析内部仓库、不占用库存、不进入拣货流程，行直接进入
@@ -278,7 +301,21 @@ export class OrderIngestionService {
       });
     });
 
-    // 2a. 外部履约行：平台负责履约，内部不占库存（不阻塞）。
+    // 2a. 平台已事实发货（stage IN_TRANSIT / DELIVERED，用户指示
+    // 2026-10-14）：同步到的订单在平台上已经发走（OZON delivering /
+    // delivered）——内部不预留、不拣货、不产生缺货异常（缺货与现实
+    // 矛盾），行直接外部履约完成，语义同 2b：平台侧履约，不占内部库存。
+    // 订单头收敛（转 SHIPPED / 保持未映射阻塞）见 ingest 末尾。
+    if (isPlatformShippedStage(order.platformStage)) {
+      await this.dataSource.transaction(async (runner) => {
+        await this.itemRepo.updateFulfillment(runner, item.id, {
+          fulfillmentStatus: 'EXTERNAL_FULFILLED',
+        });
+      });
+      return;
+    }
+
+    // 2b. 外部履约行：平台负责履约，内部不占库存（不阻塞）。
     if (isExternalFulfillmentMode(order.fulfillmentMode)) {
       await this.dataSource.transaction(async (runner) => {
         await this.itemRepo.updateFulfillment(runner, item.id, {
@@ -438,6 +475,20 @@ export class OrderIngestionService {
           `第 ${item.lineNo} 行映射修复（外部履约，等待平台发货事实）`,
         );
       }
+      return { resolved: true, reserved: false, reservationId: null };
+    }
+
+    // 平台已事实发货（stage IN_TRANSIT / DELIVERED，用户指示 2026-10-14）：
+    // 自管履约（FBS/RFBS）订单在平台上已经发走——映射虽已修复，但货物
+    // 不在我们手里，占内部库存会被现实否证。行转外部履约完成并关闭缺货
+    // 异常；无其他未映射行时订单随平台事实转 SHIPPED（收敛逻辑见
+    // OrderPlatformShippedService），否则保持由未映射异常阻塞。
+    if (isPlatformShippedStage(order.platformStage)) {
+      await this.platformShipped.apply(
+        order,
+        operator,
+        `第 ${item.lineNo} 行映射修复：平台已事实发货（${order.platformStage}），缺货状态与现实矛盾，按平台事实关闭`,
+      );
       return { resolved: true, reserved: false, reservationId: null };
     }
 

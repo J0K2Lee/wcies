@@ -78,6 +78,9 @@ describe('OrderIngestionService.retryFailedMappingItem - external fulfillment', 
           transition: vi.fn().mockResolvedValue(undefined),
           recomputeOrderStatus: vi.fn().mockResolvedValue('EXCEPTION'),
         },
+        platformShipped: {
+          apply: vi.fn().mockResolvedValue({ shipped: true, erpStatus: 'SHIPPED' }),
+        },
         logger: { log: vi.fn(), warn: vi.fn() },
       },
     );
@@ -90,8 +93,14 @@ describe('OrderIngestionService.retryFailedMappingItem - external fulfillment', 
         transition: ReturnType<typeof vi.fn>;
         recomputeOrderStatus: ReturnType<typeof vi.fn>;
       };
+      platformShipped: { apply: ReturnType<typeof vi.fn> };
     };
-    return { service, itemRepo: internals.itemRepo, statusService: internals.statusService };
+    return {
+      service,
+      itemRepo: internals.itemRepo,
+      statusService: internals.statusService,
+      platformShipped: internals.platformShipped,
+    };
   }
 
   it('marks the line EXTERNAL_FULFILLED and follows an already-shipped platform to SHIPPED', async () => {
@@ -129,5 +138,29 @@ describe('OrderIngestionService.retryFailedMappingItem - external fulfillment', 
       OPERATOR,
       expect.stringContaining('外部履约'),
     );
+  });
+
+  // 平台已事实发货（用户指示 2026-10-14）：自管履约（FBS/RFBS）订单映射
+  // 修复时平台已发走——不再占内部库存（会被现实否证），行转外部履约完成、
+  // 关缺货异常，由 OrderPlatformShippedService 按平台事实收敛订单。
+  it('self-managed order already shipped on the platform converges instead of allocating', async () => {
+    const order = makeOrder({
+      fulfillmentMode: 'RFBS',
+      platformStage: 'IN_TRANSIT',
+      platformStatus: 'delivering',
+    });
+    const { service, statusService, platformShipped } = build();
+
+    const result = await service.retryFailedMappingItem(order, makeItem(), OPERATOR);
+
+    expect(result).toMatchObject({ resolved: true, reserved: false, reservationId: null });
+    expect(platformShipped.apply).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'order-1', platformStage: 'IN_TRANSIT' }),
+      OPERATOR,
+      expect.stringContaining('平台已事实发货'),
+    );
+    // 收敛服务负责状态迁移：此处不再自行 transition / recompute。
+    expect(statusService.transition).not.toHaveBeenCalled();
+    expect(statusService.recomputeOrderStatus).not.toHaveBeenCalled();
   });
 });

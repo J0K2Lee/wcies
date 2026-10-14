@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import { OrderIngestionService } from './order-ingestion.service';
 import { OrderStatusService } from './order-status.service';
 import { OrderDeadlineExceptionService } from './order-deadline-exception.service';
+import { OrderPlatformShippedService } from './order-platform-shipped.service';
 import { OrderRepository } from '../repositories/order.repository';
 import { OrderItemRepository } from '../repositories/order-item.repository';
 import { OrderStatusHistoryRepository } from '../repositories/order-status-history.repository';
@@ -143,6 +144,9 @@ function build(input: {
   const deadlineExceptionService = {
     evaluate: vi.fn().mockResolvedValue(undefined),
   } as unknown as OrderDeadlineExceptionService;
+  const platformShipped = {
+    apply: vi.fn().mockResolvedValue({ shipped: true, erpStatus: 'SHIPPED' }),
+  } as unknown as OrderPlatformShippedService;
   const logger = { log: vi.fn(), warn: vi.fn() } as unknown as AppLoggerService;
   const service = new OrderIngestionService(
     dataSource,
@@ -156,9 +160,18 @@ function build(input: {
     historyRepo,
     statusService,
     deadlineExceptionService,
+    platformShipped,
     logger,
   );
-  return { service, exceptionService, reservationService, statusService, itemRepo };
+  return {
+    service,
+    exceptionService,
+    reservationService,
+    statusService,
+    itemRepo,
+    deadlineExceptionService,
+    platformShipped,
+  };
 }
 
 describe('OrderIngestionService (task §11-§24)', () => {
@@ -241,6 +254,51 @@ describe('OrderIngestionService (task §11-§24)', () => {
     expect(reservationService.reserveStock).not.toHaveBeenCalled();
   });
 
+  // 平台已事实发货（用户指示 2026-10-14）：摄入时平台阶段已是
+  // IN_TRANSIT / DELIVERED（OZON delivering / delivered）——货物已发走，
+  // 不预留、不产生缺货异常；订单头由 OrderPlatformShippedService 按平台
+  // 事实收敛（无未映射行转 SHIPPED）。
+  it('platform-shipped at ingest marks the line EXTERNAL_FULFILLED and converges the order', async () => {
+    const { service, reservationService, itemRepo, platformShipped, deadlineExceptionService } =
+      build({
+        createdItems: [makeItem('item-1', 1)],
+        finalItems: [
+          makeItem('item-1', 1, { fulfillmentStatus: 'EXTERNAL_FULFILLED', skuId: 'sku-1' }),
+        ],
+      });
+    const input = { ...baseInput(), platformStage: 'IN_TRANSIT' };
+    const result = await service.ingest(input, OPERATOR);
+    expect(result.alreadyIngested).toBe(false);
+    expect(itemRepo.updateFulfillment).toHaveBeenCalledWith(
+      expect.anything(),
+      'item-1',
+      expect.objectContaining({ fulfillmentStatus: 'EXTERNAL_FULFILLED' }),
+    );
+    expect(reservationService.reserveStock).not.toHaveBeenCalled();
+    expect(platformShipped.apply).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'order-1', platformStage: 'IN_TRANSIT' }),
+      OPERATOR,
+      expect.stringContaining('平台已事实发货'),
+    );
+    expect(deadlineExceptionService.evaluate).not.toHaveBeenCalled();
+  });
+
+  it('platform-shipped at ingest still raises the mapping exception and stays blocked by it', async () => {
+    const { service, exceptionService, platformShipped } = build({
+      createdItems: [makeItem('item-1', 1)],
+      resolveError: new ListingSkuResolveFailedError('store-1', {}),
+    });
+    const input = { ...baseInput(), platformStage: 'DELIVERED' };
+    await service.ingest(input, OPERATOR);
+    // 未映射异常仍然创建（唯一被允许的阻塞）；收敛仍执行——由 rollup
+    // 决定订单保持 EXCEPTION。
+    expect(exceptionService.createInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ exceptionType: 'ORDER_SKU_MAPPING_FAILED' }),
+    );
+    expect(platformShipped.apply).toHaveBeenCalled();
+  });
+
   it('no available warehouse backorders the mapped line instead of leaving PENDING (2026-09-17 修复)', async () => {
     const { service, itemRepo, reservationService } = build({
       createdItems: [makeItem('item-1', 1)],
@@ -321,6 +379,9 @@ describe('OrderIngestionService (task §11-§24)', () => {
     const deadlineExceptionService = {
       evaluate: vi.fn().mockResolvedValue(undefined),
     } as unknown as OrderDeadlineExceptionService;
+    const platformShipped = {
+      apply: vi.fn().mockResolvedValue({ shipped: true, erpStatus: 'SHIPPED' }),
+    } as unknown as OrderPlatformShippedService;
     const logger = { log: vi.fn(), warn: vi.fn() } as unknown as AppLoggerService;
     const service = new OrderIngestionService(
       dataSource,
@@ -334,6 +395,7 @@ describe('OrderIngestionService (task §11-§24)', () => {
       historyRepo,
       statusService,
       deadlineExceptionService,
+      platformShipped,
       logger,
     );
     await service.ingest(baseInput(), OPERATOR);

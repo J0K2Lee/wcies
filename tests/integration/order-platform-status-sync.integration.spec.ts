@@ -733,6 +733,107 @@ describe('mark external fulfillment (T6, decision 6 = A)', () => {
   });
 });
 
+describe('platform-shipped convergence (用户指示 2026-10-14, orders.md §7a.0)', () => {
+  it('a factually-shipped (delivering) order is never blocked by out-of-stock', async () => {
+    // 库存 0.001 < 订单 2：摄入即缺货（BACKORDERED + OPEN 缺货异常）。
+    const skuId = await newMappedSkuWithStock('PSD', 700000011, '0.001');
+    script.postings.push(
+      makePosting('IT-S9-PSD-1', [{ offerId: 'PSD', sku: 700000011, quantity: 2 }], {
+        minutesAgo: 0,
+      }),
+    );
+    await syncOrders();
+
+    const before = await orderByPlatformId('IT-S9-PSD-1');
+    expect(before.erpStatus).toBe('BACKORDERED');
+    expect(before.items[0]?.fulfillmentStatus).toBe('BACKORDERED');
+    const openBefore = await exceptionsOfItem(before.items[0]!.id);
+    expect(
+      openBefore.some((e) => e.exceptionType === 'ORDER_OUT_OF_STOCK' && e.status === 'OPEN'),
+    ).toBe(true);
+    const txCount = await transactionCountOf(skuId);
+
+    // 平台侧发货（webhook 是生产主通道）：回读拿到 delivering 事实后，
+    // 缺货与现实矛盾——订单按平台事实收敛，不再被缺货阻塞。
+    const posting = script.postings.find((p) => p.posting_number === 'IT-S9-PSD-1')!;
+    posting.status = 'delivering';
+    (posting as MockPosting & { delivering_date?: string }).delivering_date =
+      new Date().toISOString();
+    await postWebhookEvent('TYPE_STATE_CHANGED', 'IT-S9-PSD-1', new Date().toISOString());
+
+    const after = await orderByPlatformId('IT-S9-PSD-1');
+    expect(after.erpStatus).toBe('SHIPPED');
+    expect(after.items[0]?.fulfillmentStatus).toBe('EXTERNAL_FULFILLED');
+    // 缺货异常关闭；没有任何库存流水（行从未持有内部库存）。
+    const openAfter = await exceptionsOfItem(after.items[0]!.id);
+    expect(
+      openAfter.every((e) => e.exceptionType !== 'ORDER_OUT_OF_STOCK' || e.status !== 'OPEN'),
+    ).toBe(true);
+    expect(await transactionCountOf(skuId)).toBe(txCount);
+    // 缺货筛选不再命中（行已非 BACKORDERED/PENDING）；物流阶段进入「在途」。
+    const backorderedList = await client.get<Array<{ id: string }>>(
+      `/api/v1/orders?keyword=IT-S9-PSD-1&goodsState=BACKORDERED&pageSize=10`,
+    );
+    expect(backorderedList.body.data).toHaveLength(0);
+    const inTransitList = await client.get<Array<{ id: string }>>(
+      `/api/v1/orders?keyword=IT-S9-PSD-1&stage=IN_TRANSIT&pageSize=10`,
+    );
+    expect(inTransitList.body.data.length).toBeGreaterThan(0);
+  }, 120_000);
+
+  it('the unmapped exception still blocks a factually-shipped order (birth-delivering)', async () => {
+    // 无 Listing → 映射失败；订单摄入时平台已 delivering。未映射异常是
+    // 唯一被允许的阻塞：订单保持 EXCEPTION，不转 SHIPPED。
+    await client.post<{ id: string }>('/api/v1/skus', { nameZh: `${PREFIX} PSD-UNMAPPED SKU` });
+    script.postings.push(
+      makePosting('IT-S9-PSD-2', [{ offerId: 'PSD-UNMAPPED', sku: 700000012, quantity: 1 }], {
+        minutesAgo: 0,
+        status: 'delivering',
+      }),
+    );
+    await syncOrders();
+
+    const order = await orderByPlatformId('IT-S9-PSD-2');
+    expect(order.erpStatus).toBe('EXCEPTION');
+    expect(order.items[0]?.mappingStatus).toBe('FAILED');
+    expect(order.items[0]?.fulfillmentStatus).not.toBe('EXTERNAL_FULFILLED');
+    const itemExceptions = await exceptionsOfItem(order.items[0]!.id);
+    expect(
+      itemExceptions.some(
+        (e) => e.exceptionType === 'ORDER_SKU_MAPPING_FAILED' && e.status === 'OPEN',
+      ),
+    ).toBe(true);
+  }, 120_000);
+
+  it('does not auto-close an order whose internal fulfillment is in progress (RESERVED line)', async () => {
+    // 货可能还在我们仓内：平台状态与现实谁对谁错留给人判（双轴差异
+    // 协议）——不自动转 SHIPPED，占用中的库存不动。
+    const skuId = await newMappedSkuWithStock('PSR', 700000013, '5');
+    script.postings.push(
+      makePosting('IT-S9-PSR-1', [{ offerId: 'PSR', sku: 700000013, quantity: 1 }], {
+        minutesAgo: 0,
+      }),
+    );
+    await syncOrders();
+
+    const before = await orderByPlatformId('IT-S9-PSR-1');
+    expect(before.erpStatus).toBe('READY_TO_PICK');
+    expect(before.items[0]?.fulfillmentStatus).toBe('RESERVED');
+
+    const posting = script.postings.find((p) => p.posting_number === 'IT-S9-PSR-1')!;
+    posting.status = 'delivering';
+    (posting as MockPosting & { delivering_date?: string }).delivering_date =
+      new Date().toISOString();
+    await postWebhookEvent('TYPE_STATE_CHANGED', 'IT-S9-PSR-1', new Date().toISOString());
+
+    const after = await orderByPlatformId('IT-S9-PSR-1');
+    expect(after.erpStatus).toBe('READY_TO_PICK');
+    expect(after.items[0]?.fulfillmentStatus).toBe('RESERVED');
+    const inventory = await inventoryOf(skuId);
+    expect(inventory.reservedQty).toBe('1.000');
+  }, 120_000);
+});
+
 describe('platform logistics stall (dual-axis T4, orders.md §16A)', () => {
   it('IN_TRANSIT anchored >3 days ago raises ORDER_TRACKING_STALLED; pure re-read resolves it', async () => {
     await newMappedSkuWithStock('STL', 700000008, '6');
@@ -759,7 +860,10 @@ describe('platform logistics stall (dual-axis T4, orders.md §16A)', () => {
     // time, decides.
     await syncOrders();
     const order = await orderByPlatformId('IT-S9-STL-1');
-    expect(order.erpStatus).toBe('READY_TO_PICK');
+    // 平台已事实发货收敛（用户指示 2026-10-14，orders.md §7a.0）：摄入时
+    // 平台阶段即 IN_TRANSIT——不预留库存、按平台事实直接 SHIPPED（行
+    // EXTERNAL_FULFILLED）；物流停滞是平台侧事实，仍照常评估。
+    expect(order.erpStatus).toBe('SHIPPED');
     const stalled = await exceptionsOf(order.id, 'ORDER_TRACKING_STALLED');
     expect(stalled.some((e) => e.status === 'OPEN')).toBe(true);
 

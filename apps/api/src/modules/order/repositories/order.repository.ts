@@ -209,6 +209,13 @@ export class OrderRepository {
    *   order stays a candidate until the platform itself reports DELIVERED or
    *   CANCELLED (fix A3 - delivered facts were previously unlearnable);
    *   platform-terminal orders leave the rotation on their own.
+   * - divergent DELIVERED orders stay candidates too (用户指示 2026-10-14):
+   *   platform_stage='DELIVERED' while erp_status is not SHIPPED/CANCELLED
+   *   means the goods left while WCIES still holds a pre-shipment state
+   *   (缺货行 / 缺货异常). Re-reading converges them through
+   *   OrderPlatformShippedService; once SHIPPED they leave the rotation.
+   *   Without this, an order first synced as delivered would never be
+   *   re-observed (no webhook left to fire) and stay blocked forever.
    * - a candidate must be due: its last CONFIRMED facts check
    *   (platform_facts_checked_at) is NULL or older than the fallback window.
    * - ordering checked-at ASC NULLS FIRST rotates fairly - unchanged orders
@@ -226,7 +233,9 @@ export class OrderRepository {
       .select(['o.id', 'o.platformOrderId'])
       .where('o.store_id = :storeId', { storeId })
       .andWhere(
-        `(o.platform_stage IS NULL OR o.platform_stage IN ('AWAITING_SHIPMENT', 'IN_TRANSIT'))`,
+        `(o.platform_stage IS NULL
+          OR o.platform_stage IN ('AWAITING_SHIPMENT', 'IN_TRANSIT')
+          OR (o.platform_stage = 'DELIVERED' AND o.erp_status NOT IN ('SHIPPED', 'CANCELLED')))`,
       )
       .andWhere(
         `(o.platform_facts_checked_at IS NULL OR o.platform_facts_checked_at < now() - (:fallbackHours || ' hours')::interval)`,

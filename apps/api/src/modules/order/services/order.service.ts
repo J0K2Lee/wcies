@@ -18,7 +18,8 @@ import { OrderStatusService } from './order-status.service';
 import { OrderDeadlineExceptionService } from './order-deadline-exception.service';
 import { OrderTrackingStallService } from './order-tracking-stall.service';
 import { OrderIngestionService } from './order-ingestion.service';
-import { ErpOrderStatus, orderReleaseKey } from '../enums/order.constants';
+import { OrderPlatformShippedService } from './order-platform-shipped.service';
+import { ErpOrderStatus, isPlatformShippedStage, orderReleaseKey } from '../enums/order.constants';
 import {
   OrderInvalidStateError,
   OrderItemNotFoundError,
@@ -53,6 +54,12 @@ export class OrderService {
     private readonly deadlineExceptionService: OrderDeadlineExceptionService,
     private readonly stallService: OrderTrackingStallService,
     private readonly ingestionService: OrderIngestionService,
+    /**
+     * 平台已事实发货的收敛（用户指示 2026-10-14）：归一化阶段
+     * IN_TRANSIT / DELIVERED 的订单按平台事实关闭内部缺货/时限状态，
+     * 除未映射异常外不阻塞。同步遭遇、摄入、映射修复三条路径共用。
+     */
+    private readonly platformShipped: OrderPlatformShippedService,
     private readonly reservationService: ReservationService,
     private readonly inventoryQuery: InventoryQueryService,
     private readonly exceptionService: ExceptionService,
@@ -492,6 +499,18 @@ export class OrderService {
       };
     }
 
+    // 平台已事实发货（用户指示 2026-10-14）：货物在平台侧已经发走，重试
+    // 占库存会被现实否证——RESERVED 会随已发货订单把库存锁死。订单由
+    // 同步链路按平台事实收敛（缺货行转外部履约完成、关缺货异常、转
+    // SHIPPED，见 OrderPlatformShippedService），此处明确拒绝并说明，
+    // 避免运营对同一缺货事实反复点击。外部履约行在上方已提前处理。
+    if (isPlatformShippedStage(order.platformStage)) {
+      throw new OrderInvalidStateError(
+        `该订单平台已事实发货（${order.platformStage}），内部缺货状态将按平台事实自动收敛，无需重新分配`,
+        { orderId: order.id, orderItemId: item.id, platformStage: order.platformStage },
+      );
+    }
+
     const outcome = await this.ingestionService.allocateMappedItem(order, item, operator);
     if (outcome.reserved) {
       // Success: close the OPEN out-of-stock exception.
@@ -663,6 +682,10 @@ export class OrderService {
    *   release, Picked -> interception, BACKORDERED -> plain close);
    * - the deadline exception is re-evaluated on every encounter (time
    *   passes even when no fact changed);
+   * - a platform-shipped stage (IN_TRANSIT / DELIVERED) converges the order
+   *   through OrderPlatformShippedService on every encounter (2026-10-14:
+   *   factually shipped orders are never blocked by out-of-stock; only
+   *   unmapped exceptions may still block);
    * - unchanged facts write NOTHING (idempotent re-sync).
    */
   async applySyncedPlatformFacts(
@@ -766,35 +789,35 @@ export class OrderService {
       );
       cancelled = true;
     } else {
-      // 外部履约（FBO/FBP，用户指示 2026-09-17）：平台仓库已把货发走
-      // （platform stage 进入 IN_TRANSIT / DELIVERED）时订单自动转 SHIPPED，
-      // 业务状态随 webhook / 平台事实流转，不阻塞、不依赖内部发货单。
-      const effectiveMode = newFulfillmentMode ?? order.fulfillmentMode;
-      if (
-        isExternalFulfillmentMode(effectiveMode) &&
-        (newStage === 'IN_TRANSIT' || newStage === 'DELIVERED') &&
-        order.erpStatus !== 'SHIPPED' &&
-        order.erpStatus !== 'CANCELLED'
-      ) {
-        await this.statusService.transition(
-          order.id,
-          'SHIPPED',
+      // 平台已事实发货（用户指示 2026-10-14）：归一化阶段进入
+      // IN_TRANSIT / DELIVERED（OZON delivering / delivered）即货物在平台
+      // 侧已经发走——与履约模式无关（外部履约同样如此，2026-09-17 起）。
+      // 内部「预发货」状态与现实矛盾：缺货行转外部履约完成、关闭缺货 /
+      // 时限异常；除未映射异常外不阻塞——无未映射行时订单随平台事实转
+      // SHIPPED（收敛逻辑见 OrderPlatformShippedService）。阶段取
+      // 「本次事实 ?? 库内阶段」：回读载荷缺 stage 时不得推翻已事实发货。
+      const effectiveStage = newStage ?? order.platformStage;
+      if (isPlatformShippedStage(effectiveStage)) {
+        await this.platformShipped.apply(
+          order,
           operator,
-          `平台履约流转：平台仓库已发货（${newStage}，外部履约 ${effectiveMode}）`,
+          `平台已事实发货（stage ${effectiveStage}${
+            isExternalFulfillmentMode(newFulfillmentMode ?? order.fulfillmentMode)
+              ? `，外部履约 ${newFulfillmentMode ?? order.fulfillmentMode}`
+              : ''
+          }）：内部缺货/时限状态与现实矛盾，按平台事实关闭`,
         );
-      } else {
+      } else if (!isExternalFulfillmentMode(newFulfillmentMode ?? order.fulfillmentMode)) {
         // Time-based re-evaluation even when nothing changed (deadline was
         // far at ingest, now < 24h). No-op writes when the OPEN state is
         // correct. 外部履约订单不评估发货时限（平台负责发货，时限不构成
         // 内部作业压力）。
-        if (!isExternalFulfillmentMode(effectiveMode)) {
-          await this.deadlineExceptionService.evaluate({
-            id: order.id,
-            orderNo: order.orderNo,
-            storeId: order.storeId,
-            shipmentDeadline: newDeadline ?? order.shipmentDeadline ?? null,
-          });
-        }
+        await this.deadlineExceptionService.evaluate({
+          id: order.id,
+          orderNo: order.orderNo,
+          storeId: order.storeId,
+          shipmentDeadline: newDeadline ?? order.shipmentDeadline ?? null,
+        });
       }
     }
     // Stall re-evaluation on EVERY encounter (dual-axis T4, orders.md §16A):

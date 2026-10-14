@@ -13,6 +13,7 @@ import { OrderEntity } from '../entities/order.entity';
 import { OrderItemEntity } from '../entities/order-item.entity';
 import { OrderIngestionService } from './order-ingestion.service';
 import { OrderStatusService } from './order-status.service';
+import { isPlatformShippedStage } from '../enums/order.constants';
 
 /** 自动重新分配使用的系统操作者（操作日志/状态历史可追溯为 automation）。 */
 const SYSTEM_OPERATOR: OperatorContext = {
@@ -32,7 +33,9 @@ const MAX_IN_FLIGHT = 8;
  * - 成功：行转 RESERVED，关闭该行的 OPEN ORDER_OUT_OF_STOCK 异常，重算
  *   订单 rollup；
  * - 失败（仍不足）：静默保留缺货状态——不重复制造异常（人工「已到货重试」
- *   与采购到货自动重试共用底层的 allocateMappedItem 幂等预留）。
+ *   与采购到货自动重试共用底层的 allocateMappedItem 幂等预留）；
+ * - 平台已事实发货（stage IN_TRANSIT / DELIVERED，用户指示 2026-10-14）的
+ *   订单跳过：货物已发走，占库存会被现实否证，行交由同步链路收敛。
  *
  * 失败自吞：库存主流程永远不因重分配失败而回滚（AGENTS.md §10）。
  */
@@ -84,6 +87,12 @@ export class OrderAutoReallocationService implements StockIncreasedListener, OnM
     for (const candidate of candidates) {
       const order = await this.orderRepo.findById(candidate.orderId);
       if (order === null || order.erpStatus === 'CANCELLED' || order.erpStatus === 'SHIPPED') {
+        continue;
+      }
+      // 平台已事实发货（用户指示 2026-10-14）：货物在平台侧已经发走，
+      // 占内部库存会被现实否证——RESERVED 会随已发货订单把库存锁死。
+      // 行保持缺货直至同步链路按平台事实收敛（转外部履约完成）。
+      if (isPlatformShippedStage(order.platformStage)) {
         continue;
       }
       const item = await this.itemRepo.findById(candidate.itemId);

@@ -25,6 +25,7 @@ import { OrderDeadlineExceptionService } from './services/order-deadline-excepti
 import { OrderTrackingStallService } from './services/order-tracking-stall.service';
 import { OrderIngestionService } from './services/order-ingestion.service';
 import { OrderAutoReallocationService } from './services/order-auto-reallocation.service';
+import { OrderPlatformShippedService } from './services/order-platform-shipped.service';
 import { OrderService } from './services/order.service';
 import { OrderController } from './controllers/order.controller';
 
@@ -68,8 +69,9 @@ import { OrderController } from './controllers/order.controller';
     OrderTrackingStallService,
     OrderIngestionService,
     OrderAutoReallocationService,
+    OrderPlatformShippedService,
     OrderService,
   ],
-  exports: [OrderService, OrderIngestionService, OrderStatusService],
+  exports: [OrderService, OrderIngestionService, OrderStatusService, OrderPlatformShippedService],
 })
 export class OrderModule {}

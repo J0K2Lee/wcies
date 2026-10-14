@@ -9,6 +9,7 @@ import { OrderStatusService } from './order-status.service';
 import { OrderTrackingStallService } from './order-tracking-stall.service';
 import { OrderDeadlineExceptionService } from './order-deadline-exception.service';
 import { OrderIngestionService } from './order-ingestion.service';
+import { OrderPlatformShippedService } from './order-platform-shipped.service';
 import { ReservationService } from '../../inventory/services/reservation.service';
 import { InventoryQueryService } from '../../inventory/services/inventory-query.service';
 import { ExceptionService } from '../../exception/services/exception.service';
@@ -38,14 +39,14 @@ describe('OrderService.applySyncedPlatformFacts - fulfillmentMode', () => {
     source: 'ORDER_SYNC',
   };
 
-  function build(storedMode: string | null = 'FBS') {
+  function build(storedMode: string | null = 'FBS', storedStage: string | null = null) {
     const order = {
       id: 'order-1',
       orderNo: 'ORD00000001',
       storeId: facts.storeId,
-      erpStatus: 'PENDING',
+      erpStatus: 'BACKORDERED',
       platformStatus: facts.platformStatus,
-      platformStage: null,
+      platformStage: storedStage,
       platformStageChangedAt: null,
       shipmentDeadline: null,
       rawData: null,
@@ -57,6 +58,12 @@ describe('OrderService.applySyncedPlatformFacts - fulfillmentMode', () => {
       markPlatformFactsChecked: vi.fn().mockResolvedValue(undefined),
     };
     const history = { insert: vi.fn() };
+    const deadlineExceptionService = {
+      evaluate: vi.fn().mockResolvedValue(undefined),
+    } as unknown as OrderDeadlineExceptionService;
+    const platformShipped = {
+      apply: vi.fn().mockResolvedValue({ shipped: true, erpStatus: 'SHIPPED' }),
+    } as unknown as OrderPlatformShippedService;
     const service = new OrderService(
       {
         transaction: vi.fn((work: (manager: unknown) => Promise<unknown>) => work({})),
@@ -66,9 +73,10 @@ describe('OrderService.applySyncedPlatformFacts - fulfillmentMode', () => {
       {} as OrderStatusHistoryRepository,
       history as unknown as PlatformStatusHistoryRepository,
       {} as OrderStatusService,
-      { evaluate: vi.fn() } as unknown as OrderDeadlineExceptionService,
+      deadlineExceptionService,
       { evaluate: vi.fn() } as unknown as OrderTrackingStallService,
       {} as OrderIngestionService,
+      platformShipped,
       {} as ReservationService,
       {} as InventoryQueryService,
       {} as ExceptionService,
@@ -81,7 +89,7 @@ describe('OrderService.applySyncedPlatformFacts - fulfillmentMode', () => {
       {} as OrderProcurementPort,
       {} as PlatformAdapterRegistry,
     );
-    return { service, orderRepo, history };
+    return { service, orderRepo, history, platformShipped, deadlineExceptionService };
   }
 
   it.each(['FBS', null])(
@@ -129,6 +137,52 @@ describe('OrderService.applySyncedPlatformFacts - fulfillmentMode', () => {
       expect(patch).not.toHaveProperty('fulfillmentMode');
     },
   );
+
+  // 平台已事实发货（用户指示 2026-10-14）：归一化阶段 IN_TRANSIT /
+  // DELIVERED（OZON delivering / delivered）时，缺货不得再阻塞订单——
+  // 收敛逻辑（关缺货/时限异常、缺货行转外部履约完成、无未映射行转
+  // SHIPPED）由 OrderPlatformShippedService 承担，此处只验证分流。
+  it.each(['IN_TRANSIT', 'DELIVERED'])(
+    'converges a platform-shipped order (%s) instead of evaluating the deadline',
+    async (stage) => {
+      const { service, platformShipped, deadlineExceptionService } = build('RFBS');
+      const result = await service.applySyncedPlatformFacts(
+        {
+          ...facts,
+          platformStatus: stage === 'IN_TRANSIT' ? 'delivering' : 'delivered',
+          platformStage: stage,
+        },
+        OPERATOR,
+      );
+      expect(result).toEqual({ applied: true, changed: true, cancelled: false });
+      expect(platformShipped.apply).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'order-1' }),
+        OPERATOR,
+        expect.stringContaining('平台已事实发货'),
+      );
+      expect(deadlineExceptionService.evaluate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('converges from the STORED stage when the re-read payload omits it', async () => {
+    const { service, platformShipped } = build('RFBS', 'IN_TRANSIT');
+    await service.applySyncedPlatformFacts({ ...facts, platformStage: null }, OPERATOR);
+    expect(platformShipped.apply).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'order-1' }),
+      OPERATOR,
+      expect.stringContaining('IN_TRANSIT'),
+    );
+  });
+
+  it('still evaluates the deadline for a not-yet-shipped self-managed order', async () => {
+    const { service, platformShipped, deadlineExceptionService } = build('RFBS');
+    await service.applySyncedPlatformFacts(
+      { ...facts, platformStage: 'AWAITING_SHIPMENT' },
+      OPERATOR,
+    );
+    expect(platformShipped.apply).not.toHaveBeenCalled();
+    expect(deadlineExceptionService.evaluate).toHaveBeenCalled();
+  });
 });
 
 function makeItem(overrides: Partial<OrderItemEntity>): OrderItemEntity {
@@ -201,6 +255,7 @@ describe('OrderService.retryAllocation - mapped line without stock', () => {
       {} as OrderDeadlineExceptionService,
       { evaluate: vi.fn().mockResolvedValue(undefined) } as unknown as OrderTrackingStallService,
       ingestionService,
+      {} as OrderPlatformShippedService,
       {} as ReservationService,
       {} as InventoryQueryService,
       exceptionService,

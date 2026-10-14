@@ -100,6 +100,19 @@ referenceId   = orderItem.id
 分配、待采购管线均按此口径。摄入时「无法分配仓库」的已映射行直接置
 BACKORDERED（不再停留 PENDING）；历史卡行由 Migration 20260917_007 归位。
 
+## 平台已事实发货时缺货不成立（用户指示 2026-10-14）
+
+平台阶段 `IN_TRANSIT / DELIVERED`（OZON `delivering` / `delivered`）
+即货物已发走：此时缺货与现实矛盾，**缺货不得阻塞订单**——缺货行转
+`EXTERNAL_FULFILLED`、OPEN `ORDER_OUT_OF_STOCK` 关闭；除未映射异常
+（`ORDER_SKU_MAPPING_FAILED`）外不阻塞，无未映射行且内部履约不在进行
+中时订单转 `SHIPPED`。完整规则见 §7a.0（`OrderPlatformShippedService`，
+同步/摄入/映射修复三路径共用）。连带约束：
+
+- 库存到货触发自动重分配时**跳过**平台已事实发货的订单（占库存会被
+  现实否证——RESERVED 会随已发货订单把库存锁死）；
+- 人工「重新分配」对平台已事实发货的订单直接 409 说明，不再占库存。
+
 ## 自动重新分配（用户指示 2026-09-17）
 
 任何入库类库存流水（`INITIAL_STOCK / RECEIVE / TRANSFER_IN`）产生后，
@@ -133,7 +146,9 @@ BACKORDERED / PENDING
 
 要点：**PENDING 行（映射修复后从未分配成功）分配失败同样必须落到
 BACKORDERED**——静默停在 PENDING 会让操作员看不到任何待办（与 §5.B.2
-同一原则）。
+同一原则）。**平台已事实发货（stage IN_TRANSIT / DELIVERED）的订单除外**
+（用户指示 2026-10-14）：直接 409 说明「平台已事实发货，缺货状态将按平台
+事实自动收敛，无需重新分配」——占库存会被现实否证，收敛见 §7a.0。
 
 ### A2. 已映射行 + 其他状态（`RELEASED` / `SHIPPED` / `RESERVED` 等）
 
@@ -151,6 +166,10 @@ FAILED
 解析失败 → 保持 FAILED，接口回报解析错误码，异常保持 OPEN（外层 409）
 解析成功 → 行提升为 MAPPED + 写入 skuId
          → 关闭 ORDER_SKU_MAPPING_FAILED 异常
+         → 平台已事实发货（stage IN_TRANSIT / DELIVERED）？**不占库存**
+             （货物已发走，分配会被现实否证）：走 §7a.0 收敛——行转
+             EXTERNAL_FULFILLED、关缺货异常，无其他未映射行时订单转
+             SHIPPED，否则保持由未映射异常阻塞
          → 分配状态可分配（BACKORDERED / PENDING）？走 A 的库存分配
              成功 → RESERVED
              失败 → BACKORDERED + ORDER_OUT_OF_STOCK 异常
@@ -249,6 +268,12 @@ EXTERNAL_FULFILLED 行不属于内部可履约行（与 RELEASED 同样被 rollu
 
 摄入成功后订单直接进入按行结果汇总出的状态（NEW 仅作为创建历史记录的起点，历史链：）。
 
+**平台已事实发货时按平台事实收敛**（用户指示 2026-10-14）：摄入时
+`platform_stage` 已是 `IN_TRANSIT` / `DELIVERED`（OZON `delivering` /
+`delivered`）的订单，行不预留、不拣货、不产生缺货异常（直接
+`EXTERNAL_FULFILLED`），摄入完成即按 §7a.0 收敛——无未映射行时转
+`SHIPPED`，有未映射行时保持由未映射异常阻塞；不评估发货时限。
+
 ## 平台同步摄入（Sprint 5）
 
 订单除人工/测试 API 摄入外，新增两条同步链路，均**复用** `OrderIngestionService`（不重写 SKU 映射/预约/Backorder/异常逻辑）：
@@ -275,7 +300,25 @@ EXTERNAL_FULFILLED 行不属于内部可履约行（与 RELEASED 同样被 rollu
 ORDER_SYNC 再遇到已存在的订单（窗口重叠再投递，或定向回读刷新）时，
 从「跳过」改为「对比更新」：
 
-0. **外部履约自动流转**（用户指示 2026-09-17）：订单履约模式为 FBO/FBP
+0. **平台已事实发货的收敛**（用户指示 2026-10-14）：归一化平台阶段为
+   `IN_TRANSIT / DELIVERED`（OZON `delivering` / `delivered`）即货物在
+   平台侧已经发走——与履约模式无关（外部履约同样适用，2026-09-17 起）。
+   此时内部「预发货」状态与现实矛盾，统一由 `OrderPlatformShippedService`
+   收敛（同步遭遇、摄入、映射修复三条路径共用，幂等）：
+   - 缺货行（`MAPPED` 且 `BACKORDERED` / `PENDING`）转
+     `EXTERNAL_FULFILLED`：平台侧已履约完成，不再占用内部库存、不进入
+     拣货 / 待采购 / 自动重分配（这些口径只认 `BACKORDERED`/`PENDING` 行）；
+   - 关闭行上 OPEN `ORDER_OUT_OF_STOCK` 与订单级
+     `ORDER_SHIPMENT_DEADLINE_NEAR`，不再评估发货时限；
+   - **除未映射异常外不阻塞**：无 `FAILED` 行、且无 `RESERVED` / `PICKED`
+     行（内部履约不在进行中）时，订单经 `OrderStatusService.transition`
+     转 `SHIPPED`；仍有 `FAILED` 行时由未映射异常阻塞（重算 rollup 落
+     `EXCEPTION`）；内部履约进行中时不自动关账，按 §7a.8 差异协议留待
+     运营处理（货可能还在我们仓内，平台状态与现实谁对谁错需要人判）。
+   - 不产生任何库存流水（§14）：这些行从未持有内部库存。轮转候选因此
+     纳入「`platform_stage='DELIVERED'` 且 ERP 未 SHIPPED/CANCELLED」的
+     差异单（§7a.2），首次即按 delivered 摄入的订单也能被兜底回读自愈。
+1. **外部履约自动流转**（用户指示 2026-09-17，已被 0 泛化）：订单履约模式为 FBO/FBP
    （`isExternalFulfillmentMode`，兼容长短两种存储形态）且平台阶段进入
    `IN_TRANSIT / DELIVERED`、ERP 尚未 SHIPPED/CANCELLED 时，订单经
    `OrderStatusService.transition` 自动转 `SHIPPED`（历史原因
@@ -295,9 +338,12 @@ ORDER_SYNC 再遇到已存在的订单（窗口重叠再投递，或定向回读
 2. **窗口游标从不回看 + 按需回读轮转（双轴 T2，2026-09-15）**：OZON 窗口按
    `in_process_at`（订单创建时间）过滤，已摄入订单不会再出现在后续窗口中。
    兜底感知改为**公平轮转制**，不再「每轮刷新全部非 ERP 终态订单」：
-   - 候选 = `platform_stage IS NULL 或 ∈ {AWAITING_SHIPMENT, IN_TRANSIT}`
+   - 候选 = `platform_stage IS NULL`、`∈ {AWAITING_SHIPMENT, IN_TRANSIT}`，
+     或 `= 'DELIVERED' 且 erp_status NOT IN ('SHIPPED','CANCELLED')`
      （**按平台阶段**判定，不看 `erp_status`——`erp_status='SHIPPED'` 的单
-     继续回读直到平台妥投/取消，否则妥投事实永远学不到）；
+     继续回读直到平台妥投/取消，否则妥投事实永远学不到；最后一档是
+     「已妥投但 ERP 未发货」的差异单，用户指示 2026-10-14：交给 §7a.0
+     收敛，收敛为 SHIPPED 后自动退出候选，不会常驻）；
    - 且 `platform_facts_checked_at`（上次回读确认时间）为空或超过
      `ORDER_STATE_FALLBACK_HOURS`（默认 24h，ENV 可配）；
    - 排序「最久未查优先」，每单回读确认后无论事实是否变化都刷新

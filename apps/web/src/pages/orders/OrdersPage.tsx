@@ -293,7 +293,11 @@ interface OrdersViewSettings {
   expandedColumns: ColumnSetting[];
 }
 
-const VIEW_SETTINGS_KEY = 'wcies.orders.view.v1';
+// 视图设置版本：v2（2026-10-14）把「运单号」列改为默认可见——平台同步
+// 到的运单号（OZON 组包后分配，delivering/delivered 订单都有）与「获取
+// 运单号」写入的是同一个字段，都应展示（用户指示）。升版让已有用户拿到
+// 新默认值，旧版 v1 偏好自然废弃。
+const VIEW_SETTINGS_KEY = 'wcies.orders.view.v2';
 
 const DEFAULT_VIEW_SETTINGS: OrdersViewSettings = {
   defaultExpandAll: false,
@@ -307,9 +311,9 @@ const DEFAULT_VIEW_SETTINGS: OrdersViewSettings = {
     { key: 'fulfillmentMode', visible: true },
     { key: 'shipmentDeadline', visible: true },
     { key: 'orderedAt', visible: true },
-    // 平台运单号是「获取运单号」的结果，默认放到列设置里由用户开启，
-    // 避免默认视图多出大量空列（未组包订单本来就没有运单号）。
-    { key: 'platformTrackingNo', visible: false },
+    // 平台运单号（平台事实）：既包括「获取运单号」写入的，也包括订单同步
+    // 带回的（OZON 组包后分配）——默认展示，未组包订单该列为空。
+    { key: 'platformTrackingNo', visible: true },
   ],
   expandedColumns: [
     { key: 'image', visible: true },
