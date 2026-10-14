@@ -755,7 +755,7 @@ Sprint 4 在此基础上增加三个原子业务命令（显式 QueryRunner + In
 | 待发货 | `TO_SHIP` | 存在行 `fulfillment_status='PICKED'` |
 | 缺货 | `BACKORDERED` | 存在行 `fulfillment_status='BACKORDERED'` |
 | 映射失败 | `MAPPING_FAILED` | 存在行 `mapping_status='FAILED'` |
-| 发货超时 | `SHIPMENT_OVERDUE` | `shipment_deadline < now()` 且 `erp_status NOT IN ('SHIPPED','CANCELLED')`（`PARTIALLY_SHIPPED` 剩余行未出且已过时限也算） |
+| 发货超时 | `SHIPMENT_OVERDUE` | `shipment_deadline < now()` 且 `erp_status NOT IN ('SHIPPED','CANCELLED')`，且平台阶段不是 `IN_TRANSIT`/`DELIVERED`（用户指示 2026-10-14：**已事实发货的订单不属于发货超时**，含被未映射异常卡在 EXCEPTION 的——映射要补，但「超时」与货物已发走的事实矛盾；`PARTIALLY_SHIPPED` 剩余行未出且已过时限仍算；阶段 NULL 的单保持原口径） |
 | 异常（聚合） | `ABNORMAL` | 缺货 ∪ 映射失败 ∪ 发货超时 ∪ 存在 OPEN `ORDER_TRACKING_STALLED`（§16A；退货模块落地后并入「已发货退款」） |
 
 - 行级口径**不能用订单 ERP 状态表达**：映射失败行不占状态位（§7），

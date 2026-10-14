@@ -908,11 +908,14 @@ describe('dual-axis list contract: stage + goodsState filters (T3)', () => {
   async function ingestWith(options: {
     items: Array<{ platformSkuId: string; quantity: string }>;
     shipmentDeadline?: string;
+    platformStage?: string;
+    platformStatus?: string;
   }) {
     const result = await client.post<IngestResult>('/api/v1/orders/ingest', {
       storeId: storeA,
       platformOrderId: `PO-${randomUUID()}`,
-      platformStatus: 'awaiting_packaging',
+      platformStatus: options.platformStatus ?? 'awaiting_packaging',
+      platformStage: options.platformStage,
       fulfillmentMode: 'FBS',
       orderedAt: new Date().toISOString(),
       currency: 'RUB',
@@ -1071,6 +1074,32 @@ describe('dual-axis list contract: stage + goodsState filters (T3)', () => {
     expect((await listOne(order.orderId, 'goodsState=SHIPMENT_OVERDUE')).hit).toBe(true);
     expect((await listOne(order.orderId, 'goodsState=BACKORDERED')).hit).toBe(true);
     expect((await listOne(order.orderId, 'stage=PENDING')).hit).toBe(true);
+  });
+
+  it('a factually-shipped order with a mapping failure is not 发货超时 (用户指示 2026-10-14)', async () => {
+    // 平台已发货（IN_TRANSIT，OZON delivering）+ 映射失败 + 已过发货时限：
+    // 未映射异常继续阻塞（EXCEPTION），但货物已发走——不属于发货超时
+    //（orders.md §17a；shipmentOverduePredicate 的平台阶段排除档）。
+    const shippedFailed = await ingestWith({
+      items: [{ platformSkuId: `${PREFIX}-NO-SUCH-3`, quantity: '1' }],
+      shipmentDeadline: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      platformStage: 'IN_TRANSIT',
+      platformStatus: 'delivering',
+    });
+    expect(shippedFailed.erpStatus).toBe('EXCEPTION');
+    expect((await listOne(shippedFailed.orderId, 'goodsState=SHIPMENT_OVERDUE')).hit).toBe(false);
+    // 仍可经「映射失败」找到（ABNORMAL 命中的是映射子句，不是超时）。
+    expect((await listOne(shippedFailed.orderId, 'goodsState=MAPPING_FAILED')).hit).toBe(true);
+    expect((await listOne(shippedFailed.orderId, 'goodsState=ABNORMAL')).hit).toBe(true);
+
+    // 对照组：同样逾期但平台尚未发货（AWAITING_SHIPMENT）→ 仍是发货超时。
+    const awaitingFailed = await ingestWith({
+      items: [{ platformSkuId: `${PREFIX}-NO-SUCH-4`, quantity: '1' }],
+      shipmentDeadline: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      platformStage: 'AWAITING_SHIPMENT',
+    });
+    expect(awaitingFailed.erpStatus).toBe('EXCEPTION');
+    expect((await listOne(awaitingFailed.orderId, 'goodsState=SHIPMENT_OVERDUE')).hit).toBe(true);
   });
 
   it('backorderedOrderedCount / backorderedArrivedCount follow the purchase lifecycle', async () => {

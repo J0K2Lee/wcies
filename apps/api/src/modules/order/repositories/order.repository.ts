@@ -420,16 +420,30 @@ function goodsStatePredicate(state: OrderGoodsStateFilter): string {
     case 'MAPPING_FAILED':
       return `EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND i.mapping_status = 'FAILED')`;
     case 'SHIPMENT_OVERDUE':
-      return `o.shipment_deadline IS NOT NULL AND o.shipment_deadline < now() AND o.erp_status NOT IN ('SHIPPED', 'CANCELLED')`;
+      return shipmentOverduePredicate();
     case 'ABNORMAL':
       return `(${backorderedPredicate()}
         OR EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND i.mapping_status = 'FAILED')
-        OR (o.shipment_deadline IS NOT NULL AND o.shipment_deadline < now() AND o.erp_status NOT IN ('SHIPPED', 'CANCELLED'))
+        OR ${shipmentOverduePredicate()}
         OR EXISTS (SELECT 1 FROM system_exceptions e
               WHERE e.status = 'OPEN' AND e.exception_type = 'ORDER_TRACKING_STALLED'
                 AND e.reference_type = 'ORDER' AND e.reference_id = o.id)
       )`;
   }
+}
+
+/**
+ * 发货超时口径（用户指示 2026-10-14）：平台阶段已 `IN_TRANSIT` /
+ * `DELIVERED` 即货物在平台侧已经发走——时限不再构成内部作业压力，
+ * **已事实发货的订单不属于发货超时**（含被未映射异常卡在 EXCEPTION 的：
+ * 映射要补，但「超时」这个判定与事实矛盾）。`PARTIALLY_SHIPPED` 剩余行
+ * 未出且已过时限仍算（erp_status 未达 SHIPPED）。阶段为 NULL（尚未同步
+ * 到阶段事实）的订单保持原口径。
+ */
+function shipmentOverduePredicate(): string {
+  return `(o.shipment_deadline IS NOT NULL AND o.shipment_deadline < now()
+    AND o.erp_status NOT IN ('SHIPPED', 'CANCELLED')
+    AND (o.platform_stage IS NULL OR o.platform_stage NOT IN ('IN_TRANSIT', 'DELIVERED')))`;
 }
 
 /** 与 rollup 同口径的缺货行判定（见 goodsStatePredicate 注释）。 */

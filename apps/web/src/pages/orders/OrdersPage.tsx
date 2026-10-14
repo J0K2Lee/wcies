@@ -255,7 +255,8 @@ const GOODS_STATE_CHIPS: Array<{
     key: 'SHIPMENT_OVERDUE',
     label: '发货超时',
     flow: false,
-    tooltip: '已过平台发货时限且订单未发完（含部分发货剩余行未出）',
+    tooltip:
+      '已过平台发货时限且订单未发完（含部分发货剩余行未出）；平台已事实发货（运输中/已送达）的订单不算发货超时',
   },
   {
     key: 'ABNORMAL',
@@ -552,16 +553,21 @@ function deadlineBadge(deadline: string | null): {
  * 发货时限只在「还没发出去」的阶段倒计时（用户反馈 2026-10-09）：
  * 已发货订单仍显示红/橙倒计时会误导——SHIPPED 后改为中性「已发货」+
  * 原截止时间；CANCELLED 的时限无意义，不再显示。
+ * 平台侧已事实发货（delivering / delivered 差异单，用户指示 2026-10-14
+ * 扩展）：货物在平台侧已经发走，时限同样不再构成内部压力——与 ERP
+ * SHIPPED 同样按中性「已发货」展示（已发货但映射异常的订单不属于发货
+ * 超时，倒计时继续飘红会自相矛盾）。
  */
 function deadlineBadgeFor(
   deadline: string | null,
   erpStatus: string,
+  platformStatus: string | null = null,
 ): ReturnType<typeof deadlineBadge> {
   if (deadline === null || erpStatus === 'CANCELLED') {
     return null;
   }
   const badge = deadlineBadge(deadline);
-  if (erpStatus === 'SHIPPED') {
+  if (erpStatus === 'SHIPPED' || platformDivergent(platformStatus, erpStatus)) {
     return { tone: 'neutral', label: '已发货', exact: badge === null ? '' : badge.exact };
   }
   return badge;
@@ -1366,7 +1372,9 @@ export function OrdersPage() {
   const list = query.data?.data ?? [];
   const detail = detailId !== null ? detailQuery.data?.data : undefined;
   const detailDeadline =
-    detail === undefined ? null : deadlineBadgeFor(detail.shipmentDeadline, detail.erpStatus);
+    detail === undefined
+      ? null
+      : deadlineBadgeFor(detail.shipmentDeadline, detail.erpStatus, detail.platformStatus);
   const selectedRow = useMemo(
     () => list.find((row) => row.id === selectedId) ?? null,
     [list, selectedId],
@@ -1780,7 +1788,11 @@ export function OrdersPage() {
       tone: 'neutral' as const,
       label: selectedRow.erpStatus,
     };
-    const deadline = deadlineBadgeFor(selectedRow.shipmentDeadline, selectedRow.erpStatus);
+    const deadline = deadlineBadgeFor(
+      selectedRow.shipmentDeadline,
+      selectedRow.erpStatus,
+      selectedRow.platformStatus,
+    );
     // 发货流程按钮显隐（2026-09-18）。能力来自后端的能力位——前端不判断平台，
     // 后端也不靠平台名硬编码：没接入发货能力的平台这两个按钮就不出现。
     const canPrepareShipment =
@@ -2452,7 +2464,7 @@ export function OrdersPage() {
       key: 'shipmentDeadline',
       width: 130,
       render: (value: string | null, row: OrderListItem) => {
-        const badge = deadlineBadgeFor(value, row.erpStatus);
+        const badge = deadlineBadgeFor(value, row.erpStatus, row.platformStatus);
         return badge === null ? (
           '—'
         ) : (
