@@ -1,5 +1,6 @@
 import { bindPlatformWarehouse, spawnApiEntry, waitForHttp, ManagedProcess } from './helpers';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Client } from 'pg';
 import { randomUUID } from 'node:crypto';
 import { ApiClient, runPrefix } from './sprint1.helpers';
 
@@ -80,6 +81,7 @@ let storeA = '';
 let storeB = '';
 let warehouseId = '';
 let binA01 = '';
+let db: Client;
 
 async function newSku(label: string, serialTracking = false): Promise<string> {
   const sku = await client.post<{ id: string }>('/api/v1/skus', {
@@ -161,6 +163,8 @@ async function openExceptionsOf(referenceId: string): Promise<ExceptionDto[]> {
 }
 
 beforeAll(async () => {
+  db = new Client({ connectionString: process.env.DATABASE_URL });
+  await db.connect();
   api = spawnApiEntry('main.js', { PORT: '3111', REDIS_URL: 'redis://localhost:6379/8' });
   await waitForHttp(`${BASE}/health/live`, 60_000);
   await client.login();
@@ -200,6 +204,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await api.stop();
+  await db.end();
 });
 
 describe('order ingestion + allocation (task §67-§73)', () => {
@@ -437,6 +442,123 @@ describe('order ingestion + allocation (task §67-§73)', () => {
 
     const detail = await orderDetail(result.body.data.orderId);
     expect(detail.erpStatus).toBe('READY_TO_PICK');
+  });
+
+  it('订单页快速建档 → 自动重试映射/分配把订单行救回（页面 onCompleted 路径）', async () => {
+    // 复刻订单页真实链路：
+    //   行先到（无映射）→ FAILED；运营在订单页点「快速建档」→ 弹窗内部
+    //   ①按平台标识反查未映射商品链接 ②onboard 建 SKU 并落 MAPPED；
+    //   成功后页面 onCompleted 立刻调 retry-allocation 重试映射+分配。
+    const platformSkuId = `${PREFIX}-QP-1`;
+    const result = await ingest({ items: [{ platformSkuId, quantity: '1' }] });
+    const item = result.body.data.itemResults[0]!;
+    expect(item.mappingStatus).toBe('FAILED');
+
+    // 已同步但未映射的变体行（sync 的真实产物形状）。
+    const listing = await db.query<{ id: string }>(
+      `INSERT INTO platform_listings (platform_id, store_id, platform_product_id, title, status)
+       VALUES ($1, $2, $3, $4, 'ACTIVE') RETURNING id`,
+      [ozonPlatformId, storeA, `${PREFIX}-QP-L1`, `${PREFIX} 快速建档链接`],
+    );
+    const listingId = listing.rows[0].id;
+    const mapping = await db.query<{ id: string }>(
+      `INSERT INTO platform_listing_skus
+         (listing_id, sku_id, mapping_status, platform_sku_id, status)
+       VALUES ($1, NULL, 'UNMAPPED', $2, 'ACTIVE') RETURNING id`,
+      [listingId, platformSkuId],
+    );
+    const mappingId = mapping.rows[0].id;
+
+    // ① 弹窗入口：按订单行标识能在本店铺检索到该未映射链接。
+    const found = await client.get<Array<{ id: string }>>(
+      `/api/v1/listings?storeId=${storeA}&keyword=${encodeURIComponent(platformSkuId)}&mappingState=UNMAPPED&pageSize=5`,
+    );
+    expect(found.body.data.some((row) => row.id === listingId)).toBe(true);
+
+    // ② onboard：一个事务内建 SKU + 落 MAPPED（与弹窗提交体一致）。
+    const onboard = await client.post<{ sku: { id: string; skuCode: string } }>(
+      `/api/v1/listings/${listingId}/skus/${mappingId}/onboard`,
+      { skuNameZh: `${PREFIX} 快速建档SKU`, generateBarcode: false },
+    );
+    expect(onboard.status).toBe(201);
+    const onboardedSkuId = onboard.body.data.sku.id;
+    const mappingRow = await db.query<{ mapping_status: string; sku_id: string | null }>(
+      'SELECT mapping_status, sku_id FROM platform_listing_skus WHERE id = $1',
+      [mappingId],
+    );
+    expect(mappingRow.rows[0]?.mapping_status).toBe('MAPPED');
+    expect(mappingRow.rows[0]?.sku_id).toBe(onboardedSkuId);
+
+    // 备货后 ③ 自动重试（页面 onCompleted 的 retryMutation）：行转 RESERVED。
+    await initialize({ skuId: onboardedSkuId, binId: binA01, quantity: '3' });
+    const retry = await client.post<{ reserved: boolean; fulfillmentStatus: string }>(
+      `/api/v1/orders/items/${item.orderItemId}/retry-allocation`,
+    );
+    expect(retry.status).toBe(200);
+    expect(retry.body.data.reserved).toBe(true);
+    expect(retry.body.data.fulfillmentStatus).toBe('RESERVED');
+
+    const detail = await orderDetail(result.body.data.orderId);
+    expect(detail.erpStatus).toBe('READY_TO_PICK');
+    expect(
+      detail.items[0]?.exceptions.filter(
+        (e) => e.exceptionType === 'ORDER_SKU_MAPPING_FAILED' && e.status === 'OPEN',
+      ).length,
+    ).toBe(0);
+  });
+
+  it('非可分配状态（RELEASED）的行：补齐映射后重试仍必须修映射并关异常', async () => {
+    // 现实来源：行先映射失败（FAILED + 异常），运营随后把订单标记「外部履约」
+    // → 行转 RELEASED（markExternalFulfillment 只拦 RESERVED/PICKED），映射保持
+    // FAILED。此后运营在订单页「快速建档」补齐变体映射，自动重试**不能再被
+    // 分配状态守卫拦住**（2026-10-14 修：映射修复先于分配；此前该行会 409，
+    // 映射永远修不上、映射异常常开、订单卡在 EXCEPTION）。
+    const skuId = await newSku('RELEASED-REPAIR');
+    const platformSkuId = `${PREFIX}-REL-1`;
+    const created = await ingest({ items: [{ platformSkuId, quantity: '1' }] });
+    const item = created.body.data.itemResults[0]!;
+    expect(item.mappingStatus).toBe('FAILED');
+
+    const marked = await client.post(
+      `/api/v1/orders/${created.body.data.orderId}/mark-external-fulfillment`,
+      {
+        reason: '线下直发买家（测试）',
+      },
+    );
+    expect(marked.status).toBe(200);
+    const released = await orderDetail(created.body.data.orderId);
+    expect(released.items[0]?.fulfillmentStatus).toBe('RELEASED');
+    expect(released.items[0]?.mappingStatus).toBe('FAILED');
+
+    // 未补齐映射 → 仍拒绝（语义不变，行为不放松）。
+    const stillFailed = await client.post(
+      `/api/v1/orders/items/${item.orderItemId}/retry-allocation`,
+    );
+    expect(stillFailed.status).toBe(409);
+    expect(stillFailed.body.error?.code).toBe('ORDER_INVALID_STATE');
+
+    // 补齐映射（等价订单页快速建档把变体落成 MAPPED）。
+    await mapSku(skuId, platformSkuId);
+
+    const retry = await client.post<{
+      mappingRepaired: boolean;
+      reserved: boolean;
+      fulfillmentStatus: string;
+    }>(`/api/v1/orders/items/${item.orderItemId}/retry-allocation`);
+    expect(retry.status).toBe(200);
+    expect(retry.body.data.mappingRepaired).toBe(true);
+    // 该行不持有内部库存（RELEASED），只修映射、不占库存。
+    expect(retry.body.data.reserved).toBe(false);
+    expect(retry.body.data.fulfillmentStatus).toBe('RELEASED');
+
+    const after = await orderDetail(created.body.data.orderId);
+    expect(after.items[0]?.mappingStatus).toBe('MAPPED');
+    expect(after.items[0]?.skuId).toBe(skuId);
+    expect(
+      after.items[0]?.exceptions.filter(
+        (e) => e.exceptionType === 'ORDER_SKU_MAPPING_FAILED' && e.status === 'OPEN',
+      ).length,
+    ).toBe(0);
   });
 
   it('mapping repair with no stock: retry records BACKORDERED, not a stuck PENDING', async () => {

@@ -116,7 +116,7 @@ BACKORDERED（不再停留 PENDING）；历史卡行由 Migration 20260917_007 �
 
 `retryBackorder(orderItemId)`（API：`POST /orders/items/:itemId/retry-allocation`）：
 
-两种情况，按行当前的 `mappingStatus` 分流。
+三种情况，按行当前的 `mappingStatus` / 分配状态分流。
 
 ### A. 已映射行（`MAPPED` + `BACKORDERED / PENDING`）
 
@@ -135,7 +135,12 @@ BACKORDERED / PENDING
 BACKORDERED**——静默停在 PENDING 会让操作员看不到任何待办（与 §5.B.2
 同一原则）。
 
-### B. 映射失败行（`FAILED`）— 决策 0012
+### A2. 已映射行 + 其他状态（`RELEASED` / `SHIPPED` / `RESERVED` 等）
+
+直接 409 `ORDER_INVALID_STATE`：该行既不缺库存、也没有映射问题可修
+（`RESERVED` 已占用、`SHIPPED` 已出库、`RELEASED` 不持有内部库存）。
+
+### B. 映射失败行（`FAILED`）— 决策 0012；2026-10-14 调整：**先修映射，再决定是否分配**
 
 ```text
 FAILED
@@ -143,13 +148,22 @@ FAILED
 按摄入时相同的 store-scoped 规则【重新解析】该行
    （不信任行上存储的 mappingStatus / skuId：人工可能已修好映射）
 ↓
-解析失败 → 保持 FAILED，接口回报解析错误码，异常保持 OPEN
+解析失败 → 保持 FAILED，接口回报解析错误码，异常保持 OPEN（外层 409）
 解析成功 → 行提升为 MAPPED + 写入 skuId
          → 关闭 ORDER_SKU_MAPPING_FAILED 异常
-         → 走 A 的库存分配
+         → 分配状态可分配（BACKORDERED / PENDING）？走 A 的库存分配
              成功 → RESERVED
              失败 → BACKORDERED + ORDER_OUT_OF_STOCK 异常
+           不可分配（RELEASED 等）→ **只修映射、不占库存**：行保持原状态，
+             仅重算订单汇总状态；响应 mappingRepaired=true 供前端提示
 ```
+
+**为何修映射不设状态门槛（2026-10-14 修正）**：此前「先判 `BACKORDERED`/
+`PENDING`、再修映射」的顺序，让 `RELEASED` 类行（典型来源：运营对含映射失败
+行的订单执行「标记外部履约」，行转 RELEASED 而映射保持 FAILED）永远修不上映射
+——订单页「快速建档后自动重试映射」对该类行表现为失效：映射补不上、映射异常常
+开、订单卡在 EXCEPTION。修复方式是把映射修复提到状态守卫之前，并让「是否占库存」
+单独判定；**未补齐映射时仍然 409**，行为不放松。
 
 要点：
 
@@ -909,6 +923,21 @@ createShipmentsFromOrder（仅 PICKED 行，1 发货单 = 1 仓）
 - **幂等**：复用已存在的有效发货单；`shipShipment` 重复调用不二次扣减；
   重新发货的报告 `alreadyShipped`。
 - 订单上的平台运单号自动填入发货单 `trackingNumber`（已有值不覆盖）。
+
+## 多选批量入口（2026-10-13，订单页多选）
+
+订单页支持勾选多个订单（跨分页保留）后在主页面批量条上批量执行 ①②④：
+
+| 动作 | API | 语义 |
+|---|---|---|
+| 批量生成拣货单 | `POST /picking-tasks/auto-create`（请求体带 `orderIds`） | 仅为勾选订单创建拣货任务（省略 `orderIds` 仍是旧的按店铺自动选取）；跳过/幂等规则不变 |
+| 批量获取运单号 | `POST /orders/batch-prepare-shipment` | 逐单执行 ① 的全部平台/幂等/事实回写逻辑；仍是真实平台写操作 |
+| 批量发货 | `POST /orders/batch-ship` | 逐单执行 ④（含按订单 advisory lock）；库存仍只走 `shipShipment` |
+
+规则不变，只是编排：**逐单执行、单笔失败只记录结果不拖垮整批**（§36/§43），
+不新增状态、不改变任何单笔路径的业务规则；批量获取运单号仍要求操作员显式确认
+（§92）。前端原右栏「自动创建拣货任务」按钮按店铺全量扫单的入口已下线，
+改为按勾选执行。
 
 ## 异常
 

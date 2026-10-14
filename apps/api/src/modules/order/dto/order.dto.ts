@@ -475,6 +475,11 @@ export class OrderRetryAllocationResultDto {
   @ApiProperty() orderItemId!: string;
   @ApiProperty({ enum: ORDER_ITEM_FULFILLMENT_STATUSES }) fulfillmentStatus!: string;
   @ApiProperty() reserved!: boolean;
+  @ApiProperty({
+    description:
+      '本次是否修复了平台映射（修复失败的订单行时会先补映射、关异常，再按分配状态决定是否占库存）',
+  })
+  mappingRepaired!: boolean;
 }
 
 export class OrderCancelResultDto {

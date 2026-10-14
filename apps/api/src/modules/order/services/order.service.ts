@@ -381,11 +381,18 @@ export class OrderService {
   /**
    * Retry allocation for one line (task §24).
    *
-   * Two entry states:
+   * Three entry states:
    *  - MAPPED + (BACKORDERED | PENDING): stock retry, no re-resolution.
-   *  - FAILED: the mapping may have been repaired since ingestion, so the
-   *    line is re-resolved with the same store-scoped rules before allocating
-   *    (leaving FAILED as a dead end would make the repair useless).
+   *  - MAPPED + other status: rejected (409) - the line neither needs stock
+   *    nor has a mapping problem to fix.
+   *  - FAILED: the mapping may have been repaired since ingestion (e.g. the
+   *    operator just quick-onboarded the variant), so the line is ALWAYS
+   *    re-resolved with the same store-scoped rules; stock is only reserved
+   *    when the line's status allows it (BACKORDERED / PENDING). Repairing the
+   *    mapping must not be gated on the allocation status - otherwise a
+   *    RELEASED / non-allocatable line could never leave FAILED, keeping its
+   *    mapping exception open and the order stuck in EXCEPTION
+   *    (orders-page 快速建档自动重试, 2026-10-14).
    */
   async retryAllocation(
     orderItemId: string,
@@ -394,6 +401,8 @@ export class OrderService {
     orderItemId: string;
     fulfillmentStatus: string;
     reserved: boolean;
+    /** True when this call repaired a FAILED platform mapping. */
+    mappingRepaired: boolean;
   }> {
     const item = await this.itemRepo.findById(orderItemId);
     if (item === null) {
@@ -403,15 +412,18 @@ export class OrderService {
     if (order.erpStatus === 'CANCELLED') {
       throw new OrderInvalidStateError('订单已取消，不能重新分配库存', { orderId: order.id });
     }
-    if (item.fulfillmentStatus !== 'BACKORDERED' && item.fulfillmentStatus !== 'PENDING') {
-      throw new OrderInvalidStateError(
-        `订单行状态 ${item.fulfillmentStatus} 不允许重试分配（仅 BACKORDERED / PENDING）`,
-        { orderItemId: item.id, fulfillmentStatus: item.fulfillmentStatus },
-      );
-    }
+    const allocatable =
+      item.fulfillmentStatus === 'BACKORDERED' || item.fulfillmentStatus === 'PENDING';
 
+    // 映射仍失败的行：**先修映射，再按分配状态决定是否占库存**（2026-10-14 修正
+    // 顺序）。此前是「先卡状态、后修映射」：分配状态不属于 BACKORDERED/PENDING
+    // 的行（典型：已释放/不持有内部库存的 RELEASED 行）即使平台变体已补齐映射，
+    // 也会被状态守卫 409 拦住 —— 订单页「快速建档后自动重试映射」对这类行表现为
+    // 失效：映射补不上、映射异常常开、订单卡在 EXCEPTION。
     if (item.mappingStatus === 'FAILED') {
-      const retried = await this.ingestionService.retryFailedMappingItem(order, item, operator);
+      const retried = await this.ingestionService.retryFailedMappingItem(order, item, operator, {
+        allocate: allocatable,
+      });
       if (!retried.resolved) {
         // Still unmapped: tell the operator exactly what the resolver saw.
         throw new OrderInvalidStateError(
@@ -425,7 +437,15 @@ export class OrderService {
         orderItemId,
         fulfillmentStatus: afterRetry?.fulfillmentStatus ?? item.fulfillmentStatus,
         reserved: retried.reserved,
+        mappingRepaired: true,
       };
+    }
+
+    if (!allocatable) {
+      throw new OrderInvalidStateError(
+        `订单行状态 ${item.fulfillmentStatus} 不允许重试分配（仅 BACKORDERED / PENDING）`,
+        { orderItemId: item.id, fulfillmentStatus: item.fulfillmentStatus },
+      );
     }
 
     if (item.mappingStatus !== 'MAPPED' || item.skuId === null) {
@@ -468,6 +488,7 @@ export class OrderService {
         orderItemId,
         fulfillmentStatus: afterExternal?.fulfillmentStatus ?? 'EXTERNAL_FULFILLED',
         reserved: false,
+        mappingRepaired: false,
       };
     }
 
@@ -515,6 +536,7 @@ export class OrderService {
       orderItemId,
       fulfillmentStatus: fresh?.fulfillmentStatus ?? item.fulfillmentStatus,
       reserved: outcome.reserved,
+      mappingRepaired: false,
     };
   }
 

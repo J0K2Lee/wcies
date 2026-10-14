@@ -367,6 +367,13 @@ export class OrderIngestionService {
     order: OrderEntity,
     item: OrderItemEntity,
     operator: OperatorContext,
+    options?: {
+      /**
+       * false = 只修映射不占库存（2026-10-14）：行当前不持有内部库存
+       * （如 RELEASED），分配会被业务状态拒绝，但映射与异常仍必须修复。
+       */
+      allocate?: boolean;
+    },
   ): Promise<
     | { resolved: false; code: string }
     | { resolved: true; reserved: boolean; reservationId: string | null }
@@ -431,6 +438,18 @@ export class OrderIngestionService {
           `第 ${item.lineNo} 行映射修复（外部履约，等待平台发货事实）`,
         );
       }
+      return { resolved: true, reserved: false, reservationId: null };
+    }
+
+    // 只修映射（allocate=false）：行当前状态不允许占用内部库存时，映射修复
+    // 本身（+ 关映射异常 + 重算 rollup）就是要的结果——不能再往下走分配，
+    // 否则会把不该占库存的行改成 BACKORDERED/RESERVED（2026-10-14）。
+    if (options?.allocate === false) {
+      await this.statusService.recomputeOrderStatus(
+        order.id,
+        operator,
+        `第 ${item.lineNo} 行映射修复（当前状态 ${item.fulfillmentStatus}，未分配内部库存）`,
+      );
       return { resolved: true, reserved: false, reservationId: null };
     }
 

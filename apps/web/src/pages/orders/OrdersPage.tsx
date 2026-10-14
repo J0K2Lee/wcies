@@ -832,16 +832,27 @@ export function OrdersPage() {
 
   const retryMutation = useMutation({
     mutationFn: (itemId: string) =>
-      apiPost<{ reserved: boolean; fulfillmentStatus: string }>(
+      apiPost<{ reserved: boolean; fulfillmentStatus: string; mappingRepaired: boolean }>(
         '/api/v1/orders/items/{itemId}/retry-allocation',
         {},
         { itemId },
       ),
-    onSuccess: (result: { reserved: boolean; fulfillmentStatus: string }) => {
+    onSuccess: (result: {
+      reserved: boolean;
+      fulfillmentStatus: string;
+      mappingRepaired: boolean;
+    }) => {
+      // 映射修复先于分配（2026-10-14）：行当前状态不该占用内部库存时（如已释放
+      // 的 RELEASED 行），后端只修映射、不占库存，此时报「已修复」而不是
+      // 让运营以为库存问题没解决。
       if (result.reserved) {
         message.success('重新分配成功，订单行已占用');
       } else if (result.fulfillmentStatus === 'BACKORDERED') {
         message.warning('映射已修复，但库存不足，订单行保持缺货');
+      } else if (result.mappingRepaired) {
+        message.success(
+          `映射已修复，映射异常已关闭（该行当前状态 ${result.fulfillmentStatus}，无需占用内部库存）`,
+        );
       } else {
         message.warning('库存仍然不足，订单行保持缺货');
       }
