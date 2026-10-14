@@ -18,6 +18,8 @@ import { OperatorContext } from '../../operation-log/operation-log.service';
 import {
   CreatePurchaseReceiptRequestDto,
   GenerateReceiptFromPoRequestDto,
+  GenerateReceiptsFromPosRequestDto,
+  GenerateReceiptsFromPosResultDto,
   PurchaseReceiptConfirmResultDto,
   PurchaseReceiptDetailDto,
   PurchaseReceiptListItemDto,
@@ -50,6 +52,20 @@ export class PurchaseReceiptController {
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true; data: PurchaseReceiptDetailDto }> {
     return ok(await this.receiptService.create(dto, operator));
+  }
+
+  // 批量路由必须先于 from-po/:poId 声明，否则 'batch' 会被当成 poId 参数。
+  @Post('from-po/batch')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '批量从采购单生成收货单草稿（采购单页多选；单笔失败不影响其余）',
+  })
+  @ApiOkEnvelope(GenerateReceiptsFromPosResultDto)
+  async generateFromPosBatch(
+    @Body() dto: GenerateReceiptsFromPosRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: GenerateReceiptsFromPosResultDto }> {
+    return ok(await this.receiptService.generateFromPosBatch(dto, operator));
   }
 
   @Post('from-po/:poId')

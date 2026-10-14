@@ -103,6 +103,10 @@ ORDERED → PARTIALLY_RECEIVED → RECEIVED
    用途：① PO 详情展示收货仓库；② 收货页「从采购单生成」入口在请求未显式指定
    `warehouseId` 时缺省使用该意向仓库；③ 历史数据由迁移按"该 PO 名下所有收货单仓库
    唯一"回填，冲突/无收货单的 PO 保持 NULL（迁移日志输出计数，不静默猜测）。
+8. **批量生成收货单（2026-10-13，采购单页多选）**：`POST /purchase-receipts/from-po/batch`
+   接受 `{ items: [{ poId, warehouseId? }] }`（单批 ≤50），逐单复用 `generateFromPo`
+   的全部规则（仓库解析：请求 > PO 意向；未收数量预填；只建 DRAFT 不碰库存），
+   **单笔失败只记录结果、不拖垮整批**；返回逐单草稿号/失败明细。
 
 ## 3.4 防重复采购（后端强制）
 

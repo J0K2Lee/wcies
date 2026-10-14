@@ -183,3 +183,33 @@ describe('QuickShipService.quickShipOrder', () => {
     expect(shipmentService.createShipmentsFromOrder).not.toHaveBeenCalled();
   });
 });
+
+describe('QuickShipService.quickShipBatch (2026-10-13 订单页多选批量发货)', () => {
+  it('ships each order through the single-order path and isolates failures', async () => {
+    const { service } = build();
+    const single = vi
+      .spyOn(service, 'quickShipOrder')
+      .mockResolvedValueOnce({
+        orderId: 'o1',
+        orderNo: 'ORD1',
+        orderErpStatus: 'SHIPPED',
+        trackingNumber: 'T1',
+        shipments: [{ shipmentId: 's1', shipmentNo: 'SHP1', alreadyShipped: false }],
+      } as never)
+      .mockRejectedValueOnce(new ShipmentStateInvalidError('订单已取消', { orderId: 'o2' }));
+
+    const result = await service.quickShipBatch(['o1', 'o2', 'o1'], OPERATOR);
+
+    // 重复 id 只执行一次；失败的单不影响已成功的单。
+    expect(single).toHaveBeenCalledTimes(2);
+    expect(result.total).toBe(2);
+    expect(result.succeeded).toBe(1);
+    expect(result.failed).toBe(1);
+    expect(result.results[0]).toMatchObject({ orderId: 'o1', ok: true, orderErpStatus: 'SHIPPED' });
+    expect(result.results[1]).toMatchObject({
+      orderId: 'o2',
+      ok: false,
+      code: 'SHIPMENT_STATE_INVALID',
+    });
+  });
+});

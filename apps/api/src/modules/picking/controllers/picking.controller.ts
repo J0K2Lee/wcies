@@ -49,7 +49,8 @@ export class PickingController {
   @Post('auto-create')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary: '自动为待拣货（READY_TO_PICK）订单创建拣货任务（跳过已有进行中任务的订单）',
+    summary:
+      '批量创建拣货任务：传 orderIds 只处理勾选订单；省略则自动选取待拣货（READY_TO_PICK）订单；均跳过已有进行中任务的订单',
   })
   @ApiOkEnvelope(AutoCreatePickingTasksResultDto)
   async autoCreate(
@@ -60,6 +61,7 @@ export class PickingController {
       await this.pickingService.autoCreateForReadyOrders(operator, {
         storeId: request.storeId,
         limit: request.limit ?? 100,
+        orderIds: request.orderIds,
       }),
     );
   }

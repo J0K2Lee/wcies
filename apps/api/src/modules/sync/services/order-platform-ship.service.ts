@@ -36,6 +36,26 @@ export interface PrepareShipmentResult {
   platformWritePerformed: boolean;
 }
 
+/** One order's outcome inside a batch 获取运单号 (订单页多选, 2026-10-13). */
+export interface BatchPrepareShipmentItem {
+  orderId: string;
+  orderNo: string | null;
+  ok: boolean;
+  code: string | null;
+  message: string | null;
+  trackingNumber: string | null;
+  platformStatus: string | null;
+  alreadyPrepared: boolean;
+  assemblyPending: boolean;
+}
+
+export interface BatchPrepareShipmentResult {
+  total: number;
+  succeeded: number;
+  failed: number;
+  results: BatchPrepareShipmentItem[];
+}
+
 /**
  * Order fulfillment platform operations (2026-09-18 flow): the platform-facing
  * half of 「获取运单号」 and 「打单」.
@@ -135,6 +155,52 @@ export class OrderPlatformShipService {
       alreadyPrepared: result.alreadyPrepared,
       assemblyPending: result.assemblyPending === true,
       platformWritePerformed: !result.alreadyPrepared && result.assemblyPending !== true,
+    };
+  }
+
+  /**
+   * 批量获取运单号（订单页多选, 2026-10-13）：逐单复用 prepareShipment 的全部
+   * 平台/幂等/事实回写逻辑，单笔失败（含平台报错）只记录结果，不拖垮整批
+   * （AGENTS §43/§49）。仍是真实平台写操作，只能由操作员显式触发（§92）。
+   */
+  async prepareShipmentBatch(
+    orderIds: string[],
+    operator: OperatorContext,
+  ): Promise<BatchPrepareShipmentResult> {
+    const results: BatchPrepareShipmentItem[] = [];
+    for (const orderId of new Set(orderIds)) {
+      try {
+        const result = await this.prepareShipment(orderId, operator);
+        results.push({
+          orderId,
+          orderNo: result.orderNo,
+          ok: true,
+          code: null,
+          message: null,
+          trackingNumber: result.trackingNumber,
+          platformStatus: result.platformStatus,
+          alreadyPrepared: result.alreadyPrepared,
+          assemblyPending: result.assemblyPending,
+        });
+      } catch (error: unknown) {
+        results.push(this.batchFailureOf(orderId, error));
+      }
+    }
+    const failed = results.filter((item) => !item.ok).length;
+    return { total: results.length, succeeded: results.length - failed, failed, results };
+  }
+
+  private batchFailureOf(orderId: string, error: unknown): BatchPrepareShipmentItem {
+    return {
+      orderId,
+      orderNo: null,
+      ok: false,
+      code: error instanceof DomainError ? error.code : 'ORDER_PLATFORM_SHIP_FAILED',
+      message: error instanceof Error ? error.message : String(error),
+      trackingNumber: null,
+      platformStatus: null,
+      alreadyPrepared: false,
+      assemblyPending: false,
     };
   }
 

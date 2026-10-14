@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsOptional, IsUUID } from 'class-validator';
+import { QuickShipShipmentDto } from '../../shipment/dto/shipment.dto';
 
 /** Query of `POST /orders/:id/shipping-label` (2026-09-18 fulfillment flow). */
 export class FetchShippingLabelQueryDto {
@@ -34,4 +35,74 @@ export class PrepareShipmentResultDto {
   assemblyPending!: boolean;
   @ApiProperty({ description: '本次点击是否完成平台组包写（受理中/已组包过则为 false）' })
   platformWritePerformed!: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Batch endpoints (订单页多选批量, 2026-10-13)
+// ---------------------------------------------------------------------------
+
+/** Request of `POST /orders/batch-prepare-shipment` and `POST /orders/batch-ship`. */
+export class BatchOrderActionRequestDto {
+  @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    minItems: 1,
+    maxItems: 50,
+    description: '勾选的订单（单批上限 50，逐单执行）',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @IsUUID('4', { each: true })
+  orderIds!: string[];
+}
+
+/** One order's outcome of `POST /orders/batch-prepare-shipment`. */
+export class BatchPrepareShipmentItemDto {
+  @ApiProperty() orderId!: string;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: '失败且订单不可读时为 null（前端用自己缓存的列表行标注）',
+  })
+  orderNo!: string | null;
+  @ApiProperty() ok!: boolean;
+  @ApiPropertyOptional({ nullable: true, type: String, description: '失败时的错误码' })
+  code?: string | null;
+  @ApiPropertyOptional({ nullable: true, type: String, description: '失败时的错误信息' })
+  message?: string | null;
+  @ApiProperty({ nullable: true, type: String, description: '平台运单号（成功时）' })
+  trackingNumber!: string | null;
+  @ApiProperty({ nullable: true, type: String, description: '组包后的平台订单状态' })
+  platformStatus!: string | null;
+  @ApiProperty({ description: '平台此前已受理该订单' })
+  alreadyPrepared!: boolean;
+  @ApiProperty({ description: '平台已受理组包但尚未确认（运单号稍后可取）' })
+  assemblyPending!: boolean;
+}
+
+export class BatchPrepareShipmentResultDto {
+  @ApiProperty() total!: number;
+  @ApiProperty() succeeded!: number;
+  @ApiProperty() failed!: number;
+  @ApiProperty({ type: [BatchPrepareShipmentItemDto] }) results!: BatchPrepareShipmentItemDto[];
+}
+
+/** One order's outcome of `POST /orders/batch-ship`. */
+export class BatchShipItemDto {
+  @ApiProperty() orderId!: string;
+  @ApiProperty({ nullable: true, type: String }) orderNo!: string | null;
+  @ApiProperty() ok!: boolean;
+  @ApiPropertyOptional({ nullable: true, type: String }) code?: string | null;
+  @ApiPropertyOptional({ nullable: true, type: String }) message?: string | null;
+  @ApiProperty({ nullable: true, type: String, description: '出库后订单 ERP 状态（成功时）' })
+  orderErpStatus!: string | null;
+  @ApiProperty({ type: [QuickShipShipmentDto] }) shipments!: QuickShipShipmentDto[];
+}
+
+export class BatchShipResultDto {
+  @ApiProperty() total!: number;
+  @ApiProperty() succeeded!: number;
+  @ApiProperty() failed!: number;
+  @ApiProperty({ type: [BatchShipItemDto] }) results!: BatchShipItemDto[];
 }

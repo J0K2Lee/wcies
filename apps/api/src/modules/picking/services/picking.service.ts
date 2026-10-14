@@ -142,17 +142,20 @@ export class PickingService implements OrderPickingStatePort {
   }
 
   /**
-   * 自动为待拣货订单批量创建拣货任务（2026-09-18 用户指示）。
+   * 批量创建拣货任务（2026-09-18 用户指示；2026-10-13 多选改造）。
    *
-   * 候选 = erpStatus READY_TO_PICK（可按店铺过滤）；已有进行中任务
-   * （CREATED/IN_PROGRESS 且含未拣行）的订单跳过——重复点击不会产生重复
-   * 拣货单。单笔失败（域错误）记录后继续，不拖垮整批（AGENTS §49 精神）；
-   * 系统错误照常抛出。创建动作与单笔路径共用 createPickingTask（含操
-   * 作日志）。
+   * 两种入口共用一条路径：
+   * - 自动模式（省略 orderIds）：候选 = erpStatus READY_TO_PICK（可按店铺过滤）；
+   * - 多选模式（orderIds 显式给定）：只处理勾选的订单，不存在的单按失败记录。
+   *
+   * 已有进行中任务（CREATED/IN_PROGRESS 且含未拣行）的订单跳过——重复点击
+   * 不会产生重复拣货单。单笔失败（域错误）记录后继续，不拖垮整批（AGENTS
+   * §49 精神）；系统错误照常抛出。创建动作与单笔路径共用 createPickingTask
+   * （含操作日志）。
    */
   async autoCreateForReadyOrders(
     operator: OperatorContext,
-    options: { storeId?: string; limit: number },
+    options: { storeId?: string; limit: number; orderIds?: string[] },
   ): Promise<{
     candidates: number;
     created: number;
@@ -161,12 +164,38 @@ export class PickingService implements OrderPickingStatePort {
     createdTaskNos: string[];
     failures: Array<{ orderNo: string; code: string; message: string }>;
   }> {
-    const orders = await this.orderService.listReadyToPickOrders(options);
     const createdTaskNos: string[] = [];
     const failures: Array<{ orderNo: string; code: string; message: string }> = [];
     let created = 0;
     let skipped = 0;
     let failed = 0;
+
+    let orders: Array<{ id: string; orderNo: string }>;
+    if (options.orderIds !== undefined && options.orderIds.length > 0) {
+      // 多选模式：逐单解析（去重），取不到的按失败记录而不是让整批 500。
+      const seen = new Set<string>();
+      orders = [];
+      for (const orderId of options.orderIds) {
+        if (seen.has(orderId)) {
+          continue;
+        }
+        seen.add(orderId);
+        try {
+          const order = await this.orderService.getOrderOrThrow(orderId);
+          orders.push({ id: order.id, orderNo: order.orderNo });
+        } catch (error: unknown) {
+          if (error instanceof DomainError) {
+            failed += 1;
+            failures.push({ orderNo: orderId, code: error.code, message: error.message });
+            continue;
+          }
+          throw error;
+        }
+      }
+    } else {
+      orders = await this.orderService.listReadyToPickOrders(options);
+    }
+
     for (const order of orders) {
       if ((await this.countActivePickingItems(order.id)) > 0) {
         skipped += 1;

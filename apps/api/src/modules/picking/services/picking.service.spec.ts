@@ -15,6 +15,7 @@ import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { PickingTaskEntity } from '../entities/picking-task.entity';
 import { PickingTaskItemEntity } from '../entities/picking-task-item.entity';
 import { PickingNoEligibleItemsError } from '../errors/picking.errors';
+import { OrderNotFoundError } from '../../order/errors/order.errors';
 const OPERATOR = { userId: null, username: 'test' };
 
 function makeTask(status: PickingTaskEntity['status'] = 'IN_PROGRESS'): PickingTaskEntity {
@@ -379,5 +380,35 @@ describe('PickingService.autoCreateForReadyOrders (2026-09-18 批量入口)', ()
     await expect(service.autoCreateForReadyOrders(OPERATOR, { limit: 100 })).rejects.toThrow(
       'db down',
     );
+  });
+
+  it('2026-10-13 多选模式：只处理 orderIds，去重，未知订单按失败记录', async () => {
+    const { service, orderService, countActivePickingItems } = build({ items: [makeItem()] });
+    vi.mocked(orderService.getOrderOrThrow).mockImplementation((id: string) =>
+      id === 'missing'
+        ? Promise.reject(new OrderNotFoundError('missing'))
+        : Promise.resolve({ id, orderNo: `ORD-${id}` } as never),
+    );
+    vi.mocked(countActivePickingItems)
+      .mockResolvedValueOnce(0) // o1 -> create
+      .mockResolvedValueOnce(1); // o2 -> skip
+    const createSpy = vi
+      .spyOn(service, 'createPickingTask')
+      .mockResolvedValue([{ pickingNo: 'PCK00000009' } as never]);
+
+    const result = await service.autoCreateForReadyOrders(OPERATOR, {
+      limit: 100,
+      orderIds: ['o1', 'o2', 'o1', 'missing'],
+    });
+
+    // 去重后的候选 = o1/o2/missing 三单；missing 解析失败进入 failures。
+    expect(result).toMatchObject({ candidates: 2, created: 1, skipped: 1, failed: 1 });
+    expect(result.createdTaskNos).toEqual(['PCK00000009']);
+    expect(result.failures).toEqual([
+      expect.objectContaining({ orderNo: 'missing', code: 'ORDER_NOT_FOUND' }),
+    ]);
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    // 多选模式绝不走自动候选查询。
+    expect(orderService.listReadyToPickOrders).not.toHaveBeenCalled();
   });
 });

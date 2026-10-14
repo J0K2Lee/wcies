@@ -10,6 +10,25 @@ import { PackingService } from './packing.service';
 import { ShipmentShipService } from './shipment-ship.service';
 import { ShipmentStateInvalidError } from '../errors/shipment.errors';
 import { QuickShipResultDto, QuickShipShipmentDto } from '../dto/shipment.dto';
+import { DomainError } from '../../../common/errors/domain.error';
+
+/** One order's outcome inside a batch 发货 (订单页多选, 2026-10-13). */
+export interface BatchShipItem {
+  orderId: string;
+  orderNo: string | null;
+  ok: boolean;
+  code: string | null;
+  message: string | null;
+  orderErpStatus: string | null;
+  shipments: QuickShipShipmentDto[];
+}
+
+export interface BatchShipResult {
+  total: number;
+  succeeded: number;
+  failed: number;
+  results: BatchShipItem[];
+}
 
 /**
  * One-click outbound (2026-09-18 order fulfillment flow): the order page's
@@ -46,6 +65,41 @@ export class QuickShipService {
     // loser dies on the ACTIVE-shipment-item unique index (verified by the
     // concurrency integration test).
     return this.withOrderLock(orderId, () => this.runQuickShip(orderId, operator));
+  }
+
+  /**
+   * 批量发货（订单页多选, 2026-10-13）：逐单复用 quickShipOrder（含按单
+   * 串行锁与幂等回放），单笔失败只记录结果、不拖垮整批（AGENTS §36/§43）。
+   * 出库扣库存永远只发生在 shipShipment 这条已测路径里。
+   */
+  async quickShipBatch(orderIds: string[], operator: OperatorContext): Promise<BatchShipResult> {
+    const results: BatchShipItem[] = [];
+    for (const orderId of new Set(orderIds)) {
+      try {
+        const result = await this.quickShipOrder(orderId, operator);
+        results.push({
+          orderId,
+          orderNo: result.orderNo,
+          ok: true,
+          code: null,
+          message: null,
+          orderErpStatus: result.orderErpStatus,
+          shipments: result.shipments,
+        });
+      } catch (error: unknown) {
+        results.push({
+          orderId,
+          orderNo: null,
+          ok: false,
+          code: error instanceof DomainError ? error.code : 'ORDER_QUICK_SHIP_FAILED',
+          message: error instanceof Error ? error.message : String(error),
+          orderErpStatus: null,
+          shipments: [],
+        });
+      }
+    }
+    const failed = results.filter((item) => !item.ok).length;
+    return { total: results.length, succeeded: results.length - failed, failed, results };
   }
 
   private async runQuickShip(

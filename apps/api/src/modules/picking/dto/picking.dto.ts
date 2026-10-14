@@ -1,5 +1,17 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+  Max,
+  Min,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
 import { PICKING_ITEM_STATUSES, PICKING_TASK_STATUSES } from '../enums/picking.constants';
@@ -21,7 +33,22 @@ export class AutoCreatePickingTasksRequestDto {
   @IsUUID()
   storeId?: string;
 
-  @ApiPropertyOptional({ default: 100, maximum: 200, description: '单次批量上限' })
+  @ApiPropertyOptional({
+    type: [String],
+    format: 'uuid',
+    minItems: 1,
+    maxItems: 100,
+    description:
+      '订单页多选批量（2026-10-13）：只为这些订单生成拣货任务；省略 = 自动选取待拣货订单',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @IsUUID('4', { each: true })
+  orderIds?: string[];
+
+  @ApiPropertyOptional({ default: 100, maximum: 200, description: '单次批量上限（自动选取模式）' })
   @IsOptional()
   @Type(() => Number)
   @IsInt()

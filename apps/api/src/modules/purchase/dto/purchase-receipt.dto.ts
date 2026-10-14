@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsIn,
@@ -96,6 +97,51 @@ export class GenerateReceiptFromPoRequestDto {
   @IsOptional()
   @IsUUID()
   defaultBinId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// 批量生成收货单（采购单页多选, 2026-10-13）
+// ---------------------------------------------------------------------------
+
+export class GenerateReceiptFromPoBatchItemDto {
+  @ApiProperty({ format: 'uuid' }) @IsUUID() poId!: string;
+  @ApiPropertyOptional({
+    description: '收货仓库（省略 = 用采购单上的收货仓库意向；两者皆无则该单失败）',
+  })
+  @IsOptional()
+  @IsUUID()
+  warehouseId?: string;
+}
+
+export class GenerateReceiptsFromPosRequestDto {
+  @ApiProperty({ type: [GenerateReceiptFromPoBatchItemDto], minItems: 1, maxItems: 50 })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => GenerateReceiptFromPoBatchItemDto)
+  items!: GenerateReceiptFromPoBatchItemDto[];
+}
+
+export class GenerateReceiptFromPoBatchItemResultDto {
+  @ApiProperty() poId!: string;
+  @ApiProperty({ nullable: true, type: String, description: '采购单号（单据不存在时为 null）' })
+  poNo!: string | null;
+  @ApiProperty() ok!: boolean;
+  @ApiPropertyOptional({ nullable: true, type: String }) receiptId?: string | null;
+  @ApiPropertyOptional({ nullable: true, type: String }) receiptNo?: string | null;
+  @ApiPropertyOptional({ nullable: true, type: String, description: '失败时的错误码' })
+  code?: string | null;
+  @ApiPropertyOptional({ nullable: true, type: String, description: '失败时的错误信息' })
+  message?: string | null;
+}
+
+export class GenerateReceiptsFromPosResultDto {
+  @ApiProperty() total!: number;
+  @ApiProperty() succeeded!: number;
+  @ApiProperty() failed!: number;
+  @ApiProperty({ type: [GenerateReceiptFromPoBatchItemResultDto] })
+  results!: GenerateReceiptFromPoBatchItemResultDto[];
 }
 
 export class PurchaseReceiptItemDto {

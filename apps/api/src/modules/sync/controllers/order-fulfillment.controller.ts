@@ -1,4 +1,4 @@
-import { Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentOperator } from '../../../common/decorators/current-operator.decorator';
 import { OperatorContext } from '../../operation-log/operation-log.service';
@@ -7,7 +7,13 @@ import { ApiOkEnvelope } from '../../../common/swagger/api-envelope';
 import { OrderPlatformShipService } from '../services/order-platform-ship.service';
 import { QuickShipService } from '../../shipment/services/quick-ship.service';
 import { QuickShipResultDto, ShippingLabelDto } from '../../shipment/dto/shipment.dto';
-import { FetchShippingLabelQueryDto, PrepareShipmentResultDto } from '../dto/order-fulfillment.dto';
+import {
+  BatchOrderActionRequestDto,
+  BatchPrepareShipmentResultDto,
+  BatchShipResultDto,
+  FetchShippingLabelQueryDto,
+  PrepareShipmentResultDto,
+} from '../dto/order-fulfillment.dto';
 
 /**
  * Order fulfillment actions of the real daily flow
@@ -17,6 +23,10 @@ import { FetchShippingLabelQueryDto, PrepareShipmentResultDto } from '../dto/ord
  * the four actions are REAL platform operations and must dispatch through the
  * adapter layer with store credentials (arch Rule 5). Same arrangement as
  * PlatformWarehouseController; the routes stay order-scoped.
+ *
+ * Batch twins of 获取运单号/发货 (订单页多选, 2026-10-13) live here too: they
+ * run the SAME per-order paths sequentially and report per-order outcomes, so
+ * one failing order never fails the batch (AGENTS.md §36/§43).
  */
 @ApiTags('orders')
 @Controller('orders')
@@ -25,6 +35,36 @@ export class OrderFulfillmentController {
     private readonly platformShipService: OrderPlatformShipService,
     private readonly quickShipService: QuickShipService,
   ) {}
+
+  @Post('batch-prepare-shipment')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '批量获取运单号（订单页多选；逐单平台组包，真实平台写操作，单笔失败不影响其余）',
+  })
+  @ApiOkEnvelope(BatchPrepareShipmentResultDto)
+  async prepareShipmentBatch(
+    @Body() request: BatchOrderActionRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ) {
+    return ok<BatchPrepareShipmentResultDto>(
+      await this.platformShipService.prepareShipmentBatch(request.orderIds, operator),
+    );
+  }
+
+  @Post('batch-ship')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '批量发货（订单页多选；逐单一键出库扣库存，单笔失败不影响其余）',
+  })
+  @ApiOkEnvelope(BatchShipResultDto)
+  async quickShipBatch(
+    @Body() request: BatchOrderActionRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ) {
+    return ok<BatchShipResultDto>(
+      await this.quickShipService.quickShipBatch(request.orderIds, operator),
+    );
+  }
 
   @Post(':id/prepare-shipment')
   @HttpCode(HttpStatus.OK)

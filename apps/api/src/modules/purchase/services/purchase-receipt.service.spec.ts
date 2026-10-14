@@ -11,7 +11,10 @@ import { InventoryService } from '../../inventory/services/inventory.service';
 import { InventoryQueryService } from '../../inventory/services/inventory-query.service';
 import { BusinessCodeService } from '../../../infrastructure/business-code/business-code.service';
 import { OperationLogService } from '../../operation-log/operation-log.service';
-import { PurchaseReceiptWarehouseMissingError } from '../errors/purchase-errors';
+import {
+  PurchaseOrderNotFoundError,
+  PurchaseReceiptWarehouseMissingError,
+} from '../errors/purchase-errors';
 
 const operator = { userId: null, username: 'tester' };
 const manager = {} as EntityManager;
@@ -48,22 +51,20 @@ function setup(po: ReturnType<typeof buildPo>) {
   };
   const poRepository = {
     findById: vi.fn().mockResolvedValue(po),
-    findItemsWithRefs: vi
-      .fn()
-      .mockResolvedValue([
-        {
-          item: {
-            id: 'item-1',
-            skuId: 'sku-1',
-            quantity: '2.000',
-            receivedQuantity: '0.000',
-            unitCost: null,
-          },
-          skuCode: '',
-          skuName: '',
-          orderNo: null,
+    findItemsWithRefs: vi.fn().mockResolvedValue([
+      {
+        item: {
+          id: 'item-1',
+          skuId: 'sku-1',
+          quantity: '2.000',
+          receivedQuantity: '0.000',
+          unitCost: null,
         },
-      ]),
+        skuCode: '',
+        skuName: '',
+        orderNo: null,
+      },
+    ]),
   };
   const warehouse = { getEntityById: vi.fn().mockResolvedValue({ id: 'wh-1', code: 'WH-1' }) };
   const codes = { nextPurchaseReceiptNo: vi.fn().mockResolvedValue('PR000001') };
@@ -109,5 +110,50 @@ describe('generateFromPo warehouse resolution (ERP 建议#4)', () => {
       PurchaseReceiptWarehouseMissingError,
     );
     expect(ctx.repository.insertWithItems).not.toHaveBeenCalled();
+  });
+});
+
+describe('generateFromPosBatch (2026-10-13 采购单页多选批量)', () => {
+  it('generates one draft per PO and isolates per-PO failures', async () => {
+    const ctx = setup(buildPo({ receivingWarehouseId: 'wh-po' }));
+    const single = vi
+      .spyOn(ctx.service, 'generateFromPo')
+      .mockResolvedValueOnce({ id: 'r-1', receiptNo: 'PR000001' } as never)
+      .mockRejectedValueOnce(new PurchaseReceiptWarehouseMissingError('PO000002'));
+    vi.mocked(ctx.poRepository.findById)
+      .mockResolvedValueOnce({ id: 'po-1', poNo: 'PO000001' })
+      .mockResolvedValueOnce({ id: 'po-2', poNo: 'PO000002' });
+
+    const result = await ctx.service.generateFromPosBatch(
+      { items: [{ poId: 'po-1' }, { poId: 'po-2', warehouseId: 'wh-req' }] },
+      operator,
+    );
+
+    expect(single).toHaveBeenNthCalledWith(1, 'po-1', { warehouseId: undefined }, operator);
+    expect(single).toHaveBeenNthCalledWith(2, 'po-2', { warehouseId: 'wh-req' }, operator);
+    expect(result).toMatchObject({ total: 2, succeeded: 1, failed: 1 });
+    expect(result.results[0]).toMatchObject({
+      poNo: 'PO000001',
+      ok: true,
+      receiptNo: 'PR000001',
+    });
+    expect(result.results[1]).toMatchObject({
+      poNo: 'PO000002',
+      ok: false,
+      code: 'PURCHASE_RECEIPT_WAREHOUSE_MISSING',
+    });
+  });
+
+  it('labels an unknown PO as a failure with poNo = null', async () => {
+    const ctx = setup(buildPo({ receivingWarehouseId: 'wh-po' }));
+    vi.mocked(ctx.poRepository.findById).mockResolvedValueOnce(null);
+    const single = vi
+      .spyOn(ctx.service, 'generateFromPo')
+      .mockRejectedValueOnce(new PurchaseOrderNotFoundError('po-x'));
+
+    const result = await ctx.service.generateFromPosBatch({ items: [{ poId: 'po-x' }] }, operator);
+
+    expect(single).toHaveBeenCalledTimes(1);
+    expect(result.results[0]).toMatchObject({ poNo: null, ok: false });
   });
 });

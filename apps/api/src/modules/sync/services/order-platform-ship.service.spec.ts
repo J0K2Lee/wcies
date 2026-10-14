@@ -226,3 +226,35 @@ describe('OrderPlatformShipService.fetchShippingLabel', () => {
     ).rejects.toBeInstanceOf(PlatformLabelNotReadyError);
   });
 });
+
+describe('OrderPlatformShipService.prepareShipmentBatch (2026-10-13 订单页多选批量)', () => {
+  it('prepares each order via the single-order path and isolates failures', async () => {
+    const { service } = makeService(new PreparableAdapter());
+    const single = vi
+      .spyOn(service, 'prepareShipment')
+      .mockResolvedValueOnce({
+        orderId: 'o1',
+        orderNo: 'ORD1',
+        platformCode: 'OZON',
+        trackingNumber: 'OZ75001234',
+        platformStatus: 'awaiting_deliver',
+        alreadyPrepared: false,
+        assemblyPending: false,
+        platformWritePerformed: true,
+      })
+      .mockRejectedValueOnce(new PlatformCapabilityUnsupportedError('WB 不支持组包'));
+
+    const result = await service.prepareShipmentBatch(['o1', 'o2', 'o1'], OPERATOR);
+
+    // 重复 id 只执行一次；平台能力失败的单不拖垮整批。
+    expect(single).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({ total: 2, succeeded: 1, failed: 1 });
+    expect(result.results[0]).toMatchObject({
+      orderId: 'o1',
+      ok: true,
+      trackingNumber: 'OZ75001234',
+    });
+    expect(result.results[1]).toMatchObject({ orderId: 'o2', ok: false, orderNo: null });
+    expect(result.results[1]?.code).toBe('PLATFORM_CAPABILITY_UNSUPPORTED');
+  });
+});

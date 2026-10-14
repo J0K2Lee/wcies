@@ -20,6 +20,9 @@ import {
   PurchaseReceiptListQueryDto,
   CreatePurchaseReceiptRequestDto,
   UpdatePurchaseReceiptRequestDto,
+  GenerateReceiptFromPoBatchItemResultDto,
+  GenerateReceiptsFromPosRequestDto,
+  GenerateReceiptsFromPosResultDto,
 } from '../dto/purchase-receipt.dto';
 import {
   PurchaseReceiptRepository,
@@ -37,6 +40,7 @@ import {
 } from '../errors/purchase-errors';
 import { SupplierService } from './supplier.service';
 import { offsetOf } from '../../../common/dto/pagination.dto';
+import { DomainError } from '../../../common/errors/domain.error';
 
 const ENTITY_TYPE = 'PURCHASE_RECEIPT';
 
@@ -180,6 +184,49 @@ export class PurchaseReceiptService {
       operator,
     });
     return this.getDetail(created.id);
+  }
+
+  /**
+   * 批量生成收货单草稿（采购单页多选, 2026-10-13）：逐单复用 generateFromPo
+   * （草稿不碰库存，确认收货才入库），单笔失败只记录结果、不拖垮整批
+   * （AGENTS §36）。仓库解析规则与单笔一致：请求指定 > PO 收货仓库意向。
+   */
+  async generateFromPosBatch(
+    dto: GenerateReceiptsFromPosRequestDto,
+    operator: OperatorContext,
+  ): Promise<GenerateReceiptsFromPosResultDto> {
+    const results: GenerateReceiptFromPoBatchItemResultDto[] = [];
+    for (const item of dto.items) {
+      const po = await this.poRepository.findById(item.poId);
+      try {
+        const receipt = await this.generateFromPo(
+          item.poId,
+          { warehouseId: item.warehouseId },
+          operator,
+        );
+        results.push({
+          poId: item.poId,
+          poNo: po?.poNo ?? null,
+          ok: true,
+          receiptId: receipt.id,
+          receiptNo: receipt.receiptNo,
+          code: null,
+          message: null,
+        });
+      } catch (error: unknown) {
+        results.push({
+          poId: item.poId,
+          poNo: po?.poNo ?? null,
+          ok: false,
+          receiptId: null,
+          receiptNo: null,
+          code: error instanceof DomainError ? error.code : 'PURCHASE_RECEIPT_GENERATE_FAILED',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    const failed = results.filter((item) => !item.ok).length;
+    return { total: results.length, succeeded: results.length - failed, failed, results };
   }
 
   /** DRAFT-only edits; RECEIVED quantities are frozen (§4.2). */
