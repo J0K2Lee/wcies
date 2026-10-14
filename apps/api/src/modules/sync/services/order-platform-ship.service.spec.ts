@@ -242,7 +242,11 @@ describe('OrderPlatformShipService.prepareShipmentBatch (2026-10-13 订单页多
         assemblyPending: false,
         platformWritePerformed: true,
       })
-      .mockRejectedValueOnce(new PlatformCapabilityUnsupportedError('WB 不支持组包'));
+      .mockRejectedValueOnce(
+        // 构造签名是 (platformCode, capability, reason) —— 只传文案会在 tsc
+        // 报 arity 错（vitest 经 esbuild 不做类型检查，故只有 typecheck 能发现）。
+        new PlatformCapabilityUnsupportedError('WB', '组包', 'WB 不支持组包（测试桩）'),
+      );
 
     const result = await service.prepareShipmentBatch(['o1', 'o2', 'o1'], OPERATOR);
 
