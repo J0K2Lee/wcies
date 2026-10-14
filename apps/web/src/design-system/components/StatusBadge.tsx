@@ -135,12 +135,17 @@ export const ERP_STATUS_META: Record<string, StatusMeta> = {
   EXCEPTION: { tone: 'danger', label: '异常' },
 };
 
-/** Order item fulfillment status → tone + label (Orders detail, decision #15). */
+/**
+ * Order item fulfillment status → tone + label (Orders detail, decision #15).
+ * 与后端 ORDER_ITEM_FULFILLMENT_STATUSES 一一对应（order.constants.ts）；
+ * 行出库后随物流流转，SHIPPED 显示为「运输中」（用户指示 2026-10-13）。
+ */
 export const FULFILLMENT_STATUS_META: Record<string, StatusMeta> = {
   PENDING: { tone: 'neutral', label: '待处理' },
   RESERVED: { tone: 'info', label: '已占用' },
   BACKORDERED: { tone: 'warning', label: '缺货' },
   PICKED: { tone: 'success', label: '已拣货' },
+  SHIPPED: { tone: 'success', label: '运输中' },
   RELEASED: { tone: 'neutral', label: '已释放' },
   EXTERNAL_FULFILLED: { tone: 'info', label: '外部履约' },
 };

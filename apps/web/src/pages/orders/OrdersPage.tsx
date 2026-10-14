@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Key, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ColumnsType } from 'antd/es/table';
 import {
   App as AntdApp,
@@ -15,6 +15,7 @@ import {
   Timeline,
   Tooltip,
 } from 'antd';
+import { DownOutlined, UpOutlined } from '@ant-design/icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import { apiGet, apiPost, useApiQuery } from '../../api/hooks';
@@ -615,6 +616,53 @@ function ExpandedOrderItems({
   );
 }
 
+/**
+ * 右栏「最近状态」（用户指示 2026-10-13）：最新状态在上，默认只显示最近
+ * 两条；超过两条时在分区标题右侧给一个符号化展开按钮（↑/↓）控制全量显示。
+ * 以订单 id 作 key 挂载，切换订单自动回到收起态。
+ */
+function RailRecentStatus({ history }: { history: OrderDetail['history'] }) {
+  const [expanded, setExpanded] = useState(false);
+  const sorted = useMemo(
+    () => [...history].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)),
+    [history],
+  );
+  const visible = expanded ? sorted : sorted.slice(0, 2);
+  return (
+    <ContextSection
+      title="最近状态"
+      extra={
+        sorted.length > 2 ? (
+          <Button
+            type="text"
+            size="small"
+            aria-label={expanded ? '收起状态历史' : '展开全部状态历史'}
+            aria-expanded={expanded}
+            icon={expanded ? <UpOutlined /> : <DownOutlined />}
+            onClick={() => setExpanded((value) => !value)}
+            style={{ padding: '0 4px', color: colors.textTertiary }}
+          />
+        ) : undefined
+      }
+    >
+      <Timeline
+        items={visible.map((entry) => ({
+          content: (
+            <div>
+              <div style={{ fontSize: 13, color: colors.textPrimary }}>
+                {ERP_STATUS_META[entry.toStatus]?.label ?? entry.toStatus}
+              </div>
+              <div style={{ fontSize: 12, color: colors.textTertiary }}>
+                {fmtDateTime(entry.createdAt)}
+              </div>
+            </div>
+          ),
+        }))}
+      />
+    </ContextSection>
+  );
+}
+
 export function OrdersPage() {
   const { message, modal, notification } = AntdApp.useApp();
   const queryClient = useQueryClient();
@@ -1055,6 +1103,42 @@ export function OrdersPage() {
   // 打开商品链接（ERP 建议#3）按钮的反查 pending。
   const [platformLinkPending, setPlatformLinkPending] = useState(false);
 
+  // ---- 多选批量（用户指示 2026-10-13）：跨分页保留勾选 ----
+  // antd 的 preserveSelectedRowKeys 让翻页不清空 keys；这里另存一份行快照，
+  // 让批量结果提示能标注不在当前页的订单（平台单号 > 内部单号 > id）。
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
+  const [selectedOrdersById, setSelectedOrdersById] = useState<Map<string, OrderListItem>>(
+    () => new Map(),
+  );
+  const handleOrderSelectionChange = useCallback((keys: Key[], rows: OrderListItem[]) => {
+    const ids = keys.map(String);
+    setSelectedOrderIds(ids);
+    setSelectedOrdersById((current) => {
+      const next = new Map<string, OrderListItem>();
+      for (const id of ids) {
+        const kept = current.get(id);
+        if (kept !== undefined) {
+          next.set(id, kept);
+        }
+      }
+      for (const row of rows) {
+        next.set(row.id, row);
+      }
+      return next;
+    });
+  }, []);
+  const labelOfSelectedOrder = useCallback(
+    (orderId: string): string =>
+      selectedOrdersById.get(orderId)?.platformOrderId ??
+      selectedOrdersById.get(orderId)?.orderNo ??
+      orderId,
+    [selectedOrdersById],
+  );
+  const clearOrderSelection = useCallback(() => {
+    setSelectedOrderIds([]);
+    setSelectedOrdersById(new Map());
+  }, []);
+
   const createPickingMutation = useMutation({
     mutationFn: (orderId: string) =>
       apiPost<{ tasks: Array<{ pickingNo: string }> }>('/api/v1/picking-tasks', { orderId }),
@@ -1066,10 +1150,14 @@ export function OrdersPage() {
     onError: (error: Error) => message.error(`创建失败：${error.message}`),
   });
 
-  // 自动创建拣货任务（2026-09-18 用户指示）：为当前筛选店铺下所有「待拣货」
-  // 订单批量生成拣货单；已有进行中任务的订单由后端跳过（幂等）。
-  const autoCreatePickingMutation = useMutation({
-    mutationFn: (filterStoreId: string | undefined) =>
+  // 自动创建拣货任务已于 2026-10-13 改造为「勾选订单 → 批量生成拣货单」：
+  // 按钮从右栏迁到主页面批量条（用户指示），不再按店铺全量扫单。
+
+  // ---- 多选批量操作（用户指示 2026-10-13）：主页面批量条驱动 ----
+  // 三类动作都逐单在后端执行（单笔失败不拖垮整批），这里只聚合展示结果。
+
+  const batchPickingMutation = useMutation({
+    mutationFn: (orderIds: string[]) =>
       apiPost<{
         candidates: number;
         created: number;
@@ -1077,24 +1165,173 @@ export function OrdersPage() {
         failed: number;
         createdTaskNos: string[];
         failures: Array<{ orderNo: string; code: string; message: string }>;
-      }>('/api/v1/picking-tasks/auto-create', {
-        ...(filterStoreId !== undefined && filterStoreId !== '' ? { storeId: filterStoreId } : {}),
-        limit: 100,
-      }),
+      }>('/api/v1/picking-tasks/auto-create', { orderIds }),
     onSuccess: (result) => {
-      const parts = [`新建 ${result.created} 个任务`];
-      if (result.skipped > 0) {
-        parts.push(`跳过 ${result.skipped}（已有进行中任务）`);
-      }
-      if (result.failed > 0) {
-        parts.push(`失败 ${result.failed}`);
-      }
-      message.success(`自动创建拣货任务：${parts.join('，')}`);
+      notification.open({
+        type: result.failed > 0 ? 'warning' : 'success',
+        title: `批量生成拣货单：新建 ${result.created}，跳过 ${result.skipped}，失败 ${result.failed}`,
+        description: (
+          <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+            {result.createdTaskNos.length > 0 && (
+              <div>拣货单号：{result.createdTaskNos.join('、')}</div>
+            )}
+            {result.failures.map((failure) => (
+              <div key={failure.orderNo}>
+                {failure.orderNo}：{failure.message}
+              </div>
+            ))}
+          </div>
+        ),
+        duration: result.failed > 0 ? 0 : 6,
+      });
       void queryClient.invalidateQueries({ queryKey: ['orders'] });
       void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
     },
-    onError: (error: Error) => message.error(`自动创建失败：${error.message}`),
+    onError: (error: Error) => message.error(`批量生成拣货单失败：${error.message}`),
   });
+
+  const batchPrepareMutation = useMutation({
+    mutationFn: (orderIds: string[]) =>
+      apiPost<{
+        total: number;
+        succeeded: number;
+        failed: number;
+        results: Array<{
+          orderId: string;
+          orderNo: string | null;
+          ok: boolean;
+          code?: string | null;
+          message?: string | null;
+          trackingNumber: string | null;
+          platformStatus: string | null;
+          alreadyPrepared: boolean;
+          assemblyPending: boolean;
+        }>;
+      }>('/api/v1/orders/batch-prepare-shipment', { orderIds }),
+    onSuccess: (result) => {
+      notification.open({
+        type: result.failed > 0 ? 'warning' : 'success',
+        title: `批量获取运单号：成功 ${result.succeeded} / 失败 ${result.failed}（共 ${result.total}）`,
+        description: (
+          <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+            {result.results.map((item) => (
+              <div key={item.orderId}>
+                {labelOfSelectedOrder(item.orderId)}：
+                {item.ok
+                  ? item.assemblyPending
+                    ? '组包已提交，平台处理中，运单号稍后可取'
+                    : item.alreadyPrepared
+                      ? `平台此前已组包${item.trackingNumber === null ? '' : `（${item.trackingNumber}）`}`
+                      : `已组包${
+                          item.trackingNumber === null ? '' : `（运单号 ${item.trackingNumber}）`
+                        }`
+                  : `失败（${item.message ?? item.code ?? '未知错误'}）`}
+              </div>
+            ))}
+          </div>
+        ),
+        duration: result.failed > 0 ? 0 : 8,
+      });
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
+      void queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+    },
+    onError: (error: Error) => message.error(`批量获取运单号失败：${error.message}`),
+  });
+
+  const batchShipMutation = useMutation({
+    mutationFn: (orderIds: string[]) =>
+      apiPost<{
+        total: number;
+        succeeded: number;
+        failed: number;
+        results: Array<{
+          orderId: string;
+          orderNo: string | null;
+          ok: boolean;
+          code?: string | null;
+          message?: string | null;
+          orderErpStatus: string | null;
+          shipments: Array<{ alreadyShipped: boolean }>;
+        }>;
+      }>('/api/v1/orders/batch-ship', { orderIds }),
+    onSuccess: (result) => {
+      notification.open({
+        type: result.failed > 0 ? 'warning' : 'success',
+        title: `批量发货：成功 ${result.succeeded} / 失败 ${result.failed}（共 ${result.total}）`,
+        description: (
+          <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+            {result.results.map((item) => (
+              <div key={item.orderId}>
+                {labelOfSelectedOrder(item.orderId)}：
+                {item.ok
+                  ? `已发货（订单状态 ${ERP_STATUS_META[item.orderErpStatus ?? '']?.label ?? item.orderErpStatus}）`
+                  : `失败（${item.message ?? item.code ?? '未知错误'}）`}
+              </div>
+            ))}
+          </div>
+        ),
+        duration: result.failed > 0 ? 0 : 8,
+      });
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
+      void queryClient.invalidateQueries({ queryKey: ['shipments'] });
+      void queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+    },
+    onError: (error: Error) => message.error(`批量发货失败：${error.message}`),
+  });
+
+  const confirmBatchPicking = () => {
+    if (selectedOrderIds.length === 0) {
+      return;
+    }
+    modal.confirm({
+      title: `为勾选的 ${selectedOrderIds.length} 个订单生成拣货单？`,
+      content:
+        '仅为勾选订单的已占用（RESERVED）行生成拣货任务（按仓拆分）；已有进行中拣货任务的订单自动跳过。',
+      okText: '生成拣货单',
+      cancelText: '返回',
+      onOk: () => {
+        batchPickingMutation.mutate(selectedOrderIds);
+      },
+    });
+  };
+
+  const confirmBatchPrepare = () => {
+    if (selectedOrderIds.length === 0) {
+      return;
+    }
+    modal.confirm({
+      title: `为勾选的 ${selectedOrderIds.length} 个订单获取运单号？`,
+      content:
+        '将逐单调用平台「组包」接口推进订单（OZON awaiting_deliver）并让平台分配运单号——' +
+        '这是真实平台操作，会改变平台上的订单状态。已组包的订单不会重复提交；' +
+        '单笔失败不影响其余订单。',
+      okText: '批量获取运单号',
+      cancelText: '返回',
+      onOk: () => {
+        batchPrepareMutation.mutate(selectedOrderIds);
+      },
+    });
+  };
+
+  const confirmBatchShip = () => {
+    if (selectedOrderIds.length === 0) {
+      return;
+    }
+    modal.confirm({
+      title: `发货：勾选的 ${selectedOrderIds.length} 个订单？`,
+      content:
+        '逐单自动创建发货单与单包裹并封箱，然后正式出库：会扣减已拣货库存，' +
+        '全部行出库后订单变为已发货。已出库的发货单不会重复扣减库存；单笔失败不影响其余订单。',
+      okText: '确认批量发货',
+      okButtonProps: { danger: true },
+      cancelText: '返回',
+      onOk: () => {
+        batchShipMutation.mutate(selectedOrderIds);
+      },
+    });
+  };
 
   const registerPurchaseMutation = useMutation({
     mutationFn: (values: { sourceNote?: string; quantity: number; unitCost?: number }) => {
@@ -1521,30 +1758,17 @@ export function OrdersPage() {
       return {
         defaultCollapsed: true,
         children: (
-          <>
-            <ContextSection title="订单概览">
-              <ContextMetric label="当前筛选" value={`${query.data?.meta.total ?? 0} 单`} />
-              <ContextMetric label="待处理" value={pendingCount.data?.meta.total ?? 0} />
-              <ContextMetric label="待收货" value={inTransitCount.data?.meta.total ?? 0} />
-              <ContextMetric label="已完成" value={completedCount.data?.meta.total ?? 0} />
-              <RailHint>
-                点击订单行快速预览风险与状态；缺货订单可在右栏重试分配或登记采购。
-              </RailHint>
-            </ContextSection>
-            <ContextAction>
-              <Button
-                block
-                type="primary"
-                loading={autoCreatePickingMutation.isPending}
-                onClick={() => autoCreatePickingMutation.mutate(storeId)}
-              >
-                自动创建拣货任务
-              </Button>
-              <RailHint>
-                为当前店铺筛选下所有「待拣货」订单批量生成拣货单；已有进行中任务的订单自动跳过。
-              </RailHint>
-            </ContextAction>
-          </>
+          <ContextSection title="订单概览">
+            <ContextMetric label="当前筛选" value={`${query.data?.meta.total ?? 0} 单`} />
+            <ContextMetric label="待处理" value={pendingCount.data?.meta.total ?? 0} />
+            <ContextMetric label="待收货" value={inTransitCount.data?.meta.total ?? 0} />
+            <ContextMetric label="已完成" value={completedCount.data?.meta.total ?? 0} />
+            <RailHint>
+              点击订单行快速预览风险与状态；缺货订单可在右栏重试分配或登记采购。批量操作
+              （生成拣货单 / 获取运单号 /
+              发货）在主页面批量条上，勾选订单行首复选框即可（跨分页保留）。
+            </RailHint>
+          </ContextSection>
         ),
       };
     }
@@ -1576,6 +1800,143 @@ export function OrdersPage() {
     // FAILED lines carry no skuId, so they need their own list to stay
     // clickable in the rail.
     const failedMappingItems = riskItems.filter((item) => item.mappingStatus === 'FAILED');
+    // 操作区上移（用户指示 2026-10-13）：紧跟「订单概况」基础信息渲染，
+    // 避免右栏信息过长时操作按钮被挤出可视区；最近状态排在操作区之后。
+    const railActions = (
+      <>
+        <Button block onClick={() => setDetailId(selectedRow.id)}>
+          查看详情
+        </Button>
+        {/* 发货 = PICKED 订单的推进主操作（§4.3：主操作紧跟查看详情，每个
+            视图 ≤1 个 primary）。一键出库：自动建发货单+单包裹封箱 →
+            正式出库扣库存 → 订单 SHIPPED。正式出库属 UI 规范 §7 L2，
+            确认弹窗带 danger ok。 */}
+        {canQuickShip && (
+          <Button
+            block
+            type="primary"
+            style={{ marginTop: 8 }}
+            loading={quickShipMutation.isPending}
+            onClick={() => {
+              modal.confirm({
+                title: `发货：${selectedRow.platformOrderId}？`,
+                content:
+                  '自动创建发货单与单包裹并封箱，然后正式出库：会扣减已拣货库存，' +
+                  '全部行出库后订单变为已发货。已出库的发货单不会重复扣减库存。',
+                okText: '确认发货',
+                okButtonProps: { danger: true },
+                cancelText: '返回',
+                onOk: () => {
+                  quickShipMutation.mutate(selectedRow.id);
+                },
+              });
+            }}
+          >
+            发货
+          </Button>
+        )}
+        {/* 待拣货订单的推进主操作（2026-09-18 从详情弹窗迁至右栏操作区）：
+            仅 READY_TO_PICK 且有 RESERVED 行、且无进行中拣货任务时显示；
+            与「发货」（PICKED）互斥，保证同一视图只有一个 primary。 */}
+        {selectedRow.erpStatus === 'READY_TO_PICK' &&
+          !(railDetail?.pickingTasks ?? []).some(
+            (task) => task.status === 'CREATED' || task.status === 'IN_PROGRESS',
+          ) && (
+            <Button
+              block
+              type="primary"
+              style={{ marginTop: 8 }}
+              loading={createPickingMutation.isPending}
+              onClick={() => createPickingMutation.mutate(selectedRow.id)}
+            >
+              创建拣货任务
+            </Button>
+          )}
+        {/* 获取运单号 = 平台组包（真实平台写操作）。流程第一步（先于拣货）；
+            接口幂等，已组包时不会重复写平台。真实外部写超出 §7 分级表，
+            按 L2 力度用 modal.confirm 说明后果（比 Popconfirm 重是刻意的）。 */}
+        {canPrepareShipment && (
+          <Button
+            block
+            style={{ marginTop: 8 }}
+            loading={prepareShipmentMutation.isPending}
+            onClick={() => {
+              modal.confirm({
+                title: `获取运单号：${selectedRow.platformOrderId}？`,
+                content:
+                  '将调用平台「组包」接口把该订单推进到待发货状态（OZON awaiting_deliver），' +
+                  '这是真实平台操作：会改变平台上的订单状态，并让平台分配运单号。' +
+                  '已组包的订单不会重复提交。',
+                okText: '获取运单号',
+                cancelText: '返回',
+                onOk: () => {
+                  prepareShipmentMutation.mutate(selectedRow.id);
+                },
+              });
+            }}
+          >
+            {selectedRow.platformTrackingNo === null ? '获取运单号' : '重新获取运单号'}
+          </Button>
+        )}
+        {/* 打单：取平台面单 PDF 并打开打印（已存档则直接复用）。 */}
+        {canPrintLabel && (
+          <Button
+            block
+            style={{ marginTop: 8 }}
+            loading={shippingLabelMutation.isPending}
+            onClick={() => shippingLabelMutation.mutate({ id: selectedRow.id, refresh: false })}
+          >
+            {orderLabels.length === 0 ? '打单（取平台面单）' : '打单（用已存档面单）'}
+          </Button>
+        )}
+        {/* 快速建档 = 修复类次操作（§3.1 primary 语义是"推进动作"，且每视图
+            ≤1；与创建拣货任务/发货并存时降级为 default，避免双 primary）。 */}
+        {failedMappingItems.length > 0 && mappingSearchKeyword(failedMappingItems[0]!) !== null && (
+          <Button
+            block
+            style={{ marginTop: 8 }}
+            loading={onboardLookupPending}
+            onClick={() => openQuickOnboard(failedMappingItems[0]!, selectedRow.storeId)}
+          >
+            快速建档
+          </Button>
+        )}
+        {selectedRow.erpStatus !== 'SHIPPED' && selectedRow.erpStatus !== 'CANCELLED' && (
+          <Button
+            block
+            style={{ marginTop: 8 }}
+            onClick={() => {
+              setExternalTarget(selectedRow);
+              externalForm.setFieldsValue({ reason: '' });
+            }}
+          >
+            标记外部履约
+          </Button>
+        )}
+        {selectedRow.erpStatus !== 'CANCELLED' && (
+          <Button
+            block
+            danger
+            style={{ marginTop: 8 }}
+            onClick={() => {
+              // 取消订单 = L2：modal.confirm + danger ok。
+              modal.confirm({
+                title: `取消订单 ${selectedRow.platformOrderId}？`,
+                content: '已占用行将释放库存；已拣货行将创建拦截任务（不自动恢复库存）。',
+                okText: '取消订单',
+                okButtonProps: { danger: true },
+                cancelText: '返回',
+                onOk: () => {
+                  cancelMutation.mutate(selectedRow.id);
+                },
+              });
+            }}
+          >
+            取消订单
+          </Button>
+        )}
+      </>
+    );
     return {
       defaultCollapsed: true,
       header: (
@@ -1708,9 +2069,11 @@ export function OrdersPage() {
               />
             )}
           </ContextSection>
+          {/* 操作区（用户指示 2026-10-13 上移）：紧跟订单概况基础信息，
+              信息再长按钮也不会被挤出可视区。 */}
+          <ContextAction>{railActions}</ContextAction>
           {/* 发货流程（2026-09-18）：运单号与面单都是平台事实，直接展示；
-              仓库内部出库仍在「发货」按钮里走既有阶梯。
-              分区位置遵循 UI 规范 §4.2：概要（订单概况 / 发货物流）→ 风险 → 操作区。 */}
+              仓库内部出库仍在「发货」按钮里走既有阶梯。 */}
           {(selectedRow.platformTrackingNo !== null ||
             canPrepareShipment ||
             orderLabels.length > 0) && (
@@ -1738,157 +2101,8 @@ export function OrdersPage() {
             </ContextSection>
           )}
           {railDetail !== undefined && railDetail.history.length > 0 && (
-            <ContextSection title="最近状态">
-              <Timeline
-                items={railDetail.history.slice(0, 4).map((entry) => ({
-                  content: (
-                    <div>
-                      <div style={{ fontSize: 13, color: colors.textPrimary }}>
-                        {ERP_STATUS_META[entry.toStatus]?.label ?? entry.toStatus}
-                      </div>
-                      <div style={{ fontSize: 12, color: colors.textTertiary }}>
-                        {fmtDateTime(entry.createdAt)}
-                      </div>
-                    </div>
-                  ),
-                }))}
-              />
-            </ContextSection>
+            <RailRecentStatus key={railDetail.id} history={railDetail.history} />
           )}
-          <ContextAction>
-            <Button block onClick={() => setDetailId(selectedRow.id)}>
-              查看详情
-            </Button>
-            {/* 发货 = PICKED 订单的推进主操作（§4.3：主操作紧跟查看详情，每个
-                视图 ≤1 个 primary）。一键出库：自动建发货单+单包裹封箱 →
-                正式出库扣库存 → 订单 SHIPPED。正式出库属 UI 规范 §7 L2，
-                确认弹窗带 danger ok。 */}
-            {canQuickShip && (
-              <Button
-                block
-                type="primary"
-                style={{ marginTop: 8 }}
-                loading={quickShipMutation.isPending}
-                onClick={() => {
-                  modal.confirm({
-                    title: `发货：${selectedRow.platformOrderId}？`,
-                    content:
-                      '自动创建发货单与单包裹并封箱，然后正式出库：会扣减已拣货库存，' +
-                      '全部行出库后订单变为已发货。已出库的发货单不会重复扣减库存。',
-                    okText: '确认发货',
-                    okButtonProps: { danger: true },
-                    cancelText: '返回',
-                    onOk: () => {
-                      quickShipMutation.mutate(selectedRow.id);
-                    },
-                  });
-                }}
-              >
-                发货
-              </Button>
-            )}
-            {/* 待拣货订单的推进主操作（2026-09-18 从详情弹窗迁至右栏操作区）：
-                仅 READY_TO_PICK 且有 RESERVED 行、且无进行中拣货任务时显示；
-                与「发货」（PICKED）互斥，保证同一视图只有一个 primary。 */}
-            {selectedRow.erpStatus === 'READY_TO_PICK' &&
-              !(railDetail?.pickingTasks ?? []).some(
-                (task) => task.status === 'CREATED' || task.status === 'IN_PROGRESS',
-              ) && (
-                <Button
-                  block
-                  type="primary"
-                  style={{ marginTop: 8 }}
-                  loading={createPickingMutation.isPending}
-                  onClick={() => createPickingMutation.mutate(selectedRow.id)}
-                >
-                  创建拣货任务
-                </Button>
-              )}
-            {/* 获取运单号 = 平台组包（真实平台写操作）。流程第一步（先于拣货）；
-                接口幂等，已组包时不会重复写平台。真实外部写超出 §7 分级表，
-                按 L2 力度用 modal.confirm 说明后果（比 Popconfirm 重是刻意的）。 */}
-            {canPrepareShipment && (
-              <Button
-                block
-                style={{ marginTop: 8 }}
-                loading={prepareShipmentMutation.isPending}
-                onClick={() => {
-                  modal.confirm({
-                    title: `获取运单号：${selectedRow.platformOrderId}？`,
-                    content:
-                      '将调用平台「组包」接口把该订单推进到待发货状态（OZON awaiting_deliver），' +
-                      '这是真实平台操作：会改变平台上的订单状态，并让平台分配运单号。' +
-                      '已组包的订单不会重复提交。',
-                    okText: '获取运单号',
-                    cancelText: '返回',
-                    onOk: () => {
-                      prepareShipmentMutation.mutate(selectedRow.id);
-                    },
-                  });
-                }}
-              >
-                {selectedRow.platformTrackingNo === null ? '获取运单号' : '重新获取运单号'}
-              </Button>
-            )}
-            {/* 打单：取平台面单 PDF 并打开打印（已存档则直接复用）。 */}
-            {canPrintLabel && (
-              <Button
-                block
-                style={{ marginTop: 8 }}
-                loading={shippingLabelMutation.isPending}
-                onClick={() => shippingLabelMutation.mutate({ id: selectedRow.id, refresh: false })}
-              >
-                {orderLabels.length === 0 ? '打单（取平台面单）' : '打单（用已存档面单）'}
-              </Button>
-            )}
-            {/* 快速建档 = 修复类次操作（§3.1 primary 语义是"推进动作"，且每视图
-                ≤1；与创建拣货任务/发货并存时降级为 default，避免双 primary）。 */}
-            {failedMappingItems.length > 0 &&
-              mappingSearchKeyword(failedMappingItems[0]!) !== null && (
-                <Button
-                  block
-                  style={{ marginTop: 8 }}
-                  loading={onboardLookupPending}
-                  onClick={() => openQuickOnboard(failedMappingItems[0]!, selectedRow.storeId)}
-                >
-                  快速建档
-                </Button>
-              )}
-            {selectedRow.erpStatus !== 'SHIPPED' && selectedRow.erpStatus !== 'CANCELLED' && (
-              <Button
-                block
-                style={{ marginTop: 8 }}
-                onClick={() => {
-                  setExternalTarget(selectedRow);
-                  externalForm.setFieldsValue({ reason: '' });
-                }}
-              >
-                标记外部履约
-              </Button>
-            )}
-            {selectedRow.erpStatus !== 'CANCELLED' && (
-              <Button
-                block
-                danger
-                style={{ marginTop: 8 }}
-                onClick={() => {
-                  // 取消订单 = L2：modal.confirm + danger ok。
-                  modal.confirm({
-                    title: `取消订单 ${selectedRow.platformOrderId}？`,
-                    content: '已占用行将释放库存；已拣货行将创建拦截任务（不自动恢复库存）。',
-                    okText: '取消订单',
-                    okButtonProps: { danger: true },
-                    cancelText: '返回',
-                    onOk: () => {
-                      cancelMutation.mutate(selectedRow.id);
-                    },
-                  });
-                }}
-              >
-                取消订单
-              </Button>
-            )}
-          </ContextAction>
         </>
       ),
     };
@@ -1898,7 +2112,6 @@ export function OrdersPage() {
     railDetail,
     retryMutation.isPending,
     createPickingMutation.isPending,
-    autoCreatePickingMutation.isPending,
     prepareShipmentMutation.isPending,
     shippingLabelMutation.isPending,
     quickShipMutation.isPending,
@@ -1912,7 +2125,6 @@ export function OrdersPage() {
     modal,
     onboardLookupPending,
     openQuickOnboard,
-    storeId,
   ]);
   useContextRail(railContent);
 
@@ -2294,17 +2506,73 @@ export function OrdersPage() {
         description="统一管理各平台订单及内部履约状态"
         secondary={<Button onClick={() => setViewOpen(true)}>视图设置</Button>}
         extra={
-          <Tabs
-            activeKey={activeTab}
-            onChange={(key) => {
-              setPage(1);
-              setActiveTab(key);
-            }}
-            items={STAGE_TABS.map((tab) => ({
-              key: tab.key,
-              label: `${tab.label} (${stageCountOf(tab.key)})`,
-            }))}
-          />
+          <>
+            {/* 批量操作条（用户指示 2026-10-13）：放中央主页面，页面名称下、
+                分类标签上方；不再进右侧抽屉。勾选跨分页保留。 */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                flexWrap: 'wrap',
+                padding: '8px 12px',
+                marginBottom: 12,
+                border: `1px solid ${selectedOrderIds.length > 0 ? colors.primary : colors.border}`,
+                borderRadius: 8,
+                background: selectedOrderIds.length > 0 ? colors.primarySoft : undefined,
+              }}
+            >
+              {selectedOrderIds.length > 0 ? (
+                <>
+                  <span style={{ fontSize: 13, fontWeight: 550 }}>
+                    已选 {selectedOrderIds.length} 单
+                  </span>
+                  <span style={{ fontSize: 12, color: colors.textTertiary }}>（跨分页保留）</span>
+                  <Button
+                    loading={batchPickingMutation.isPending}
+                    disabled={batchPrepareMutation.isPending || batchShipMutation.isPending}
+                    onClick={confirmBatchPicking}
+                  >
+                    批量生成拣货单
+                  </Button>
+                  <Button
+                    loading={batchPrepareMutation.isPending}
+                    disabled={batchPickingMutation.isPending || batchShipMutation.isPending}
+                    onClick={confirmBatchPrepare}
+                  >
+                    批量获取运单号
+                  </Button>
+                  <Button
+                    danger
+                    loading={batchShipMutation.isPending}
+                    disabled={batchPickingMutation.isPending || batchPrepareMutation.isPending}
+                    onClick={confirmBatchShip}
+                  >
+                    批量发货
+                  </Button>
+                  <Button type="text" onClick={clearOrderSelection}>
+                    清空选择
+                  </Button>
+                </>
+              ) : (
+                <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+                  勾选订单行首复选框后可批量操作（支持跨分页）：批量生成拣货单 / 批量获取运单号 /
+                  批量发货
+                </span>
+              )}
+            </div>
+            <Tabs
+              activeKey={activeTab}
+              onChange={(key) => {
+                setPage(1);
+                setActiveTab(key);
+              }}
+              items={STAGE_TABS.map((tab) => ({
+                key: tab.key,
+                label: `${tab.label} (${stageCountOf(tab.key)})`,
+              }))}
+            />
+          </>
         }
       />
 
@@ -2399,6 +2667,12 @@ export function OrdersPage() {
           rowKey="id"
           loading={query.isLoading}
           dataSource={list}
+          rowSelection={{
+            selectedRowKeys: selectedOrderIds,
+            // 跨分页选择（用户指示 2026-10-13）：翻页/筛选后勾选不丢。
+            preserveSelectedRowKeys: true,
+            onChange: handleOrderSelectionChange,
+          }}
           pagination={{
             current: page,
             pageSize: viewSettings.pageSize,
@@ -2432,7 +2706,11 @@ export function OrdersPage() {
             ),
           }}
           onRow={(record) => ({
-            onClick: () => {
+            onClick: (event) => {
+              // 勾选复选框不触发行选中/展开（多选与单击选中互不干扰）。
+              if ((event.target as HTMLElement).closest('.ant-table-selection-column') !== null) {
+                return;
+              }
               setSelectedItemId(null);
               setSelectedId(record.id === selectedId ? null : record.id);
             },

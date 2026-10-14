@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { Key, useCallback, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   App as AntdApp,
@@ -162,7 +162,7 @@ const PO_STATUS_TAB_FILTERS: Record<PoStatusTab, { status?: string; statuses?: s
 };
 
 export function PurchaseOrdersPage() {
-  const { message, modal } = AntdApp.useApp();
+  const { message, modal, notification } = AntdApp.useApp();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState('');
@@ -178,6 +178,49 @@ export function PurchaseOrdersPage() {
   // 生成收货单（需求 2026-10-09）：PO 未指定收货仓库时弹窗补选。
   const [receiptWarehouseOpen, setReceiptWarehouseOpen] = useState(false);
   const [receiptWarehouseForm] = Form.useForm<{ warehouseId: string }>();
+  // ---- 多选批量生成收货单（用户指示 2026-10-13）：跨分页保留勾选 ----
+  const [selectedPoIds, setSelectedPoIds] = useState<string[]>([]);
+  const [selectedPosById, setSelectedPosById] = useState<Map<string, PurchaseOrderRow>>(
+    () => new Map(),
+  );
+  const [batchReceiptOpen, setBatchReceiptOpen] = useState(false);
+  const [batchReceiptForm] = Form.useForm<{ warehouseId: string }>();
+  const handlePoSelectionChange = useCallback((keys: Key[], rows: PurchaseOrderRow[]) => {
+    const ids = keys.map(String);
+    setSelectedPoIds(ids);
+    setSelectedPosById((current) => {
+      const next = new Map<string, PurchaseOrderRow>();
+      for (const id of ids) {
+        const kept = current.get(id);
+        if (kept !== undefined) {
+          next.set(id, kept);
+        }
+      }
+      for (const row of rows) {
+        next.set(row.id, row);
+      }
+      return next;
+    });
+  }, []);
+  const clearPoSelection = useCallback(() => {
+    setSelectedPoIds([]);
+    setSelectedPosById(new Map());
+  }, []);
+  const selectedPoRows = useMemo(
+    () =>
+      selectedPoIds
+        .map((id) => selectedPosById.get(id))
+        .filter((row): row is PurchaseOrderRow => row !== undefined),
+    [selectedPoIds, selectedPosById],
+  );
+  // 只有「已下单 / 部分到货」还有未收数量可生成；到货/取消的单自动排除。
+  const eligibleBatchPos = useMemo(
+    () =>
+      selectedPoRows.filter(
+        (row) => row.status === 'ORDERED' || row.status === 'PARTIALLY_RECEIVED',
+      ),
+    [selectedPoRows],
+  );
 
   const tabFilter = PO_STATUS_TAB_FILTERS[statusTab];
   const list = useApiQuery<Envelope<PurchaseOrderRow[]>>(
@@ -372,6 +415,102 @@ export function PurchaseOrdersPage() {
     [modal, warehouses.data, generateReceiptMutation, receiptWarehouseForm],
   );
 
+  // ---- 批量生成收货单（用户指示 2026-10-13）：勾选多个 PO 一次出草稿 ----
+  // 后端逐单执行（单笔失败不拖垮整批）；这里只聚合展示每单的草稿号/失败原因。
+  const batchGenerateReceiptMutation = useMutation({
+    mutationFn: (items: Array<{ poId: string; warehouseId?: string }>) =>
+      apiPost<{
+        total: number;
+        succeeded: number;
+        failed: number;
+        results: Array<{
+          poId: string;
+          poNo: string | null;
+          ok: boolean;
+          receiptNo?: string | null;
+          code?: string | null;
+          message?: string | null;
+        }>;
+      }>('/api/v1/purchase-receipts/from-po/batch', { items }),
+    onSuccess: (result) => {
+      notification.open({
+        type: result.failed > 0 ? 'warning' : 'success',
+        title: `批量生成收货单：成功 ${result.succeeded} / 失败 ${result.failed}（共 ${result.total}）`,
+        description: (
+          <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+            {result.results.map((item) => (
+              <div key={item.poId}>
+                {item.poNo ?? selectedPosById.get(item.poId)?.poNo ?? item.poId}：
+                {item.ok
+                  ? `已生成收货单 ${item.receiptNo}（草稿），到收货单页确认后入库`
+                  : `失败（${item.message ?? item.code ?? '未知错误'}）`}
+              </div>
+            ))}
+          </div>
+        ),
+        duration: result.failed > 0 ? 0 : 8,
+      });
+      setBatchReceiptOpen(false);
+      batchReceiptForm.resetFields();
+      void queryClient.invalidateQueries({ queryKey: ['purchase-receipts'] });
+      void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+    },
+    onError: (error: Error) => void message.error(`批量生成收货单失败：${error.message}`),
+  });
+
+  const runBatchGenerateReceipt = useCallback(
+    (fallbackWarehouseId: string | undefined) => {
+      batchGenerateReceiptMutation.mutate(
+        eligibleBatchPos.map((row) => ({
+          poId: row.id,
+          ...(row.receivingWarehouseId !== null
+            ? { warehouseId: row.receivingWarehouseId }
+            : fallbackWarehouseId !== undefined
+              ? { warehouseId: fallbackWarehouseId }
+              : {}),
+        })),
+      );
+    },
+    [batchGenerateReceiptMutation, eligibleBatchPos],
+  );
+
+  /**
+   * 批量入口：无可生成单提示；勾选单都带收货仓库 → 二次确认；有缺仓库的单
+   * → 弹窗为这些单选一个共用仓库（其余单仍用自己的意向仓库）。
+   */
+  const requestBatchGenerateReceipt = useCallback(() => {
+    if (selectedPoRows.length === 0) {
+      return;
+    }
+    if (eligibleBatchPos.length === 0) {
+      void message.warning('勾选的采购单都不是「已下单 / 部分到货」，没有可生成收货单的单');
+      return;
+    }
+    const missingWarehouse = eligibleBatchPos.filter((row) => row.receivingWarehouseId === null);
+    if (missingWarehouse.length > 0) {
+      batchReceiptForm.setFieldsValue({ warehouseId: undefined });
+      setBatchReceiptOpen(true);
+      return;
+    }
+    modal.confirm({
+      title: `为勾选的 ${eligibleBatchPos.length} 个采购单生成收货单草稿？`,
+      content:
+        '按各采购单的收货仓库与未收数量预填草稿；生成后到收货单页选库位、确认收货才入库。单笔失败不影响其余。',
+      okText: '批量生成草稿',
+      cancelText: '返回',
+      onOk: () => {
+        runBatchGenerateReceipt(undefined);
+      },
+    });
+  }, [
+    modal,
+    message,
+    selectedPoRows.length,
+    eligibleBatchPos,
+    batchReceiptForm,
+    runBatchGenerateReceipt,
+  ]);
+
   // ---- Context rail ----
   const railContent = useMemo<ContextRailContent>(() => {
     if (selectedRow === null) {
@@ -479,6 +618,46 @@ export function PurchaseOrdersPage() {
             登记采购
           </Button>
         }
+        extra={
+          /* 批量操作条（用户指示 2026-10-13）：放中央主页面、页面名称下；
+             与订单页同款跨分页勾选。 */
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flexWrap: 'wrap',
+              padding: '8px 12px',
+              border: `1px solid ${selectedPoIds.length > 0 ? colors.primary : colors.border}`,
+              borderRadius: 8,
+              background: selectedPoIds.length > 0 ? colors.primarySoft : undefined,
+            }}
+          >
+            {selectedPoIds.length > 0 ? (
+              <>
+                <span style={{ fontSize: 13, fontWeight: 550 }}>
+                  已选 {selectedPoIds.length} 单
+                </span>
+                <span style={{ fontSize: 12, color: colors.textTertiary }}>
+                  （可生成 {eligibleBatchPos.length}，跨分页保留）
+                </span>
+                <Button
+                  loading={batchGenerateReceiptMutation.isPending}
+                  onClick={requestBatchGenerateReceipt}
+                >
+                  批量生成收货单
+                </Button>
+                <Button type="text" onClick={clearPoSelection}>
+                  清空选择
+                </Button>
+              </>
+            ) : (
+              <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+                勾选采购单行首复选框后可批量操作（支持跨分页）：批量生成收货单
+              </span>
+            )}
+          </div>
+        }
       />
 
       <FilterBar>
@@ -515,6 +694,12 @@ export function PurchaseOrdersPage() {
           rowKey="id"
           loading={list.isLoading}
           dataSource={rows}
+          rowSelection={{
+            selectedRowKeys: selectedPoIds,
+            // 跨分页选择（用户指示 2026-10-13）：翻页/切标签后勾选不丢。
+            preserveSelectedRowKeys: true,
+            onChange: handlePoSelectionChange,
+          }}
           pagination={{
             current: page,
             pageSize: 50,
@@ -534,7 +719,13 @@ export function PurchaseOrdersPage() {
             ),
           }}
           onRow={(record) => ({
-            onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+            onClick: (event) => {
+              // 勾选复选框不触发行选中/展开（多选与单击选中互不干扰）。
+              if ((event.target as HTMLElement).closest('.ant-table-selection-column') !== null) {
+                return;
+              }
+              setSelectedId(record.id === selectedId ? null : record.id);
+            },
             onDoubleClick: () => setDetailId(record.id),
             style: {
               cursor: 'pointer',
@@ -890,6 +1081,46 @@ export function PurchaseOrdersPage() {
             label="收货仓库"
             rules={[{ required: true, message: '请选择收货仓库' }]}
             extra="该采购单未指定收货仓库；草稿按采购明细的未收数量预填，确认收货后入库。"
+          >
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder="选择收货仓库"
+              loading={warehouses.isLoading}
+              options={(warehouses.data?.data ?? []).map((warehouse) => ({
+                value: warehouse.id,
+                label: `${warehouse.warehouseCode} · ${warehouse.name}`,
+              }))}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 批量生成收货单（用户指示 2026-10-13）：勾选中存在未指定收货仓库的
+          采购单时，为这些单统一补选一个仓库；其余单仍用各自意向仓库。 */}
+      <Modal
+        title={`批量生成收货单：为 ${eligibleBatchPos.filter((row) => row.receivingWarehouseId === null).length} 个未指定仓库的采购单补选收货仓库`}
+        open={batchReceiptOpen}
+        onCancel={() => setBatchReceiptOpen(false)}
+        onOk={() => {
+          void batchReceiptForm
+            .validateFields()
+            .then((values) => {
+              runBatchGenerateReceipt(values.warehouseId);
+            })
+            .catch(() => undefined);
+        }}
+        okText="批量生成草稿"
+        cancelText="取消"
+        confirmLoading={batchGenerateReceiptMutation.isPending}
+        destroyOnHidden
+      >
+        <Form form={batchReceiptForm} layout="vertical" preserve={false}>
+          <Form.Item
+            name="warehouseId"
+            label="收货仓库"
+            rules={[{ required: true, message: '请选择收货仓库' }]}
+            extra="仅应用于未指定收货仓库的勾选采购单；其余单使用各自登记的收货仓库。草稿按未收数量预填，确认收货后入库。"
           >
             <Select
               showSearch
