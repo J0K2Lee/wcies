@@ -681,6 +681,37 @@ describe('cancellation (task §79-§82)', () => {
     expect(detail.history.map((h) => h.toStatus)).toContain('CANCELLED');
   });
 
+  it('订单占用不可裸释放（库存页 lifecycle 被拒），但订单取消仍可收口（2026-10-15 悬空占用）', async () => {
+    // 用户 bug：库存占用页对 ORDER 来源预约直接 release，只改库存不回订单，
+    // 行悬空在 RESERVED（真实样本 ORD00000142）。修复：库存层拒绝 ORDER 来源的
+    // 裸生命周期；订单取消链路带 orderDomain 标志，且容忍预约已终态（自愈）。
+    const skuId = await newSku('OWNED');
+    await initialize({ skuId, binId: binA01, quantity: '3' });
+    await mapSku(skuId, `${PREFIX}-OWNED-1`);
+    const result = await ingest({ items: [{ platformSkuId: `${PREFIX}-OWNED-1`, quantity: '1' }] });
+    const item = result.body.data.itemResults[0]!;
+    const reservationId = item.reservationId;
+    expect(reservationId).not.toBeNull();
+
+    // 直接对 ORDER 来源预约 release → 409，库存不变，订单行仍 RESERVED。
+    const naked = await client.post(`/api/v1/inventory/reservations/${reservationId}/release`, {});
+    expect(naked.status).toBe(409);
+    expect(naked.body.error?.code).toBe('INVENTORY_RESERVATION_ORDER_OWNED');
+    expect((await balanceOf(skuId))[0]?.reservedQty).toBe('1.000');
+
+    // 订单取消链路照常：释放库存、行转 RELEASED、订单 CANCELLED。
+    const cancel = await client.post<{ erpStatus: string; releasedItems: number }>(
+      `/api/v1/orders/${result.body.data.orderId}/cancel`,
+      { reason: 'integration cancel (owned)' },
+    );
+    expect(cancel.status).toBe(200);
+    expect(cancel.body.data.erpStatus).toBe('CANCELLED');
+    expect(cancel.body.data.releasedItems).toBe(1);
+    expect((await balanceOf(skuId))[0]?.reservedQty).toBe('0.000');
+    const after = await orderDetail(result.body.data.orderId);
+    expect(after.items[0]?.fulfillmentStatus).toBe('RELEASED');
+  });
+
   it('backordered cancel touches no stock (§80)', async () => {
     const skuId = await newSku('CXB');
     await mapSku(skuId, `${PREFIX}-CXB-1`);

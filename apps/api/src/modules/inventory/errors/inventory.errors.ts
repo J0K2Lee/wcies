@@ -55,6 +55,27 @@ export class InvalidReservationStateError extends DomainError {
   }
 }
 
+/**
+ * 订单来源的预约只能走订单域入口（2026-10-15 用户 bug 报告）。
+ *
+ * `reference_type = 'ORDER'` 的预约承载订单行的库存事实：直接对它做
+ * release/pick/unpick/ship 会改库存却不同步订单行状态与订单 rollup，制造
+ * 「订单页显示已占用、实为已释放」的悬空占用（真实样本 ORD00000142）。
+ * 释放走「取消订单」、拣货走拣货任务、出库走发货单——均已有订单域入口并经
+ * 库存模块公共 API（AGENTS.md §10）。本错误拦住绕过订单域的裸生命周期调用。
+ */
+export class OrderOwnedReservationError extends DomainError {
+  readonly code = 'INVENTORY_RESERVATION_ORDER_OWNED';
+  readonly httpStatus = 409;
+
+  constructor(details: { reservationId: string; attemptedAction: string }) {
+    super(
+      '订单占用只能通过订单流程变更：释放请在订单页「取消订单」，拣货请走拣货任务，出库请走发货单',
+      details,
+    );
+  }
+}
+
 export class ReservationNotFoundError extends DomainError {
   readonly code = 'INVENTORY_RESERVATION_NOT_FOUND';
   readonly httpStatus = 404;

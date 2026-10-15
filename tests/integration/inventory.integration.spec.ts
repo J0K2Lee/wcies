@@ -976,7 +976,10 @@ describe('task §85 acceptance: VK87-BLK in SZ01', () => {
       warehouseId: sz01WarehouseId,
       quantity: '3',
       idempotencyKey: `s85-reserve:${PREFIX}`,
-      referenceType: 'ORDER',
+      // TEST 来源：本用例验收库存生命周期算术（pick→ship→onHand）。
+      // ORDER 来源的裸生命周期自 2026-10-15 起被拒（防悬空占用），
+      // 订单域的取消收口见 orders.integration.spec「订单占用不可裸释放」。
+      referenceType: 'TEST',
     });
     expect(reservation.status).toBe(200);
     const id = reservation.body.data.id;

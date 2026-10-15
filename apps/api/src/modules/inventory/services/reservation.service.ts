@@ -20,6 +20,7 @@ import {
   InventoryQuantityInvalidError,
   InventorySerialInvalidError,
   InvalidReservationStateError,
+  OrderOwnedReservationError,
   ReservationNotFoundError,
   SkuNotFoundInvariantError,
   BalanceMissingInvariantError,
@@ -85,6 +86,14 @@ export interface LifecycleInput {
   /** Optional business key; same key replays the first execution (task §30). */
   idempotencyKey?: string;
   remark?: string | null;
+  /**
+   * Internal flag set ONLY by the order domain's own cancel chain (2026-10-15):
+   * a `reference_type='ORDER'` reservation may not be released/picked/built
+   * out-of-band, because that would move stock without syncing the order line
+   * + rollup (悬空占用). The inventory HTTP endpoints never set this, so a
+   * manual lifecycle call on an ORDER reservation is rejected.
+   */
+  orderDomain?: boolean;
 }
 
 /**
@@ -376,157 +385,176 @@ export class ReservationService {
     await runner.connect();
     await runner.startTransaction();
     let finished: InventoryReservationEntity | undefined;
+    let alreadyTerminal = false;
     try {
       const reservation = await this.reservationRepo.lockById(runner, reservationId);
       if (reservation === null) {
         throw new ReservationNotFoundError(reservationId);
       }
-      if (!RESERVATION_TRANSITIONS[reservation.status].includes(target)) {
-        throw new InvalidReservationStateError({
+      // 订单来源预约只能走订单域入口（2026-10-15）：裸生命周期会改库存却不同步
+      // 订单行状态/rollup，制造悬空占用。订单域的取消链路显式传 orderDomain=true。
+      if (reservation.referenceType === 'ORDER' && input.orderDomain !== true) {
+        throw new OrderOwnedReservationError({
           reservationId,
-          currentStatus: reservation.status,
           attemptedAction: op,
         });
       }
-
-      const lines = await this.reservationRepo.findLinesTx(runner, reservationId);
-      // Deterministic order for both balance locking and ledger lines (task §73).
-      const orderedLines = await sortLinesByBinCodeOnRunner(runner, lines);
-
-      // Serial lifecycle follows the reservation in the SAME transaction
-      // (Sprint 3 task §43); non-serial SKUs have no serial rows at all.
-      const serials = await this.serialRepo.findByReservationIdTx(
-        runner,
-        reservationId,
-        {
-          RELEASE: 'RESERVED',
-          PICK: 'RESERVED',
-          UNPICK: 'PICKED',
-          SHIP: 'PICKED',
-        }[op] as 'RESERVED' | 'PICKED',
-      );
-
-      const ledgerLines: LedgerLineInsert[] = [];
-      for (const line of orderedLines) {
-        const lineQty = parseQty(line.quantity);
-        const balance = await this.balanceRepo.lockByDim(runner, {
-          skuId: reservation.skuId,
-          warehouseId: reservation.warehouseId,
-          binId: line.binId,
-          condition: 'SELLABLE',
-        });
-        if (balance === null) {
-          throw new BalanceMissingInvariantError({
-            skuId: reservation.skuId,
-            warehouseId: reservation.warehouseId,
-            binId: line.binId,
+      // 订单域取消的幂等兜底（悬空占用自愈）：预约已处于目标终态时直接复用结果，
+      // 不再走状态机（RELEASED→RELEASED 无出边）。这是「订单行仍显示已占用、
+      // 预约已被外部释放」的历史悬空行在取消时能收口的必要路径。DTO 在 runner
+      // 释放后再构建（本文件池纪律：事务内不跑池查询）。
+      if (input.orderDomain === true && reservation.status === target) {
+        await runner.commitTransaction();
+        finished = reservation;
+        alreadyTerminal = true;
+      } else {
+        if (!RESERVATION_TRANSITIONS[reservation.status].includes(target)) {
+          throw new InvalidReservationStateError({
+            reservationId,
+            currentStatus: reservation.status,
+            attemptedAction: op,
           });
         }
 
-        const onHand = qtyFromDb(balance.onHandQty);
-        const reserved = qtyFromDb(balance.reservedQty);
-        const picked = qtyFromDb(balance.pickedQty);
+        const lines = await this.reservationRepo.findLinesTx(runner, reservationId);
+        // Deterministic order for both balance locking and ledger lines (task §73).
+        const orderedLines = await sortLinesByBinCodeOnRunner(runner, lines);
 
-        let nextOnHand = onHand;
-        let nextReserved = reserved;
-        let nextPicked = picked;
-        if (op === 'RELEASE') {
-          nextReserved = reserved - lineQty; // Reserved - N, On Hand unchanged (task §29)
-        } else if (op === 'PICK') {
-          nextReserved = reserved - lineQty; // Reserved - N, Picked + N (task §31)
-          nextPicked = picked + lineQty;
-        } else if (op === 'UNPICK') {
-          nextPicked = picked - lineQty; // Picked - N, Reserved + N (task §33)
-          nextReserved = reserved + lineQty;
-        } else {
-          nextPicked = picked - lineQty; // Picked - N, On Hand - N (task §34)
-          nextOnHand = onHand - lineQty;
+        // Serial lifecycle follows the reservation in the SAME transaction
+        // (Sprint 3 task §43); non-serial SKUs have no serial rows at all.
+        const serials = await this.serialRepo.findByReservationIdTx(
+          runner,
+          reservationId,
+          {
+            RELEASE: 'RESERVED',
+            PICK: 'RESERVED',
+            UNPICK: 'PICKED',
+            SHIP: 'PICKED',
+          }[op] as 'RESERVED' | 'PICKED',
+        );
+
+        const ledgerLines: LedgerLineInsert[] = [];
+        for (const line of orderedLines) {
+          const lineQty = parseQty(line.quantity);
+          const balance = await this.balanceRepo.lockByDim(runner, {
+            skuId: reservation.skuId,
+            warehouseId: reservation.warehouseId,
+            binId: line.binId,
+            condition: 'SELLABLE',
+          });
+          if (balance === null) {
+            throw new BalanceMissingInvariantError({
+              skuId: reservation.skuId,
+              warehouseId: reservation.warehouseId,
+              binId: line.binId,
+            });
+          }
+
+          const onHand = qtyFromDb(balance.onHandQty);
+          const reserved = qtyFromDb(balance.reservedQty);
+          const picked = qtyFromDb(balance.pickedQty);
+
+          let nextOnHand = onHand;
+          let nextReserved = reserved;
+          let nextPicked = picked;
+          if (op === 'RELEASE') {
+            nextReserved = reserved - lineQty; // Reserved - N, On Hand unchanged (task §29)
+          } else if (op === 'PICK') {
+            nextReserved = reserved - lineQty; // Reserved - N, Picked + N (task §31)
+            nextPicked = picked + lineQty;
+          } else if (op === 'UNPICK') {
+            nextPicked = picked - lineQty; // Picked - N, Reserved + N (task §33)
+            nextReserved = reserved + lineQty;
+          } else {
+            nextPicked = picked - lineQty; // Picked - N, On Hand - N (task §34)
+            nextOnHand = onHand - lineQty;
+          }
+
+          const patch = {
+            onHandQty: formatQty(nextOnHand),
+            reservedQty: formatQty(nextReserved),
+            pickedQty: formatQty(nextPicked),
+            version: nextVersionOf(balance),
+          };
+          assertBalanceInvariants(patch);
+          await this.balanceRepo.saveQuantities(runner, balance.id, patch);
+
+          ledgerLines.push({
+            skuId: reservation.skuId,
+            warehouseId: reservation.warehouseId,
+            binId: line.binId,
+            transactionType: op,
+            quantityBefore: balance.onHandQty,
+            quantityChange: formatQty(nextOnHand - onHand),
+            quantityAfter: patch.onHandQty,
+            reservedBefore: op === 'SHIP' ? null : balance.reservedQty,
+            reservedChange: op === 'SHIP' ? null : formatQty(nextReserved - reserved),
+            reservedAfter: op === 'SHIP' ? null : patch.reservedQty,
+            pickedBefore: op === 'RELEASE' ? null : balance.pickedQty,
+            pickedChange: op === 'RELEASE' ? null : formatQty(nextPicked - picked),
+            pickedAfter: op === 'RELEASE' ? null : patch.pickedQty,
+            remark: `reservation=${reservation.reservationNo}`,
+          });
+
+          const linePatch =
+            op === 'RELEASE'
+              ? { status: 'RELEASED' as const }
+              : op === 'PICK'
+                ? { status: 'PICKED' as const, pickedQty: line.quantity }
+                : op === 'UNPICK'
+                  ? { status: 'ACTIVE' as const, pickedQty: '0.000' }
+                  : { status: 'CONSUMED' as const };
+          await this.reservationRepo.updateLine(runner, line.id, linePatch);
         }
 
-        const patch = {
-          onHandQty: formatQty(nextOnHand),
-          reservedQty: formatQty(nextReserved),
-          pickedQty: formatQty(nextPicked),
-          version: nextVersionOf(balance),
-        };
-        assertBalanceInvariants(patch);
-        await this.balanceRepo.saveQuantities(runner, balance.id, patch);
-
-        ledgerLines.push({
-          skuId: reservation.skuId,
-          warehouseId: reservation.warehouseId,
-          binId: line.binId,
-          transactionType: op,
-          quantityBefore: balance.onHandQty,
-          quantityChange: formatQty(nextOnHand - onHand),
-          quantityAfter: patch.onHandQty,
-          reservedBefore: op === 'SHIP' ? null : balance.reservedQty,
-          reservedChange: op === 'SHIP' ? null : formatQty(nextReserved - reserved),
-          reservedAfter: op === 'SHIP' ? null : patch.reservedQty,
-          pickedBefore: op === 'RELEASE' ? null : balance.pickedQty,
-          pickedChange: op === 'RELEASE' ? null : formatQty(nextPicked - picked),
-          pickedAfter: op === 'RELEASE' ? null : patch.pickedQty,
-          remark: `reservation=${reservation.reservationNo}`,
-        });
-
-        const linePatch =
-          op === 'RELEASE'
-            ? { status: 'RELEASED' as const }
-            : op === 'PICK'
-              ? { status: 'PICKED' as const, pickedQty: line.quantity }
-              : op === 'UNPICK'
-                ? { status: 'ACTIVE' as const, pickedQty: '0.000' }
-                : { status: 'CONSUMED' as const };
-        await this.reservationRepo.updateLine(runner, line.id, linePatch);
-      }
-
-      await this.ledgerRepo.insertEventWithLines(
-        runner,
-        {
-          eventType: op,
-          referenceType: reservation.referenceType,
-          referenceId: reservation.referenceId,
-          idempotencyKey: eventKey,
-          operatorId: input.operator.userId,
-          remark: `reservation=${reservation.reservationNo}${suffixRemark(input.remark)}`,
-        },
-        ledgerLines,
-      );
-
-      if (serials.length > 0) {
-        const serialPatch =
-          op === 'RELEASE'
-            ? { status: 'IN_STOCK' as const, reservationId: null }
-            : op === 'PICK'
-              ? { status: 'PICKED' as const }
-              : op === 'UNPICK'
-                ? { status: 'RESERVED' as const, pickingTaskItemId: null }
-                : { status: 'SHIPPED' as const };
-        await this.serialRepo.updateMany(
+        await this.ledgerRepo.insertEventWithLines(
           runner,
-          serials.map((serial) => serial.id),
-          serialPatch,
+          {
+            eventType: op,
+            referenceType: reservation.referenceType,
+            referenceId: reservation.referenceId,
+            idempotencyKey: eventKey,
+            operatorId: input.operator.userId,
+            remark: `reservation=${reservation.reservationNo}${suffixRemark(input.remark)}`,
+          },
+          ledgerLines,
         );
+
+        if (serials.length > 0) {
+          const serialPatch =
+            op === 'RELEASE'
+              ? { status: 'IN_STOCK' as const, reservationId: null }
+              : op === 'PICK'
+                ? { status: 'PICKED' as const }
+                : op === 'UNPICK'
+                  ? { status: 'RESERVED' as const, pickingTaskItemId: null }
+                  : { status: 'SHIPPED' as const };
+          await this.serialRepo.updateMany(
+            runner,
+            serials.map((serial) => serial.id),
+            serialPatch,
+          );
+        }
+
+        const now = new Date();
+        const headerPatch: Partial<InventoryReservationEntity> =
+          op === 'RELEASE'
+            ? { status: 'RELEASED', releasedAt: now }
+            : op === 'PICK'
+              ? { status: 'PICKED', pickedAt: now }
+              : op === 'UNPICK'
+                ? { status: 'ACTIVE', pickedAt: null }
+                : { status: 'CONSUMED', consumedAt: now };
+        await this.reservationRepo.updateStatus(runner, reservationId, headerPatch);
+
+        await runner.commitTransaction();
+        finished = { ...reservation, ...headerPatch };
       }
-
-      const now = new Date();
-      const headerPatch: Partial<InventoryReservationEntity> =
-        op === 'RELEASE'
-          ? { status: 'RELEASED', releasedAt: now }
-          : op === 'PICK'
-            ? { status: 'PICKED', pickedAt: now }
-            : op === 'UNPICK'
-              ? { status: 'ACTIVE', pickedAt: null }
-              : { status: 'CONSUMED', consumedAt: now };
-      await this.reservationRepo.updateStatus(runner, reservationId, headerPatch);
-
-      await runner.commitTransaction();
-      finished = { ...reservation, ...headerPatch };
     } finally {
       await runner.release();
     }
 
-    return this.buildDtoWithCodes(finished, false);
+    return this.buildDtoWithCodes(finished, alreadyTerminal);
   }
 
   // --------------------------------------------------------------------------

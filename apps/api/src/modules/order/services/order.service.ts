@@ -613,6 +613,9 @@ export class OrderService {
           operator,
           idempotencyKey: orderReleaseKey(item.id),
           remark: `cancel order=${order.orderNo}${reason ? `; ${reason}` : ''}`,
+          // 订单域入口标志（2026-10-15）：ORDER 来源预约的裸 release 被库存层
+          // 拒绝，只有订单自身的取消链路可释放，并同步行状态 + rollup。
+          orderDomain: true,
         });
         await this.setItemReleased(item);
         released += 1;

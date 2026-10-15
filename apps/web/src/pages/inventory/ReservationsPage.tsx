@@ -57,7 +57,13 @@ const LIFECYCLE_LABELS: Record<LifecycleOp, { text: string; explain: string }> =
 };
 
 /** 状态机：已占用 → 已拣货 → 已出库；已占用可释放；已拣货可取消拣货回已占用。 */
-function actionsFor(status: string): LifecycleOp[] {
+function actionsFor(status: string, referenceType: string): LifecycleOp[] {
+  // 订单来源预约（referenceType=ORDER）只能走订单域入口（2026-10-15）：释放走
+  // 「取消订单」、拣货走拣货任务、出库走发货单。裸生命周期会改库存却不同步订单
+  // 行状态/rollup，制造悬空占用——后端已拒绝，前端也不应给出可点的按钮。
+  if (referenceType === 'ORDER') {
+    return [];
+  }
   switch (status) {
     case 'ACTIVE':
       return ['pick', 'release'];
@@ -140,7 +146,8 @@ export function ReservationsPage() {
       };
     }
     const meta = RESERVATION_STATUS_META[selectedRow.status];
-    const ops = actionsFor(selectedRow.status);
+    const ops = actionsFor(selectedRow.status, selectedRow.referenceType);
+    const orderOwned = selectedRow.referenceType === 'ORDER';
     // 生命周期推进动作不是 danger（UI 规范 §3.1）；首个可用动作为主操作。
     return {
       defaultCollapsed: true,
@@ -181,7 +188,13 @@ export function ReservationsPage() {
                 {LIFECYCLE_LABELS[op].text}
               </Button>
             ))}
-            {ops.length === 0 && <RailHint>该占用已是终态，无可用操作。</RailHint>}
+            {ops.length === 0 && (
+              <RailHint>
+                {orderOwned
+                  ? '订单占用的生命周期由订单流程驱动：释放请在订单页「取消订单」，拣货走拣货任务，出库走发货单。'
+                  : '该占用已是终态，无可用操作。'}
+              </RailHint>
+            )}
           </ContextAction>
         </>
       ),

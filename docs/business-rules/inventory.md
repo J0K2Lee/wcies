@@ -537,6 +537,25 @@ On Hand：
 
 但必须留下业务记录。
 
+## 订单来源预约只能经订单域变更（2026-10-15 修复）
+
+`reference_type = 'ORDER'` 的 Reservation 承载订单行的库存事实，**不得**通过
+库存占用页的裸生命周期端点（`POST /inventory/reservations/:id/{release,pick,
+unpick,ship}`）变更——那条路径只改库存（余额/流水/预约头）却不同步订单行
+`fulfillment_status` 与订单 rollup，会留下「订单页显示已占用、实体占用已解除」
+的悬空行（真实样本 ORD00000142 / RSV00000010）。
+
+- 库存层对 ORDER 来源的裸生命周期调用返回 409
+  `INVENTORY_RESERVATION_ORDER_OWNED`；`TEST` / `MANUAL` 来源不受影响。
+- 订单域入口不受限：取消订单（`OrderService.cancel`）、拣货任务
+  （`pickStockPartialInTx`）、发货单（`shipStockPartialInTx`）均经库存模块
+  公共 API 变更，并同步订单行 + rollup（AGENTS.md §10）。
+- 订单取消链路显式携带 `orderDomain` 标志；预约已处于目标终态时幂等复用
+  结果（`RELEASED→RELEASED` 无状态机出边），使历史悬空行在取消时能收口。
+- 数据修复：Migration `20261015_001_fix_dangling_order_reservations` 把现存
+  悬空行（RESERVED 且无有效占用）按 §5 口径归位 BACKORDERED、清理其零进度
+  拣货行、重算受影响订单 rollup。
+
 ---
 
 # 20. Picked 状态订单取消
