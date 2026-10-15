@@ -6,6 +6,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Checkbox,
   Modal,
   Popconfirm,
   Select,
@@ -156,10 +157,20 @@ export function InventoryPage() {
     'warehouses-lite',
     warehouseSearch,
   ]);
+  // 全零事实行（移位/出库清零后保留）默认隐藏（用户指示 2026-10-15），
+  // 盘点核对时打开开关。
+  const [showEmpty, setShowEmpty] = useState(false);
   const inventory = useApiQuery<Envelope<InventoryRow[]>>(
     '/api/v1/inventory',
-    { page, pageSize: 50, keyword: keyword || undefined, warehouseId, status },
-    ['inventory', page, keyword, warehouseId, status],
+    {
+      page,
+      pageSize: 50,
+      keyword: keyword || undefined,
+      warehouseId,
+      status,
+      ...(showEmpty ? { includeEmpty: 'true' } : {}),
+    },
+    ['inventory', page, keyword, warehouseId, status, showEmpty],
   );
   // KPI counters (task §33): three light meta.total queries — real numbers only.
   const inStockTotal = useApiQuery<Envelope<unknown[]>>(
@@ -515,6 +526,17 @@ export function InventoryPage() {
             setStatus(value);
           }}
         />
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+          <Checkbox
+            checked={showEmpty}
+            onChange={(event) => {
+              setPage(1);
+              setShowEmpty(event.target.checked);
+            }}
+          >
+            显示空记录
+          </Checkbox>
+        </label>
       </FilterBar>
 
       <SectionCard flush>

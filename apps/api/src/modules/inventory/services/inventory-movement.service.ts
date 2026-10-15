@@ -16,6 +16,7 @@ import {
 } from '../errors/inventory.errors';
 import { InventoryBalanceRepository } from '../repositories/inventory-balance.repository';
 import { InventoryTransactionRepository } from '../repositories/inventory-transaction.repository';
+import { InventoryStockListenerRegistry } from './inventory-stock-listener-registry';
 import {
   assertBalanceInvariants,
   nextVersionOf,
@@ -57,6 +58,7 @@ export class InventoryMovementService {
     private readonly dataSource: DataSource,
     private readonly balanceRepo: InventoryBalanceRepository,
     private readonly ledgerRepo: InventoryTransactionRepository,
+    private readonly stockListeners: InventoryStockListenerRegistry,
     skuService: SkuService,
     warehouseService: WarehouseService,
     binService: WarehouseBinService,
@@ -180,6 +182,17 @@ export class InventoryMovementService {
       );
 
       await runner.commitTransaction();
+
+      // 库内移位也通知监听器（用户指示 2026-10-15）：收货入暂存库位后用户
+      // 移位上架是「货已就位」的心智时点——配置类失败（如店铺后补绑定仓库）
+      // 修复后的任何移位都让缺货行获得一次自愈的自动占用（预留幂等，仍不
+      // 足则静默跳过）。幂等重放路径不重复通知。
+      this.stockListeners.emitStockIncreased({
+        skuId: input.skuId,
+        warehouseId: input.warehouseId,
+        eventType: 'MOVE_BIN',
+      });
+
       return {
         eventNo: event.eventNo,
         transactionNos: [`${event.eventNo}-1`, `${event.eventNo}-2`],

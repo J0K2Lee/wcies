@@ -147,6 +147,11 @@ export interface BalanceListFilters {
   condition?: InventoryCondition;
   /** Computed row availability (task §41): IN_STOCK / OUT_OF_STOCK. */
   status?: 'IN_STOCK' | 'OUT_OF_STOCK';
+  /**
+   * true = 连全零事实行（在库/占用/拣货全 0）一起返回；缺省 false = 隐藏
+   * （2026-10-15 用户指示：清零残留行默认不显示，盘点核对时打开）。
+   */
+  includeEmpty?: boolean;
 }
 
 export interface BalanceRowWithRefs {
@@ -205,6 +210,11 @@ export async function listBalancesWithRefs(
     qb.andWhere('(b.onHandQty - b.reservedQty - b.pickedQty) > 0');
   } else if (filters.status === 'OUT_OF_STOCK') {
     qb.andWhere('(b.onHandQty - b.reservedQty - b.pickedQty) <= 0');
+  }
+  // 全零行默认隐藏（用户指示 2026-10-15）：移位/出库清零后保留的余额事实行
+  // 对日常浏览是噪音；includeEmpty=true（盘点核对）时不过滤。
+  if (filters.includeEmpty !== true) {
+    qb.andWhere('(b.onHandQty > 0 OR b.reservedQty > 0 OR b.pickedQty > 0)');
   }
 
   // ORDER BY must reference entity properties only: raw-join aliases crash

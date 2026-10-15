@@ -9,6 +9,7 @@ import { ExceptionService } from '../../exception/services/exception.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { OrderEntity } from '../entities/order.entity';
 import { OrderItemEntity } from '../entities/order-item.entity';
+import { OrderIngestInvalidError } from '../errors/order.errors';
 
 function makeOrder(id: string, erpStatus = 'BACKORDERED'): OrderEntity {
   return {
@@ -147,5 +148,95 @@ describe('OrderAutoReallocationService (用户指示 2026-09-17)', () => {
       service.onStockIncreased({ skuId: 'sku-1', warehouseId: 'wh-1', eventType: 'RECEIVE' }),
     ).not.toThrow();
     await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+});
+
+describe('OrderAutoReallocationService 配置性失败可见化 (用户指示 2026-10-15)', () => {
+  it('raises an ORDER_INVALID_STATE line exception when the store has no bound warehouse', async () => {
+    const registry = new InventoryStockListenerRegistry();
+    const itemRepo = {
+      findUnallocatedItemIdsBySku: vi
+        .fn()
+        .mockResolvedValue([{ itemId: 'item-1', orderId: 'order-1' }]),
+      findById: vi.fn().mockResolvedValue(makeItem('item-1')),
+    } as unknown as OrderItemRepository;
+    const orderRepo = {
+      findById: vi.fn().mockResolvedValue(makeOrder('order-1')),
+    } as unknown as OrderRepository;
+    const ingestionService = {
+      allocateMappedItem: vi
+        .fn()
+        .mockRejectedValue(new OrderIngestInvalidError('店铺没有可用的库存绑定仓库')),
+    } as unknown as OrderIngestionService;
+    const exceptionService = {
+      resolveByReference: vi.fn().mockResolvedValue(undefined),
+      upsertOpen: vi.fn().mockResolvedValue({ id: 'exc-1' }),
+    } as unknown as ExceptionService;
+    const service = new OrderAutoReallocationService(
+      registry,
+      itemRepo,
+      orderRepo,
+      ingestionService,
+      { recomputeOrderStatus: vi.fn() } as never,
+      exceptionService,
+      { log: vi.fn(), warn: vi.fn() } as never,
+    );
+
+    service.onStockIncreased({ skuId: 'sku-1', warehouseId: 'wh-1', eventType: 'RECEIVE' });
+    // 异步自吞：等一个微任务周期让 reallocateFor 跑完。
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(exceptionService.upsertOpen).toHaveBeenCalledWith(
+      expect.objectContaining({
+        exceptionType: 'ORDER_INVALID_STATE',
+        referenceType: 'ORDER_ITEM',
+        referenceId: 'item-1',
+        storeId: 'store-1',
+      }),
+    );
+  });
+
+  it('closes the config-failure exception when allocation succeeds', async () => {
+    const registry = new InventoryStockListenerRegistry();
+    const itemRepo = {
+      findUnallocatedItemIdsBySku: vi
+        .fn()
+        .mockResolvedValue([{ itemId: 'item-1', orderId: 'order-1' }]),
+      findById: vi.fn().mockResolvedValue(makeItem('item-1')),
+    } as unknown as OrderItemRepository;
+    const orderRepo = {
+      findById: vi.fn().mockResolvedValue(makeOrder('order-1')),
+    } as unknown as OrderRepository;
+    const ingestionService = {
+      allocateMappedItem: vi.fn().mockResolvedValue({ reserved: true, reservationId: 'rsv-1' }),
+    } as unknown as OrderIngestionService;
+    const exceptionService = {
+      resolveByReference: vi.fn().mockResolvedValue(undefined),
+      upsertOpen: vi.fn().mockResolvedValue({ id: 'exc-1' }),
+    } as unknown as ExceptionService;
+    const service = new OrderAutoReallocationService(
+      registry,
+      itemRepo,
+      orderRepo,
+      ingestionService,
+      { recomputeOrderStatus: vi.fn() } as never,
+      exceptionService,
+      { log: vi.fn(), warn: vi.fn() } as never,
+    );
+
+    service.onStockIncreased({ skuId: 'sku-1', warehouseId: 'wh-1', eventType: 'RECEIVE' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // 成功 = 关缺货异常 + 关配置性失败异常（幂等，无则不动）。
+    expect(exceptionService.resolveByReference).toHaveBeenCalledWith({
+      exceptionType: 'ORDER_OUT_OF_STOCK',
+      referenceType: 'ORDER_ITEM',
+      referenceId: 'item-1',
+    });
+    expect(exceptionService.resolveByReference).toHaveBeenCalledWith({
+      exceptionType: 'ORDER_INVALID_STATE',
+      referenceType: 'ORDER_ITEM',
+      referenceId: 'item-1',
+    });
   });
 });

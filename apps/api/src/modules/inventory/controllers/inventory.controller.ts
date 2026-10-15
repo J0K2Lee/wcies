@@ -75,6 +75,7 @@ export class InventoryController {
         binId: query.binId,
         condition: query.condition,
         status: query.status,
+        includeEmpty: query.includeEmpty === 'true',
       },
       { page: query.page, pageSize: query.pageSize },
     );

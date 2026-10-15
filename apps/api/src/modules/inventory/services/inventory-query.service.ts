@@ -182,7 +182,13 @@ export class InventoryQueryService {
     if (sku === null) {
       throw new SkuNotFoundError(skuId);
     }
-    const { rows } = await listBalancesWithRefs(this.dataSource, { skuId }, 1000, 0);
+    // 详情分布保留全零行：移位/调整需要看到每个库位的完整事实（含已清零）。
+    const { rows } = await listBalancesWithRefs(
+      this.dataSource,
+      { skuId, includeEmpty: true },
+      1000,
+      0,
+    );
     const bins = rows.map((row) => this.toRowDto(row));
 
     const warehouseMap = new Map<string, SkuInventoryWarehouseDto>();

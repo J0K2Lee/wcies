@@ -337,6 +337,12 @@ export class InventoryListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsIn(INVENTORY_ROW_STATUSES)
   status?: InventoryRowStatus;
+  @ApiPropertyOptional({
+    description: 'true = 连全零事实行一起返回（盘点核对）；缺省 false = 隐藏清零残留行',
+  })
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  includeEmpty?: string;
 }
 
 export class TransactionListQueryDto extends PaginationQueryDto {
