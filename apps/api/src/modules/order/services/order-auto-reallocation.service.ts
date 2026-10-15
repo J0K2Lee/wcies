@@ -66,9 +66,18 @@ export class OrderAutoReallocationService implements StockIncreasedListener, OnM
     const key = `${event.skuId}:${event.warehouseId}`;
     if (this.inFlight.size >= MAX_IN_FLIGHT || this.inFlight.has(key)) {
       // 同通道已在跑（或系统饱和）：本次忽略——下一笔库存流水或人工重试兜底。
+      // 观测（2026-10-15）：闸门拦截必须有痕迹，否则"收货没占用"无从排查。
+      this.logger.warn(
+        `auto reallocation skipped by in-flight gate: ${key} (event=${event.eventType})`,
+        'OrderAutoReallocationService',
+      );
       return;
     }
     this.inFlight.add(key);
+    this.logger.info(
+      `auto reallocation received event: ${key} (${event.eventType})`,
+      'OrderAutoReallocationService',
+    );
     void this.reallocateFor(event)
       .catch((error: unknown) => {
         this.logger.warn(
@@ -84,19 +93,28 @@ export class OrderAutoReallocationService implements StockIncreasedListener, OnM
   private async reallocateFor(event: StockIncreasedEvent): Promise<void> {
     const candidates = await this.itemRepo.findUnallocatedItemIdsBySku(event.skuId);
     if (candidates.length === 0) {
+      // 观测（2026-10-15）：候选为空也留痕——"收货了却没动静"时区分是
+      // 没找到可分配行（行状态/映射不满足）还是事件根本没到达。
+      this.logger.info(
+        `auto reallocation: no unallocated (MAPPED+BACKORDERED/PENDING) lines for sku=${event.skuId}`,
+        'OrderAutoReallocationService',
+      );
       return;
     }
     let reserved = 0;
     const ordersWithSuccess = new Set<string>();
+    const skipped: Array<{ orderNo: string; reason: string }> = [];
     for (const candidate of candidates) {
       const order = await this.orderRepo.findById(candidate.orderId);
       if (order === null || order.erpStatus === 'CANCELLED' || order.erpStatus === 'SHIPPED') {
+        skipped.push({ orderNo: candidate.orderId, reason: 'order missing/terminal' });
         continue;
       }
       // 平台已事实发货（用户指示 2026-10-14）：货物在平台侧已经发走，
       // 占内部库存会被现实否证——RESERVED 会随已发货订单把库存锁死。
       // 行保持缺货直至同步链路按平台事实收敛（转外部履约完成）。
       if (isPlatformShippedStage(order.platformStage)) {
+        skipped.push({ orderNo: order.orderNo, reason: `platform stage ${order.platformStage}` });
         continue;
       }
       const item = await this.itemRepo.findById(candidate.itemId);
@@ -105,6 +123,7 @@ export class OrderAutoReallocationService implements StockIncreasedListener, OnM
         item.skuId === null ||
         (item.fulfillmentStatus !== 'BACKORDERED' && item.fulfillmentStatus !== 'PENDING')
       ) {
+        skipped.push({ orderNo: candidate.orderId, reason: 'item state changed' });
         continue;
       }
       try {
@@ -115,6 +134,7 @@ export class OrderAutoReallocationService implements StockIncreasedListener, OnM
         );
         if (!outcome.reserved) {
           // 仍不足：保留缺货事实，不再刷异常（首次缺货时已建 ORDER_OUT_OF_STOCK）。
+          skipped.push({ orderNo: order.orderNo, reason: 'insufficient stock' });
           continue;
         }
         reserved += 1;
@@ -141,12 +161,16 @@ export class OrderAutoReallocationService implements StockIncreasedListener, OnM
           `库存增加后自动重新分配成功（SKU ${event.skuId}）`,
         );
       }
-      this.logger.log(
-        `auto reallocation reserved ${reserved} line(s) for sku=${event.skuId} ` +
-          `warehouse=${event.warehouseId} (${event.eventType})`,
-        'OrderAutoReallocationService',
-      );
     }
+    // 观测（2026-10-15）：无论成败都输出一轮摘要，跳过原因逐单可见。
+    this.logger.info(
+      `auto reallocation finished sku=${event.skuId} (${event.eventType}): ` +
+        `candidates=${candidates.length} reserved=${reserved}` +
+        (skipped.length > 0
+          ? ` skipped=[${skipped.map((s) => `${s.orderNo}:${s.reason}`).join(', ')}]`
+          : ''),
+      'OrderAutoReallocationService',
+    );
   }
 
   private async closeStockException(order: OrderEntity, item: OrderItemEntity): Promise<void> {

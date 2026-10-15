@@ -62,6 +62,7 @@ function build(opts: {
   } as unknown as ExceptionService;
   const logger = {
     log: vi.fn(),
+    info: vi.fn(),
     warn: vi.fn(),
   } as unknown as AppLoggerService;
   const service = new OrderAutoReallocationService(
@@ -179,7 +180,7 @@ describe('OrderAutoReallocationService 配置性失败可见化 (用户指示 20
       ingestionService,
       { recomputeOrderStatus: vi.fn() } as never,
       exceptionService,
-      { log: vi.fn(), warn: vi.fn() } as never,
+      { log: vi.fn(), info: vi.fn(), warn: vi.fn() } as never,
     );
 
     service.onStockIncreased({ skuId: 'sku-1', warehouseId: 'wh-1', eventType: 'RECEIVE' });
@@ -221,7 +222,7 @@ describe('OrderAutoReallocationService 配置性失败可见化 (用户指示 20
       ingestionService,
       { recomputeOrderStatus: vi.fn() } as never,
       exceptionService,
-      { log: vi.fn(), warn: vi.fn() } as never,
+      { log: vi.fn(), info: vi.fn(), warn: vi.fn() } as never,
     );
 
     service.onStockIncreased({ skuId: 'sku-1', warehouseId: 'wh-1', eventType: 'RECEIVE' });
