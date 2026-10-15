@@ -175,12 +175,19 @@ Request：`{posting_number: string, with:{}}`；Response：`{result: <posting>}`
 | `awaiting_approve` / `awaiting_packaging` / `awaiting_registration` / `awaiting_deliver` | `AWAITING_SHIPMENT` | null |
 | `delivering` / `driver_pickup` / `acceptance_in_progress` | `IN_TRANSIT` | `delivering_date` |
 | `delivered` | `DELIVERED` | `fact_delivery_date` |
-| `cancelled` | `CANCELLED` | null |
+| `cancelled` / `cancelled_from_split_pending` | `CANCELLED` | null |
+
+`cancelled` 与 `cancelled_from_split_pending`（拆单取消）归一为同一取消事实，
+`platformCancelled = true`（2026-10-15 归类，与发货链路
+`ozon-shipment.service` 早已采用的口径对齐）。真实样本 `73885080-0016-1`：
+`substatus=posting_canceled`、`cancellation_type=client`、无运单号。此前
+`cancelled_from_split_pending` 未归类（→ null），导致已取消的发货单被
+`POSTING_CANCELLED` webhook 回读后当活跃单摄入、常驻缺货；用户 2026-10-15
+bug 报告。共享谓词 `isOzonPostingCancelled` 保证 mapper 与发货链路同口径。
 
 **未归类（→ null，仅记录，不猜）**：`arbitration`、`client_arbitration`、
-`not_accepted`（任务书 §8 待确认项 3）；`awaiting_verification`（"created"）、
-`cancelled_from_split_pending`（拆单取消）——后两个是 2026-09-15 规范复核时
-发现任务书词表未覆盖的规范值，同样保守置 null 待业务归类。
+`not_accepted`（任务书 §8 待确认项 3）；`awaiting_verification`（"created"）
+——2026-09-15 规范复核发现的规范值，保守置 null 待业务归类。
 
 ⚠ **A8 坑（2026-09-15 规范 schema 逐项核对）**：`/v3/posting/fbs/get` 响应对象
 （`v3FbsPostingDetail`，43 属性）**不含** `changed_state_date` /

@@ -359,6 +359,13 @@ ORDER_SYNC 再遇到已存在的订单（窗口重叠再投递，或定向回读
    Reservation、Picked 行建 Interception。重复的 cancelled 同步命中
    cancel 的幂等早退与 `ORDER_RELEASE:<orderItemId>` 幂等键，只释放一次。
    **新单即取消**（窗口内首次摄入即 `cancelled`）同样在摄入后立即走 cancel。
+   **取消词表的完整归类（2026-10-15 修复）**：OZON 的
+   `cancelled_from_split_pending`（拆单取消）与 `cancelled` 是同一取消事实，
+   由 Mapper 共享谓词 `isOzonPostingCancelled` 一并判为 `platformCancelled`
+   且阶段归 `CANCELLED`（与发货链路 `ozon-shipment.service` 早有口径对齐）。
+   此前该状态未归类，导致已取消的发货单被 `POSTING_CANCELLED` webhook 回读后
+   当活跃单摄入、常驻缺货（真实样本 ORD00000041）。数据修复见 Migration
+   `20261015_002_fix_platform_cancelled_dead_orders`。
 5. **取消关闭缺货异常**：订单取消（任何触发方）时，自动 RESOLVE 其订单行的
    OPEN `ORDER_OUT_OF_STOCK` 与 `ORDER_SHIPMENT_DEADLINE_NEAR`——
    永不发货的订单不得继续要货。

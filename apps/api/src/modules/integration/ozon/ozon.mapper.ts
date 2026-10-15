@@ -75,12 +75,27 @@ export function mapProductToListing(
 // ---------------------------------------------------------------------------
 
 /**
- * OZON FBS Seller-API status for a cancelled posting (docs/integrations/ozon.md
- * §Posting 字段映射, verified 2026-09). Kept HERE so the platform vocabulary
- * never leaks into the order core (AGENTS.md §31/§33): the core only sees
- * `platformCancelled: true`.
+ * OZON FBS Seller-API statuses that mean the posting is cancelled / will never
+ * ship (docs/integrations/ozon.md §Posting 字段映射, verified 2026-09). Kept
+ * HERE so the platform vocabulary never leaks into the order core (AGENTS.md
+ * §31/§33): the core only sees `platformCancelled: true`.
+ *
+ * `cancelled_from_split_pending`（拆单取消）与 `cancelled` 是同一事实：发
+ * 货单已取消（真实样本 73885080-0016-1：substatus=posting_canceled、
+ * cancellation_type=client、tracking 为空）。发货链路
+ * （ozon-shipment.service）早已把它与 `cancelled` 一并判为不可组包；订单
+ * 映射此前只认精确 `cancelled`，导致该状态被当活跃单摄入并常驻缺货
+ * （2026-10-15 用户 bug 报告）。共用谓词保证两侧同口径。
  */
-const OZON_POSTING_STATUS_CANCELLED = 'cancelled';
+const OZON_POSTING_CANCELLED_STATUSES: ReadonlySet<string> = new Set([
+  'cancelled',
+  'cancelled_from_split_pending',
+]);
+
+/** True when the OZON posting status means the order is cancelled. */
+export function isOzonPostingCancelled(status: string): boolean {
+  return OZON_POSTING_CANCELLED_STATUSES.has(status);
+}
 
 /**
  * Seller API `status` -> normalized logistics stage (dual-axis task T1,
@@ -88,6 +103,8 @@ const OZON_POSTING_STATUS_CANCELLED = 'cancelled';
  * spec's v3FbsPostingDetail.status description - see docs/integrations/ozon.md
  * §平台阶段映射). Unclassified values map to null: guessing a stage for
  * arbitration-like statuses would be a business-rule invention (AGENTS.md §88).
+ * `cancelled_from_split_pending` 归 CANCELLED（与 `cancelled` 同一取消事实，
+ * 见上）；其余未归类值仍保守置 null。
  */
 const OZON_POSTING_STATUS_STAGE: Readonly<Record<string, PlatformOrderStage>> = {
   awaiting_approve: 'AWAITING_SHIPMENT',
@@ -99,6 +116,7 @@ const OZON_POSTING_STATUS_STAGE: Readonly<Record<string, PlatformOrderStage>> = 
   acceptance_in_progress: 'IN_TRANSIT',
   delivered: 'DELIVERED',
   cancelled: 'CANCELLED',
+  cancelled_from_split_pending: 'CANCELLED',
 };
 
 export function mapPostingToOrder(posting: OzonFbsPosting): PlatformOrderRaw {
@@ -161,7 +179,7 @@ export function mapPostingToOrder(posting: OzonFbsPosting): PlatformOrderRaw {
   return {
     platformOrderId: posting.posting_number,
     platformStatus: posting.status,
-    platformCancelled: posting.status === OZON_POSTING_STATUS_CANCELLED,
+    platformCancelled: isOzonPostingCancelled(posting.status),
     platformStage,
     platformStageChangedAt,
     fulfillmentMode: mapOzonFulfillmentMode(posting.integration_type_flow),

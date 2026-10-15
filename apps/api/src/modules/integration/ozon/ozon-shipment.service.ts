@@ -11,6 +11,7 @@ import {
 import { PlatformApiError } from '../platform-error';
 import { DomainError } from '../../../common/errors/domain.error';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
+import { isOzonPostingCancelled } from './ozon.mapper';
 
 /**
  * OZON posting statuses meaning the order has ALREADY been accepted for
@@ -258,7 +259,7 @@ function classify(posting: OzonFbsPosting): PrepareDecision {
   if (actions.some((action) => SHIP_ACTION_HINTS.has(action))) {
     return 'CAN_SHIP';
   }
-  if (posting.status === 'cancelled' || posting.status === 'cancelled_from_split_pending') {
+  if (isOzonPostingCancelled(posting.status)) {
     return 'BLOCKED';
   }
   return OZON_FALLBACK_SHIPPABLE_STATUSES.has(posting.status) ? 'CAN_SHIP' : 'BLOCKED';

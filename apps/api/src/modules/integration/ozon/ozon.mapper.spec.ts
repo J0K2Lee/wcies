@@ -255,9 +255,19 @@ describe('mapPostingToOrder', () => {
     ['acceptance_in_progress', 'IN_TRANSIT'],
     ['delivered', 'DELIVERED'],
     ['cancelled', 'CANCELLED'],
+    // 拆单取消与 cancelled 同一事实（2026-10-15）：发货链路早已同等对待，
+    // 订单映射此前未归类导致死单被当活跃单摄入。
+    ['cancelled_from_split_pending', 'CANCELLED'],
   ])('maps Seller API status %s to stage %s', (status, stage) => {
     expect(mapPostingToOrder({ ...POSTING, status }).platformStage).toBe(stage);
   });
+
+  it.each([['cancelled'], ['cancelled_from_split_pending']])(
+    'marks status %s as platformCancelled',
+    (status) => {
+      expect(mapPostingToOrder({ ...POSTING, status }).platformCancelled).toBe(true);
+    },
+  );
 
   it.each([
     ['arbitration'],
@@ -266,7 +276,6 @@ describe('mapPostingToOrder', () => {
     // Present in the v3 spec vocabulary but not yet classified by the frozen
     // mapping table - they stay null until a documented decision exists.
     ['awaiting_verification'],
-    ['cancelled_from_split_pending'],
   ])('maps unclassified status %s to platformStage = null (no guessing)', (status) => {
     expect(mapPostingToOrder({ ...POSTING, status }).platformStage).toBeNull();
   });
