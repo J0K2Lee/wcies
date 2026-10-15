@@ -106,9 +106,10 @@ export class OrderRepository {
   }
 
   /**
-   * Orders owning a MAPPED BACKORDERED line that no live purchase order
-   * covers (待采购 view, purchase.md §3.5). `coveredOrderItemIds` comes from
-   * the purchase module's port; this repo owns the order-line facts.
+   * Orders owning a MAPPED 缺货 line that no live purchase order covers
+   * (待采购 view, purchase.md §3.5；口径见 orders.md §5——含 MAPPED+PENDING
+   * 卡行，否则「订单头缺货、待采购却看不到」）。`coveredOrderItemIds` comes
+   * from the purchase module's port; this repo owns the order-line facts.
    */
   async findOrderIdsWithUncoveredBackorderedLines(
     coveredOrderItemIds: readonly string[],
@@ -116,7 +117,7 @@ export class OrderRepository {
     const rows = await this.dataSource.query<Array<{ order_id: string }>>(
       `SELECT DISTINCT i.order_id
        FROM order_items i
-       WHERE i.fulfillment_status = 'BACKORDERED'
+       WHERE i.fulfillment_status IN ('BACKORDERED', 'PENDING')
          AND i.mapping_status = 'MAPPED'
          AND i.sku_id IS NOT NULL
          ${coveredOrderItemIds.length > 0 ? 'AND i.id != ALL($1::uuid[])' : ''}`,
@@ -313,8 +314,14 @@ export class OrderRepository {
         `(SELECT COUNT(*) FROM order_items i WHERE i.order_id = o.id AND i.fulfillment_status = 'RESERVED')`,
         'reserved_count',
       )
+      // 缺货行计数与缺货筛选/rollup 同口径（orders.md §5「缺货口径」）：
+      // MAPPED 且 fulfillment_status IN ('BACKORDERED','PENDING')。只数
+      // BACKORDERED 会让 MAPPED+PENDING 的卡行在商品列徽标/右栏风险段/
+      // 行内「重新尝试分配」处整条链路隐身——而订单头 ERP 状态已显示缺货。
       .addSelect(
-        `(SELECT COUNT(*) FROM order_items i WHERE i.order_id = o.id AND i.fulfillment_status = 'BACKORDERED')`,
+        `(SELECT COUNT(*) FROM order_items i WHERE i.order_id = o.id
+            AND i.mapping_status = 'MAPPED'
+            AND i.fulfillment_status IN ('BACKORDERED', 'PENDING'))`,
         'backordered_count',
       )
       .addSelect(
@@ -416,9 +423,10 @@ export class OrderRepository {
     };
   }
 
-  /** BACKORDERED line ids of the given orders (dual-axis §2.3 procurement
-   *  counters: the service derives ORDERED/ARRIVED per line through the
-   *  purchase port and rolls the counts up per order). */
+  /** 缺货行 ids（dual-axis §2.3 采购计数：服务层经采购端口逐行取
+   *  ORDERED/ARRIVED 再按订单汇总）。口径与缺货筛选/rollup 一致
+   *  （orders.md §5）：MAPPED 且 fulfillment_status IN ('BACKORDERED','PENDING')
+   *  ——否则 MAPPED+PENDING 卡行不计入「已采购/已到货」，与订单头缺货状态矛盾。 */
   async findBackorderedItemIdsByOrderIds(
     orderIds: readonly string[],
   ): Promise<Map<string, string[]>> {
@@ -429,7 +437,8 @@ export class OrderRepository {
     const rows = await this.dataSource.query<Array<{ order_id: string; id: string }>>(
       `SELECT i.order_id, i.id
        FROM order_items i
-       WHERE i.fulfillment_status = 'BACKORDERED'
+       WHERE i.mapping_status = 'MAPPED'
+         AND i.fulfillment_status IN ('BACKORDERED', 'PENDING')
          AND i.order_id = ANY($1::uuid[])`,
       [[...orderIds]],
     );

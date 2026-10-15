@@ -584,6 +584,62 @@ describe('order ingestion + allocation (task §67-§73)', () => {
     expect(detail.erpStatus).toBe('BACKORDERED');
   });
 
+  it('MAPPED+PENDING 卡行计入列表缺货口径（backorderedCount/待采购/已采购）', async () => {
+    // 用户 bug 报告（2026-10-15）：映射失败行被修复时店铺尚未绑定仓库，
+    // retryFailedMappingItem 的分配阶段抛 OrderIngestInvalidError —— catch 只
+    // 重算 rollup（行已是 MAPPED，被 rollup 记作缺货），但抛错路径不写
+    // BACKORDERED，于是行卡在 MAPPED+PENDING：订单头 ERP 显示缺货，商品列却
+    // 没有缺货徽标、右栏「风险」不渲染、行内也没有「重新尝试分配」。
+    // 口径（orders.md §5）已冻结为 MAPPED ∧ (BACKORDERED ∪ PENDING)；本用例
+    // 锁死列表契约（backorderedCount / 待采购）与筛选同口径。
+    const storeUnbound = (
+      await client.post<{ id: string }>('/api/v1/stores', {
+        platformId: ozonPlatformId,
+        storeCode: `${PREFIX}-UNBOUND`,
+        name: `${PREFIX} 未绑定仓店`,
+      })
+    ).body.data.id;
+    // 故意不绑定平台仓库：摄入即落 BACKORDERED（此路径自己写异常），
+    // 随后走「映射失败 → 修复」复现卡行需要先 FAILED，故用仅映射失败更直接：
+    const platformSkuId = `${PREFIX}-PEND-1`;
+    const skuId = await newSku('PEND');
+    const created = await ingest({
+      storeId: storeUnbound,
+      items: [{ platformSkuId, quantity: '1' }],
+    });
+    const item = created.body.data.itemResults[0]!;
+    // 无映射时先 FAILED；补齐映射后（未绑仓）分配阶段抛配置性错误，行停在
+    // MAPPED+PENDING —— 正是线上卡行的形状。
+    expect(item.mappingStatus).toBe('FAILED');
+    await mapSku(skuId, platformSkuId, storeUnbound);
+    const retry = await client.post<{
+      fulfillmentStatus: string;
+      mappingRepaired: boolean;
+    }>(`/api/v1/orders/items/${item.orderItemId}/retry-allocation`);
+    expect(retry.status).toBe(422);
+    const stuck = await db.query<{ mapping_status: string; fulfillment_status: string }>(
+      'SELECT mapping_status, fulfillment_status FROM order_items WHERE id = $1',
+      [item.orderItemId],
+    );
+    expect(stuck.rows[0]?.mapping_status).toBe('MAPPED');
+    expect(stuck.rows[0]?.fulfillment_status).toBe('PENDING');
+
+    // 订单头按 rollup 显示缺货，列表必须同口径：backorderedCount 计入该卡行。
+    const detail = await orderDetail(created.body.data.orderId);
+    expect(detail.erpStatus).toBe('BACKORDERED');
+    const list = await client.get<
+      Array<{ id: string; erpStatus: string; backorderedCount: number }>
+    >(`/api/v1/orders?keyword=${encodeURIComponent(detail.orderNo)}&pageSize=10`);
+    const row = list.body.data.find((r) => r.id === created.body.data.orderId);
+    expect(row?.erpStatus).toBe('BACKORDERED');
+    expect(row?.backorderedCount).toBe(1);
+    // 待采购视图（uncovered MAPPED 缺货行含 PENDING）与筛选同口径。
+    const pendingProcurement = await client.get<Array<{ id: string }>>(
+      `/api/v1/orders?keyword=${encodeURIComponent(detail.orderNo)}&pendingProcurement=true&pageSize=10`,
+    );
+    expect(pendingProcurement.body.data.some((r) => r.id === created.body.data.orderId)).toBe(true);
+  });
+
   it('concurrent duplicate ingest -> exactly one order (§84)', async () => {
     const skuId = await newSku('RACE');
     await initialize({ skuId, binId: binA01, quantity: '10' });

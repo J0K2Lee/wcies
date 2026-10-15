@@ -769,6 +769,14 @@ Sprint 4 在此基础上增加三个原子业务命令（显式 QueryRunner + In
 派生采购状态（`ORDERED` / `ARRIVED`，purchase.md §3.5），与行内徽标同源；
 列表响应字段 `backorderedOrderedCount` / `backorderedArrivedCount`。
 
+**口径统一（2026-10-15 修复）**：`缺货 N` 计数、已采购/已到货的取行、待采购
+筛选的行集，全部与 §5「缺货口径」及订单 rollup 同源——`mapping_status='MAPPED'`
+且 `fulfillment_status IN ('BACKORDERED','PENDING')`。此前 `backorderedCount` 与
+取行只数 `BACKORDERED`，导致 `MAPPED+PENDING` 的卡行（典型来源：映射修复时店铺
+尚未绑定仓库，分配阶段抛错而抛错路径不写 BACKORDERED）在订单头已显示缺货，
+商品列却无缺货徽标、右栏「风险」不渲染、行内也无「重新尝试分配」——整条行级
+链路隐身。三处口径现已与筛选/rollup 对齐。
+
 ---
 
 # 15B. SYNC_FAILED 异常（Sprint 9 T2，决策 3）
