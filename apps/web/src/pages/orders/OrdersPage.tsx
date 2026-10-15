@@ -1248,6 +1248,8 @@ export function OrdersPage() {
       apiPost<{
         candidates: number;
         created: number;
+        createdOrders: number;
+        itemsTotal: number;
         skipped: number;
         failed: number;
         createdTaskNos: string[];
@@ -1256,7 +1258,9 @@ export function OrdersPage() {
     onSuccess: (result) => {
       notification.open({
         type: result.failed > 0 ? 'warning' : 'success',
-        title: `批量生成拣货单：新建 ${result.created}，跳过 ${result.skipped}，失败 ${result.failed}`,
+        title:
+          `批量生成拣货单：新建 ${result.created} 个任务（${result.createdOrders} 单 / ` +
+          `${result.itemsTotal} 行，按仓合并），跳过 ${result.skipped}，失败 ${result.failed}`,
         description: (
           <div style={{ maxHeight: 260, overflowY: 'auto' }}>
             {result.createdTaskNos.length > 0 && (
@@ -1375,7 +1379,8 @@ export function OrdersPage() {
     modal.confirm({
       title: `为勾选的 ${selectedOrderIds.length} 个订单生成拣货单？`,
       content:
-        '仅为勾选订单的已占用（RESERVED）行生成拣货任务（按仓拆分）；已有进行中拣货任务的订单自动跳过。',
+        '勾选订单的已占用（RESERVED）行按仓库合并生成拣货任务——同一仓库合并为一个任务' +
+        '（合并拣货，一次巡回取齐多单）；已有进行中拣货任务的订单自动跳过。',
       okText: '生成拣货单',
       cancelText: '返回',
       onOk: () => {

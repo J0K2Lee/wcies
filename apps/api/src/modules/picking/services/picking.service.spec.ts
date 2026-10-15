@@ -14,7 +14,6 @@ import { OperationLogService } from '../../operation-log/operation-log.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { PickingTaskEntity } from '../entities/picking-task.entity';
 import { PickingTaskItemEntity } from '../entities/picking-task-item.entity';
-import { PickingNoEligibleItemsError } from '../errors/picking.errors';
 import { OrderNotFoundError } from '../../order/errors/order.errors';
 const OPERATOR = { userId: null, username: 'test' };
 
@@ -325,36 +324,210 @@ describe('PickingService state port (order rollup / cancel blockers)', () => {
   });
 });
 
-describe('PickingService.autoCreateForReadyOrders (2026-09-18 批量入口)', () => {
-  it('creates for eligible orders, skips active ones, isolates per-order domain failures', async () => {
-    const { service, orderService, countActivePickingItems } = build({ items: [makeItem()] });
+describe('PickingService.autoCreateForReadyOrders (2026-10-15 合并语义：一任务多订单)', () => {
+  /** 合并路径的轻量装配：行收集 + 按仓建任务的真实编排。 */
+  function buildMerge(options: {
+    candidatesByOrder: Record<
+      string,
+      Array<{
+        id: string;
+        orderId: string;
+        warehouseId: string | null;
+        reservationId: string;
+        quantity: string;
+      }>
+    >;
+    activeCounts?: Record<string, number>;
+  }) {
+    const insertedRows: Array<Record<string, unknown>> = [];
+    const createdTasks: Array<{ id: string; pickingNo: string }> = [];
+    let pickingNoSeq = 0;
+    const dataSource = {
+      transaction: vi.fn(async (work: (manager: unknown) => Promise<unknown>) => work({})),
+    } as unknown as DataSource;
+    const taskRepo = {
+      nextPickingNo: vi.fn(async () => {
+        pickingNoSeq += 1;
+        return `PCK0000000${pickingNoSeq}`;
+      }),
+      insert: vi.fn(async (_runner: unknown, header: Record<string, unknown>) => {
+        const created = {
+          id: `task-${createdTasks.length + 1}`,
+          pickingNo: String(header.pickingNo),
+          ...header,
+        };
+        createdTasks.push(created);
+        return created;
+      }),
+      updateStatus: vi.fn().mockResolvedValue(undefined),
+    };
+    const itemRepo = {
+      insert: vi.fn(async (_runner: unknown, rows: Array<Record<string, unknown>>) => {
+        insertedRows.push(...rows);
+        return rows;
+      }),
+      countActivePickingItems: vi.fn(
+        async (orderId: string) => options.activeCounts?.[orderId] ?? 0,
+      ),
+    };
+    const orderService = {
+      listReadyToPickOrders: vi.fn().mockResolvedValue([]),
+      getOrderOrThrow: vi.fn(async (id: string) => ({ id, orderNo: `ORD-${id}` })),
+      listReservedItemsForPicking: vi.fn(async (orderId: string) =>
+        (options.candidatesByOrder[orderId] ?? []).map((item) => ({
+          item,
+          order: { id: orderId, orderNo: `ORD-${orderId}`, erpStatus: 'READY_TO_PICK' },
+        })),
+      ),
+    };
+    const service = new PickingService(
+      dataSource,
+      taskRepo as never,
+      itemRepo as never,
+      orderService as never,
+      { findByBarcode: vi.fn(), listBySku: vi.fn() } as never,
+      { getEntityById: vi.fn() } as never,
+      { getEntityById: vi.fn() } as never,
+      { findByWarehouseAndCode: vi.fn() } as never,
+      { pickStockPartialInTx: vi.fn() } as never,
+      { getReservation: vi.fn() } as never,
+      { record: vi.fn() } as never,
+      { log: vi.fn(), info: vi.fn(), warn: vi.fn() } as never,
+    );
+    return { service, itemRepo, taskRepo, orderService, insertedRows, createdTasks };
+  }
+
+  const reservedItem = (overrides: {
+    id: string;
+    orderId: string;
+    warehouseId: string | null;
+  }) => ({
+    id: overrides.id,
+    orderId: overrides.orderId,
+    warehouseId: overrides.warehouseId,
+    reservationId: `rsv-${overrides.id}`,
+    quantity: '1.000',
+    skuId: `sku-${overrides.id}`,
+  });
+
+  it('merges same-warehouse orders into ONE task with per-order lines', async () => {
+    const { service, itemRepo, createdTasks, insertedRows } = buildMerge({
+      candidatesByOrder: {
+        o1: [reservedItem({ id: 'oi-1', orderId: 'o1', warehouseId: 'wh-1' })],
+        o2: [reservedItem({ id: 'oi-2', orderId: 'o2', warehouseId: 'wh-1' })],
+        o3: [reservedItem({ id: 'oi-3', orderId: 'o3', warehouseId: 'wh-1' })],
+      },
+    });
+
+    const result = await service.autoCreateForReadyOrders(OPERATOR, {
+      limit: 100,
+      orderIds: ['o1', 'o2', 'o3'],
+    });
+
+    expect(result).toMatchObject({
+      candidates: 3,
+      created: 1,
+      createdOrders: 3,
+      itemsTotal: 3,
+      skipped: 0,
+      failed: 0,
+    });
+    expect(result.createdTaskNos).toHaveLength(1);
+    expect(createdTasks).toHaveLength(1);
+    expect(insertedRows).toHaveLength(3);
+    expect(new Set(insertedRows.map((row) => row.orderId))).toEqual(new Set(['o1', 'o2', 'o3']));
+    expect(itemRepo.insert).toHaveBeenCalledTimes(1);
+  });
+
+  it('still splits one task per warehouse (1 task = 1 warehouse, task §33)', async () => {
+    const { service, createdTasks, insertedRows } = buildMerge({
+      candidatesByOrder: {
+        o1: [reservedItem({ id: 'oi-1', orderId: 'o1', warehouseId: 'wh-1' })],
+        o2: [
+          reservedItem({ id: 'oi-2', orderId: 'o2', warehouseId: 'wh-1' }),
+          reservedItem({ id: 'oi-3', orderId: 'o2', warehouseId: 'wh-2' }),
+        ],
+      },
+    });
+
+    const result = await service.autoCreateForReadyOrders(OPERATOR, {
+      limit: 100,
+      orderIds: ['o1', 'o2'],
+    });
+
+    expect(result.created).toBe(2);
+    expect(createdTasks).toHaveLength(2);
+    expect(insertedRows).toHaveLength(3);
+  });
+
+  it('skips orders with active tasks and isolates no-eligible-item failures', async () => {
+    const { service, createdTasks, insertedRows } = buildMerge({
+      candidatesByOrder: {
+        o1: [reservedItem({ id: 'oi-1', orderId: 'o1', warehouseId: 'wh-1' })],
+        o3: [],
+      },
+      activeCounts: { o2: 2 },
+    });
+
+    const result = await service.autoCreateForReadyOrders(OPERATOR, {
+      limit: 100,
+      orderIds: ['o1', 'o2', 'o3'],
+    });
+
+    expect(result).toMatchObject({
+      candidates: 3,
+      created: 1,
+      createdOrders: 1,
+      itemsTotal: 1,
+      skipped: 1,
+      failed: 1,
+    });
+    expect(result.failures).toEqual([
+      expect.objectContaining({ orderNo: 'ORD-o3', code: 'PICKING_NO_ELIGIBLE_ITEMS' }),
+    ]);
+    expect(createdTasks).toHaveLength(1);
+    expect(insertedRows).toHaveLength(1);
+  });
+
+  it('多选模式：去重、未知订单按失败记录、绝不走自动候选查询', async () => {
+    const { service, orderService } = buildMerge({
+      candidatesByOrder: {
+        o1: [reservedItem({ id: 'oi-1', orderId: 'o1', warehouseId: 'wh-1' })],
+      },
+    });
+    vi.mocked(orderService.getOrderOrThrow).mockImplementation((id: string) =>
+      id === 'missing'
+        ? Promise.reject(new OrderNotFoundError('missing'))
+        : Promise.resolve({ id, orderNo: `ORD-${id}` } as never),
+    );
+
+    const result = await service.autoCreateForReadyOrders(OPERATOR, {
+      limit: 100,
+      orderIds: ['o1', 'o1', 'missing'],
+    });
+
+    // candidates = 解析成功的订单数（missing 在 failures 里）。
+    expect(result).toMatchObject({ candidates: 1, created: 1, createdOrders: 1, failed: 1 });
+    expect(result.failures).toEqual([
+      expect.objectContaining({ orderNo: 'missing', code: 'ORDER_NOT_FOUND' }),
+    ]);
+    expect(orderService.listReadyToPickOrders).not.toHaveBeenCalled();
+  });
+
+  it('rethrows system errors (only domain errors are isolated)', async () => {
+    const { service, orderService } = buildMerge({ candidatesByOrder: {} });
     vi.mocked(orderService.listReadyToPickOrders).mockResolvedValue([
       { id: 'o1', orderNo: 'ORD1' },
-      { id: 'o2', orderNo: 'ORD2' },
-      { id: 'o3', orderNo: 'ORD3' },
     ]);
-    vi.mocked(countActivePickingItems)
-      .mockResolvedValueOnce(0) // o1 -> create
-      .mockResolvedValueOnce(1) // o2 -> skip (active task exists)
-      .mockResolvedValueOnce(0); // o3 -> domain failure
-    const createSpy = vi
-      .spyOn(service, 'createPickingTask')
-      .mockResolvedValueOnce([{ pickingNo: 'PCK00000001' } as never])
-      .mockRejectedValueOnce(new PickingNoEligibleItemsError({ orderId: 'o3' }));
+    vi.mocked(orderService.listReservedItemsForPicking).mockRejectedValueOnce(new Error('db down'));
 
-    const result = await service.autoCreateForReadyOrders(OPERATOR, { limit: 100 });
-
-    expect(result).toMatchObject({ candidates: 3, created: 1, skipped: 1, failed: 1 });
-    expect(result.createdTaskNos).toEqual(['PCK00000001']);
-    expect(result.failures).toEqual([
-      expect.objectContaining({ orderNo: 'ORD3', code: 'PICKING_NO_ELIGIBLE_ITEMS' }),
-    ]);
-    expect(createSpy).toHaveBeenCalledTimes(2); // o1 attempted, o2 skipped, o3 attempted
-    expect(orderService.listReadyToPickOrders).toHaveBeenCalledWith({ limit: 100 });
+    await expect(service.autoCreateForReadyOrders(OPERATOR, { limit: 100 })).rejects.toThrow(
+      'db down',
+    );
   });
 
   it('passes the store filter through and reports an empty candidate set', async () => {
-    const { service, orderService } = build({ items: [makeItem()] });
+    const { service, orderService } = buildMerge({ candidatesByOrder: {} });
     vi.mocked(orderService.listReadyToPickOrders).mockResolvedValue([]);
 
     const result = await service.autoCreateForReadyOrders(OPERATOR, {
@@ -368,47 +541,66 @@ describe('PickingService.autoCreateForReadyOrders (2026-09-18 批量入口)', ()
     });
     expect(result).toMatchObject({ candidates: 0, created: 0, skipped: 0, failed: 0 });
   });
+});
 
-  it('rethrows system errors (only domain errors are isolated)', async () => {
-    const { service, orderService, countActivePickingItems } = build({ items: [makeItem()] });
-    vi.mocked(orderService.listReadyToPickOrders).mockResolvedValue([
-      { id: 'o1', orderNo: 'ORD1' },
-    ]);
-    vi.mocked(countActivePickingItems).mockResolvedValue(0);
-    vi.spyOn(service, 'createPickingTask').mockRejectedValueOnce(new Error('db down'));
-
-    await expect(service.autoCreateForReadyOrders(OPERATOR, { limit: 100 })).rejects.toThrow(
-      'db down',
+describe('PickingService.cancelZeroProgressTasksForOrder (2026-10-15 合并任务摘行)', () => {
+  function buildCancel(options: {
+    taskIds: string[];
+    removedPerTask?: number;
+    remainingAfterDelete?: number;
+  }) {
+    const dataSource = {
+      transaction: vi.fn(async (work: (m: unknown) => Promise<unknown>) => work({})),
+    } as unknown as DataSource;
+    const itemRepo = {
+      findActiveTaskIdsOfOrder: vi.fn().mockResolvedValue(options.taskIds),
+      deleteZeroProgressItemsOfOrderInTask: vi.fn().mockResolvedValue(options.removedPerTask ?? 1),
+      countItemsOfTask: vi.fn().mockResolvedValue(options.remainingAfterDelete ?? 1),
+    };
+    const taskRepo = { updateStatus: vi.fn().mockResolvedValue(undefined) };
+    const service = new PickingService(
+      dataSource,
+      taskRepo as never,
+      itemRepo as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { record: vi.fn() } as never,
+      { log: vi.fn(), info: vi.fn(), warn: vi.fn() } as never,
     );
-  });
+    return { service, itemRepo, taskRepo };
+  }
 
-  it('2026-10-13 多选模式：只处理 orderIds，去重，未知订单按失败记录', async () => {
-    const { service, orderService, countActivePickingItems } = build({ items: [makeItem()] });
-    vi.mocked(orderService.getOrderOrThrow).mockImplementation((id: string) =>
-      id === 'missing'
-        ? Promise.reject(new OrderNotFoundError('missing'))
-        : Promise.resolve({ id, orderNo: `ORD-${id}` } as never),
-    );
-    vi.mocked(countActivePickingItems)
-      .mockResolvedValueOnce(0) // o1 -> create
-      .mockResolvedValueOnce(1); // o2 -> skip
-    const createSpy = vi
-      .spyOn(service, 'createPickingTask')
-      .mockResolvedValue([{ pickingNo: 'PCK00000009' } as never]);
-
-    const result = await service.autoCreateForReadyOrders(OPERATOR, {
-      limit: 100,
-      orderIds: ['o1', 'o2', 'o1', 'missing'],
+  it('removes only the cancelled order lines and keeps the merged task alive', async () => {
+    const { service, itemRepo, taskRepo } = buildCancel({
+      taskIds: ['task-1'],
+      removedPerTask: 2,
+      remainingAfterDelete: 3,
     });
 
-    // 去重后的候选 = o1/o2/missing 三单；missing 解析失败进入 failures。
-    expect(result).toMatchObject({ candidates: 2, created: 1, skipped: 1, failed: 1 });
-    expect(result.createdTaskNos).toEqual(['PCK00000009']);
-    expect(result.failures).toEqual([
-      expect.objectContaining({ orderNo: 'missing', code: 'ORDER_NOT_FOUND' }),
-    ]);
-    expect(createSpy).toHaveBeenCalledTimes(1);
-    // 多选模式绝不走自动候选查询。
-    expect(orderService.listReadyToPickOrders).not.toHaveBeenCalled();
+    const cancelled = await service.cancelZeroProgressTasksForOrder('order-A', OPERATOR);
+
+    expect(itemRepo.deleteZeroProgressItemsOfOrderInTask).toHaveBeenCalledWith('task-1', 'order-A');
+    expect(taskRepo.updateStatus).not.toHaveBeenCalled();
+    expect(cancelled).toEqual([]);
+  });
+
+  it('cancels the task only when the last lines were removed', async () => {
+    const { service, taskRepo } = buildCancel({
+      taskIds: ['task-1'],
+      removedPerTask: 3,
+      remainingAfterDelete: 0,
+    });
+
+    const cancelled = await service.cancelZeroProgressTasksForOrder('order-A', OPERATOR);
+
+    expect(taskRepo.updateStatus).toHaveBeenCalledWith(expect.anything(), 'task-1', {
+      status: 'CANCELLED',
+    });
+    expect(cancelled).toEqual(['task-1']);
   });
 });

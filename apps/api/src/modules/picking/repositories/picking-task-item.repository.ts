@@ -116,31 +116,45 @@ export class PickingTaskItemRepository {
     return Number(rows[0]?.cnt ?? 0);
   }
 
-  /** Physical delete is allowed ONLY for zero-progress items of a cancelled task. */
-  async deleteZeroProgressItemsOfTask(pickingTaskId: string): Promise<number> {
+  /**
+   * 活跃任务中该订单的零进度行摘除（2026-10-15 合并任务语义）：只删本订单
+   * 的行，同任务其他订单的行不受影响。返回删除的行数。
+   */
+  async deleteZeroProgressItemsOfOrderInTask(
+    pickingTaskId: string,
+    orderId: string,
+  ): Promise<number> {
     const result = await this.dataSource.query<unknown>(
       `DELETE FROM picking_task_items
-        WHERE picking_task_id = $1::uuid AND picked_qty = 0
+        WHERE picking_task_id = $1::uuid
+          AND order_id = $2::uuid
+          AND picked_qty = 0
         RETURNING id`,
-      [pickingTaskId],
+      [pickingTaskId, orderId],
     );
     return unwrapReturningRows<{ id: string }>(result).length;
   }
 
-  /** Zero-progress tasks (all items picked_qty = 0) of an order. */
-  async findZeroProgressTaskIdsOfOrder(orderId: string): Promise<string[]> {
+  /** Active (CREATED / IN_PROGRESS) tasks that contain lines of this order. */
+  async findActiveTaskIdsOfOrder(orderId: string): Promise<string[]> {
     const rows = await this.dataSource.query<Array<{ task_id: string }>>(
-      `SELECT t.id AS task_id
+      `SELECT DISTINCT t.id AS task_id
          FROM picking_tasks t
+         JOIN picking_task_items i ON i.picking_task_id = t.id
         WHERE t.status IN ('CREATED', 'IN_PROGRESS')
-          AND EXISTS (SELECT 1 FROM picking_task_items i WHERE i.picking_task_id = t.id AND i.order_id = $1::uuid)
-          AND NOT EXISTS (
-                SELECT 1 FROM picking_task_items i
-                 WHERE i.picking_task_id = t.id AND i.picked_qty > 0
-              )`,
+          AND i.order_id = $1::uuid`,
       [orderId],
     );
     return rows.map((row) => row.task_id);
+  }
+
+  /** Remaining line count of a task (merge-task teardown decision). */
+  async countItemsOfTask(pickingTaskId: string): Promise<number> {
+    const rows = await this.dataSource.query<Array<{ cnt: string }>>(
+      `SELECT COUNT(*) AS cnt FROM picking_task_items WHERE picking_task_id = $1::uuid`,
+      [pickingTaskId],
+    );
+    return Number(rows[0]?.cnt ?? 0);
   }
 }
 

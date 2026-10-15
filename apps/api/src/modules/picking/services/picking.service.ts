@@ -142,16 +142,21 @@ export class PickingService implements OrderPickingStatePort {
   }
 
   /**
-   * 批量创建拣货任务（2026-09-18 用户指示；2026-10-13 多选改造）。
+   * 批量创建拣货任务（2026-09-18 用户指示；2026-10-13 多选改造；
+   * 2026-10-15 合并语义修正：批量 = 一个任务含多个订单，按仓拆分）。
    *
    * 两种入口共用一条路径：
    * - 自动模式（省略 orderIds）：候选 = erpStatus READY_TO_PICK（可按店铺过滤）；
    * - 多选模式（orderIds 显式给定）：只处理勾选的订单，不存在的单按失败记录。
    *
+   * 合并规则：把所有可拣订单的 RESERVED 行汇总后 **按仓库分组**，每个仓
+   * 建一个任务（1 task = 1 warehouse 不变，task §33），任务内行保留各自的
+   * orderId/orderItemId（picking_task_items 本就按订单行引用，一任务多
+   * 订单是数据模型既定能力）。合并拣货一次巡回取齐多单，不再一单一任务。
+   *
    * 已有进行中任务（CREATED/IN_PROGRESS 且含未拣行）的订单跳过——重复点击
-   * 不会产生重复拣货单。单笔失败（域错误）记录后继续，不拖垮整批（AGENTS
-   * §49 精神）；系统错误照常抛出。创建动作与单笔路径共用 createPickingTask
-   * （含操作日志）。
+   * 不会产生重复拣货行。单笔失败（域错误：订单不可读 / 无可拣行 / 行缺
+   * 仓库）记录后继续，不拖垮整批（AGENTS §49 精神）；系统错误照常抛出。
    */
   async autoCreateForReadyOrders(
     operator: OperatorContext,
@@ -159,14 +164,14 @@ export class PickingService implements OrderPickingStatePort {
   ): Promise<{
     candidates: number;
     created: number;
+    createdOrders: number;
+    itemsTotal: number;
     skipped: number;
     failed: number;
     createdTaskNos: string[];
     failures: Array<{ orderNo: string; code: string; message: string }>;
   }> {
-    const createdTaskNos: string[] = [];
     const failures: Array<{ orderNo: string; code: string; message: string }> = [];
-    let created = 0;
     let skipped = 0;
     let failed = 0;
 
@@ -196,16 +201,29 @@ export class PickingService implements OrderPickingStatePort {
       orders = await this.orderService.listReadyToPickOrders(options);
     }
 
+    // 逐单收集可拣行：已有进行中任务的跳过；无 RESERVED 行 / 行缺仓库的
+    // 订单按失败记录，不拖垮整批。
+    type PickingCandidate = Awaited<
+      ReturnType<OrderService['listReservedItemsForPicking']>
+    >[number];
+    const eligible: Array<{ orderNo: string; item: PickingCandidate['item'] }> = [];
     for (const order of orders) {
       if ((await this.countActivePickingItems(order.id)) > 0) {
         skipped += 1;
         continue;
       }
       try {
-        const tasks = await this.createPickingTask(order.id, operator);
-        created += 1;
-        for (const task of tasks) {
-          createdTaskNos.push(task.pickingNo);
+        const candidates = await this.orderService.listReservedItemsForPicking(order.id);
+        if (candidates.length === 0) {
+          throw new PickingNoEligibleItemsError({ orderId: order.id });
+        }
+        for (const candidate of candidates) {
+          if (candidate.item.warehouseId === null) {
+            throw new PickingTaskStateInvalidError('订单行缺少仓库信息，无法生成拣货任务', {
+              orderItemId: candidate.item.id,
+            });
+          }
+          eligible.push({ orderNo: order.orderNo, item: candidate.item });
         }
       } catch (error: unknown) {
         if (error instanceof DomainError) {
@@ -216,14 +234,77 @@ export class PickingService implements OrderPickingStatePort {
         throw error;
       }
     }
-    this.logger.info('auto picking creation finished', {
+
+    // 按仓库分组：每仓一个合并任务，任务内行跨订单。
+    const byWarehouse = new Map<string, typeof eligible>();
+    for (const entry of eligible) {
+      const warehouseId = entry.item.warehouseId as string;
+      const bucket = byWarehouse.get(warehouseId) ?? [];
+      bucket.push(entry);
+      byWarehouse.set(warehouseId, bucket);
+    }
+
+    const createdTaskNos: string[] = [];
+    const createdOrders = new Set<string>();
+    for (const [warehouseId, bucket] of byWarehouse) {
+      const task = await this.dataSource.transaction(async (runner) => {
+        const pickingNo = await this.taskRepo.nextPickingNo(runner);
+        const created_ = await this.taskRepo.insert(runner, {
+          pickingNo,
+          warehouseId,
+          createdBy: operator.userId,
+          createdByName: operator.username,
+        });
+        await this.itemRepo.insert(
+          runner,
+          bucket.map(({ item }) => ({
+            pickingTaskId: created_.id,
+            orderId: item.orderId,
+            orderItemId: item.id,
+            skuId: item.skuId as string,
+            reservationId: item.reservationId as string,
+            requiredQty: item.quantity,
+          })),
+        );
+        return created_;
+      });
+      createdTaskNos.push(task.pickingNo);
+      for (const entry of bucket) {
+        createdOrders.add(entry.item.orderId);
+      }
+      await this.operationLog.record({
+        entityType: 'PICKING_TASK',
+        entityId: task.id,
+        entityCode: task.pickingNo,
+        action: 'CREATE',
+        changes: {
+          warehouseId: { from: null, to: warehouseId },
+          items: { from: null, to: bucket.length },
+          orders: { from: null, to: createdOrders.size },
+        },
+        operator,
+      });
+    }
+
+    this.logger.info('batch picking creation finished', {
       module: 'picking',
       candidates: orders.length,
-      created,
+      tasks: createdTaskNos.length,
+      orders: createdOrders.size,
+      items: eligible.length,
       skipped,
       failed,
     });
-    return { candidates: orders.length, created, skipped, failed, createdTaskNos, failures };
+    return {
+      candidates: orders.length,
+      created: createdTaskNos.length,
+      createdOrders: createdOrders.size,
+      itemsTotal: eligible.length,
+      skipped,
+      failed,
+      createdTaskNos,
+      failures,
+    };
   }
 
   async start(taskId: string, operator: OperatorContext): Promise<PickingTaskDetailDto> {
@@ -502,22 +583,28 @@ export class PickingService implements OrderPickingStatePort {
     orderId: string,
     operator: OperatorContext,
   ): Promise<string[]> {
-    const taskIds = await this.itemRepo.findZeroProgressTaskIdsOfOrder(orderId);
+    const taskIds = await this.itemRepo.findActiveTaskIdsOfOrder(orderId);
+    const cancelledTaskIds: string[] = [];
     for (const taskId of taskIds) {
       await this.dataSource.transaction(async (runner) => {
-        await this.itemRepo.deleteZeroProgressItemsOfTask(taskId);
-        await this.taskRepo.updateStatus(runner, taskId, { status: 'CANCELLED' });
+        // 合并任务（2026-10-15）：只摘除该订单的零进度行，同任务其他订单
+        // 继续拣；任务删空才取消。
+        const removed = await this.itemRepo.deleteZeroProgressItemsOfOrderInTask(taskId, orderId);
+        if (removed > 0 && (await this.itemRepo.countItemsOfTask(taskId)) === 0) {
+          await this.taskRepo.updateStatus(runner, taskId, { status: 'CANCELLED' });
+          cancelledTaskIds.push(taskId);
+        }
       });
       await this.operationLog.record({
         entityType: 'PICKING_TASK',
         entityId: taskId,
         entityCode: taskId,
         action: 'CANCEL',
-        changes: { reason: { from: null, to: '订单取消，零进度拣货任务一并取消' } },
+        changes: { reason: { from: null, to: '订单取消，摘除其零进度拣货行' } },
         operator,
       });
     }
-    return taskIds;
+    return cancelledTaskIds;
   }
 
   async listTasksForOrder(orderId: string): Promise<

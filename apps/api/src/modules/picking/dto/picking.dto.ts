@@ -58,8 +58,10 @@ export class AutoCreatePickingTasksRequestDto {
 }
 
 export class AutoCreatePickingTasksResultDto {
-  @ApiProperty({ description: '候选订单数（READY_TO_PICK）' }) candidates!: number;
-  @ApiProperty({ description: '成功创建任务的订单数' }) created!: number;
+  @ApiProperty({ description: '候选订单数（多选 = 去重后解析成功的订单数）' }) candidates!: number;
+  @ApiProperty({ description: '新建任务数（批量按仓合并：一任务可含多个订单）' }) created!: number;
+  @ApiProperty({ description: '进入新建任务的订单数' }) createdOrders!: number;
+  @ApiProperty({ description: '新建任务包含的拣货行总数' }) itemsTotal!: number;
   @ApiProperty({ description: '跳过数（已有进行中的拣货任务）' }) skipped!: number;
   @ApiProperty({ description: '失败数（域错误，逐单记录）' }) failed!: number;
   @ApiProperty({ type: [String], description: '新建的拣货单号' }) createdTaskNos!: string[];

@@ -977,7 +977,7 @@ createShipmentsFromOrder（仅 PICKED 行，1 发货单 = 1 仓）
 
 | 动作 | API | 语义 |
 |---|---|---|
-| 批量生成拣货单 | `POST /picking-tasks/auto-create`（请求体带 `orderIds`） | 仅为勾选订单创建拣货任务（省略 `orderIds` 仍是旧的按店铺自动选取）；跳过/幂等规则不变 |
+| 批量生成拣货单 | `POST /picking-tasks/auto-create`（请求体带 `orderIds`） | 勾选订单的 RESERVED 行**按仓合并**生成拣货任务（2026-10-15 语义修正）：同一仓库合并为一个任务（合并拣货，`picking_task_items` 行保留各自订单引用，任务内订单取消只摘除该订单行）；省略 `orderIds` 仍是旧的按店铺自动选取（同样合并）；跳过/幂等规则不变 |
 | 批量获取运单号 | `POST /orders/batch-prepare-shipment` | 逐单执行 ① 的全部平台/幂等/事实回写逻辑；仍是真实平台写操作 |
 | 批量发货 | `POST /orders/batch-ship` | 逐单执行 ④（含按订单 advisory lock）；库存仍只走 `shipShipment` |
 | 批量外部履约 | `POST /orders/batch-mark-external-fulfillment` | 逐单执行 Sprint 9 T6 的标记外部履约（同一 reason 记入每单的状态历史与操作日志）；不产生任何库存流水 |
