@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, forwardRef } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { PageMeta } from '@wcies/shared';
 import { PlatformService } from '../../platform/platform.service';
@@ -42,6 +42,7 @@ import {
   UpdateListingSkuRequestDto,
 } from '../dto/listing.dto';
 import { offsetOf } from '../../../common/dto/pagination.dto';
+import { OrderIngestionService } from '../../order/services/order-ingestion.service';
 
 const ENTITY_TYPE = 'PLATFORM_LISTING';
 const MAPPING_ENTITY_TYPE = 'PLATFORM_LISTING_SKU';
@@ -62,6 +63,10 @@ export class ListingService {
     private readonly storeService: StoreService,
     private readonly skuService: SkuService,
     private readonly operationLog: OperationLogService,
+    // 映射修复后的订单行批量收敛（2026-10-15 bug 修复；order ↔ listing 循环
+    // 依赖与 order↔picking 同款 forwardRef 解法）。
+    @Inject(forwardRef(() => OrderIngestionService))
+    private readonly orderIngestion: OrderIngestionService,
   ) {}
 
   async list(query: ListingListQueryDto): Promise<{ items: ListingResponseDto[]; meta: PageMeta }> {
@@ -334,12 +339,44 @@ export class ListingService {
       },
       operator,
     });
+    // 映射已落库：同店铺引用该变体的 FAILED 订单行批量收敛（失败自吞，
+    // 不影响映射结果；2026-10-15 bug 修复）。
+    await this.retryOrderLinesAfterMappingRepair(mappingId, operator);
     const updated = await this.repository.findMappingById(mappingId);
     return this.mappingToResponse({
       mapping: updated as typeof mapping,
       skuCode: sku.skuCode,
       skuName: sku.nameZh,
     });
+  }
+
+  /**
+   * 映射落库后的订单行批量收敛入口（快速建档 onboard 与人工映射共用）：
+   * 失败自吞——映射本身已提交成功，订单行重试的任何失败只记日志，绝不
+   * 让调用方的事务/响应失败（映射结果不受影响）。
+   */
+  async retryOrderLinesAfterMappingRepair(
+    mappingId: string,
+    operator: OperatorContext,
+  ): Promise<void> {
+    try {
+      const mapping = await this.repository.findMappingById(mappingId);
+      const listing =
+        mapping === null ? null : await this.repository.findListingById(mapping.listingId);
+      if (mapping === null || listing === null) {
+        return;
+      }
+      await this.orderIngestion.retryFailedMappingForVariant(
+        {
+          storeId: listing.storeId,
+          platformSkuId: mapping.platformSkuId,
+          sellerSku: mapping.sellerSku,
+        },
+        operator,
+      );
+    } catch {
+      // 映射已提交：收敛失败不能反射为调用失败（静默，行仍可手动重试）。
+    }
   }
 
   /**

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ObjectStorageModule } from '../../infrastructure/storage/object-storage.module';
 import { CatalogModule } from '../catalog/catalog.module';
@@ -7,6 +7,7 @@ import { OperationLogModule } from '../operation-log/operation-log.module';
 import { PlatformModule } from '../platform/platform.module';
 import { ProductModule } from '../product/product.module';
 import { StoreModule } from '../store/store.module';
+import { OrderModule } from '../order/order.module';
 import { PlatformListingEntity } from './entities/platform-listing.entity';
 import { PlatformListingSkuEntity } from './entities/platform-listing-sku.entity';
 import { PlatformCategoryMappingEntity } from './entities/platform-category-mapping.entity';
@@ -40,6 +41,8 @@ import { CategoryImportController } from './controllers/category-import.controll
     OzonModule,
     OperationLogModule,
     ObjectStorageModule,
+    // listing ↔ order 循环：映射落定后回调 order 的批量收敛（2026-10-15）。
+    forwardRef(() => OrderModule),
   ],
   controllers: [ListingController, CategoryImportController],
   providers: [

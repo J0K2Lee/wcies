@@ -214,6 +214,11 @@ export class ListingOnboardingService {
     // retries in the queue and never affects onboarding facts.
     await this.scheduleImageImport(mappingId, outcome.sku.id);
 
+    // 映射修复后的订单行批量收敛（2026-10-15 bug 修复）：建档把变体落成
+    // MAPPED 后，同店铺引用它的 FAILED 订单行自动重试（失败自吞，见
+    // ListingService.retryOrderLinesAfterMappingRepair）。
+    await this.listingService.retryOrderLinesAfterMappingRepair(mappingId, operator);
+
     return this.toResponse(listingId, outcome);
   }
 

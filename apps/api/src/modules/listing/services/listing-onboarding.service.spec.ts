@@ -100,6 +100,8 @@ function buildService(overrides?: BuildOptions) {
       invocationOrder.push('mapping');
       return makeMapping({ skuId: 'sku-1', mappingStatus: 'MAPPED' });
     }),
+    // 2026-10-15 批量收敛：不推入 invocationOrder（此处只验证调用不抛）。
+    retryOrderLinesAfterMappingRepair: vi.fn(async () => undefined),
   } as unknown as ListingService;
 
   const categoryMappingRepository = {

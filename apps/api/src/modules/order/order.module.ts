@@ -45,7 +45,9 @@ import { OrderController } from './controllers/order.controller';
       PlatformStatusHistoryEntity,
     ]),
     StoreModule,
-    ListingModule,
+    // listing ↔ order 循环：listing 的映射落定回调 order 的批量收敛
+    // （2026-10-15），与 picking/interception 同款 forwardRef 解法。
+    forwardRef(() => ListingModule),
     InventoryModule,
     ExceptionModule,
     WarehouseModule,

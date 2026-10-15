@@ -552,6 +552,68 @@ export class OrderIngestionService {
     return { resolved: true, ...outcome };
   }
 
+  /**
+   * 映射修复后的批量收敛（2026-10-15 用户 bug 报告）：一个平台变体补齐映射
+   * （快速建档 / 人工映射）后，同店铺引用该变体的全部 FAILED 订单行自动重试
+   * ——不再要求逐单手动点「重试映射」。候选按店铺 + 平台标识宽松匹配（与
+   * 摄入解析同一标识语义，decision 0016：platform_sku_id 优先、seller_sku
+   * 次之、offer_id 永不参与），精确判定交给逐行 retryFailedMappingItem——
+   * resolve 不过的行保持 FAILED。单行失败自吞（日志），不拖垮批次；调用方
+   * 是操作员的建档/映射动作，操作日志沿用该操作员（可追溯触发人）。
+   */
+  async retryFailedMappingForVariant(
+    input: { storeId: string; platformSkuId: string | null; sellerSku: string | null },
+    operator: OperatorContext,
+  ): Promise<{ scanned: number; repaired: number; reserved: number }> {
+    if (input.platformSkuId === null && input.sellerSku === null) {
+      // 变体没有任何可用于订单行匹配的标识：无事可做（也无法误匹配）。
+      return { scanned: 0, repaired: 0, reserved: 0 };
+    }
+    const candidates = await this.itemRepo.findFailedMappingLineCandidates(
+      input.storeId,
+      input.platformSkuId,
+      input.sellerSku,
+      50,
+    );
+    let repaired = 0;
+    let reserved = 0;
+    for (const candidate of candidates) {
+      try {
+        const item = await this.itemRepo.findById(candidate.itemId);
+        const order = item === null ? null : await this.orderRepo.findById(item.orderId);
+        if (item === null || order === null || order.erpStatus === 'CANCELLED') {
+          continue;
+        }
+        const outcome = await this.retryFailedMappingItem(order, item, operator, {
+          allocate:
+            item.fulfillmentStatus === 'BACKORDERED' || item.fulfillmentStatus === 'PENDING',
+        });
+        if (outcome.resolved) {
+          repaired += 1;
+          if (outcome.reserved) {
+            reserved += 1;
+          }
+        }
+      } catch (error: unknown) {
+        this.logger.warn(
+          `mapping-repair batch retry failed for item ${candidate.itemId}: ${String(error)}`,
+          'OrderIngestionService',
+        );
+      }
+    }
+    if (repaired > 0) {
+      this.logger.log('batch mapping repair after variant mapping committed', {
+        module: 'order',
+        storeId: input.storeId,
+        platformSkuId: input.platformSkuId,
+        scanned: candidates.length,
+        repaired,
+        reserved,
+      });
+    }
+    return { scanned: candidates.length, repaired, reserved };
+  }
+
   /** Retry entry shared with OrderService.retryAllocation (task §24). */
   async allocateMappedItem(
     order: OrderEntity,
@@ -581,6 +643,13 @@ export class OrderIngestionService {
           reservationId: reservation.id,
           warehouseId,
         });
+      });
+      // 占用成功 = 此前的配置性失败（如"店铺未绑定仓库"，自动重分配写入的
+      // 行级 ORDER_INVALID_STATE）已解除：幂等关闭，无则不动。
+      await this.exceptionService.resolveByReference({
+        exceptionType: 'ORDER_INVALID_STATE',
+        referenceType: 'ORDER_ITEM',
+        referenceId: item.id,
       });
       return { reserved: true, reservationId: reservation.id };
     } catch (error: unknown) {

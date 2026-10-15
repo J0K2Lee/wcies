@@ -45,6 +45,34 @@ export class OrderItemRepository {
     return rows.map((row) => ({ itemId: row.item_id, orderId: row.order_id }));
   }
 
+  /**
+   * 映射修复批量收敛（2026-10-15 bug 修复）的候选行：同店铺 mapping_status =
+   * 'FAILED' 且平台标识匹配该变体的行。宽松超集——标识 OR 匹配，精确判定
+   * 交给逐行 resolver（resolve 不过的行保持 FAILED）。
+   */
+  async findFailedMappingLineCandidates(
+    storeId: string,
+    platformSkuId: string | null,
+    sellerSku: string | null,
+    limit: number,
+  ): Promise<Array<{ itemId: string; orderId: string }>> {
+    const rows = await this.dataSource.query<Array<{ item_id: string; order_id: string }>>(
+      `SELECT i.id AS item_id, i.order_id AS order_id
+         FROM order_items i
+         JOIN orders o ON o.id = i.order_id
+        WHERE i.mapping_status = 'FAILED'
+          AND o.store_id = $1::uuid
+          AND (
+            ($2::text IS NOT NULL AND i.platform_sku_id = $2)
+            OR ($3::text IS NOT NULL AND i.seller_sku = $3)
+          )
+        ORDER BY i.created_at ASC
+        LIMIT $4`,
+      [storeId, platformSkuId, sellerSku, limit],
+    );
+    return rows.map((row) => ({ itemId: String(row.item_id), orderId: String(row.order_id) }));
+  }
+
   /** Items with resolved sku codes for detail views (no N+1). */
   async findByOrderIdWithSku(orderId: string): Promise<
     Array<{

@@ -403,3 +403,193 @@ describe('OrderIngestionService (task §11-§24)', () => {
     expect(exceptionService.createInTx).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('OrderIngestionService.retryFailedMappingForVariant (2026-10-15 批量收敛)', () => {
+  /** 轻量装配：只 mock 批量路径触达的依赖。 */
+  function buildBatch(options: {
+    candidates: Array<{ itemId: string; orderId: string }>;
+    items: Record<string, Record<string, unknown> | null>;
+    orders: Record<string, Record<string, unknown> | null>;
+    failItemIds?: string[];
+  }) {
+    const transaction = vi
+      .fn()
+      .mockImplementation((work: (manager: unknown) => Promise<unknown>) => work({}));
+    const dataSource = { transaction } as unknown as DataSource;
+    const storeService = {
+      getEntityById: vi.fn().mockResolvedValue({ id: 'store-1', name: 'S1' }),
+    } as unknown as StoreService;
+    const resolver = {
+      resolveInternalSku: vi
+        .fn()
+        .mockResolvedValue({ internalSkuId: 'sku-1', listingSkuId: 'pls-1' }),
+    } as unknown as ListingResolverService;
+    const reservationService = {
+      reserveStock: vi.fn().mockRejectedValue(
+        new InsufficientStockError({
+          skuId: 'sku-1',
+          warehouseId: 'wh-1',
+          requestedQty: '1',
+          availableQty: '0',
+        }),
+      ),
+    } as unknown as ReservationService;
+    const bindingService = {
+      listActiveByStore: vi
+        .fn()
+        .mockResolvedValue([
+          {
+            binding: { status: 'ACTIVE', priority: 100, warehouseId: 'wh-1' },
+            warehouseType: 'SELF',
+          },
+        ]),
+    } as unknown as WarehousePlatformBindingService;
+    const exceptionService = {
+      createInTx: vi.fn().mockResolvedValue({ id: 'exc-1' }),
+      resolveByReferenceInTx: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ExceptionService;
+    const orderRepo = {
+      findById: vi
+        .fn()
+        .mockImplementation((id: string) =>
+          Promise.resolve(
+            options.orders[id] === undefined
+              ? null
+              : (options.orders[id] as unknown as OrderEntity),
+          ),
+        ),
+    } as unknown as OrderRepository;
+    const itemRepo = {
+      findFailedMappingLineCandidates: vi.fn().mockResolvedValue(options.candidates),
+      findById: vi.fn().mockImplementation((id: string) => {
+        if (options.failItemIds?.includes(id) === true) {
+          return Promise.reject(new Error('db hiccup'));
+        }
+        return Promise.resolve(
+          options.items[id] === undefined
+            ? null
+            : (options.items[id] as unknown as OrderItemEntity),
+        );
+      }),
+      updateMapping: vi.fn().mockResolvedValue(undefined),
+      updateFulfillment: vi.fn().mockResolvedValue(undefined),
+    } as unknown as OrderItemRepository;
+    const historyRepo = { insert: vi.fn().mockResolvedValue(undefined) };
+    const statusService = {
+      recomputeOrderStatus: vi.fn().mockResolvedValue('READY_TO_PICK'),
+    } as unknown as OrderStatusService;
+    const deadlineExceptionService = {
+      evaluate: vi.fn().mockResolvedValue(undefined),
+    } as unknown as OrderDeadlineExceptionService;
+    const platformShipped = {
+      apply: vi.fn().mockResolvedValue({ shipped: true, erpStatus: 'SHIPPED' }),
+    } as unknown as OrderPlatformShippedService;
+    const logger = { log: vi.fn(), warn: vi.fn() } as unknown as AppLoggerService;
+    const service = new OrderIngestionService(
+      dataSource,
+      storeService,
+      resolver,
+      reservationService,
+      bindingService,
+      exceptionService,
+      orderRepo,
+      itemRepo,
+      historyRepo as never,
+      statusService,
+      deadlineExceptionService,
+      platformShipped,
+      logger,
+    );
+    return { service, itemRepo, orderRepo, statusService, logger };
+  }
+
+  const ORDER = {
+    id: 'order-1',
+    orderNo: 'ORD00000001',
+    storeId: 'store-1',
+    erpStatus: 'READY_TO_PICK',
+    fulfillmentMode: 'FBS',
+    platformStage: null,
+  };
+
+  it('repairs every FAILED line of the variant; only BACKORDERED/PENDING allocate', async () => {
+    const { service, itemRepo } = buildBatch({
+      candidates: [
+        { itemId: 'i1', orderId: 'order-1' },
+        { itemId: 'i2', orderId: 'order-1' },
+      ],
+      items: {
+        // BACKORDERED → 修映射并尝试分配；RELEASED → 只修映射不占库存。
+        i1: {
+          id: 'i1',
+          orderId: 'order-1',
+          lineNo: 1,
+          mappingStatus: 'FAILED',
+          fulfillmentStatus: 'BACKORDERED',
+          platformSkuId: 'psk-1',
+          sellerSku: null,
+          skuId: null,
+        },
+        i2: {
+          id: 'i2',
+          orderId: 'order-1',
+          lineNo: 2,
+          mappingStatus: 'FAILED',
+          fulfillmentStatus: 'RELEASED',
+          platformSkuId: 'psk-1',
+          sellerSku: null,
+          skuId: null,
+        },
+      },
+      orders: { 'order-1': ORDER },
+    });
+    const result = await service.retryFailedMappingForVariant(
+      { storeId: 'store-1', platformSkuId: 'psk-1', sellerSku: null },
+      OPERATOR,
+    );
+
+    expect(result).toMatchObject({ scanned: 2, repaired: 2, reserved: 0 });
+    expect(itemRepo.updateMapping).toHaveBeenCalledTimes(2);
+  });
+
+  it('swallows a single-line failure and keeps repairing the rest', async () => {
+    const { service, logger } = buildBatch({
+      candidates: [
+        { itemId: 'i1', orderId: 'order-1' },
+        { itemId: 'i2', orderId: 'order-missing' },
+      ],
+      items: {
+        i1: {
+          id: 'i1',
+          orderId: 'order-1',
+          lineNo: 1,
+          mappingStatus: 'FAILED',
+          fulfillmentStatus: 'BACKORDERED',
+          platformSkuId: 'psk-1',
+          sellerSku: null,
+          skuId: null,
+        },
+        i2: {
+          id: 'i2',
+          orderId: 'order-1',
+          lineNo: 2,
+          mappingStatus: 'FAILED',
+          fulfillmentStatus: 'BACKORDERED',
+          platformSkuId: 'psk-1',
+          sellerSku: null,
+          skuId: null,
+        },
+      },
+      orders: { 'order-1': ORDER },
+      failItemIds: ['i2'],
+    });
+
+    const result = await service.retryFailedMappingForVariant(
+      { storeId: 'store-1', platformSkuId: 'psk-1', sellerSku: null },
+      OPERATOR,
+    );
+
+    expect(result).toMatchObject({ scanned: 2, repaired: 1, reserved: 0 });
+    expect(logger.warn).toHaveBeenCalled();
+  });
+});

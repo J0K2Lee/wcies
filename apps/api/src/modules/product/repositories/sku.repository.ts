@@ -88,8 +88,14 @@ export class SkuRepository {
       );
 
     if (filters.keyword !== undefined && filters.keyword !== '') {
+      // 条码纳入 keyword（2026-10-14 用户指示，优化映射弹窗 SKU 搜索）：
+      // 扫码器输入的就是条码，搜索必须能命中；匹配任一状态的条码记录。
       qb.andWhere(
-        '(sku.sku_code ILIKE :kw OR sku.name_zh ILIKE :kw OR sku.name_ru ILIKE :kw OR sku.model ILIKE :kw)',
+        `(sku.sku_code ILIKE :kw OR sku.name_zh ILIKE :kw OR sku.name_ru ILIKE :kw OR sku.model ILIKE :kw
+          OR EXISTS (
+            SELECT 1 FROM sku_barcodes kw_bc
+             WHERE kw_bc.sku_id = sku.id AND kw_bc.barcode ILIKE :kw
+          ))`,
         { kw: `%${filters.keyword}%` },
       );
     }

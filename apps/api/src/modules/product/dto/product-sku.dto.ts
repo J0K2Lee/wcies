@@ -278,7 +278,7 @@ export class UpdateSkuRequestDto {
 }
 
 export class SkuListQueryDto extends PaginationQueryDto {
-  @ApiPropertyOptional({ description: 'Matches sku_code / name_zh / name_ru / model' })
+  @ApiPropertyOptional({ description: 'Matches sku_code / name_zh / name_ru / model / barcode' })
   @IsOptional()
   @IsString()
   keyword?: string;
