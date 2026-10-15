@@ -432,7 +432,9 @@ export function PurchaseReceiptsPage() {
           return;
         }
         if (needsBin(current.items, bins.data.data.length)) {
-          void message.warning('该仓库已有库位，请先编辑明细为每行选择库位（可一键建暂存位）');
+          void message.warning(
+            '该仓库已有库位，且有明细未选库位，请先在明细中为这些行选择库位（可一键建暂存位）',
+          );
           openEditor(current);
           return;
         }

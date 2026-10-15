@@ -129,9 +129,18 @@ describe('PO creation with optional receiving draft (2026-09-17 T1)', () => {
 
   it('cancels all linked drafts without stock and prevents their confirmation', async () => {
     const { skuId, po, receipt } = await createPoWithDraft('AUTO2');
-    const extra = await client.post<ReceiptDetail>(`/api/v1/purchase-receipts/from-po/${po.id}`, {
+    // 决策 0021 防重复草稿：已有 DRAFT 时再生成被拒（不是静默第二张）。
+    const duplicate = await client.post(`/api/v1/purchase-receipts/from-po/${po.id}`, {
       warehouseId,
       defaultBinId: binA01,
+    });
+    expect(duplicate.status).toBe(409);
+    expect(duplicate.body.error?.code).toBe('PURCHASE_RECEIPT_DUPLICATE_DRAFT');
+    // 手工建的第二张草稿（直接收货入口）仍允许，用于验证“取消联动全部草稿”。
+    const extra = await client.post<ReceiptDetail>('/api/v1/purchase-receipts', {
+      purchaseOrderId: po.id,
+      warehouseId,
+      items: [{ skuId, quantity: '1', binId: binA01 }],
     });
     expect(extra.status).toBe(200);
     const cancelled = await client.post<{ status: string }>(
@@ -460,5 +469,101 @@ describe('purchase receipt confirmation (Sprint 7 T4)', () => {
     );
     expect(cancelBooked.status).toBe(409);
     expect(cancelBooked.body.error?.code).toBe('PURCHASE_RECEIPT_INVALID_STATE');
+  });
+});
+
+describe('收货默认库位与超收防御（决策 0021）', () => {
+  it('prefills the SKU current bin for a stocked SKU; staging bin for a new one', async () => {
+    // Stock a SKU in A01-1, then purchase more of it plus a brand-new SKU.
+    const stocked = await newSku('D1-existing');
+    const seed = await client.post<ReceiptDetail>('/api/v1/purchase-receipts', {
+      warehouseId,
+      items: [{ skuId: stocked, quantity: '5', binId: binA01 }],
+    });
+    await client.post(`/api/v1/purchase-receipts/${seed.body.data.id}/confirm`);
+
+    const fresh = await newSku('D1-fresh');
+    const po = await client.post<{ id: string; items: Array<{ id: string }> }>(
+      '/api/v1/purchase-orders',
+      {
+        sourceNote: `${PREFIX} default-bin`,
+        items: [
+          { skuId: stocked, quantity: '3' },
+          { skuId: fresh, quantity: '2' },
+        ],
+      },
+    );
+    const draft = await client.post<ReceiptDetail>(
+      `/api/v1/purchase-receipts/from-po/${po.body.data.id}`,
+      { warehouseId },
+    );
+    expect(draft.status).toBe(200);
+    const lines = draft.body.data.items;
+    const stockedLine = lines.find((item) => item.skuId === stocked);
+    const freshLine = lines.find((item) => item.skuId === fresh);
+    // Existing stock co-locates; the new SKU lands in an ST staging bin.
+    expect(stockedLine?.binCode?.endsWith('A01-1')).toBe(true);
+    expect(freshLine?.binCode).toContain('-ST');
+  });
+
+  it('refuses a duplicate draft for the same PO (409) and allows a fresh one after confirm', async () => {
+    const sku = await newSku('D2');
+    const po = await client.post<{ id: string }>('/api/v1/purchase-orders', {
+      sourceNote: `${PREFIX} dedupe`,
+      items: [{ skuId: sku, quantity: '4' }],
+    });
+    const first = await client.post<ReceiptDetail>(
+      `/api/v1/purchase-receipts/from-po/${po.body.data.id}`,
+      { warehouseId, defaultBinId: binA01 },
+    );
+    expect(first.status).toBe(200);
+    const dup = await client.post(`/api/v1/purchase-receipts/from-po/${po.body.data.id}`, {
+      warehouseId,
+      defaultBinId: binA01,
+    });
+    expect(dup.status).toBe(409);
+    expect(dup.body.error?.code).toBe('PURCHASE_RECEIPT_DUPLICATE_DRAFT');
+
+    // Confirm the first; a second draft must still be refused (partial delivery
+    // is the case that legitimately needs a fresh draft — but only once there is
+    // no live DRAFT left, i.e. only shows up here when nothing remains).
+    await client.post(`/api/v1/purchase-receipts/${first.body.data.id}/confirm`);
+    // Fully received: no remaining quantity.
+    const none = await client.post(`/api/v1/purchase-receipts/from-po/${po.body.data.id}`, {
+      warehouseId,
+    });
+    expect(none.status).toBe(409);
+    expect(none.body.error?.code).toBe('PURCHASE_ORDER_INVALID_STATE');
+  });
+
+  it('rejects a confirm line that exceeds the PO item remaining quantity (no stock booked)', async () => {
+    const sku = await newSku('D3');
+    const po = await client.post<{ id: string; items: Array<{ id: string }> }>(
+      '/api/v1/purchase-orders',
+      { sourceNote: `${PREFIX} overreceipt`, items: [{ skuId: sku, quantity: '3' }] },
+    );
+    const draft = await client.post<ReceiptDetail>(
+      `/api/v1/purchase-receipts/from-po/${po.body.data.id}`,
+      { warehouseId, defaultBinId: binA01 },
+    );
+    // Manually inflate the draft beyond the ordered quantity.
+    const inflated = await client.patch<ReceiptDetail>(
+      `/api/v1/purchase-receipts/${draft.body.data.id}`,
+      {
+        items: [
+          {
+            skuId: sku,
+            purchaseOrderItemId: draft.body.data.items[0]?.purchaseOrderItemId,
+            quantity: '99',
+            binId: binA01,
+          },
+        ],
+      },
+    );
+    expect(inflated.status).toBe(200);
+    const failed = await client.post(`/api/v1/purchase-receipts/${draft.body.data.id}/confirm`);
+    expect(failed.status).toBe(409);
+    expect(failed.body.error?.code).toBe('PURCHASE_RECEIPT_EXCEEDS_ORDERED');
+    expect(await balanceOf(sku)).toEqual([]);
   });
 });

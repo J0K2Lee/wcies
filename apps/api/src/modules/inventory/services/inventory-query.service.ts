@@ -161,6 +161,27 @@ export class InventoryQueryService {
     return rows[0]?.total ?? '0';
   }
 
+  /**
+   * The bin where this SKU currently sits the most in a warehouse (决策 0021):
+   * receiving defaults a line to that bin so same SKUs co-locate. Only
+   * SELLABLE stock is considered (non-sellable stock must not attract
+   * new arrivals); the largest on-hand wins, ties broken by bin_code so the
+   * choice is deterministic. Returns null when the SKU has no stock yet.
+   */
+  async findCurrentBinId(skuId: string, warehouseId: string): Promise<string | null> {
+    const rows = await this.dataSource.query<Array<{ bin_id: string }>>(
+      `SELECT b.bin_id
+         FROM inventory_balances b
+         JOIN warehouse_bins bin ON bin.id = b.bin_id
+        WHERE b.sku_id = $1 AND b.warehouse_id = $2
+          AND b.inventory_condition = 'SELLABLE' AND b.on_hand_qty > 0
+        ORDER BY b.on_hand_qty DESC, bin.bin_code ASC
+        LIMIT 1`,
+      [skuId, warehouseId],
+    );
+    return rows[0]?.bin_id ?? null;
+  }
+
   async listBalances(
     filters: BalanceListFilters,
     page: { page: number; pageSize: number },

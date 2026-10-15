@@ -499,6 +499,30 @@ export class WarehouseBinService {
     return (await this.repository.findBinById(created.id)) as WarehouseBinEntity;
   }
 
+  /**
+   * Receiving default staging bin (2026-10-15, 决策 0021): the receiving flow
+   * defaults a line to the SKU's current bin, and to a staging location when
+   * the SKU has no stock in that warehouse yet. Uses the same `ST` zone the
+   * receiving page's manual "创建暂存库位（ST 区）" button produces
+   * (rack 1 / level 1), so an auto-created bin is indistinguishable from a
+   * hand-created one. Idempotent: returns the first `ST` bin when present.
+   */
+  async ensureReceiptStagingBin(
+    warehouseId: string,
+    operator: OperatorContext,
+  ): Promise<WarehouseBinEntity> {
+    const existing = await this.repository.findFirstBinByZone(warehouseId, 'ST');
+    if (existing !== null) {
+      return existing;
+    }
+    const created = await this.create(
+      warehouseId,
+      { zone: 'ST', rackNumber: 1, level: '1', remark: '收货暂存位（系统自动创建，决策 0021）' },
+      operator,
+    );
+    return (await this.repository.findBinById(created.id)) as WarehouseBinEntity;
+  }
+
   private async assertWarehouseExists(
     warehouseId: string,
   ): Promise<{ id: string; warehouseCode: string }> {

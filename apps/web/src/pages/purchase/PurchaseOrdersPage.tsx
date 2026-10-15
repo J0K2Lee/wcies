@@ -375,7 +375,7 @@ export function PurchaseOrdersPage() {
       ),
     onSuccess: (result) => {
       void message.success(
-        `已生成收货单 ${result.receiptNo}（草稿）：到收货单页选库位、确认后入库`,
+        `已生成收货单 ${result.receiptNo}（草稿，已预填默认库位）：到收货单页核对后确认入库`,
       );
       setReceiptWarehouseOpen(false);
       receiptWarehouseForm.resetFields();
@@ -442,7 +442,7 @@ export function PurchaseOrdersPage() {
               <div key={item.poId}>
                 {item.poNo ?? selectedPosById.get(item.poId)?.poNo ?? item.poId}：
                 {item.ok
-                  ? `已生成收货单 ${item.receiptNo}（草稿），到收货单页确认后入库`
+                  ? `已生成收货单 ${item.receiptNo}（草稿），到收货单页核对后入库`
                   : `失败（${item.message ?? item.code ?? '未知错误'}）`}
               </div>
             ))}

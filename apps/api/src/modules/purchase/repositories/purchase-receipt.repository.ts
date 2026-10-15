@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { DataSource, EntityManager, QueryRunner } from 'typeorm';
+import { DataSource, EntityManager, Not, QueryRunner } from 'typeorm';
 import { rawStr } from '../../../common/utils/raw';
 import { PurchaseReceiptEntity } from '../entities/purchase-receipt.entity';
 import { PurchaseReceiptItemEntity } from '../entities/purchase-receipt-item.entity';
@@ -45,6 +45,18 @@ export class PurchaseReceiptRepository {
       where: { purchaseOrderId, status: 'DRAFT' },
       order: { id: 'ASC' },
       lock: { mode: 'pessimistic_write' },
+    });
+  }
+
+  /**
+   * The live (non-cancelled) receipts of a PO. Drives draft-generation
+   * dedupe (决策 0021): generating a second draft for a PO that already has
+   * one is refused rather than silently producing overlapping documents.
+   */
+  async findActiveByPurchaseOrderId(purchaseOrderId: string): Promise<PurchaseReceiptEntity[]> {
+    return this.dataSource.getRepository(PurchaseReceiptEntity).find({
+      where: { purchaseOrderId, status: Not('CANCELLED') },
+      order: { createdAt: 'ASC', id: 'ASC' },
     });
   }
 
@@ -271,5 +283,32 @@ export class PurchaseReceiptRepository {
        WHERE id = $1`,
       [purchaseOrderItemId, quantity],
     );
+  }
+
+  /**
+   * Reads the remaining receivable quantity of a PO item ON the confirm
+   * transaction (决策 0021 over-receipt guard). Returns null when the item
+   * row is gone; the caller then skips the check.
+   */
+  async findPoItemRemainingInTx(
+    runner: QueryRunner,
+    purchaseOrderItemId: string,
+  ): Promise<{ skuCode: string; quantity: string; receivedQuantity: string } | null> {
+    const rows = (await runner.query(
+      `SELECT i.quantity, i.received_quantity, sk.sku_code AS sku_code
+         FROM purchase_order_items i
+         JOIN skus sk ON sk.id = i.sku_id
+        WHERE i.id = $1`,
+      [purchaseOrderItemId],
+    )) as Array<{ quantity: string; received_quantity: string; sku_code: string }>;
+    const row = rows[0];
+    if (row === undefined) {
+      return null;
+    }
+    return {
+      skuCode: row.sku_code,
+      quantity: row.quantity,
+      receivedQuantity: row.received_quantity,
+    };
   }
 }

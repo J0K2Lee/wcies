@@ -9,6 +9,7 @@ import { WarehouseService } from '../../warehouse/services/warehouse.service';
 import { WarehouseNotFoundError } from '../../warehouse/errors/warehouse-errors';
 import { InventoryService } from '../../inventory/services/inventory.service';
 import { InventoryQueryService } from '../../inventory/services/inventory-query.service';
+import { WarehouseBinService } from '../../warehouse/services/warehouse-bin.service';
 import { formatQty, parseQty } from '../../../common/utils/quantity';
 import { PurchaseOrderEntity } from '../entities/purchase-order.entity';
 import { PurchaseReceiptEntity } from '../entities/purchase-receipt.entity';
@@ -32,7 +33,9 @@ import { PurchaseOrderRepository } from '../repositories/purchase-order.reposito
 import {
   PurchaseOrderInvalidStateError,
   PurchaseOrderNotFoundError,
+  PurchaseReceiptDuplicateDraftError,
   PurchaseReceiptEmptyError,
+  PurchaseReceiptExceedsOrderedError,
   PurchaseReceiptInvalidStateError,
   PurchaseReceiptNotFoundError,
   PurchaseReceiptWarehouseMissingError,
@@ -59,6 +62,7 @@ export class PurchaseReceiptService {
     private readonly supplierService: SupplierService,
     private readonly skuService: SkuService,
     private readonly warehouseService: WarehouseService,
+    private readonly warehouseBinService: WarehouseBinService,
     private readonly inventoryService: InventoryService,
     private readonly inventoryQuery: InventoryQueryService,
     private readonly businessCode: BusinessCodeService,
@@ -76,6 +80,15 @@ export class PurchaseReceiptService {
     const header = await this.resolveHeaderRefs(dto);
     await this.assertItemsValid(dto.items);
 
+    // 未指定库位的行按 §4.1.1 预填默认库位（决策 0021）：与从采购单生成同源。
+    // 事务外解析（自动建暂存位会写库位与日志，不能挂在本事务的 manager 上）。
+    const defaultBins = await this.resolveDefaultReceiptBins(
+      dto.warehouseId,
+      undefined,
+      dto.items.filter((item) => item.binId === undefined).map((item) => item.skuId),
+      operator,
+    );
+
     const created = await this.dataSource.transaction(async (manager) => {
       const receiptNo = await this.businessCode.nextPurchaseReceiptNo();
       return this.repository.insertWithItems(
@@ -90,7 +103,11 @@ export class PurchaseReceiptService {
           remark: dto.remark ?? null,
           createdBy: operator.userId,
         },
-        dto.items.map((item) => this.toItemRow(item)),
+        dto.items.map((item) =>
+          item.binId === undefined
+            ? { ...this.toItemRow(item), binId: defaultBins.get(item.skuId) ?? null }
+            : this.toItemRow(item),
+        ),
       );
     });
 
@@ -125,6 +142,14 @@ export class PurchaseReceiptService {
         status: po.status,
       });
     }
+    // 防重复草稿（决策 0021）：同一 PO 已有未取消的收货单时拒绝再生成。
+    // 两张按同一未收数量预填的草稿先后确认会把 received_quantity 累加超量；
+    // 引导操作者去编辑确认已有那张，而不是新开一张。
+    const existing = await this.repository.findActiveByPurchaseOrderId(poId);
+    const existingDraft = existing.find((row) => row.status === 'DRAFT');
+    if (existingDraft !== undefined) {
+      throw new PurchaseReceiptDuplicateDraftError(po.poNo, existingDraft.receiptNo);
+    }
     // 仓库来源（ERP 建议#4）：请求显式指定优先，否则用 PO 上的收货仓库意向；
     // 两者皆无才是错误（前端会对已选仓库的 PO 自动预填，正常到不了这里）。
     const warehouseId = dto.warehouseId ?? po.receivingWarehouseId;
@@ -146,6 +171,16 @@ export class PurchaseReceiptService {
       });
     }
 
+    // 默认收货库位（决策 0021）：逐行取该 SKU 在本仓的现存货位；没有则用暂存位
+    // （ST 区不存在时自动创建一次，全部无货 SKU 共用）。显式传入的 defaultBinId
+    // 覆盖全部行（保留原契约）。都只是预填，操作者可在草稿里逐行改。
+    const binForSku = await this.resolveDefaultReceiptBins(
+      warehouseId,
+      dto.defaultBinId,
+      items.map(({ item }) => item.skuId),
+      operator,
+    );
+
     const created = await this.dataSource.transaction(async (manager) => {
       const receiptNo = await this.businessCode.nextPurchaseReceiptNo();
       return this.repository.insertWithItems(
@@ -165,7 +200,7 @@ export class PurchaseReceiptService {
           skuId: item.skuId,
           quantity: formatQty(remaining),
           unitCost: item.unitCost,
-          binId: dto.defaultBinId ?? null,
+          binId: binForSku.get(item.skuId) ?? null,
           serialNumbers: null,
           remark: null,
         })),
@@ -356,6 +391,26 @@ export class PurchaseReceiptService {
       }
 
       for (const { item } of items) {
+        // 超收防御（决策 0021）：本次数量不得超过来源采购明细的未收数量。
+        // 生成侧防重已挡住常规重复，这里兜住历史/并发草稿，给出明确错误而不是
+        // 撞 DB CHECK 后回落成 500。读取在锁内，与 accrued 累加同一事务视图。
+        if (item.purchaseOrderItemId !== null) {
+          const poItem = await this.repository.findPoItemRemainingInTx(
+            runner,
+            item.purchaseOrderItemId,
+          );
+          if (poItem !== null) {
+            const remaining = parseQty(poItem.quantity) - parseQty(poItem.receivedQuantity);
+            if (parseQty(item.quantity) > remaining) {
+              throw new PurchaseReceiptExceedsOrderedError({
+                skuCode: poItem.skuCode,
+                orderedQty: poItem.quantity,
+                receivedQty: poItem.receivedQuantity,
+                attemptedQty: item.quantity,
+              });
+            }
+          }
+        }
         const outcome = await this.inventoryService.receiveStockInTx(runner, {
           skuId: item.skuId,
           warehouseId: receipt.warehouseId,
@@ -576,6 +631,56 @@ export class PurchaseReceiptService {
     if ((await this.warehouseService.getEntityById(warehouseId)) === null) {
       throw new WarehouseNotFoundError(warehouseId);
     }
+  }
+
+  /**
+   * Per-SKU default receiving bin (决策 0021): each SKU goes to the bin it
+   * currently sits in (largest SELLABLE on-hand); a SKU with no stock in the
+   * warehouse falls back to the `ST` staging bin, auto-creating it once if
+   * none exists. An explicit `defaultBinId` overrides every line (legacy
+   * contract). Prefill only - the operator may change any line in the draft.
+   *
+   * Public so the PO-create-with-draft path shares the exact same defaults.
+   */
+  async resolveDefaultReceiptBins(
+    warehouseId: string,
+    explicitBinId: string | undefined,
+    skuIds: string[],
+    operator: OperatorContext,
+  ): Promise<Map<string, string | null>> {
+    const map = new Map<string, string | null>();
+    if (skuIds.length === 0) {
+      return map;
+    }
+    if (explicitBinId !== undefined && explicitBinId !== null) {
+      for (const skuId of skuIds) {
+        map.set(skuId, explicitBinId);
+      }
+      return map;
+    }
+    // Resolve the staging fallback lazily/at most once: warehouses holding no
+    // bins at all keep binId null (inventory creates the virtual DEFAULT bin
+    // on receive, so a staging bin there would be noise).
+    let stagingBinId: string | null | undefined;
+    const hasBins = (await this.warehouseBinService.countByWarehouse(warehouseId)) > 0;
+    for (const skuId of skuIds) {
+      const currentBinId = await this.inventoryQuery.findCurrentBinId(skuId, warehouseId);
+      if (currentBinId !== null) {
+        map.set(skuId, currentBinId);
+        continue;
+      }
+      if (!hasBins) {
+        map.set(skuId, null);
+        continue;
+      }
+      if (stagingBinId === undefined) {
+        stagingBinId = (
+          await this.warehouseBinService.ensureReceiptStagingBin(warehouseId, operator)
+        ).id;
+      }
+      map.set(skuId, stagingBinId);
+    }
+    return map;
   }
 
   private async assertItemsValid(items: PurchaseReceiptItemInputDto[]): Promise<void> {

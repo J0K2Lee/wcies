@@ -98,3 +98,46 @@ export class PurchaseReceiptWarehouseMissingError extends DomainError {
     super(`采购单 ${poNo} 未指定收货仓库，请先选择收货仓库`, { poNo });
   }
 }
+
+/**
+ * 同一采购单已有未取消的收货草稿，拒绝再生成第二张（2026-10-15）。
+ *
+ * 草稿按“生成时刻的未收数量”预填；两张草稿各自都能通过确认校验，先后确认
+ * 会把 received_quantity 累加超量、撞上 DB CHECK 报 500。防重必须落在
+ * 生成侧：已有草稿时引导操作者编辑确认那张草稿，而不是新开一张。
+ */
+export class PurchaseReceiptDuplicateDraftError extends DomainError {
+  readonly code = 'PURCHASE_RECEIPT_DUPLICATE_DRAFT';
+  readonly httpStatus = 409;
+
+  constructor(poNo: string, existingReceiptNo: string) {
+    super(
+      `采购单 ${poNo} 已有收货草稿 ${existingReceiptNo}，请到收货单页编辑确认后再生成新的收货单`,
+      { poNo, existingReceiptNo },
+    );
+  }
+}
+
+/**
+ * 确认收货会让采购明细的已收数量超过采购数量（2026-10-15 防御）。
+ *
+ * 正常路径由生成侧防重挡住，但历史遗留草稿、并发草稿或人工放大数量仍可能
+ * 触发；此时必须在事务内给出明确错误，而不是撞 DB CHECK 后回落成 500。
+ */
+export class PurchaseReceiptExceedsOrderedError extends DomainError {
+  readonly code = 'PURCHASE_RECEIPT_EXCEEDS_ORDERED';
+  readonly httpStatus = 409;
+
+  constructor(input: {
+    skuCode?: string | null;
+    orderedQty: string;
+    receivedQty: string;
+    attemptedQty: string;
+  }) {
+    const sku = input.skuCode === null || input.skuCode === undefined ? '' : `（${input.skuCode}）`;
+    super(
+      `本次收货数量${sku}超出采购未收数量：采购 ${input.orderedQty}、已收 ${input.receivedQty}、本次 ${input.attemptedQty}，请调整数量或改做直接收货`,
+      input,
+    );
+  }
+}

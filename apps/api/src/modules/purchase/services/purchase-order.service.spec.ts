@@ -16,6 +16,7 @@ import { OperationLogService } from '../../operation-log/operation-log.service';
 import { PurchaseOrderEntity } from '../entities/purchase-order.entity';
 import { PurchaseOrderItemEntity } from '../entities/purchase-order-item.entity';
 import { CreatePurchaseOrderRequestDto } from '../dto/purchase-order.dto';
+import { PurchaseReceiptService } from './purchase-receipt.service';
 
 const operator = { userId: null, username: 'tester' };
 const manager = {} as EntityManager;
@@ -88,6 +89,19 @@ function setup() {
     updateHeader: vi.fn().mockResolvedValue(undefined),
   };
   const warehouse = { getEntityById: vi.fn().mockResolvedValue({ id: 'wh-1' }) };
+  const receiptService = {
+    resolveDefaultReceiptBins: vi
+      .fn()
+      .mockImplementation(
+        async (_whId: string, explicitBinId: string | undefined, skuIds: string[]) => {
+          const map = new Map<string, string | null>();
+          for (const skuId of skuIds) {
+            map.set(skuId, explicitBinId ?? null);
+          }
+          return map;
+        },
+      ),
+  };
   const codes = {
     nextPurchaseOrderNo: vi.fn().mockResolvedValue('PO000001'),
     nextPurchaseReceiptNo: vi.fn().mockResolvedValue('PR000001'),
@@ -104,8 +118,9 @@ function setup() {
     log as unknown as OperationLogService,
     receipts as unknown as PurchaseReceiptRepository,
     warehouse as unknown as WarehouseService,
+    receiptService as unknown as PurchaseReceiptService,
   );
-  return { service, repository, receipts, warehouse, codes, log, transaction };
+  return { service, repository, receipts, warehouse, receiptService, codes, log, transaction };
 }
 let ctx: ReturnType<typeof setup>;
 beforeEach(() => {

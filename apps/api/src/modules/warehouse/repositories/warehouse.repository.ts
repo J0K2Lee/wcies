@@ -193,6 +193,14 @@ export class WarehouseRepository {
     return this.binRepository.findOneBy({ warehouseId, binCode });
   }
 
+  /** First bin of a zone by bin_code order; drives the receiving default staging bin. */
+  async findFirstBinByZone(warehouseId: string, zone: string): Promise<WarehouseBinEntity | null> {
+    return this.binRepository.findOne({
+      where: { warehouseId, zone },
+      order: { binCode: 'ASC' },
+    });
+  }
+
   async countBins(warehouseId: string): Promise<number> {
     return this.binRepository.count({ where: { warehouseId } });
   }

@@ -28,6 +28,7 @@ import {
   PurchaseOrderListFilters,
 } from '../repositories/purchase-order.repository';
 import { SupplierService } from './supplier.service';
+import { PurchaseReceiptService } from './purchase-receipt.service';
 import {
   CreatePurchaseOrderRequestDto,
   PurchaseOrderDetailDto,
@@ -58,6 +59,7 @@ export class PurchaseOrderService {
     private readonly operationLog: OperationLogService,
     private readonly receiptRepository: PurchaseReceiptRepository,
     private readonly warehouseService: WarehouseService,
+    private readonly receiptService: PurchaseReceiptService,
   ) {}
 
   // --------------------------------------------------------------------------
@@ -76,6 +78,22 @@ export class PurchaseOrderService {
       (await this.warehouseService.getEntityById(dto.receipt.warehouseId)) === null
     ) {
       throw new WarehouseNotFoundError(dto.receipt.warehouseId);
+    }
+
+    // 默认收货库位（决策 0021）：与 generateFromPo 同源——逐 SKU 取现存货位，
+    // 无货则暂存位（不存在时自动创建）。必须在事务外解析：暂存位自动创建会写
+    // 库位与操作日志，不能挂在采购单事务的 manager 上。
+    const receiptBins = new Map<string, string | null>();
+    if (dto.receipt) {
+      const resolved = await this.receiptService.resolveDefaultReceiptBins(
+        dto.receipt.warehouseId,
+        dto.receipt.defaultBinId,
+        dto.items.map((item) => item.skuId),
+        operator,
+      );
+      for (const [skuId, binId] of resolved) {
+        receiptBins.set(skuId, binId);
+      }
     }
 
     const { created, receipt } = await this.dataSource.transaction(async (manager) => {
@@ -117,7 +135,7 @@ export class PurchaseOrderService {
         })),
       );
       const receipt = dto.receipt
-        ? await this.createReceiptDraft(manager, created, dto.receipt, operator)
+        ? await this.createReceiptDraft(manager, created, dto.receipt, receiptBins, operator)
         : null;
       return { created, receipt };
     });
@@ -445,6 +463,7 @@ export class PurchaseOrderService {
     manager: EntityManager,
     po: PurchaseOrderEntity,
     option: ReceivingOptionDto,
+    binsBySku: Map<string, string | null>,
     operator: OperatorContext,
   ): Promise<PurchaseReceiptEntity> {
     // Read newly inserted lines through this manager, never another connection.
@@ -467,7 +486,7 @@ export class PurchaseOrderService {
         skuId: item.skuId,
         quantity: formatQty(parseQty(item.quantity) - parseQty(item.receivedQuantity)),
         unitCost: item.unitCost,
-        binId: option.defaultBinId ?? null,
+        binId: binsBySku.get(item.skuId) ?? null,
         serialNumbers: null,
         remark: null,
       })),

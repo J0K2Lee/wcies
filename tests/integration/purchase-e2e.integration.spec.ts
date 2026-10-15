@@ -54,9 +54,12 @@ async function mapSku(skuId: string, platformSkuId: string): Promise<void> {
 async function balanceRows(
   skuId: string,
 ): Promise<Array<{ binCode: string; onHandQty: string; reservedQty: string; pickedQty: string }>> {
+  // includeEmpty=true: this spec deliberately observes rows that shipping drove
+  // to zero (onHand/reserved/picked all 0); the inventory list hides those by
+  // default since 2026-10-15 (commit 9aa71e3).
   const list = await client.get<
     Array<{ binCode: string; onHandQty: string; reservedQty: string; pickedQty: string }>
-  >(`/api/v1/inventory?skuId=${skuId}&warehouseId=${warehouseId}&pageSize=100`);
+  >(`/api/v1/inventory?skuId=${skuId}&warehouseId=${warehouseId}&includeEmpty=true&pageSize=100`);
   return [...list.body.data].sort((a, b) => a.binCode.localeCompare(b.binCode));
 }
 
