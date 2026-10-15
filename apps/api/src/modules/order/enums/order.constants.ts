@@ -98,6 +98,14 @@ export const ORDER_STAGE_FILTERS = ['PENDING', 'IN_TRANSIT', 'COMPLETED'] as con
 export type OrderStageFilter = (typeof ORDER_STAGE_FILTERS)[number];
 
 /**
+ * 订单列表排序字段白名单（2026-10-14 用户指示：SKU 编码 / 下单时间 / 发货
+ * 时限）。repository 只按这里的值映射 ORDER BY，防注入；排序语义见
+ * order.repository 的 orderSortOf。
+ */
+export const ORDER_LIST_SORT_FIELDS = ['orderedAt', 'skuCode', 'shipmentDeadline'] as const;
+export type OrderListSortField = (typeof ORDER_LIST_SORT_FIELDS)[number];
+
+/**
  * Axis 2 - goods state chips (line-level facts, orders.md §17b). A chip is
  * answered by EXISTS subqueries so orders whose rollup status hides a line
  * problem (e.g. PARTIALLY_SHIPPED + one BACKORDERED line) stay findable.

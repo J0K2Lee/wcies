@@ -30,7 +30,13 @@ import { ORDER_INTERCEPTION_PORT, OrderInterceptionPort } from '../ports/order-i
 import { ORDER_PROCUREMENT_PORT, OrderProcurementPort } from '../ports/order-procurement.port';
 import { isExternalFulfillmentMode } from '../../platform/constants/platform.constants';
 import { PlatformAdapterRegistry } from '../../integration/platform-adapter.registry';
-import { OrderDetailDto, OrderListItemDto } from '../dto/order.dto';
+import { DomainError } from '../../../common/errors/domain.error';
+import {
+  OrderBatchMarkExternalFulfillmentItemDto,
+  OrderBatchMarkExternalFulfillmentResultDto,
+  OrderDetailDto,
+  OrderListItemDto,
+} from '../dto/order.dto';
 
 /**
  * Order application service (Sprint 3): list/detail, cancellation with
@@ -168,6 +174,8 @@ export class OrderService {
         pickedCount: row.pickedCount,
         mappingFailedCount: row.mappingFailedCount,
         openExceptionsCount: row.openExceptionsCount,
+        firstSkuCode: row.firstSkuCode,
+        skuKindCount: row.skuKindCount,
         backorderedOrderedCount: ordered,
         backorderedArrivedCount: arrived,
       };
@@ -921,6 +929,50 @@ export class OrderService {
       operator,
     });
     return { orderId, erpStatus: 'SHIPPED', releasedItems: released };
+  }
+
+  /**
+   * 批量标记外部履约（订单页多选, 2026-10-14）：逐单复用
+   * markExternalFulfillment 的全部校验与关账逻辑（同一 reason 记入每单的
+   * 状态历史与操作日志），单笔失败（域错误，如订单已发货 / 存在已占用库存
+   * 行）只记录结果、不拖垮整批（AGENTS §36）。不产生任何库存流水——
+   * 这正是该动作与批量发货的本质区别。
+   */
+  async markExternalFulfillmentBatch(
+    orderIds: string[],
+    reason: string,
+    operator: OperatorContext,
+  ): Promise<OrderBatchMarkExternalFulfillmentResultDto> {
+    const results: OrderBatchMarkExternalFulfillmentItemDto[] = [];
+    for (const orderId of new Set(orderIds)) {
+      // 预读一次拿 orderNo 供结果标注；订单不可读时它保持 null。
+      const order = await this.orderRepo.findById(orderId);
+      try {
+        const result = await this.markExternalFulfillment(orderId, operator, reason);
+        results.push({
+          orderId,
+          orderNo: order?.orderNo ?? null,
+          ok: true,
+          code: null,
+          message: null,
+          erpStatus: result.erpStatus,
+          releasedItems: result.releasedItems,
+        });
+      } catch (error: unknown) {
+        results.push({
+          orderId,
+          orderNo: order?.orderNo ?? null,
+          ok: false,
+          code:
+            error instanceof DomainError ? error.code : 'ORDER_MARK_EXTERNAL_FULFILLMENT_FAILED',
+          message: error instanceof Error ? error.message : String(error),
+          erpStatus: null,
+          releasedItems: null,
+        });
+      }
+    }
+    const failed = results.filter((item) => !item.ok).length;
+    return { total: results.length, succeeded: results.length - failed, failed, results };
   }
 
   // --------------------------------------------------------------------------

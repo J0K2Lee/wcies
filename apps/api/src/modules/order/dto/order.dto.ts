@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsDateString,
@@ -22,7 +23,9 @@ import {
   ORDER_INTERCEPTION_STATUSES,
   ORDER_ITEM_FULFILLMENT_STATUSES,
   ORDER_ITEM_MAPPING_STATUSES,
+  ORDER_LIST_SORT_FIELDS,
   ORDER_STAGE_FILTERS,
+  OrderListSortField,
 } from '../enums/order.constants';
 
 const POSITIVE_QTY_PATTERN = /^\d{1,15}(\.\d{1,3})?$/;
@@ -233,6 +236,21 @@ export class OrderListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsIn(['true'])
   pendingProcurement?: string;
+
+  @ApiPropertyOptional({
+    enum: ORDER_LIST_SORT_FIELDS,
+    description:
+      '排序字段（2026-10-14）：skuCode=该单最小 SKU 编码（全未映射排最后）；' +
+      'orderedAt=下单时间（默认）；shipmentDeadline=发货时限（无时限排最后）',
+  })
+  @IsOptional()
+  @IsIn(ORDER_LIST_SORT_FIELDS)
+  sortBy?: OrderListSortField;
+
+  @ApiPropertyOptional({ enum: ['asc', 'desc'], description: '排序方向；默认 desc' })
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  sortOrder?: 'asc' | 'desc';
 }
 
 export class OrderListItemDto {
@@ -270,6 +288,14 @@ export class OrderListItemDto {
   @ApiProperty() pickedCount!: number;
   @ApiProperty() mappingFailedCount!: number;
   @ApiProperty() openExceptionsCount!: number;
+  @ApiPropertyOptional({
+    nullable: true,
+    type: String,
+    description: '该单 SKU 编码的字典序最小值（主表 SKU 列展示 + SKU 排序键；全行未映射为 null）',
+  })
+  firstSkuCode!: string | null;
+  @ApiProperty({ description: '该单不同 SKU 编码的种类数' })
+  skuKindCount!: number;
   @ApiPropertyOptional({
     description: '缺货行中已登记采购（ORDERED，purchase.md §3.5 派生）的行数（双轴 §2.3）',
   })
@@ -504,4 +530,61 @@ export class OrderMarkExternalFulfillmentResultDto {
   @ApiProperty() orderId!: string;
   @ApiProperty({ enum: ERP_ORDER_STATUSES }) erpStatus!: string;
   @ApiProperty() releasedItems!: number;
+}
+
+// ---------------------------------------------------------------------------
+// 批量标记外部履约（订单页多选, 2026-10-14）
+// ---------------------------------------------------------------------------
+
+export class OrderBatchMarkExternalFulfillmentRequestDto {
+  @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    minItems: 1,
+    maxItems: 50,
+    description: '勾选的订单（单批上限 50，逐单执行）',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @IsUUID('4', { each: true })
+  orderIds!: string[];
+
+  @ApiProperty({
+    description: '外部履约原因（必填，应用于全部勾选订单，逐单记入状态历史与操作日志）',
+  })
+  @IsString()
+  @Length(1, 500)
+  reason!: string;
+}
+
+export class OrderBatchMarkExternalFulfillmentItemDto {
+  @ApiProperty() orderId!: string;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: '订单不可读时为 null（前端用缓存行标注）',
+  })
+  orderNo!: string | null;
+  @ApiProperty() ok!: boolean;
+  @ApiPropertyOptional({ nullable: true, type: String, description: '失败时的错误码' })
+  code?: string | null;
+  @ApiPropertyOptional({ nullable: true, type: String, description: '失败时的错误信息' })
+  message?: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: '标记后订单 ERP 状态（成功时为 SHIPPED）',
+  })
+  erpStatus!: string | null;
+  @ApiProperty({ nullable: true, type: Number, description: '关账的订单行数（成功时）' })
+  releasedItems!: number | null;
+}
+
+export class OrderBatchMarkExternalFulfillmentResultDto {
+  @ApiProperty() total!: number;
+  @ApiProperty() succeeded!: number;
+  @ApiProperty() failed!: number;
+  @ApiProperty({ type: [OrderBatchMarkExternalFulfillmentItemDto] })
+  results!: OrderBatchMarkExternalFulfillmentItemDto[];
 }

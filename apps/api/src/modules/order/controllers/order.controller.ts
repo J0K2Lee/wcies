@@ -20,6 +20,8 @@ import { OrderIngestionService } from '../services/order-ingestion.service';
 import { OrderGoodsStateFilter, OrderStageFilter } from '../enums/order.constants';
 import {
   NormalizedOrderInputDto,
+  OrderBatchMarkExternalFulfillmentRequestDto,
+  OrderBatchMarkExternalFulfillmentResultDto,
   OrderCancelRequestDto,
   OrderCancelResultDto,
   OrderDetailDto,
@@ -53,6 +55,8 @@ export class OrderController {
         storeId: query.storeId,
         fulfillmentMode: query.fulfillmentMode?.trim() || undefined,
         pendingProcurement: query.pendingProcurement === 'true',
+        sortBy: query.sortBy,
+        sortOrder: query.sortOrder,
       },
       {
         page: query.page,
@@ -81,6 +85,26 @@ export class OrderController {
     @CurrentOperator() operator: OperatorContext,
   ) {
     return ok<OrderIngestResultDto>(await this.ingestionService.ingest(input, operator));
+  }
+
+  // 批量路由先于 :id 参数路由声明（同 from-po/batch 约定，避免段名被当成 id）。
+  @Post('batch-mark-external-fulfillment')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '批量标记外部履约（订单页多选；同一原因逐单关账，不产生库存流水，单笔失败不影响其余）',
+  })
+  @ApiOkEnvelope(OrderBatchMarkExternalFulfillmentResultDto)
+  async markExternalFulfillmentBatch(
+    @Body() request: OrderBatchMarkExternalFulfillmentRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ) {
+    return ok<OrderBatchMarkExternalFulfillmentResultDto>(
+      await this.orderService.markExternalFulfillmentBatch(
+        request.orderIds,
+        request.reason,
+        operator,
+      ),
+    );
   }
 
   @Post(':id/cancel')

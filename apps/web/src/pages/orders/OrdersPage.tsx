@@ -22,6 +22,7 @@ import { apiGet, apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime, fmtMoney } from '../../utils/format';
 import { buildOzonProductUrl, buildPlatformProductUrl } from '../../utils/platformUrl';
 import { ListingOnboardModal, OnboardMatchIdentifiers } from '../../components/ListingOnboardModal';
+import { ListingVariantMapModal } from '../../components/ListingVariantMapModal';
 import {
   ContextAction,
   ContextMetric,
@@ -88,6 +89,10 @@ interface OrderListItem {
   pickedCount: number;
   mappingFailedCount: number;
   openExceptionsCount: number;
+  /** 该单 SKU 编码的字典序最小值（SKU 列展示 + SKU 排序键）；全行未映射为 null。 */
+  firstSkuCode: string | null;
+  /** 该单不同 SKU 编码的种类数。 */
+  skuKindCount: number;
 }
 
 interface OrderItem {
@@ -288,6 +293,9 @@ interface OrdersViewSettings {
   pageSize: number;
   /** 展开行主图缩略图边长（px，方形不裁剪）。 */
   thumbnailSize: number;
+  /** 默认排序（2026-10-14 用户指示：在视图设置中配置；排序按钮只切会话态）。 */
+  defaultSortBy: 'orderedAt' | 'skuCode' | 'shipmentDeadline';
+  defaultSortOrder: 'asc' | 'desc';
   /** 主表列（数组顺序即显示顺序）。 */
   mainColumns: ColumnSetting[];
   /** 展开行列（数组顺序即显示顺序）。 */
@@ -304,9 +312,13 @@ const DEFAULT_VIEW_SETTINGS: OrdersViewSettings = {
   defaultExpandAll: false,
   pageSize: 20,
   thumbnailSize: 48,
+  defaultSortBy: 'orderedAt',
+  defaultSortOrder: 'desc',
   mainColumns: [
     { key: 'platformOrderId', visible: true },
     { key: 'items', visible: true },
+    // SKU 列（2026-10-14）：展示该单最小 SKU 编码，是「SKU 排序」的可视依据。
+    { key: 'sku', visible: true },
     { key: 'erpStatus', visible: true },
     { key: 'store', visible: true },
     { key: 'fulfillmentMode', visible: true },
@@ -367,12 +379,63 @@ function loadViewSettings(): OrdersViewSettings {
 const MAIN_COLUMN_LABELS: Record<string, string> = {
   platformOrderId: '订单号',
   items: '商品',
+  sku: 'SKU',
   erpStatus: 'ERP 状态',
   store: '店铺',
   fulfillmentMode: '履约方式',
   shipmentDeadline: '时限',
   orderedAt: '下单时间',
 };
+
+/**
+ * 排序预设（2026-10-14 用户指示）：视图设置弹窗「默认排序」下拉的选项；
+ * 值格式 `字段:方向`。列表页按钮只切会话态（三字段固定方向），
+ * 默认排序在这里配置。
+ */
+const SORT_PRESETS: Array<{
+  value: string;
+  label: string;
+  sortBy: OrdersViewSettings['defaultSortBy'];
+  sortOrder: OrdersViewSettings['defaultSortOrder'];
+}> = [
+  { value: 'orderedAt:desc', label: '下单时间 新→旧', sortBy: 'orderedAt', sortOrder: 'desc' },
+  { value: 'orderedAt:asc', label: '下单时间 旧→新', sortBy: 'orderedAt', sortOrder: 'asc' },
+  { value: 'skuCode:asc', label: 'SKU 编码 A→Z', sortBy: 'skuCode', sortOrder: 'asc' },
+  { value: 'skuCode:desc', label: 'SKU 编码 Z→A', sortBy: 'skuCode', sortOrder: 'desc' },
+  {
+    value: 'shipmentDeadline:asc',
+    label: '发货时限 近→远',
+    sortBy: 'shipmentDeadline',
+    sortOrder: 'asc',
+  },
+  {
+    value: 'shipmentDeadline:desc',
+    label: '发货时限 远→近',
+    sortBy: 'shipmentDeadline',
+    sortOrder: 'desc',
+  },
+];
+
+/**
+ * 列表排序按钮（用户指示 2026-10-14 图示：默认排序 / 下单时间 / 发货时间 /
+ * SKU）。字段按钮只切当前会话（方向固定：下单时间新→旧、发货时限近→远、
+ * SKU A→Z）；再点已选中的按钮回到默认排序。默认值在视图设置配置。
+ */
+const SORT_FIELD_BUTTONS: Array<{
+  field: OrdersViewSettings['defaultSortBy'];
+  label: string;
+  sortBy: OrdersViewSettings['defaultSortBy'];
+  sortOrder: OrdersViewSettings['defaultSortOrder'];
+}> = [
+  { field: 'orderedAt', label: '下单时间排序', sortBy: 'orderedAt', sortOrder: 'desc' },
+  {
+    field: 'shipmentDeadline',
+    label: '发货时间排序',
+    sortBy: 'shipmentDeadline',
+    sortOrder: 'asc',
+  },
+  { field: 'skuCode', label: 'SKU排序', sortBy: 'skuCode', sortOrder: 'asc' },
+];
 
 const EXPANDED_COLUMN_LABELS: Record<string, string> = {
   image: '主图',
@@ -765,6 +828,15 @@ export function OrdersPage() {
   }, [searchParams]);
 
   const stageOfActiveTab = STAGE_TABS.find((tab) => tab.key === activeTab)?.stage;
+  // 排序按钮的会话态（2026-10-14 用户指示）：初始取视图设置的默认排序；
+  // 按钮切换只改会话态，「默认排序」按钮回到视图设置的默认。
+  const [sessionSort, setSessionSort] = useState<{
+    sortBy: OrdersViewSettings['defaultSortBy'];
+    sortOrder: OrdersViewSettings['defaultSortOrder'];
+  }>(() => ({ sortBy: viewSettings.defaultSortBy, sortOrder: viewSettings.defaultSortOrder }));
+  const isDefaultSort =
+    sessionSort.sortBy === viewSettings.defaultSortBy &&
+    sessionSort.sortOrder === viewSettings.defaultSortOrder;
   const query = useApiQuery<Envelope<OrderListItem[]>>(
     '/api/v1/orders',
     {
@@ -778,6 +850,9 @@ export function OrdersPage() {
       ...(goodsState ? { goodsState } : {}),
       ...(storeId ? { storeId } : {}),
       ...(fulfillmentModeFilter ? { fulfillmentMode: fulfillmentModeFilter } : {}),
+      // 列表排序（2026-10-14）：按钮会话态；默认值也显式传，保证查询键稳定。
+      sortBy: sessionSort.sortBy,
+      sortOrder: sessionSort.sortOrder,
     },
     [
       'orders',
@@ -788,6 +863,8 @@ export function OrdersPage() {
       goodsState,
       storeId,
       fulfillmentModeFilter,
+      sessionSort.sortBy,
+      sessionSort.sortOrder,
     ],
   );
 
@@ -1343,6 +1420,77 @@ export function OrdersPage() {
     });
   };
 
+  // ---- 批量外部履约（用户指示 2026-10-14）：同一原因逐单关账 ----
+  // 与批量发货的本质区别：不产生任何库存流水。已发货/已取消的单前端先排除，
+  // 存在已占用（RESERVED/PICKED）行的单由后端逐单拒绝并说明原因。
+  const [batchExternalOpen, setBatchExternalOpen] = useState(false);
+  const [batchExternalForm] = Form.useForm<{ reason: string }>();
+  const eligibleExternalOrderIds = useMemo(
+    () =>
+      selectedOrderIds.filter((id) => {
+        const row = selectedOrdersById.get(id);
+        return row === undefined || (row.erpStatus !== 'SHIPPED' && row.erpStatus !== 'CANCELLED');
+      }),
+    [selectedOrderIds, selectedOrdersById],
+  );
+
+  const batchMarkExternalMutation = useMutation({
+    mutationFn: ({ orderIds, reason }: { orderIds: string[]; reason: string }) =>
+      apiPost<{
+        total: number;
+        succeeded: number;
+        failed: number;
+        results: Array<{
+          orderId: string;
+          orderNo: string | null;
+          ok: boolean;
+          code?: string | null;
+          message?: string | null;
+          erpStatus: string | null;
+          releasedItems: number | null;
+        }>;
+      }>('/api/v1/orders/batch-mark-external-fulfillment', { orderIds, reason }),
+    onSuccess: (result) => {
+      notification.open({
+        type: result.failed > 0 ? 'warning' : 'success',
+        title: `批量外部履约：成功 ${result.succeeded} / 失败 ${result.failed}（共 ${result.total}）`,
+        description: (
+          <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+            {result.results.map((item) => (
+              <div key={item.orderId}>
+                {labelOfSelectedOrder(item.orderId)}：
+                {item.ok
+                  ? `已关账 ${item.releasedItems ?? 0} 行，订单转${
+                      ERP_STATUS_META[item.erpStatus ?? '']?.label ?? item.erpStatus
+                    }`
+                  : `失败（${item.message ?? item.code ?? '未知错误'}）`}
+              </div>
+            ))}
+          </div>
+        ),
+        duration: result.failed > 0 ? 0 : 8,
+      });
+      setBatchExternalOpen(false);
+      batchExternalForm.resetFields();
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
+      void queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+    },
+    onError: (error: Error) => message.error(`批量外部履约失败：${error.message}`),
+  });
+
+  const requestBatchMarkExternal = () => {
+    if (selectedOrderIds.length === 0) {
+      return;
+    }
+    if (eligibleExternalOrderIds.length === 0) {
+      void message.warning('勾选的订单都已发货/已取消，没有可标记外部履约的订单');
+      return;
+    }
+    batchExternalForm.setFieldsValue({ reason: '' });
+    setBatchExternalOpen(true);
+  };
+
   const registerPurchaseMutation = useMutation({
     mutationFn: (values: { sourceNote?: string; quantity: number; unitCost?: number }) => {
       const item = registerItem as OrderItem;
@@ -1568,6 +1716,57 @@ export function OrdersPage() {
     [message],
   );
 
+  // ---- SKU映射（用户指示 2026-10-14）：未映射订单行 → 绑定已有内部 SKU ----
+  // 与 openQuickOnboard 同样的反查（本店铺 + 未映射 + 平台标识），命中后打开
+  // 与 SKU映射 页面相同的共享映射弹窗，并按订单行标识预选变体。
+  const [variantMap, setVariantMap] = useState<{
+    listingId: string;
+    match: OnboardMatchIdentifiers;
+    orderItemId: string;
+  } | null>(null);
+  const [variantMapLookupPending, setVariantMapLookupPending] = useState(false);
+
+  const openVariantMap = useCallback(
+    (item: OrderItem, storeId: string) => {
+      const keyword = mappingSearchKeyword(item);
+      if (keyword === null || keyword.trim() === '') {
+        void message.warning(
+          '该订单行没有任何平台 SKU 标识（platformSkuId / sellerSku / offerId），无法定位',
+        );
+        return;
+      }
+      setVariantMapLookupPending(true);
+      apiGet<Array<{ id: string }>>('/api/v1/listings', {
+        storeId,
+        keyword: keyword.trim(),
+        mappingState: 'UNMAPPED',
+        page: 1,
+        pageSize: 5,
+      })
+        .then((result) => {
+          const listing = result.data[0];
+          if (listing === undefined) {
+            void message.warning(
+              '未在本店铺找到该平台标识对应的未映射商品链接：请确认该变体已同步到本地，或用「快速建档」新建',
+            );
+            return;
+          }
+          setVariantMap({
+            listingId: listing.id,
+            match: {
+              platformSkuId: item.platformSkuId,
+              offerId: item.offerId,
+              sellerSku: item.sellerSku,
+            },
+            orderItemId: item.id,
+          });
+        })
+        .catch((error: Error) => void message.error(`定位商品链接失败：${error.message}`))
+        .finally(() => setVariantMapLookupPending(false));
+    },
+    [message],
+  );
+
   /**
    * 打开商品链接（ERP 建议#3，用户指示 2026-09-28：只加在商品行侧边栏操作区）。
    * 反查本店铺下订单行对应的商品链接：已映射行按 skuId 精确查，未映射行按
@@ -1747,19 +1946,37 @@ export function OrdersPage() {
                 </Button>
               )}
               {selectedItem.mappingStatus === 'FAILED' && (
-                <Button
-                  block
-                  style={{ marginTop: 8 }}
-                  loading={onboardLookupPending}
-                  onClick={() =>
-                    openQuickOnboard(
-                      selectedItem,
-                      railDetail?.storeId ?? selectedRow?.storeId ?? '',
-                    )
-                  }
-                >
-                  快速建档
-                </Button>
+                <>
+                  {/* SKU映射（用户指示 2026-10-14）：把该未映射行绑定到已有内部
+                      SKU，与 SKU映射 页面同一弹窗同一行为；映射完成自动对该行
+                      重试映射/分配。 */}
+                  <Button
+                    block
+                    style={{ marginTop: 8 }}
+                    loading={variantMapLookupPending}
+                    onClick={() =>
+                      openVariantMap(
+                        selectedItem,
+                        railDetail?.storeId ?? selectedRow?.storeId ?? '',
+                      )
+                    }
+                  >
+                    SKU映射
+                  </Button>
+                  <Button
+                    block
+                    style={{ marginTop: 8 }}
+                    loading={onboardLookupPending}
+                    onClick={() =>
+                      openQuickOnboard(
+                        selectedItem,
+                        railDetail?.storeId ?? selectedRow?.storeId ?? '',
+                      )
+                    }
+                  >
+                    快速建档
+                  </Button>
+                </>
               )}
             </ContextAction>
           </>
@@ -1905,18 +2122,9 @@ export function OrdersPage() {
             {orderLabels.length === 0 ? '打单（取平台面单）' : '打单（用已存档面单）'}
           </Button>
         )}
-        {/* 快速建档 = 修复类次操作（§3.1 primary 语义是"推进动作"，且每视图
-            ≤1；与创建拣货任务/发货并存时降级为 default，避免双 primary）。 */}
-        {failedMappingItems.length > 0 && mappingSearchKeyword(failedMappingItems[0]!) !== null && (
-          <Button
-            block
-            style={{ marginTop: 8 }}
-            loading={onboardLookupPending}
-            onClick={() => openQuickOnboard(failedMappingItems[0]!, selectedRow.storeId)}
-          >
-            快速建档
-          </Button>
-        )}
+        {/* 快速建档已从订单级操作区移除（用户指示 2026-10-14）：一个订单可能
+            含多个 SKU，订单级按钮只能处理第一行、语义不清；建档入口收敛到
+            SKU 行侧边栏（点开具体未映射行后操作）。 */}
         {selectedRow.erpStatus !== 'SHIPPED' && selectedRow.erpStatus !== 'CANCELLED' && (
           <Button
             block
@@ -2141,6 +2349,8 @@ export function OrdersPage() {
     modal,
     onboardLookupPending,
     openQuickOnboard,
+    openVariantMap,
+    variantMapLookupPending,
   ]);
   useContextRail(railContent);
 
@@ -2407,6 +2617,28 @@ export function OrdersPage() {
         );
       },
     },
+    sku: {
+      title: 'SKU',
+      key: 'sku',
+      width: 170,
+      render: (_: unknown, row: OrderListItem) =>
+        row.firstSkuCode === null ? (
+          <span style={{ color: colors.textTertiary }}>—</span>
+        ) : (
+          <Tooltip
+            title={
+              row.skuKindCount > 1 ? `该单共 ${row.skuKindCount} 种 SKU，展开查看明细` : undefined
+            }
+          >
+            <span style={{ fontSize: 12.5 }}>
+              {row.firstSkuCode}
+              {row.skuKindCount > 1 && (
+                <span style={{ color: colors.textTertiary }}> 等 {row.skuKindCount} 种</span>
+              )}
+            </span>
+          </Tooltip>
+        ),
+    },
     erpStatus: {
       title: 'ERP 状态',
       dataIndex: 'erpStatus',
@@ -2546,14 +2778,22 @@ export function OrdersPage() {
                   <span style={{ fontSize: 12, color: colors.textTertiary }}>（跨分页保留）</span>
                   <Button
                     loading={batchPickingMutation.isPending}
-                    disabled={batchPrepareMutation.isPending || batchShipMutation.isPending}
+                    disabled={
+                      batchPrepareMutation.isPending ||
+                      batchShipMutation.isPending ||
+                      batchMarkExternalMutation.isPending
+                    }
                     onClick={confirmBatchPicking}
                   >
                     批量生成拣货单
                   </Button>
                   <Button
                     loading={batchPrepareMutation.isPending}
-                    disabled={batchPickingMutation.isPending || batchShipMutation.isPending}
+                    disabled={
+                      batchPickingMutation.isPending ||
+                      batchShipMutation.isPending ||
+                      batchMarkExternalMutation.isPending
+                    }
                     onClick={confirmBatchPrepare}
                   >
                     批量获取运单号
@@ -2561,10 +2801,25 @@ export function OrdersPage() {
                   <Button
                     danger
                     loading={batchShipMutation.isPending}
-                    disabled={batchPickingMutation.isPending || batchPrepareMutation.isPending}
+                    disabled={
+                      batchPickingMutation.isPending ||
+                      batchPrepareMutation.isPending ||
+                      batchMarkExternalMutation.isPending
+                    }
                     onClick={confirmBatchShip}
                   >
                     批量发货
+                  </Button>
+                  <Button
+                    loading={batchMarkExternalMutation.isPending}
+                    disabled={
+                      batchPickingMutation.isPending ||
+                      batchPrepareMutation.isPending ||
+                      batchShipMutation.isPending
+                    }
+                    onClick={requestBatchMarkExternal}
+                  >
+                    批量外部履约
                   </Button>
                   <Button type="text" onClick={clearOrderSelection}>
                     清空选择
@@ -2573,7 +2828,7 @@ export function OrdersPage() {
               ) : (
                 <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
                   勾选订单行首复选框后可批量操作（支持跨分页）：批量生成拣货单 / 批量获取运单号 /
-                  批量发货
+                  批量发货 / 批量外部履约
                 </span>
               )}
             </div>
@@ -2660,8 +2915,18 @@ export function OrdersPage() {
 
       {/* Axis 2: line-level goods-state chips (§2.2) - single select on top of
           the stage tab. Flow chips describe healthy progress; risk chips need
-          human attention. Tooltips state the exact backend predicate. */}
-      <div style={{ marginBottom: 12 }}>
+          human attention. Tooltips state the exact backend predicate.
+          行末排序按钮组（2026-10-14 用户指示图示）：默认排序 / 下单时间 /
+          发货时间 / SKU。按钮只切当前会话，默认排序在视图设置里配置。 */}
+      <div
+        style={{
+          marginBottom: 12,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          flexWrap: 'wrap',
+        }}
+      >
         <FilterChips
           chips={GOODS_STATE_CHIPS.map((chip) => ({
             key: chip.key,
@@ -2676,6 +2941,54 @@ export function OrdersPage() {
             setGoodsState(key === undefined || key === 'ALL' ? undefined : key);
           }}
         />
+        <div
+          style={{
+            marginLeft: 'auto',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}
+        >
+          <Button
+            size="small"
+            type={isDefaultSort ? 'primary' : 'default'}
+            onClick={() => {
+              setPage(1);
+              setSessionSort({
+                sortBy: viewSettings.defaultSortBy,
+                sortOrder: viewSettings.defaultSortOrder,
+              });
+            }}
+          >
+            默认排序
+          </Button>
+          {SORT_FIELD_BUTTONS.map((button) => {
+            const active =
+              sessionSort.sortBy === button.sortBy && sessionSort.sortOrder === button.sortOrder;
+            return (
+              <Button
+                key={button.field}
+                size="small"
+                type={active ? 'primary' : 'default'}
+                onClick={() => {
+                  setPage(1);
+                  // 再点已选中的按钮 = 回到默认排序（toggle）。
+                  setSessionSort(
+                    active
+                      ? {
+                          sortBy: viewSettings.defaultSortBy,
+                          sortOrder: viewSettings.defaultSortOrder,
+                        }
+                      : { sortBy: button.sortBy, sortOrder: button.sortOrder },
+                  );
+                }}
+              >
+                {button.label}
+              </Button>
+            );
+          })}
+        </div>
       </div>
 
       <SectionCard flush>
@@ -2694,7 +3007,16 @@ export function OrdersPage() {
             pageSize: viewSettings.pageSize,
             total: query.data?.meta.total ?? 0,
             showTotal: (total) => `共 ${total} 单`,
-            onChange: setPage,
+            // pageSize 是受控值（视图设置）：必须接住 size 变化写回设置，
+            // 否则下拉选了新条数会被受控值打回（2026-10-14 用户报告的 bug）。
+            onChange: (next, size) => {
+              if (size !== viewSettings.pageSize) {
+                setPage(1);
+                updateViewSettings({ pageSize: size });
+              } else {
+                setPage(next);
+              }
+            },
           }}
           expandable={{
             // 选中即展开（用户指示 2026-09-17）：行点击选择驱动展开/收起，
@@ -3147,6 +3469,51 @@ export function OrdersPage() {
         </Form>
       </Modal>
 
+      {/* ---- 批量外部履约（用户指示 2026-10-14）：同一原因应用于全部勾选订单 ---- */}
+      <Modal
+        title={`批量标记外部履约：${eligibleExternalOrderIds.length} 个订单`}
+        open={batchExternalOpen}
+        onCancel={() => setBatchExternalOpen(false)}
+        onOk={() => {
+          void batchExternalForm
+            .validateFields()
+            .then((values) => {
+              batchMarkExternalMutation.mutate({
+                orderIds: eligibleExternalOrderIds,
+                reason: values.reason,
+              });
+            })
+            .catch(() => undefined);
+        }}
+        okText="标记并关账"
+        cancelText="取消"
+        confirmLoading={batchMarkExternalMutation.isPending}
+        destroyOnHidden
+      >
+        <Form form={batchExternalForm} layout="vertical" preserve={false}>
+          <span
+            style={{
+              fontSize: 12.5,
+              color: colors.textTertiary,
+              display: 'block',
+              marginBottom: 12,
+            }}
+          >
+            适用于货物从未进入 WCIES 仓库、在系统外完成的订单（如线下采购直发买家）。已发货 /
+            已取消的订单已自动排除（勾选 {selectedOrderIds.length} 单，本次处理{' '}
+            {eligibleExternalOrderIds.length} 单）；存在 RESERVED / PICKED
+            行的订单会被拒绝并逐单提示原因。订单行将关账、订单转入已发货，不产生任何库存流水，并关闭相关缺货/时限异常。
+          </span>
+          <Form.Item
+            name="reason"
+            label="外部履约原因（必填，应用于全部订单）"
+            rules={[{ required: true, message: '请填写原因，如：线下采购直发买家' }]}
+          >
+            <Input.TextArea rows={3} maxLength={500} showCount />
+          </Form.Item>
+        </Form>
+      </Modal>
+
       {/* ---- 视图设置（用户指示 2026-09-17） ---- */}
       <Modal
         title="视图设置"
@@ -3183,6 +3550,30 @@ export function OrdersPage() {
                 onChange={(value) => {
                   setPage(1);
                   updateViewSettings({ pageSize: value });
+                }}
+              />
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              默认排序：
+              <Select
+                size="small"
+                style={{ width: 140 }}
+                value={`${viewSettings.defaultSortBy}:${viewSettings.defaultSortOrder}`}
+                options={SORT_PRESETS.map((preset) => ({
+                  value: preset.value,
+                  label: preset.label,
+                }))}
+                onChange={(value) => {
+                  const preset = SORT_PRESETS.find((item) => item.value === value);
+                  if (preset === undefined) {
+                    return;
+                  }
+                  setPage(1);
+                  setSessionSort({ sortBy: preset.sortBy, sortOrder: preset.sortOrder });
+                  updateViewSettings({
+                    defaultSortBy: preset.sortBy,
+                    defaultSortOrder: preset.sortOrder,
+                  });
                 }}
               />
             </span>
@@ -3230,14 +3621,28 @@ export function OrdersPage() {
           void queryClient.invalidateQueries({ queryKey: ['orders'] });
           void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
           void queryClient.invalidateQueries({ queryKey: ['exceptions'] });
-          // 建档已把 platform_listing_skus 落成 MAPPED：立即对触发行的订单行
-          // 重试映射/分配，不再要求操作员手动点「重试映射」（2026-10-09）。
-          // 结果提示由 retryMutation 的 onSuccess/onError 给出。
-          const itemId = quickOnboard?.orderItemId ?? null;
+          // 建档落成 MAPPED 后，后端已批量收敛该平台变体在同店铺引用的
+          // 全部 FAILED 订单行（2026-10-15 bug 修复），前端不再对触发行
+          // 单独 retry——行此时多已 RESERVED/缺货，再调 retry-allocation
+          // 会被状态守卫 409 误报。列表/详情刷新后即可见修复结果。
+        }}
+        zIndex={1100}
+      />
+
+      {/* ---- SKU映射弹窗（2026-10-14，与 SKU映射 页面共用同一组件）：
+          映射完成后对该订单行自动重试映射/分配，与快速建档后行为一致。 ---- */}
+      <ListingVariantMapModal
+        open={variantMap !== null}
+        listingId={variantMap?.listingId ?? null}
+        matchIdentifiers={variantMap?.match ?? null}
+        onClose={() => setVariantMap(null)}
+        onCompleted={() => {
+          void queryClient.invalidateQueries({ queryKey: ['orders'] });
+          void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
+          void queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+          const itemId = variantMap?.orderItemId ?? null;
           if (itemId !== null) {
             retryMutation.mutate(itemId);
-          } else {
-            void message.info('已建档并映射：请点「重试映射」重新分配库存');
           }
         }}
         zIndex={1100}

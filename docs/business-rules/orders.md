@@ -306,8 +306,8 @@ ORDER_SYNC 再遇到已存在的订单（窗口重叠再投递，或定向回读
    此时内部「预发货」状态与现实矛盾，统一由 `OrderPlatformShippedService`
    收敛（同步遭遇、摄入、映射修复三条路径共用，幂等）：
    - 缺货行（`MAPPED` 且 `BACKORDERED` / `PENDING`）转
-     `EXTERNAL_FULFILLED`：平台侧已履约完成，不再占用内部库存、不进入
-     拣货 / 待采购 / 自动重分配（这些口径只认 `BACKORDERED`/`PENDING` 行）；
+     `EXTERNAL_FULFILLED`：平台侧已履约完成，不占内部库存、不进拣货 /
+     待采购 / 自动重分配（这些口径只认 `BACKORDERED`/`PENDING` 行）；
    - 关闭行上 OPEN `ORDER_OUT_OF_STOCK` 与订单级
      `ORDER_SHIPMENT_DEADLINE_NEAR`，不再评估发货时限；
    - **除未映射异常外不阻塞**：无 `FAILED` 行、且无 `RESERVED` / `PICKED`
@@ -972,18 +972,21 @@ createShipmentsFromOrder（仅 PICKED 行，1 发货单 = 1 仓）
 
 ## 多选批量入口（2026-10-13，订单页多选）
 
-订单页支持勾选多个订单（跨分页保留）后在主页面批量条上批量执行 ①②④：
+订单页支持勾选多个订单（跨分页保留）后在主页面批量条上批量执行 ①②④
+（2026-10-14 增补批量外部履约）：
 
 | 动作 | API | 语义 |
 |---|---|---|
 | 批量生成拣货单 | `POST /picking-tasks/auto-create`（请求体带 `orderIds`） | 仅为勾选订单创建拣货任务（省略 `orderIds` 仍是旧的按店铺自动选取）；跳过/幂等规则不变 |
 | 批量获取运单号 | `POST /orders/batch-prepare-shipment` | 逐单执行 ① 的全部平台/幂等/事实回写逻辑；仍是真实平台写操作 |
 | 批量发货 | `POST /orders/batch-ship` | 逐单执行 ④（含按订单 advisory lock）；库存仍只走 `shipShipment` |
+| 批量外部履约 | `POST /orders/batch-mark-external-fulfillment` | 逐单执行 Sprint 9 T6 的标记外部履约（同一 reason 记入每单的状态历史与操作日志）；不产生任何库存流水 |
 
 规则不变，只是编排：**逐单执行、单笔失败只记录结果不拖垮整批**（§36/§43），
 不新增状态、不改变任何单笔路径的业务规则；批量获取运单号仍要求操作员显式确认
 （§92）。前端原右栏「自动创建拣货任务」按钮按店铺全量扫单的入口已下线，
-改为按勾选执行。
+改为按勾选执行。批量外部履约的校验与单笔一致：已取消/已发货、存在
+RESERVED / PICKED 行的订单逐单拒绝并说明原因。
 
 ## 异常
 

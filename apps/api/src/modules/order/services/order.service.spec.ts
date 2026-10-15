@@ -20,6 +20,7 @@ import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { OrderPickingStatePort } from '../ports/order-picking-state.port';
 import { OrderInterceptionPort } from '../ports/order-interception.port';
 import { OrderProcurementPort } from '../ports/order-procurement.port';
+import { OrderInvalidStateError, OrderNotFoundError } from '../errors/order.errors';
 import { PlatformAdapterRegistry } from '../../integration/platform-adapter.registry';
 import { OrderEntity } from '../entities/order.entity';
 import { OrderItemEntity } from '../entities/order-item.entity';
@@ -364,5 +365,88 @@ describe('OrderService.retryAllocation - mapped line without stock', () => {
       OPERATOR,
       expect.stringContaining('外部履约'),
     );
+  });
+});
+
+describe('OrderService.markExternalFulfillmentBatch (2026-10-14 订单页多选批量外部履约)', () => {
+  function build(orders: Array<{ id: string; orderNo: string }>) {
+    const orderRepo = {
+      findById: vi.fn(async (id: string) => orders.find((order) => order.id === id) ?? null),
+    };
+    const service = new OrderService(
+      {} as unknown as DataSource,
+      orderRepo as unknown as OrderRepository,
+      {} as OrderItemRepository,
+      {} as OrderStatusHistoryRepository,
+      {} as PlatformStatusHistoryRepository,
+      {} as OrderStatusService,
+      {} as OrderDeadlineExceptionService,
+      {} as OrderTrackingStallService,
+      {} as OrderIngestionService,
+      {} as OrderPlatformShippedService,
+      {} as ReservationService,
+      {} as InventoryQueryService,
+      {} as ExceptionService,
+      {} as StoreService,
+      {} as SkuImageService,
+      {} as OperationLogService,
+      {} as AppLoggerService,
+      {} as OrderPickingStatePort,
+      {} as OrderInterceptionPort,
+      {} as OrderProcurementPort,
+      {} as PlatformAdapterRegistry,
+    );
+    return { service };
+  }
+
+  it('marks each order via the single-order path with the shared reason and isolates failures', async () => {
+    const { service } = build([
+      { id: 'o1', orderNo: 'ORD1' },
+      { id: 'o2', orderNo: 'ORD2' },
+    ]);
+    const single = vi
+      .spyOn(service, 'markExternalFulfillment')
+      .mockResolvedValueOnce({ orderId: 'o1', erpStatus: 'SHIPPED', releasedItems: 2 })
+      .mockRejectedValueOnce(
+        new OrderInvalidStateError(
+          '订单存在已占用库存的行（RESERVED / PICKED），请走取消订单流程释放或拦截库存，不能标记外部履约',
+          { orderId: 'o2' },
+        ),
+      );
+
+    const result = await service.markExternalFulfillmentBatch(
+      ['o1', 'o2', 'o1'],
+      '线下采购直发买家',
+      OPERATOR,
+    );
+
+    // 重复 id 只执行一次；同一 reason 传给每一单。
+    expect(single).toHaveBeenCalledTimes(2);
+    expect(single).toHaveBeenNthCalledWith(1, 'o1', OPERATOR, '线下采购直发买家');
+    expect(single).toHaveBeenNthCalledWith(2, 'o2', OPERATOR, '线下采购直发买家');
+    expect(result).toMatchObject({ total: 2, succeeded: 1, failed: 1 });
+    expect(result.results[0]).toMatchObject({
+      orderNo: 'ORD1',
+      ok: true,
+      erpStatus: 'SHIPPED',
+      releasedItems: 2,
+    });
+    expect(result.results[1]).toMatchObject({
+      orderNo: 'ORD2',
+      ok: false,
+      code: 'ORDER_INVALID_STATE',
+    });
+  });
+
+  it('labels an unreadable order with orderNo = null and its failure code', async () => {
+    const { service } = build([{ id: 'o1', orderNo: 'ORD1' }]);
+    const single = vi
+      .spyOn(service, 'markExternalFulfillment')
+      .mockRejectedValueOnce(new OrderNotFoundError('missing'));
+
+    const result = await service.markExternalFulfillmentBatch(['missing'], 'x', OPERATOR);
+
+    expect(single).toHaveBeenCalledTimes(1);
+    expect(result.results[0]).toMatchObject({ orderNo: null, ok: false, code: 'ORDER_NOT_FOUND' });
   });
 });

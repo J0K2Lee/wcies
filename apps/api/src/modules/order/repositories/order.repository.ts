@@ -2,7 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { OrderEntity } from '../entities/order.entity';
 import { OrderItemEntity } from '../entities/order-item.entity';
-import { ErpOrderStatus, OrderGoodsStateFilter, OrderStageFilter } from '../enums/order.constants';
+import {
+  ErpOrderStatus,
+  OrderGoodsStateFilter,
+  OrderListSortField,
+  OrderStageFilter,
+} from '../enums/order.constants';
 import { rawStr } from '../../../common/utils/raw';
 
 export interface OrderListFilters {
@@ -19,6 +24,9 @@ export interface OrderListFilters {
   storeId?: string;
   /** Hard restriction to these order ids (待采购 filter pipeline, T3). */
   orderIds?: string[];
+  /** 排序字段（白名单，2026-10-14）；缺省 = 下单时间。 */
+  sortBy?: OrderListSortField;
+  sortOrder?: 'asc' | 'desc';
 }
 
 export interface OrderListRow {
@@ -31,6 +39,46 @@ export interface OrderListRow {
   pickedCount: number;
   mappingFailedCount: number;
   openExceptionsCount: number;
+  /** 该单 SKU 编码的字典序最小值（SKU 列展示 + SKU 排序键）；全行未映射为 null。 */
+  firstSkuCode: string | null;
+  /** 该单不同 SKU 编码的种类数。 */
+  skuKindCount: number;
+}
+
+/** 该单的排序/展示键：所有行 SKU 编码的字典序最小值（未映射行无编码）。 */
+const MIN_SKU_CODE_SQL =
+  '(SELECT MIN(sk.sku_code) FROM order_items i LEFT JOIN skus sk ON sk.id = i.sku_id WHERE i.order_id = o.id)';
+
+/**
+ * 排序白名单映射（纯函数，可单测）。未列出的 sortBy 回落默认（下单时间
+ * 新→旧）；表达式全部来自本文件常量，永不拼接用户输入（防注入）。
+ * NULL 统一压最后（发货时限为空 / 全行未映射的订单不打断浏览）。
+ */
+export function orderSortOf(
+  sortBy: OrderListSortField | undefined,
+  sortOrder: 'asc' | 'desc' | undefined,
+): Array<{ expression: string; direction: 'ASC' | 'DESC'; nulls?: 'NULLS LAST' }> {
+  const direction = sortOrder === 'asc' ? 'ASC' : 'DESC';
+  switch (sortBy) {
+    case 'skuCode':
+      // SKU 编码 A→Z / Z→A；同键按下单时间新→旧保持分页稳定。
+      return [
+        { expression: MIN_SKU_CODE_SQL, direction, nulls: 'NULLS LAST' },
+        { expression: 'o.orderedAt', direction: 'DESC' },
+      ];
+    case 'shipmentDeadline':
+      // 发货时限：升序 = 最紧急/最超时在前（近→远）；无时限的固定最后。
+      return [
+        { expression: 'o.shipmentDeadline', direction, nulls: 'NULLS LAST' },
+        { expression: 'o.orderedAt', direction: 'DESC' },
+      ];
+    default:
+      // 下单时间（默认）；id 作最终次序键，避免同刻订单翻页抖动。
+      return [
+        { expression: 'o.orderedAt', direction },
+        { expression: 'o.id', direction: 'ASC' },
+      ];
+  }
 }
 
 /** Data access for order headers (queries + inserts + status patches only). */
@@ -283,6 +331,14 @@ export class OrderRepository {
               AND e.reference_type = 'ORDER_ITEM'
               AND e.reference_id IN (SELECT i.id FROM order_items i WHERE i.order_id = o.id))`,
         'open_exceptions_count',
+      )
+      // SKU 列展示 + SKU 排序键（2026-10-14）：排序与显示用同一个子查询，
+      // 两列永不可能矛盾。
+      .addSelect(MIN_SKU_CODE_SQL, 'first_sku_code')
+      .addSelect(
+        `(SELECT COUNT(DISTINCT sk.sku_code) FROM order_items i
+            LEFT JOIN skus sk ON sk.id = i.sku_id WHERE i.order_id = o.id)`,
+        'sku_kind_count',
       );
     if (filters.keyword !== undefined && filters.keyword !== '') {
       // 单框混搜（用户指示 2026-09-28：订单号/平台单号与商品标识合并）：
@@ -327,24 +383,35 @@ export class OrderRepository {
       }
       qb.andWhere('o.id IN (:...orderIds)', { orderIds: filters.orderIds });
     }
-    qb.orderBy('o.orderedAt', 'DESC').skip(offset).take(limit);
+    // 排序白名单（2026-10-14）：默认下单时间新→旧；id 兜底保证分页稳定。
+    for (const sort of orderSortOf(filters.sortBy, filters.sortOrder)) {
+      qb.addOrderBy(sort.expression, sort.direction, sort.nulls);
+    }
+    qb.skip(offset).take(limit);
     const [{ raw: rawRows, entities }, total] = await Promise.all([
       qb.getRawAndEntities(),
       qb.getCount(),
     ]);
     const rawList = rawRows as Array<Record<string, unknown>>;
     return {
-      rows: entities.map((order, index) => ({
-        order,
-        storeName: rawStr(rawList[index]?.['store_name']),
-        platformCode: rawStr(rawList[index]?.['platform_code']),
-        itemsCount: Number(rawList[index]?.['items_count'] ?? 0),
-        reservedCount: Number(rawList[index]?.['reserved_count'] ?? 0),
-        backorderedCount: Number(rawList[index]?.['backordered_count'] ?? 0),
-        pickedCount: Number(rawList[index]?.['picked_count'] ?? 0),
-        mappingFailedCount: Number(rawList[index]?.['mapping_failed_count'] ?? 0),
-        openExceptionsCount: Number(rawList[index]?.['open_exceptions_count'] ?? 0),
-      })),
+      rows: entities.map((order, index) => {
+        const raw: Record<string, unknown> = rawList[index] ?? {};
+        const firstSkuValue = raw['first_sku_code'];
+        return {
+          order,
+          storeName: rawStr(raw['store_name']),
+          platformCode: rawStr(raw['platform_code']),
+          itemsCount: Number(raw['items_count'] ?? 0),
+          reservedCount: Number(raw['reserved_count'] ?? 0),
+          backorderedCount: Number(raw['backordered_count'] ?? 0),
+          pickedCount: Number(raw['picked_count'] ?? 0),
+          mappingFailedCount: Number(raw['mapping_failed_count'] ?? 0),
+          openExceptionsCount: Number(raw['open_exceptions_count'] ?? 0),
+          firstSkuCode:
+            firstSkuValue === null || firstSkuValue === undefined ? null : rawStr(firstSkuValue),
+          skuKindCount: Number(raw['sku_kind_count'] ?? 0),
+        };
+      }),
       total,
     };
   }
