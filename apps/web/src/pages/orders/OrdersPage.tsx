@@ -858,6 +858,10 @@ export function OrdersPage() {
     [
       'orders',
       page,
+      // pageSize 必须在查询键里：useApiQuery 只用调用方给的 key 做缓存键，
+      // params 不参与。此前漏了它，「每页行数」写回设置后键不变 → 不重新
+      // 拉取，列表仍按旧条数渲染（2026-10-16 端到端验收发现）。
+      viewSettings.pageSize,
       keyword,
       platformFilter,
       stageOfActiveTab,
