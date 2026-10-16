@@ -36,7 +36,7 @@ export const appConfig = registerAs('app', () => {
     databaseUrl: process.env.DATABASE_URL ?? '',
     redisUrl: process.env.REDIS_URL ?? '',
     jwtSecret: process.env.JWT_SECRET ?? '',
-    jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '8h',
+    jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '7d',
     credentialEncryptionKey: process.env.CREDENTIAL_ENCRYPTION_KEY ?? '',
     s3: {
       endpoint: process.env.S3_ENDPOINT ?? '',

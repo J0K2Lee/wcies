@@ -17,6 +17,15 @@ export const AUTH_COOKIE_NAME = 'wcies_session';
 const RATE_LIMIT_WINDOW_SECONDS = 60;
 const RATE_LIMIT_MAX_ATTEMPTS = 5;
 
+/**
+ * Sliding-session renewal threshold (2026-10-05): a session that has been
+ * used at least once after this much token age gets a fresh full window
+ * (JWT_EXPIRES_IN, default 7d). In practice this re-issues at most once per
+ * day of activity, so an account in daily use never logs out while an idle
+ * account still expires after the full window.
+ */
+const SESSION_RENEW_AFTER_MS = 24 * 3_600_000;
+
 /** Parses simple duration strings (`8h`, `30m`, `7d`, `45s`) to milliseconds. */
 export function parseDurationToMs(input: string): number | undefined {
   const match = /^(\d+)\s*(s|m|h|d)$/i.exec(input.trim());
@@ -86,6 +95,30 @@ export class AuthService {
     return this.jwtService.verifyAsync(token);
   }
 
+  /**
+   * Sliding renewal (2026-10-05): called by JwtAuthGuard AFTER the request is
+   * fully authenticated (user active, not revoked). When the presented token
+   * is older than SESSION_RENEW_AFTER_MS, mints a fresh full-window token and
+   * resets the cookie - "used today" extends the session. At most one renewal
+   * per day per client, so bursts do not re-sign every request.
+   */
+  async renewIfAging(
+    user: UserEntity,
+    tokenIat: number | undefined,
+    response: Response,
+  ): Promise<void> {
+    if (tokenIat === undefined) {
+      return;
+    }
+    const ageMs = Date.now() - tokenIat * 1000;
+    if (ageMs < SESSION_RENEW_AFTER_MS) {
+      return;
+    }
+    const token = await this.signToken(user);
+    this.setAuthCookie(response, token);
+    this.logger.debug(`session renewed (sliding window, userId=${user.id})`);
+  }
+
   private signToken(user: UserEntity): Promise<string> {
     return this.jwtService.signAsync({
       sub: user.id,
@@ -95,7 +128,7 @@ export class AuthService {
   }
 
   private setAuthCookie(response: Response, token: string): void {
-    const expiresIn = this.config.get<string>('app.jwtExpiresIn') ?? '8h';
+    const expiresIn = this.config.get<string>('app.jwtExpiresIn') ?? '7d';
     const maxAgeMs = parseDurationToMs(expiresIn);
     response.cookie(AUTH_COOKIE_NAME, token, {
       httpOnly: true,

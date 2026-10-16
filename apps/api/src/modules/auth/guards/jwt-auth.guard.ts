@@ -1,11 +1,12 @@
 import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { requestContextStorage } from '../../../common/context/request-context';
 import { PUBLIC_KEY } from '../decorators/public.decorator';
 import { UnauthorizedError } from '../errors/auth-errors';
 import { USER_STATUS_ACTIVE } from '../enums/user-status.enum';
+import { AuthService } from '../services/auth.service';
 import { UserService } from '../services/user.service';
 
 export interface AuthenticatedRequest extends Request {
@@ -22,6 +23,7 @@ export class JwtAuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly jwtService: JwtService,
     private readonly userService: UserService,
+    private readonly authService: AuthService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -64,6 +66,14 @@ export class JwtAuthGuard implements CanActivate {
     if (store !== undefined) {
       store.userId = user.id;
     }
+    // Sliding session: a token older than the renewal threshold gets a fresh
+    // full window. Only reached on fully authenticated requests, so revoked
+    // / disabled sessions never renew (AuthService.renewIfAging).
+    await this.authService.renewIfAging(
+      user,
+      payload.iat,
+      context.switchToHttp().getResponse<Response>(),
+    );
     return true;
   }
 }

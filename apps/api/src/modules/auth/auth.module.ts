@@ -18,7 +18,8 @@ import { EmailVerificationService } from './services/email-verification.service'
 import { UserAdminService } from './services/user-admin.service';
 import { UserService } from './services/user.service';
 
-const DEFAULT_JWT_TTL_MS = 8 * 3_600_000; // 8h
+// 7d - matches the JWT_EXPIRES_IN default (sliding sessions, users.md §8).
+const DEFAULT_JWT_TTL_MS = 7 * 24 * 3_600_000;
 
 @Module({
   imports: [
@@ -49,6 +50,8 @@ const DEFAULT_JWT_TTL_MS = 8 * 3_600_000; // 8h
     UserAdminService,
     AccountService,
   ],
-  exports: [UserService, AdminGuard],
+  // AuthService is exported for the global JwtAuthGuard (registered via
+  // APP_GUARD in AppModule) - it owns the sliding-session renewal.
+  exports: [UserService, AdminGuard, AuthService],
 })
 export class AuthModule {}
