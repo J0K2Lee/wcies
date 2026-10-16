@@ -50,3 +50,6 @@ backups/
 
 # Cloudflare Tunnel credentials (local only, never commit)
 docker/cloudflared/credentials.json
+
+# Agent/tool scratch (DB dumps with business data + session notes) - never commit
+.workbuddy/
