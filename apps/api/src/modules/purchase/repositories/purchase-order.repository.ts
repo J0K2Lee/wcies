@@ -100,6 +100,24 @@ export class PurchaseOrderRepository {
     };
   }
 
+  /**
+   * Live (non-cancelled) PO header owning the given order line, newest first.
+   * Powers the order rail's「去收货」entry (2026-10-16): an order line's
+   * receipt is generated from its linked PO.
+   */
+  async findActivePoIdByOrderItemId(orderItemId: string): Promise<string | null> {
+    const rows = await this.dataSource.query<Array<{ po_id: string }>>(
+      `SELECT po.id AS po_id
+         FROM purchase_order_items i
+         JOIN purchase_orders po ON po.id = i.po_id
+        WHERE i.order_item_id = $1 AND po.status <> 'CANCELLED'
+        ORDER BY po.ordered_at DESC
+        LIMIT 1`,
+      [orderItemId],
+    );
+    return rows[0]?.po_id ?? null;
+  }
+
   /** Header + items in ONE transaction (purchase.md §3.3). */
   async insertWithItems(
     manager: EntityManager,

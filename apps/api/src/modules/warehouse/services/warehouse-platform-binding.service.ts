@@ -188,6 +188,28 @@ export class WarehousePlatformBindingService {
     }));
   }
 
+  /**
+   * 店铺默认作业仓（订单分配 / 收货草稿兜底共用，2026-10-16）：ACTIVE 绑定中
+   * priority 最小者；并列时非 FBO 优先（FBO 库存由平台管理，orders.md §4.6）。
+   * 无 ACTIVE 绑定返回 null——调用方决定是报错还是回退。与订单摄入的仓库解析
+   * 同一规则（提取到此处避免两处字面量漂移）。
+   */
+  async resolveDefaultWarehouseId(storeId: string): Promise<string | null> {
+    const bindings = await this.listActiveByStore(storeId);
+    const candidates = bindings
+      .map((entry) => entry.binding)
+      .sort((a, b) => {
+        const byPriority = a.priority - b.priority;
+        if (byPriority !== 0) {
+          return byPriority;
+        }
+        const aFbo = a.fulfillmentMode.includes('FBO') ? 1 : 0;
+        const bFbo = b.fulfillmentMode.includes('FBO') ? 1 : 0;
+        return aFbo - bFbo;
+      });
+    return candidates[0]?.warehouseId ?? null;
+  }
+
   private async findOwnedOrThrow(
     warehouseId: string,
     bindingId: string,

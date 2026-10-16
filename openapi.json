@@ -7755,6 +7755,45 @@
         "tags": ["purchase-receipts"]
       }
     },
+    "/api/v1/purchase-receipts/from-order-item/{orderItemId}": {
+      "post": {
+        "operationId": "PurchaseReceiptController_generateFromOrderItem",
+        "parameters": [
+          {
+            "name": "orderItemId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PurchaseReceiptDetailDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "订单行「去收货」：从该行关联的有效采购单生成收货草稿（店铺绑定仓自动定）",
+        "tags": ["purchase-receipts"]
+      }
+    },
     "/api/v1/purchase-receipts/{id}": {
       "get": {
         "operationId": "PurchaseReceiptController_getById",

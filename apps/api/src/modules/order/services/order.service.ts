@@ -1032,6 +1032,7 @@ export class OrderService {
   async getItemFulfillment(orderItemId: string): Promise<{
     orderId: string;
     orderItemId: string;
+    storeId: string;
     skuId: string | null;
     warehouseId: string | null;
     quantity: string;
@@ -1042,9 +1043,11 @@ export class OrderService {
     if (item === null) {
       throw new OrderItemNotFoundError(orderItemId);
     }
+    const order = await this.getOrderOrThrow(item.orderId);
     return {
       orderId: item.orderId,
       orderItemId: item.id,
+      storeId: order.storeId,
       skuId: item.skuId,
       warehouseId: item.warehouseId,
       quantity: item.quantity,

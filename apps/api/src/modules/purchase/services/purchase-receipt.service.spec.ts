@@ -8,6 +8,8 @@ import { SupplierService } from './supplier.service';
 import { SkuService } from '../../product/services/sku.service';
 import { WarehouseService } from '../../warehouse/services/warehouse.service';
 import { WarehouseBinService } from '../../warehouse/services/warehouse-bin.service';
+import { WarehousePlatformBindingService } from '../../warehouse/services/warehouse-platform-binding.service';
+import { OrderService } from '../../order/services/order.service';
 import { InventoryService } from '../../inventory/services/inventory.service';
 import { InventoryQueryService } from '../../inventory/services/inventory-query.service';
 import { BusinessCodeService } from '../../../infrastructure/business-code/business-code.service';
@@ -38,7 +40,13 @@ function buildPo(overrides: Partial<{ receivingWarehouseId: string | null; statu
   };
 }
 
-function setup(po: ReturnType<typeof buildPo>) {
+function setup(
+  po: ReturnType<typeof buildPo>,
+  extras?: {
+    activePoId?: string | null;
+    storeDefaultWarehouseId?: string | null;
+  },
+) {
   const receipt = {
     id: 'receipt-1',
     receiptNo: 'PR000001',
@@ -54,6 +62,9 @@ function setup(po: ReturnType<typeof buildPo>) {
   };
   const poRepository = {
     findById: vi.fn().mockResolvedValue(po),
+    findActivePoIdByOrderItemId: vi
+      .fn()
+      .mockResolvedValue(extras?.activePoId === undefined ? po.id : extras.activePoId),
     findItemsWithRefs: vi.fn().mockResolvedValue([
       {
         item: {
@@ -88,6 +99,12 @@ function setup(po: ReturnType<typeof buildPo>) {
     { getEntityById: vi.fn().mockResolvedValue({}) } as unknown as SkuService,
     warehouse as unknown as WarehouseService,
     binService as unknown as WarehouseBinService,
+    {
+      resolveDefaultWarehouseId: vi.fn().mockResolvedValue(extras?.storeDefaultWarehouseId ?? null),
+    } as unknown as WarehousePlatformBindingService,
+    {
+      getItemFulfillment: vi.fn().mockResolvedValue({ storeId: 'store-1' }),
+    } as unknown as OrderService,
     {} as unknown as InventoryService,
     inventoryQuery as unknown as InventoryQueryService,
     codes as unknown as BusinessCodeService,
@@ -118,6 +135,44 @@ describe('generateFromPo warehouse resolution (ERP 建议#4)', () => {
   it('rejects with a domain error when neither request nor PO carries a warehouse', async () => {
     const ctx = setup(buildPo({ receivingWarehouseId: null }));
     await expect(ctx.service.generateFromPo('po-1', {}, operator)).rejects.toBeInstanceOf(
+      PurchaseReceiptWarehouseMissingError,
+    );
+    expect(ctx.repository.insertWithItems).not.toHaveBeenCalled();
+  });
+});
+
+describe('generateFromOrderItem 订单行「去收货」(2026-10-16)', () => {
+  it('PO 有收货仓库意向时直接用其仓库', async () => {
+    const ctx = setup(buildPo({ receivingWarehouseId: 'wh-po' }));
+    await ctx.service.generateFromOrderItem('item-1', operator);
+    expect(ctx.warehouse.getEntityById).toHaveBeenCalledWith('wh-po');
+    expect(ctx.repository.insertWithItems.mock.calls[0]?.[1]).toMatchObject({
+      warehouseId: 'wh-po',
+    });
+  });
+
+  it('PO 无收货仓库意向时回退店铺绑定仓（用户拍板）', async () => {
+    const ctx = setup(buildPo({ receivingWarehouseId: null }), {
+      storeDefaultWarehouseId: 'wh-store',
+    });
+    await ctx.service.generateFromOrderItem('item-1', operator);
+    expect(ctx.warehouse.getEntityById).toHaveBeenCalledWith('wh-store');
+    expect(ctx.repository.insertWithItems.mock.calls[0]?.[1]).toMatchObject({
+      warehouseId: 'wh-store',
+    });
+  });
+
+  it('无有效采购单时报 ORDER_LINE_NOT_ORDERED，不生成草稿', async () => {
+    const ctx = setup(buildPo({}), { activePoId: null });
+    await expect(ctx.service.generateFromOrderItem('item-1', operator)).rejects.toMatchObject({
+      code: 'PURCHASE_ORDER_LINE_NOT_ORDERED',
+    });
+    expect(ctx.repository.insertWithItems).not.toHaveBeenCalled();
+  });
+
+  it('PO 意向与店铺绑定仓皆无时报 WAREHOUSE_MISSING', async () => {
+    const ctx = setup(buildPo({ receivingWarehouseId: null }), { storeDefaultWarehouseId: null });
+    await expect(ctx.service.generateFromOrderItem('item-1', operator)).rejects.toBeInstanceOf(
       PurchaseReceiptWarehouseMissingError,
     );
     expect(ctx.repository.insertWithItems).not.toHaveBeenCalled();
@@ -307,6 +362,10 @@ describe('confirm over-receipt guard (决策 0021)', () => {
       {} as unknown as SkuService,
       { getEntityById: vi.fn().mockResolvedValue({ id: 'wh-1' }) } as unknown as WarehouseService,
       {} as unknown as WarehouseBinService,
+      {
+        resolveDefaultWarehouseId: vi.fn().mockResolvedValue(null),
+      } as unknown as WarehousePlatformBindingService,
+      { getItemFulfillment: vi.fn() } as unknown as OrderService,
       inventoryService as unknown as InventoryService,
       {} as unknown as InventoryQueryService,
       {} as unknown as BusinessCodeService,

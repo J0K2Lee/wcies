@@ -104,6 +104,7 @@ function build(input: {
         warehouseType: 'SELF',
       },
     ]),
+    resolveDefaultWarehouseId: vi.fn().mockResolvedValue('wh-1'),
   } as unknown as WarehousePlatformBindingService;
   const exceptionService = {
     createInTx: vi.fn().mockResolvedValue({ id: 'exc-1' }),
@@ -305,6 +306,7 @@ describe('OrderIngestionService (task §11-§24)', () => {
     });
     const bindingService = {
       listActiveByStore: vi.fn().mockResolvedValue([]),
+      resolveDefaultWarehouseId: vi.fn().mockResolvedValue(null),
     } as unknown as WarehousePlatformBindingService;
     (service as unknown as { bindingService: WarehousePlatformBindingService }).bindingService =
       bindingService;
@@ -346,6 +348,7 @@ describe('OrderIngestionService (task §11-§24)', () => {
           warehouseType: 'SELF',
         },
       ]),
+      resolveDefaultWarehouseId: vi.fn().mockResolvedValue('wh-1'),
     } as unknown as WarehousePlatformBindingService;
     const exceptionService = {
       createInTx: vi.fn().mockResolvedValue({ id: 'exc' }),
@@ -435,14 +438,13 @@ describe('OrderIngestionService.retryFailedMappingForVariant (2026-10-15 批量�
       ),
     } as unknown as ReservationService;
     const bindingService = {
-      listActiveByStore: vi
-        .fn()
-        .mockResolvedValue([
-          {
-            binding: { status: 'ACTIVE', priority: 100, warehouseId: 'wh-1' },
-            warehouseType: 'SELF',
-          },
-        ]),
+      listActiveByStore: vi.fn().mockResolvedValue([
+        {
+          binding: { status: 'ACTIVE', priority: 100, warehouseId: 'wh-1' },
+          warehouseType: 'SELF',
+        },
+      ]),
+      resolveDefaultWarehouseId: vi.fn().mockResolvedValue('wh-1'),
     } as unknown as WarehousePlatformBindingService;
     const exceptionService = {
       createInTx: vi.fn().mockResolvedValue({ id: 'exc-1' }),

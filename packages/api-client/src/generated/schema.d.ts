@@ -2130,6 +2130,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/purchase-receipts/from-order-item/{orderItemId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 订单行「去收货」：从该行关联的有效采购单生成收货草稿（店铺绑定仓自动定） */
+        post: operations["PurchaseReceiptController_generateFromOrderItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/purchase-receipts/{id}": {
         parameters: {
             query?: never;
@@ -11309,6 +11326,31 @@ export interface operations {
                 "application/json": components["schemas"]["GenerateReceiptFromPoRequestDto"];
             };
         };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PurchaseReceiptDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    PurchaseReceiptController_generateFromOrderItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orderItemId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             200: {
                 headers: {

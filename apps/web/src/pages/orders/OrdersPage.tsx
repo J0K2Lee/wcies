@@ -17,7 +17,7 @@ import {
 } from 'antd';
 import { DownOutlined, UpOutlined } from '@ant-design/icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link, useSearchParams } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { apiGet, apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime, fmtMoney } from '../../utils/format';
 import { buildOzonProductUrl, buildPlatformProductUrl } from '../../utils/platformUrl';
@@ -739,6 +739,7 @@ function RailRecentStatus({ history }: { history: OrderDetail['history'] }) {
 export function OrdersPage() {
   const { message, modal, notification } = AntdApp.useApp();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState(() => searchParams.get('keyword') ?? '');
@@ -1522,6 +1523,29 @@ export function OrdersPage() {
     onError: (error: Error) => message.error(`登记失败：${error.message}`),
   });
 
+  /**
+   * 去收货（2026-10-16 用户需求）：已采购行（派生状态 ORDERED）直接跳到收货
+   * 流程——后端从该行关联的有效采购单生成收货草稿（收货仓库：采购单意向 →
+   * 店铺绑定仓兜底；默认库位按决策 0021），前端生成后跳收货单页并打开该草稿。
+   * 幂等/防重复草稿由后端保证（已有草稿会 409 提示去编辑那张）。
+   */
+  const createReceiptFromItemMutation = useMutation({
+    mutationFn: (orderItemId: string) =>
+      apiPost<{ id: string; receiptNo: string }>(
+        '/api/v1/purchase-receipts/from-order-item/{orderItemId}',
+        {},
+        { orderItemId },
+      ),
+    onSuccess: (result) => {
+      message.success(`已生成收货单 ${result.receiptNo}（草稿），正在打开…`);
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
+      void queryClient.invalidateQueries({ queryKey: ['purchase-receipts'] });
+      void navigate(`/purchase-receipts?receipt=${result.id}`);
+    },
+    onError: (error: Error) => message.error(`去收货失败：${error.message}`),
+  });
+
   const list = query.data?.data ?? [];
   const detail = detailId !== null ? detailQuery.data?.data : undefined;
   const detailDeadline =
@@ -1907,23 +1931,36 @@ export function OrdersPage() {
               )}
             </ContextSection>
             <ContextAction>
-              <Button
-                block
-                type="primary"
-                disabled={
-                  selectedItem.skuId === null ||
-                  selectedItem.procurementState === 'ORDERED' ||
-                  selectedItem.procurementState === 'ARRIVED'
-                }
-                onClick={() => setRegisterItem(selectedItem)}
-              >
-                创建采购单
-              </Button>
+              {selectedItem.procurementState === 'ORDERED' ? (
+                // 已采购且有进行中采购单：不再允许重复登记，给「去收货」——
+                // 从该行的采购单直接生成收货草稿（2026-10-16 用户需求）。
+                <Button
+                  block
+                  type="primary"
+                  loading={createReceiptFromItemMutation.isPending}
+                  onClick={() => createReceiptFromItemMutation.mutate(selectedItem.id)}
+                >
+                  去收货
+                </Button>
+              ) : (
+                <Button
+                  block
+                  type="primary"
+                  disabled={
+                    selectedItem.skuId === null || selectedItem.procurementState === 'ARRIVED'
+                  }
+                  onClick={() => setRegisterItem(selectedItem)}
+                >
+                  创建采购单
+                </Button>
+              )}
               {selectedItem.skuId !== null && selectedItem.procurementState !== null && (
                 <RailHint>
                   {selectedItem.procurementState === 'NOT_ORDERED'
                     ? '为该订单行登记采购；同一订单行重复登记会被系统拒绝。'
-                    : '该行已有进行中/已到货的采购，不能重复登记。'}
+                    : selectedItem.procurementState === 'ORDERED'
+                      ? '该行已登记采购；点「去收货」从对应采购单生成收货单（预填默认库位）。'
+                      : '该行采购已全部到货，无需重复登记。'}
                 </RailHint>
               )}
               <Button
@@ -2341,6 +2378,7 @@ export function OrdersPage() {
     railDetail,
     retryMutation.isPending,
     createPickingMutation.isPending,
+    createReceiptFromItemMutation.isPending,
     prepareShipmentMutation.isPending,
     shippingLabelMutation.isPending,
     quickShipMutation.isPending,

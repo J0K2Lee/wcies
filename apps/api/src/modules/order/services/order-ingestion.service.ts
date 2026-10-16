@@ -664,22 +664,11 @@ export class OrderIngestionService {
    * Store -> first ACTIVE platform-binding warehouse (priority ASC; ties
    * prefer non-FBO modes because FBO stock is platform-managed, orders.md
    * §4.6; 用户指示 2026-09-17：仓库解析改走「仓库绑定平台仓库」).
-   * Multi-warehouse decisions belong to a later sprint.
+   * 规则实现于 WarehousePlatformBindingService.resolveDefaultWarehouseId
+   * （2026-10-16 提取共享，收货草稿兜底同源）。
    */
   private async resolveWarehouse(storeId: string): Promise<string | null> {
-    const bindings = await this.bindingService.listActiveByStore(storeId);
-    const candidates = bindings
-      .map((entry) => entry.binding)
-      .sort((a, b) => {
-        const byPriority = a.priority - b.priority;
-        if (byPriority !== 0) {
-          return byPriority;
-        }
-        const aFbo = a.fulfillmentMode.includes('FBO') ? 1 : 0;
-        const bFbo = b.fulfillmentMode.includes('FBO') ? 1 : 0;
-        return aFbo - bFbo;
-      });
-    return candidates[0]?.warehouseId ?? null;
+    return this.bindingService.resolveDefaultWarehouseId(storeId);
   }
 
   private async buildResult(

@@ -1,5 +1,6 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router';
 import {
   App as AntdApp,
   Button,
@@ -191,6 +192,7 @@ export function PurchaseReceiptsPage() {
   const [statusTab, setStatusTab] = useState<ReceiptStatusTab>('pending');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [createOpen, setCreateOpen] = useState(false);
   const [fromPoOpen, setFromPoOpen] = useState(false);
   const [items, setItems] = useState<EditorItem[]>([]);
@@ -244,6 +246,21 @@ export function PurchaseReceiptsPage() {
   // selected one (focusId also feeds the rail's edit entry).
   const detailRow =
     detailId !== null && detail.data?.data.id === detailId ? detail.data.data : null;
+
+  // 深链打开（2026-10-16）：「去收货」在订单页生成草稿后跳转 ?receipt=<id>，
+  // 直接选中并打开该草稿抽屉，省去操作者再找一遍。
+  useEffect(() => {
+    const target = searchParams.get('receipt');
+    if (target === null || target === '') {
+      return;
+    }
+    setSelectedId(target);
+    setDetailId(target);
+    // 一次性消费：清掉 query，避免刷新/返回重复打开已处理的草稿。
+    const next = new URLSearchParams(searchParams);
+    next.delete('receipt');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['purchase-receipts'] });

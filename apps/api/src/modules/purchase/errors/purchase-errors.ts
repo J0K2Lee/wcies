@@ -100,6 +100,22 @@ export class PurchaseReceiptWarehouseMissingError extends DomainError {
 }
 
 /**
+ * 订单行「去收货」时该行没有关联的有效采购单（2026-10-16）。
+ *
+ * 「去收货」只在订单行已有进行中采购（派生采购状态 ORDERED）时可用；若该行
+ * 实际无 live PO（状态过期/PO 被取消），明确报错引导先登记采购，不落到「生成
+ * 空收货单」或其它不可读错误。
+ */
+export class OrderLineNotOrderedError extends DomainError {
+  readonly code = 'PURCHASE_ORDER_LINE_NOT_ORDERED';
+  readonly httpStatus = 409;
+
+  constructor(orderItemId: string) {
+    super('该订单行没有进行中的采购单，无法收货；请先登记采购', { orderItemId });
+  }
+}
+
+/**
  * 同一采购单已有未取消的收货草稿，拒绝再生成第二张（2026-10-15）。
  *
  * 草稿按“生成时刻的未收数量”预填；两张草稿各自都能通过确认校验，先后确认

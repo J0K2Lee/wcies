@@ -113,6 +113,14 @@ ORDERED → PARTIALLY_RECEIVED → RECEIVED
    返回 `PURCHASE_RECEIPT_DUPLICATE_DRAFT`（409，消息含已有 `PR` 号），引导操作者编辑
    确认那张草稿；已有 `RECEIVED` 而无 `DRAFT` 时允许（分批到货）；已取消的草稿不计入。
    原因：两张按同一未收数量预填的草稿先后确认会累加超量，撞 DB CHECK 报不可读的 500。
+10. **订单行「去收货」（2026-10-16，用户需求）**：`POST /purchase-receipts/from-order-item/:orderItemId`
+    ——订单页已采购行（派生采购状态 `ORDERED`）一键收货入口。从该行关联的**有效采购单**
+    （非取消，最新一张）生成收货草稿，规则完全复用 `generateFromPo`（未收数量预填、
+    默认库位 §4.1.1、防重复草稿）。仓库来源：**采购单收货仓库意向优先，否则用该订单
+    店铺的默认作业仓**（`WarehousePlatformBindingService.resolveDefaultWarehouseId`，与
+    订单分配同一规则）；两者皆无 → `PURCHASE_RECEIPT_WAREHOUSE_MISSING`。该行无有效
+    采购单 → `PURCHASE_ORDER_LINE_NOT_ORDERED`（409，引导先登记采购）。生成后前端跳
+    收货单页并打开该草稿（`?receipt=<id>`）。
 
 ## 3.4 防重复采购（后端强制）
 
@@ -311,7 +319,8 @@ Operation Log
 | `PURCHASE_RECEIPT_EMPTY` | 收货单无明细不可确认 |
 | `PURCHASE_RECEIPT_DUPLICATE_DRAFT` | 采购单已有未取消的收货草稿，拒绝重复生成（决策 0021） |
 | `PURCHASE_RECEIPT_EXCEEDS_ORDERED` | 本次收货数量超出采购未收数量（决策 0021） |
-| `PURCHASE_RECEIPT_WAREHOUSE_MISSING` | 从采购单生成收货单时请求与 PO 意向均未指定仓库（ERP 建议#4） |
+| `PURCHASE_RECEIPT_WAREHOUSE_MISSING` | 从采购单生成收货单时请求与 PO 意向均未指定仓库（ERP 建议#4）；订单行「去收货」时 PO 意向与店铺绑定仓皆无同样适用 |
+| `PURCHASE_ORDER_LINE_NOT_ORDERED` | 订单行「去收货」但该行无有效采购单（状态过期/PO 已取消），引导先登记采购（2026-10-16） |
 | `WAREHOUSE_NOT_FOUND` | 收货仓库不存在（含创建采购单时可选自动生成草稿） |
 
 统一错误信封（AGENTS.md §66）。
