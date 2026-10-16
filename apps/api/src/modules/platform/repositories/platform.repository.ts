@@ -23,6 +23,10 @@ export class PlatformRepository {
     return this.repository.findOneBy({ code });
   }
 
+  async updatePriority(id: string, priority: number): Promise<void> {
+    await this.repository.update({ id }, { priority });
+  }
+
   async insert(
     platform: Pick<PlatformEntity, 'code' | 'name' | 'status'>,
   ): Promise<PlatformEntity> {

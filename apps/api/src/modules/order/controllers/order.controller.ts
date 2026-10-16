@@ -31,6 +31,8 @@ import {
   OrderMarkExternalFulfillmentRequestDto,
   OrderMarkExternalFulfillmentResultDto,
   OrderRetryAllocationResultDto,
+  OrderSetUrgentRequestDto,
+  OrderSetUrgentResultDto,
 } from '../dto/order.dto';
 
 @ApiTags('orders')
@@ -145,6 +147,22 @@ export class OrderController {
   ) {
     return ok<OrderRetryAllocationResultDto>(
       await this.orderService.retryAllocation(itemId, operator),
+    );
+  }
+
+  @Post(':id/urgent')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '标记 / 取消加急（列表置顶 + 缺货到货优先分配；已发货/已取消订单不可标记）',
+  })
+  @ApiOkEnvelope(OrderSetUrgentResultDto)
+  async setUrgent(
+    @Param('id') id: string,
+    @Body() request: OrderSetUrgentRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ) {
+    return ok<OrderSetUrgentResultDto>(
+      await this.orderService.setUrgent(id, request.urgent, operator),
     );
   }
 }

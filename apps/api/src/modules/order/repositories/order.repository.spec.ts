@@ -47,9 +47,25 @@ describe('OrderRepository.updatePlatformFacts - fulfillmentMode', () => {
   );
 });
 
-describe('orderSortOf (2026-10-14 列表排序白名单)', () => {
+describe('orderSortOf (2026-10-14 列表排序白名单；2026-10-16 加急置顶)', () => {
+  it('恒以 isUrgent DESC 为首级键（无论所选排序）', () => {
+    expect(orderSortOf('skuCode', 'asc')[0]).toEqual({
+      expression: 'o.isUrgent',
+      direction: 'DESC',
+    });
+    expect(orderSortOf('shipmentDeadline', 'asc')[0]).toEqual({
+      expression: 'o.isUrgent',
+      direction: 'DESC',
+    });
+    expect(orderSortOf(undefined, undefined)[0]).toEqual({
+      expression: 'o.isUrgent',
+      direction: 'DESC',
+    });
+  });
+
   it('maps skuCode to the MIN(sku_code) key with NULLS LAST and orderedAt tiebreaker', () => {
     expect(orderSortOf('skuCode', 'asc')).toEqual([
+      { expression: 'o.isUrgent', direction: 'DESC' },
       {
         expression:
           '(SELECT MIN(sk.sku_code) FROM order_items i LEFT JOIN skus sk ON sk.id = i.sku_id WHERE i.order_id = o.id)',
@@ -58,16 +74,16 @@ describe('orderSortOf (2026-10-14 列表排序白名单)', () => {
       },
       { expression: 'o.orderedAt', direction: 'DESC' },
     ]);
-    expect(orderSortOf('skuCode', 'desc')[0]).toMatchObject({ direction: 'DESC' });
+    expect(orderSortOf('skuCode', 'desc')[1]).toMatchObject({ direction: 'DESC' });
   });
 
   it('maps shipmentDeadline with NULLS LAST in both directions', () => {
-    expect(orderSortOf('shipmentDeadline', 'asc')[0]).toMatchObject({
+    expect(orderSortOf('shipmentDeadline', 'asc')[1]).toMatchObject({
       expression: 'o.shipmentDeadline',
       direction: 'ASC',
       nulls: 'NULLS LAST',
     });
-    expect(orderSortOf('shipmentDeadline', 'desc')[0]).toMatchObject({
+    expect(orderSortOf('shipmentDeadline', 'desc')[1]).toMatchObject({
       direction: 'DESC',
       nulls: 'NULLS LAST',
     });
@@ -75,6 +91,7 @@ describe('orderSortOf (2026-10-14 列表排序白名单)', () => {
 
   it('defaults to orderedAt (id tiebreaker) for undefined sortBy', () => {
     expect(orderSortOf(undefined, undefined)).toEqual([
+      { expression: 'o.isUrgent', direction: 'DESC' },
       { expression: 'o.orderedAt', direction: 'DESC' },
       { expression: 'o.id', direction: 'ASC' },
     ]);

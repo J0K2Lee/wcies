@@ -91,12 +91,17 @@ export class OrderAutoReallocationService implements StockIncreasedListener, OnM
   }
 
   private async reallocateFor(event: StockIncreasedEvent): Promise<void> {
-    const candidates = await this.itemRepo.findUnallocatedItemIdsBySku(event.skuId);
+    // 候选按「加急置顶 · 平台优先级 · 发货时限 · 行入库时间」排序，且只含
+    // 「事件仓库被该订单店铺 ACTIVE 绑定」的行（2026-10-16 ADR 0022）。
+    const candidates = await this.itemRepo.findUnallocatedItemIdsBySku(
+      event.skuId,
+      event.warehouseId,
+    );
     if (candidates.length === 0) {
       // 观测（2026-10-15）：候选为空也留痕——"收货了却没动静"时区分是
       // 没找到可分配行（行状态/映射不满足）还是事件根本没到达。
       this.logger.info(
-        `auto reallocation: no unallocated (MAPPED+BACKORDERED/PENDING) lines for sku=${event.skuId}`,
+        `auto reallocation: no unallocated (MAPPED+BACKORDERED/PENDING) lines for sku=${event.skuId} warehouse=${event.warehouseId}`,
         'OrderAutoReallocationService',
       );
       return;

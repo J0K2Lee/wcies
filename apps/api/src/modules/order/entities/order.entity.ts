@@ -27,6 +27,7 @@ import { OrderItemEntity } from './order-item.entity';
 @Index('idx_orders_store_ordered', ['storeId', 'orderedAt'])
 @Index('idx_orders_store_stage', ['storeId', 'platformStage'])
 @Index('idx_orders_erp_status_stage', ['erpStatus', 'platformStage'])
+@Index('idx_orders_is_urgent', ['isUrgent'], { where: 'is_urgent = true' })
 export class OrderEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -105,6 +106,18 @@ export class OrderEntity {
 
   @Column({ type: 'text', nullable: true })
   remark!: string | null;
+
+  /**
+   * 加急标记（用户指示 2026-10-16，ADR 0022）：人工标注的业务属性，不是
+   * ERP 状态（AGENTS.md §38）——不进 erp_status、不参与状态机，只影响订单
+   * 列表置顶与缺货到货后的库存分配排序。`urgentMarkedAt` 记录最近一次标记
+   * 加急的时间（审计）；取消加急后保留最后一次标记时间。
+   */
+  @Column({ type: 'boolean', name: 'is_urgent', default: false })
+  isUrgent!: boolean;
+
+  @Column({ type: 'timestamptz', name: 'urgent_marked_at', nullable: true })
+  urgentMarkedAt!: Date | null;
 
   /** How the order entered WCIES (Sprint 5 §58): MANUAL / API / POLLING / WEBHOOK. */
   @Column({ type: 'varchar', length: 30, name: 'sync_source', nullable: true })

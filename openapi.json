@@ -609,6 +609,55 @@
         "tags": ["platforms"]
       }
     },
+    "/api/v1/platforms/{id}/priority": {
+      "patch": {
+        "operationId": "PlatformController_updatePriority",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePlatformPriorityRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PlatformResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "更新平台分配优先级（数值小=优先，管理员）",
+        "tags": ["platforms"]
+      }
+    },
     "/api/v1/stores": {
       "get": {
         "operationId": "StoreController_list",
@@ -4824,6 +4873,55 @@
           }
         },
         "summary": "重试分配库存（BACKORDERED / PENDING 行）",
+        "tags": ["orders"]
+      }
+    },
+    "/api/v1/orders/{id}/urgent": {
+      "post": {
+        "operationId": "OrderController_setUrgent",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderSetUrgentRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/OrderSetUrgentResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "标记 / 取消加急（列表置顶 + 缺货到货优先分配；已发货/已取消订单不可标记）",
         "tags": ["orders"]
       }
     },
@@ -11712,6 +11810,11 @@
             "type": "string",
             "example": "ACTIVE"
           },
+          "priority": {
+            "type": "number",
+            "example": 100,
+            "description": "平台分配优先级（数值小=优先）；缺货到货后「平台>发货时限」排序用"
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -11721,7 +11824,20 @@
             "type": "string"
           }
         },
-        "required": ["id", "code", "name", "status", "createdAt", "updatedAt"]
+        "required": ["id", "code", "name", "status", "priority", "createdAt", "updatedAt"]
+      },
+      "UpdatePlatformPriorityRequestDto": {
+        "type": "object",
+        "properties": {
+          "priority": {
+            "type": "number",
+            "example": 10,
+            "description": "平台分配优先级（数值小=优先）",
+            "minimum": 0,
+            "maximum": 1000
+          }
+        },
+        "required": ["priority"]
       },
       "StoreListItemDto": {
         "type": "object",
@@ -14747,6 +14863,10 @@
           "backorderedArrivedCount": {
             "type": "number",
             "description": "缺货行中采购已到货（ARRIVED，purchase.md §3.5 派生）的行数（双轴 §2.3）"
+          },
+          "isUrgent": {
+            "type": "boolean",
+            "description": "加急订单（ADR 0022）：列表恒定置顶，缺货到货后优先参与库存分配"
           }
         },
         "required": [
@@ -15621,6 +15741,33 @@
           }
         },
         "required": ["orderItemId", "fulfillmentStatus", "reserved", "mappingRepaired"]
+      },
+      "OrderSetUrgentResultDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "orderNo": {
+            "type": "string",
+            "example": "ORD00000001"
+          },
+          "isUrgent": {
+            "type": "boolean",
+            "description": "标记后的加急状态"
+          }
+        },
+        "required": ["orderId", "orderNo", "isUrgent"]
+      },
+      "OrderSetUrgentRequestDto": {
+        "type": "object",
+        "properties": {
+          "urgent": {
+            "type": "boolean",
+            "description": "true = 标记加急；false = 取消加急"
+          }
+        },
+        "required": ["urgent"]
       },
       "InventoryRowDto": {
         "type": "object",

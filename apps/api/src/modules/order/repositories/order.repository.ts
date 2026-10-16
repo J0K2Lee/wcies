@@ -53,28 +53,37 @@ const MIN_SKU_CODE_SQL =
  * 排序白名单映射（纯函数，可单测）。未列出的 sortBy 回落默认（下单时间
  * 新→旧）；表达式全部来自本文件常量，永不拼接用户输入（防注入）。
  * NULL 统一压最后（发货时限为空 / 全行未映射的订单不打断浏览）。
+ *
+ * 加急恒定置顶（用户指示 2026-10-16，ADR 0022）：无论用户选哪种排序，
+ * 首级键都是 is_urgent DESC——加急订单永远排在非加急之前，组内再按用户
+ * 所选键排。这是「优先展示」的语义，不是可选项。
  */
 export function orderSortOf(
   sortBy: OrderListSortField | undefined,
   sortOrder: 'asc' | 'desc' | undefined,
 ): Array<{ expression: string; direction: 'ASC' | 'DESC'; nulls?: 'NULLS LAST' }> {
   const direction = sortOrder === 'asc' ? 'ASC' : 'DESC';
+  // 加急置顶（恒定首级键）。PG 布尔 DESC：true 在前。
+  const urgentKey = { expression: 'o.isUrgent', direction: 'DESC' as const };
   switch (sortBy) {
     case 'skuCode':
       // SKU 编码 A→Z / Z→A；同键按下单时间新→旧保持分页稳定。
       return [
+        urgentKey,
         { expression: MIN_SKU_CODE_SQL, direction, nulls: 'NULLS LAST' },
         { expression: 'o.orderedAt', direction: 'DESC' },
       ];
     case 'shipmentDeadline':
       // 发货时限：升序 = 最紧急/最超时在前（近→远）；无时限的固定最后。
       return [
+        urgentKey,
         { expression: 'o.shipmentDeadline', direction, nulls: 'NULLS LAST' },
         { expression: 'o.orderedAt', direction: 'DESC' },
       ];
     default:
       // 下单时间（默认）；id 作最终次序键，避免同刻订单翻页抖动。
       return [
+        urgentKey,
         { expression: 'o.orderedAt', direction },
         { expression: 'o.id', direction: 'ASC' },
       ];
@@ -124,6 +133,17 @@ export class OrderRepository {
       coveredOrderItemIds.length > 0 ? [[...coveredOrderItemIds]] : [],
     );
     return rows.map((row) => row.order_id);
+  }
+
+  /**
+   * 加急标记写入（用户指示 2026-10-16，ADR 0022）。只改 is_urgent /
+   * urgent_marked_at，从不碰 erp_status（AGENTS.md §38）。取消加急时
+   * 传入原有的 urgentMarkedAt 保留最后标记时间。
+   */
+  async setUrgent(orderId: string, isUrgent: boolean, urgentMarkedAt: Date | null): Promise<void> {
+    await this.dataSource
+      .getRepository(OrderEntity)
+      .update({ id: orderId }, { isUrgent, urgentMarkedAt, updatedAt: new Date() });
   }
 
   /**

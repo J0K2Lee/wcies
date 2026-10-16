@@ -24,23 +24,45 @@ export class OrderItemRepository {
   }
 
   /**
-   * 自动重新分配候选（用户指示 2026-09-17）：某个 SKU 可售增加后，
-   * 「已映射但未持有库存」的行（BACKORDERED，或历史卡住的 MAPPED+PENDING）
-   * 是重试对象。仅返回行 id + 订单 id 的轻量映射，订单头过滤在服务层。
+   * 自动重新分配候选（用户指示 2026-09-17；排序 2026-10-16 ADR 0022）：
+   * 某个 SKU 可售增加后，「已映射但未持有库存」的行（BACKORDERED，或历史
+   * 卡住的 MAPPED+PENDING）是重试对象。仅返回行 id + 订单 id 的轻量映射，
+   * 订单头过滤在服务层。
+   *
+   * 排序（用户指示 2026-10-16「加急优先、平台>发货时限」）：
+   *   1) 加急置顶  2) 平台优先级（platforms.priority，小=优先）
+   *   3) 发货时限（早者优先，NULL 最后）  4) 行入库时间兜底（FIFO 稳定）
+   *
+   * 仓库过滤：只有「事件仓库（货实际进了哪个仓）被该订单店铺 ACTIVE 绑定」
+   * 的行才参与竞争——一个仓的到货只可能满足它服务的店铺的订单，其余订单
+   * 在别的仓收多少货都轮不到它。这是半连接，只收窄候选、不改变分配目标仓
+   * （分配仍走店铺默认仓 resolveDefaultWarehouseId），故不会把货占错仓。
    */
   async findUnallocatedItemIdsBySku(
     skuId: string,
+    warehouseId: string,
   ): Promise<Array<{ itemId: string; orderId: string }>> {
     const rows = await this.dataSource.query<Array<{ item_id: string; order_id: string }>>(
       `SELECT i.id AS item_id, i.order_id AS order_id
          FROM order_items i
          JOIN orders o ON o.id = i.order_id
+         JOIN stores s ON s.id = o.store_id
+         JOIN platforms p ON p.id = s.platform_id
         WHERE i.sku_id = $1::uuid
           AND i.mapping_status = 'MAPPED'
           AND i.fulfillment_status IN ('BACKORDERED', 'PENDING')
           AND o.erp_status NOT IN ('CANCELLED', 'SHIPPED')
-        ORDER BY i.created_at ASC`,
-      [skuId],
+          AND EXISTS (
+            SELECT 1 FROM warehouse_platform_bindings b
+             WHERE b.store_id = o.store_id
+               AND b.warehouse_id = $2::uuid
+               AND b.status = 'ACTIVE'
+          )
+        ORDER BY o.is_urgent DESC,
+                 p.priority ASC,
+                 o.shipment_deadline ASC NULLS LAST,
+                 i.created_at ASC`,
+      [skuId, warehouseId],
     );
     return rows.map((row) => ({ itemId: row.item_id, orderId: row.order_id }));
   }

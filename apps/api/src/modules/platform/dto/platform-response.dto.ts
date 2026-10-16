@@ -13,6 +13,12 @@ export class PlatformResponseDto {
   @ApiProperty({ example: 'ACTIVE' })
   status!: string;
 
+  @ApiProperty({
+    example: 100,
+    description: '平台分配优先级（数值小=优先）；缺货到货后「平台>发货时限」排序用',
+  })
+  priority!: number;
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;
 

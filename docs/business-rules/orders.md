@@ -113,17 +113,50 @@ BACKORDERED（不再停留 PENDING）；历史卡行由 Migration 20260917_007 �
   现实否证——RESERVED 会随已发货订单把库存锁死）；
 - 人工「重新分配」对平台已事实发货的订单直接 409 说明，不再占库存。
 
-## 自动重新分配（用户指示 2026-09-17）
+## 自动重新分配（用户指示 2026-09-17；排序 2026-10-16 修订）
 
-任何入库类库存流水（`INITIAL_STOCK / RECEIVE / TRANSFER_IN`）产生后，
+任何入库类库存流水（`INITIAL_STOCK / RECEIVE / TRANSFER_IN`，2026-10-15 起含
+`MOVE_BIN`——移位上架是「货已就位」心智时点）产生后，
 `OrderAutoReallocationService`（经 `InventoryStockListenerRegistry` 进程内
-注册，无模块环）自动对该 SKU「已映射但未持有库存」的行按先进先出重试预留：
+注册，无模块环）自动对该 SKU「已映射但未持有库存」的行重试预留：
 
 1. 复用 `allocateMappedItem`（幂等键 `ORDER_RESERVE:<orderItemId>`，并发安全）。
 2. 成功：行转 RESERVED、关闭该行 OPEN `ORDER_OUT_OF_STOCK` 异常、重算 rollup。
 3. 失败（仍不足）：保持缺货，不重复刷异常。
 4. 失败自吞：重分配失败不得影响库存主流程（AGENTS.md §10）。
 5. 人工重试（含「已到货」批量重试）继续走 `POST /orders/items/:itemId/retry-allocation`。
+
+**候选范围与排序（2026-10-16 决策 0022）**：候选来自
+`findUnallocatedItemIdsBySku(skuId, warehouseId)`，只含**事件仓库被该订单店铺
+ACTIVE 绑定**的行（半连接，一个仓的到货只满足它服务的店铺的订单）；按
+**加急 > 平台优先级 > 发货时限 > 行入库时间**排序：
+
+```sql
+ORDER BY o.is_urgent DESC, p.priority ASC,
+         o.shipment_deadline ASC NULLS LAST, i.created_at ASC
+```
+
+要点：`order_items.warehouse_id` 在缺货行上恒为 NULL（建单不写、只有占用成功
+才写），故仓库过滤必须用「店铺绑定」半连接，不能用行上的仓库列。分配目标仓仍
+是店铺默认仓（`resolveDefaultWarehouseId`），过滤只收窄候选、不改变目标仓。
+
+## 加急订单（用户指示 2026-10-16，决策 0022）
+
+加急是订单的**业务标注**（`orders.is_urgent` + `urgent_marked_at`），**不是 ERP
+状态**（AGENTS.md §38）——不进 `erp_status`、不写状态历史、不产生库存流水。
+
+- **优先展示**：订单列表**恒定置顶**（`orderSortOf()` 首级键恒为 `is_urgent
+  DESC`，无论用户选哪种排序），加急组内再按用户所选键排。
+- **优先分配**：缺货到货后的自动重分配把加急行排到候选最前（见上节排序），
+  但**不抢占**已 RESERVED 给其他订单的库存（只影响新分配排序）。
+- **入口**：订单列表「订单号」列的旗标，单击切换——**红=加急、黑白=普通**。
+- **终态限制**：`SHIPPED` / `CANCELLED` 订单不可加急（`ORDER_INVALID_STATE`）；
+  幂等：已在目标状态时 no-op。
+- API：`POST /api/v1/orders/:id/urgent`，body `{ "urgent": true|false }`。
+
+平台分配优先级（用户可设，数值小=优先）存于 `platforms.priority`，管理端在
+系统管理页编辑，API：`PATCH /api/v1/platforms/:id/priority`（管理员）。
+
 
 ## Backorder 重试
 

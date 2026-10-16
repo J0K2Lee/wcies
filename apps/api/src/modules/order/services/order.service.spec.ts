@@ -450,3 +450,97 @@ describe('OrderService.markExternalFulfillmentBatch (2026-10-14 订单页多选�
     expect(result.results[0]).toMatchObject({ orderNo: null, ok: false, code: 'ORDER_NOT_FOUND' });
   });
 });
+
+describe('OrderService.setUrgent (2026-10-16 加急标记，决策 0022)', () => {
+  function build(order: Partial<OrderEntity>) {
+    const orderRepo = {
+      findById: vi.fn().mockResolvedValue(order),
+      setUrgent: vi.fn().mockResolvedValue(undefined),
+    };
+    const operationLog = { record: vi.fn().mockResolvedValue(undefined) };
+    const service = new OrderService(
+      {} as unknown as DataSource,
+      orderRepo as unknown as OrderRepository,
+      {} as OrderItemRepository,
+      {} as OrderStatusHistoryRepository,
+      {} as PlatformStatusHistoryRepository,
+      {} as OrderStatusService,
+      {} as OrderDeadlineExceptionService,
+      {} as OrderTrackingStallService,
+      {} as OrderIngestionService,
+      {} as OrderPlatformShippedService,
+      {} as ReservationService,
+      {} as InventoryQueryService,
+      {} as ExceptionService,
+      {} as StoreService,
+      {} as SkuImageService,
+      operationLog as unknown as OperationLogService,
+      {} as AppLoggerService,
+      {} as OrderPickingStatePort,
+      {} as OrderInterceptionPort,
+      {} as OrderProcurementPort,
+      {} as PlatformAdapterRegistry,
+    );
+    return { service, orderRepo, operationLog };
+  }
+
+  it('marks a live order urgent (is_urgent + audit log), never touching erp_status', async () => {
+    const { service, orderRepo, operationLog } = build({
+      id: 'o1',
+      orderNo: 'ORD1',
+      erpStatus: 'BACKORDERED',
+      isUrgent: false,
+      urgentMarkedAt: null,
+    });
+    const result = await service.setUrgent('o1', true, OPERATOR);
+    expect(result).toEqual({ orderId: 'o1', orderNo: 'ORD1', isUrgent: true });
+    expect(orderRepo.setUrgent).toHaveBeenCalledWith('o1', true, expect.any(Date));
+    expect(operationLog.record).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: 'ORDER', action: 'MARK_URGENT' }),
+    );
+  });
+
+  it('unmarks urgent while preserving the last marked-at as audit', async () => {
+    const markedAt = new Date('2026-10-16T08:00:00Z');
+    const { service, orderRepo } = build({
+      id: 'o1',
+      orderNo: 'ORD1',
+      erpStatus: 'READY_TO_PICK',
+      isUrgent: true,
+      urgentMarkedAt: markedAt,
+    });
+    await service.setUrgent('o1', false, OPERATOR);
+    expect(orderRepo.setUrgent).toHaveBeenCalledWith('o1', false, markedAt);
+  });
+
+  it('is idempotent: re-marking the same state is a no-op (no write, no log)', async () => {
+    const { service, orderRepo, operationLog } = build({
+      id: 'o1',
+      orderNo: 'ORD1',
+      erpStatus: 'BACKORDERED',
+      isUrgent: true,
+      urgentMarkedAt: new Date(),
+    });
+    const result = await service.setUrgent('o1', true, OPERATOR);
+    expect(result.isUrgent).toBe(true);
+    expect(orderRepo.setUrgent).not.toHaveBeenCalled();
+    expect(operationLog.record).not.toHaveBeenCalled();
+  });
+
+  it.each(['SHIPPED', 'CANCELLED'] as const)(
+    'rejects marking a terminal (%s) order',
+    async (erpStatus) => {
+      const { service, orderRepo } = build({
+        id: 'o1',
+        orderNo: 'ORD1',
+        erpStatus,
+        isUrgent: false,
+        urgentMarkedAt: null,
+      });
+      await expect(service.setUrgent('o1', true, OPERATOR)).rejects.toBeInstanceOf(
+        OrderInvalidStateError,
+      );
+      expect(orderRepo.setUrgent).not.toHaveBeenCalled();
+    },
+  );
+});

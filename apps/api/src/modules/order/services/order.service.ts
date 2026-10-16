@@ -178,6 +178,7 @@ export class OrderService {
         skuKindCount: row.skuKindCount,
         backorderedOrderedCount: ordered,
         backorderedArrivedCount: arrived,
+        isUrgent: row.order.isUrgent,
       };
     });
     return { items, meta: { page: page.page, pageSize: page.pageSize, total } };
@@ -858,6 +859,49 @@ export class OrderService {
         statusChanged || deadlineChanged || rawChanged || stageChanged || fulfillmentModeChanged,
       cancelled,
     };
+  }
+
+  // --------------------------------------------------------------------------
+  // Urgent marking (用户指示 2026-10-16, ADR 0022)
+  // --------------------------------------------------------------------------
+
+  /**
+   * 标记 / 取消加急（用户指示 2026-10-16，ADR 0022）。
+   *
+   * 加急只是订单的业务标注：置顶展示 + 缺货到货后优先参与库存分配排序，
+   * NOT an ERP status（AGENTS.md §38）——不写 erp_status / 不写状态历史，
+   * 只落 is_urgent + urgent_marked_at 与操作日志（AGENTS §39 可追溯）。
+   *
+   * 终态限制：SHIPPED / CANCELLED 订单不可加急（加急对已完结订单无意义，
+   * 且它们不再参与分配）。已在目标状态时幂等返回，不重复写日志。
+   */
+  async setUrgent(
+    orderId: string,
+    urgent: boolean,
+    operator: OperatorContext,
+  ): Promise<{ orderId: string; orderNo: string; isUrgent: boolean }> {
+    const order = await this.getOrderOrThrow(orderId);
+    if (order.erpStatus === 'CANCELLED') {
+      throw new OrderInvalidStateError('订单已取消，不能标记加急', { orderId });
+    }
+    if (order.erpStatus === 'SHIPPED') {
+      throw new OrderInvalidStateError('订单已发货，不能标记加急', { orderId });
+    }
+    if (order.isUrgent === urgent) {
+      // 幂等：重复标记同一状态是 no-op（不重复写操作日志）。
+      return { orderId: order.id, orderNo: order.orderNo, isUrgent: order.isUrgent };
+    }
+    const markedAt = urgent ? new Date() : order.urgentMarkedAt;
+    await this.orderRepo.setUrgent(order.id, urgent, markedAt);
+    await this.operationLog.record({
+      entityType: 'ORDER',
+      entityId: order.id,
+      entityCode: order.orderNo,
+      action: urgent ? 'MARK_URGENT' : 'UNMARK_URGENT',
+      changes: { isUrgent: { from: order.isUrgent, to: urgent } },
+      operator,
+    });
+    return { orderId: order.id, orderNo: order.orderNo, isUrgent: urgent };
   }
 
   // --------------------------------------------------------------------------

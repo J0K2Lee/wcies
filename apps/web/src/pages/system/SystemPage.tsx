@@ -11,8 +11,9 @@ import {
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import { Avatar } from 'antd';
-import { useApiQuery } from '../../api/hooks';
+import { App as AntdApp, Avatar, InputNumber } from 'antd';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiPatch, useApiQuery } from '../../api/hooks';
 import {
   colors,
   ContextRailContent,
@@ -43,6 +44,8 @@ interface PlatformRow {
   code: string;
   name: string;
   status: string;
+  /** 分配优先级（数值小=优先，ADR 0022）。 */
+  priority: number;
 }
 
 interface MeData {
@@ -112,11 +115,25 @@ const ENTRIES: Array<{
 ];
 
 export function SystemPage() {
+  const { message } = AntdApp.useApp();
+  const queryClient = useQueryClient();
   const health = useApiQuery<{ data: HealthData }>('/health/ready', {}, ['health-ready']);
   const me = useApiQuery<{ data: MeData }>('/api/v1/auth/me', {}, ['auth-me']);
   const platforms = useApiQuery<{ data: PlatformRow[] }>('/api/v1/platforms', {}, [
     'platforms-list',
   ]);
+  const isAdmin = me.data?.data?.role === 'ADMIN';
+
+  // 平台分配优先级（用户指示 2026-10-16，ADR 0022）：数值小=优先；管理员可改。
+  const priorityMutation = useMutation({
+    mutationFn: ({ id, priority }: { id: string; priority: number }) =>
+      apiPatch<PlatformRow>('/api/v1/platforms/{id}/priority', { priority }, { id }),
+    onSuccess: () => {
+      message.success('平台优先级已更新');
+      void queryClient.invalidateQueries({ queryKey: ['platforms-list'] });
+    },
+    onError: (error: Error) => message.error(`更新失败：${error.message}`),
+  });
 
   const railContent = useMemo<ContextRailContent>(
     () => ({
@@ -297,6 +314,32 @@ export function SystemPage() {
                 label={platform.status === 'ACTIVE' ? '启用' : platform.status}
                 hint={platform.status}
               />
+              {/* 分配优先级（ADR 0022）：数值小=优先。管理员可改，其他人只读。 */}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 12.5, color: colors.textSecondary }}>优先级</span>
+                {isAdmin ? (
+                  <InputNumber
+                    size="small"
+                    min={0}
+                    max={1000}
+                    defaultValue={platform.priority}
+                    // 失焦/回车提交（值未变则不发请求，避免无意义写审计）。
+                    onBlur={(event) => {
+                      const raw = Number(event.target.value);
+                      if (!Number.isInteger(raw) || raw === platform.priority) {
+                        return;
+                      }
+                      priorityMutation.mutate({ id: platform.id, priority: raw });
+                    }}
+                    onPressEnter={(event) => (event.target as HTMLInputElement).blur()}
+                    style={{ width: 76 }}
+                  />
+                ) : (
+                  <span style={{ fontSize: 13, fontFamily: typography.monoFamily }}>
+                    {platform.priority}
+                  </span>
+                )}
+              </span>
             </div>
           ))}
           {platforms.isLoading && (
@@ -304,7 +347,8 @@ export function SystemPage() {
           )}
         </div>
         <p style={{ fontSize: 12.5, color: colors.textTertiary, margin: '12px 0 0' }}>
-          平台为系统内置参数（只读）；店铺与凭证在「店铺与平台」中管理。
+          平台为系统内置参数（只读）；分配优先级用于缺货到货后「平台 &gt; 发货时限」的库存分配排序，
+          数值小者优先。店铺与凭证在「<Link to="/stores">店铺与平台</Link>」中管理。
         </p>
       </SectionCard>
     </div>

@@ -4,6 +4,7 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsIn,
   IsObject,
@@ -304,6 +305,10 @@ export class OrderListItemDto {
     description: '缺货行中采购已到货（ARRIVED，purchase.md §3.5 派生）的行数（双轴 §2.3）',
   })
   backorderedArrivedCount!: number;
+  @ApiPropertyOptional({
+    description: '加急订单（ADR 0022）：列表恒定置顶，缺货到货后优先参与库存分配',
+  })
+  isUrgent!: boolean;
 }
 
 export class OrderReservationLineDto {
@@ -514,6 +519,19 @@ export class OrderCancelResultDto {
   @ApiProperty({ enum: ERP_ORDER_STATUSES }) erpStatus!: string;
   @ApiProperty() releasedItems!: number;
   @ApiProperty() interceptions!: number;
+}
+
+/** 标记 / 取消加急（用户指示 2026-10-16，ADR 0022）。 */
+export class OrderSetUrgentRequestDto {
+  @ApiProperty({ description: 'true = 标记加急；false = 取消加急' })
+  @IsBoolean()
+  urgent!: boolean;
+}
+
+export class OrderSetUrgentResultDto {
+  @ApiProperty() orderId!: string;
+  @ApiProperty({ example: 'ORD00000001' }) orderNo!: string;
+  @ApiProperty({ description: '标记后的加急状态' }) isUrgent!: boolean;
 }
 
 /** Sprint 9 T6: close out an order fulfilled outside WCIES. */

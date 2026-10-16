@@ -52,6 +52,7 @@ interface OrderDetailItem {
 interface OrderDetail {
   id: string;
   orderNo: string;
+  platformOrderId: string;
   erpStatus: string;
   items: OrderDetailItem[];
   history: Array<{ fromStatus: string | null; toStatus: string; reason: string | null }>;
@@ -1241,5 +1242,91 @@ describe('dual-axis list contract: stage + goodsState filters (T3)', () => {
       expect(arrivedRow?.backorderedOrderedCount).toBe(0);
       expect(arrivedRow?.backorderedArrivedCount).toBe(0);
     }
+  });
+});
+
+describe('urgent orders: marking + allocation priority (ADR 0022)', () => {
+  interface UrgentListItem {
+    id: string;
+    erpStatus: string;
+    isUrgent: boolean;
+  }
+
+  async function listOne(orderId: string): Promise<UrgentListItem | undefined> {
+    const detail = await orderDetail(orderId);
+    const list = await client.get<UrgentListItem[]>(
+      `/api/v1/orders?keyword=${encodeURIComponent(detail.platformOrderId)}&pageSize=10`,
+    );
+    return list.body.data.find((row) => row.id === orderId);
+  }
+
+  /** 等到某单的缺货行被占用（自动重分配 fire-and-forget，竞态感知）。 */
+  async function waitForReserved(orderId: string, timeoutMs = 5000): Promise<boolean> {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const detail = await orderDetail(orderId);
+      if (detail.erpStatus === 'READY_TO_PICK') {
+        return true;
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return false;
+  }
+
+  it('toggles isUrgent on a live order and rejects a terminal order', async () => {
+    const skuId = await newSku('URG');
+    await initialize({ skuId, binId: binA01, quantity: '3' });
+    await mapSku(skuId, `${PREFIX}-URG-1`);
+    const result = await ingest({ items: [{ platformSkuId: `${PREFIX}-URG-1`, quantity: '1' }] });
+
+    const on = await client.post<{ isUrgent: boolean }>(
+      `/api/v1/orders/${result.body.data.orderId}/urgent`,
+      { urgent: true },
+    );
+    expect(on.status).toBe(200);
+    expect(on.body.data.isUrgent).toBe(true);
+    expect((await listOne(result.body.data.orderId))?.isUrgent).toBe(true);
+
+    const off = await client.post<{ isUrgent: boolean }>(
+      `/api/v1/orders/${result.body.data.orderId}/urgent`,
+      { urgent: false },
+    );
+    expect(off.body.data.isUrgent).toBe(false);
+
+    // 终态（已取消）不可加急：ORDER_INVALID_STATE，且状态不被改写。
+    await client.post(`/api/v1/orders/${result.body.data.orderId}/cancel`, { reason: '测试取消' });
+    const rejected = await client.post<{ isUrgent: boolean }>(
+      `/api/v1/orders/${result.body.data.orderId}/urgent`,
+      { urgent: true },
+    );
+    expect(rejected.status).toBe(409);
+    expect((await orderDetail(result.body.data.orderId)).erpStatus).toBe('CANCELLED');
+  });
+
+  it('allocates newly-received stock to the urgent backordered order first', async () => {
+    const skuId = await newSku('URGP');
+    await mapSku(skuId, `${PREFIX}-URGP-1`);
+
+    // 两单各缺 1 件（无库存起始）：早单先创建，随后单被标记加急。
+    const early = await ingest({ items: [{ platformSkuId: `${PREFIX}-URGP-1`, quantity: '1' }] });
+    const late = await ingest({ items: [{ platformSkuId: `${PREFIX}-URGP-1`, quantity: '1' }] });
+    expect(early.body.data.erpStatus).toBe('BACKORDERED');
+    expect(late.body.data.erpStatus).toBe('BACKORDERED');
+
+    await client.post(`/api/v1/orders/${late.body.data.orderId}/urgent`, { urgent: true });
+
+    // 只收 1 件：加急单（晚创建）必须拿到，先来单保持缺货。
+    await client.post('/api/v1/inventory/receive', {
+      skuId,
+      warehouseId,
+      binId: binA01,
+      quantity: '1',
+      referenceType: 'MANUAL',
+      referenceId: REF(),
+      idempotencyKey: `IT-URG-RECV:${randomUUID()}`,
+    });
+
+    expect(await waitForReserved(late.body.data.orderId)).toBe(true);
+    expect((await orderDetail(early.body.data.orderId)).erpStatus).toBe('BACKORDERED');
   });
 });

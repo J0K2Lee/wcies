@@ -16,7 +16,7 @@ import {
   Timeline,
   Tooltip,
 } from 'antd';
-import { DownOutlined, UpOutlined } from '@ant-design/icons';
+import { DownOutlined, FlagFilled, UpOutlined } from '@ant-design/icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { apiGet, apiPost, useApiQuery } from '../../api/hooks';
@@ -95,6 +95,8 @@ interface OrderListItem {
   firstSkuCode: string | null;
   /** 该单不同 SKU 编码的种类数。 */
   skuKindCount: number;
+  /** 加急订单（ADR 0022）：列表恒定置顶，缺货到货后优先分配。 */
+  isUrgent: boolean;
 }
 
 interface OrderItem {
@@ -931,6 +933,29 @@ export function OrdersPage() {
     railDetailId !== null,
   );
   const orderLabels = labelsQuery.data?.data ?? [];
+
+  // ---- 加急标记（用户指示 2026-10-16）：行内旗标点击即切换 ----
+  // 加急 = 列表恒定置顶 + 缺货到货后优先参与分配（ADR 0022）；非 ERP 状态。
+  // 轻量、可逆、无平台副作用 → 不二次确认；终态订单按钮不渲染（后端亦拒绝）。
+  const [urgentPendingId, setUrgentPendingId] = useState<string | null>(null);
+  const toggleUrgentMutation = useMutation({
+    mutationFn: ({ id, urgent }: { id: string; urgent: boolean }) =>
+      apiPost<{ orderId: string; orderNo: string; isUrgent: boolean }>(
+        '/api/v1/orders/{id}/urgent',
+        { urgent },
+        { id },
+      ),
+    onMutate: ({ id }) => {
+      setUrgentPendingId(id);
+    },
+    onSuccess: (result) => {
+      message.success(result.isUrgent ? '已标记加急（置顶优先）' : '已取消加急');
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
+    },
+    onError: (error: Error) => message.error(`加急操作失败：${error.message}`),
+    onSettled: () => setUrgentPendingId(null),
+  });
 
   const cancelMutation = useMutation({
     mutationFn: (id: string) =>
@@ -2585,12 +2610,61 @@ export function OrdersPage() {
       title: '订单号',
       key: 'platformOrderId',
       width: 170,
-      render: (_: unknown, row: OrderListItem) => (
-        <div>
-          <div style={{ fontWeight: 550, wordBreak: 'break-all' }}>{row.platformOrderId}</div>
-          <div style={{ fontSize: 12, color: colors.textTertiary }}>{row.orderNo}</div>
-        </div>
-      ),
+      render: (_: unknown, row: OrderListItem) => {
+        // 加急旗标（用户指示 2026-10-16）：点击即切换。红=加急，黑白=普通。
+        // 终态订单（已发货/已取消）不可切换，旗标仅以低饱和提示（后端亦拒绝）。
+        const terminal = row.erpStatus === 'SHIPPED' || row.erpStatus === 'CANCELLED';
+        const urgent = row.isUrgent;
+        return (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <button
+              type="button"
+              aria-label={urgent ? '取消加急' : '标记加急'}
+              aria-pressed={urgent}
+              disabled={terminal || urgentPendingId === row.id}
+              title={
+                terminal
+                  ? '已发货/已取消订单不可加急'
+                  : urgent
+                    ? '取消加急（取消后不再置顶、不再优先分配）'
+                    : '标记加急（列表置顶、缺货到货优先分配库存）'
+              }
+              onClick={(event) => {
+                event.stopPropagation();
+                toggleUrgentMutation.mutate({ id: row.id, urgent: !urgent });
+              }}
+              onDoubleClick={(event) => event.stopPropagation()}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                padding: 0,
+                marginTop: 1,
+                lineHeight: 1,
+                cursor: terminal ? 'not-allowed' : 'pointer',
+                color: urgent ? colors.danger : colors.textTertiary,
+                opacity: terminal ? 0.4 : 1,
+                fontSize: 15,
+              }}
+            >
+              <FlagFilled />
+            </button>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 550, wordBreak: 'break-all' }}>
+                {row.platformOrderId}
+                {urgent && (
+                  <StatusBadge
+                    tone="danger"
+                    label="加急"
+                    hint="加急订单：列表置顶，缺货到货后优先分配"
+                    showDot={false}
+                  />
+                )}
+              </div>
+              <div style={{ fontSize: 12, color: colors.textTertiary }}>{row.orderNo}</div>
+            </div>
+          </div>
+        );
+      },
     },
     items: {
       title: '商品',

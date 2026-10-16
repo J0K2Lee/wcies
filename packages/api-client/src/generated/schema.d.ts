@@ -277,6 +277,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platforms/{id}/priority": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** 更新平台分配优先级（数值小=优先，管理员） */
+        patch: operations["PlatformController_updatePriority"];
+        trace?: never;
+    };
     "/api/v1/stores": {
         parameters: {
             query?: never;
@@ -1317,6 +1334,23 @@ export interface paths {
         put?: never;
         /** 重试分配库存（BACKORDERED / PENDING 行） */
         post: operations["OrderController_retryAllocation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders/{id}/urgent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 标记 / 取消加急（列表置顶 + 缺货到货优先分配；已发货/已取消订单不可标记） */
+        post: operations["OrderController_setUrgent"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3447,10 +3481,22 @@ export interface components {
             name: string;
             /** @example ACTIVE */
             status: string;
+            /**
+             * @description 平台分配优先级（数值小=优先）；缺货到货后「平台>发货时限」排序用
+             * @example 100
+             */
+            priority: number;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+        };
+        UpdatePlatformPriorityRequestDto: {
+            /**
+             * @description 平台分配优先级（数值小=优先）
+             * @example 10
+             */
+            priority: number;
         };
         StoreListItemDto: {
             /** Format: uuid */
@@ -4756,6 +4802,8 @@ export interface components {
             backorderedOrderedCount?: number;
             /** @description 缺货行中采购已到货（ARRIVED，purchase.md §3.5 派生）的行数（双轴 §2.3） */
             backorderedArrivedCount?: number;
+            /** @description 加急订单（ADR 0022）：列表恒定置顶，缺货到货后优先参与库存分配 */
+            isUrgent?: boolean;
         };
         OrderItemExceptionDto: {
             id: string;
@@ -5044,6 +5092,17 @@ export interface components {
             reserved: boolean;
             /** @description 本次是否修复了平台映射（修复失败的订单行时会先补映射、关异常，再按分配状态决定是否占库存） */
             mappingRepaired: boolean;
+        };
+        OrderSetUrgentResultDto: {
+            orderId: string;
+            /** @example ORD00000001 */
+            orderNo: string;
+            /** @description 标记后的加急状态 */
+            isUrgent: boolean;
+        };
+        OrderSetUrgentRequestDto: {
+            /** @description true = 标记加急；false = 取消加急 */
+            urgent: boolean;
         };
         InventoryRowDto: {
             id: string;
@@ -7381,6 +7440,35 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PlatformResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    PlatformController_updatePriority: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePlatformPriorityRequestDto"];
+            };
+        };
         responses: {
             200: {
                 headers: {
@@ -9775,6 +9863,35 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["OrderRetryAllocationResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    OrderController_setUrgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderSetUrgentRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderSetUrgentResultDto"];
                     };
                 };
             };
