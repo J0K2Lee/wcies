@@ -1204,15 +1204,15 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/imports/templates/{type}": {
+    "/api/v1/orders": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Download a fixed-template Excel (SKU / LISTING_MAPPING), header + one example row */
-        get: operations["ImportController_downloadTemplate"];
+        /** 订单列表（分页 + 汇总计数 + 未处理异常数） */
+        get: operations["OrderController_list"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1221,7 +1221,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/imports/upload": {
+    "/api/v1/orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 订单详情（行/预约/历史/异常/拦截/拣货） */
+        get: operations["OrderController_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders/ingest": {
         parameters: {
             query?: never;
             header?: never;
@@ -1230,15 +1247,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Upload a fixed-template Excel, parse + validate, return the error report */
-        post: operations["ImportController_upload"];
+        /** 标准化订单摄入（管理员/开发测试入口；未来 SyncService 复用 Service） */
+        post: operations["OrderController_ingest"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/imports/{id}/confirm": {
+    "/api/v1/orders/batch-mark-external-fulfillment": {
         parameters: {
             query?: never;
             header?: never;
@@ -1247,42 +1264,59 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Confirm import: enqueues the job to the import worker */
-        post: operations["ImportController_confirm"];
+        /** 批量标记外部履约（订单页多选；同一原因逐单关账，不产生库存流水，单笔失败不影响其余） */
+        post: operations["OrderController_markExternalFulfillmentBatch"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/imports": {
+    "/api/v1/orders/{id}/cancel": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List import jobs */
-        get: operations["ImportController_list"];
+        get?: never;
         put?: never;
-        post?: never;
+        /** 取消订单（按行处理库存：Reserved 释放 / Picked 拦截） */
+        post: operations["OrderController_cancel"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/imports/{id}": {
+    "/api/v1/orders/{id}/mark-external-fulfillment": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Import job detail incl. row-level errors */
-        get: operations["ImportController_getById"];
+        get?: never;
         put?: never;
-        post?: never;
+        /** 标记外部履约（订单在系统外完成：行关账、不产生库存流水、关闭缺货/时限异常） */
+        post: operations["OrderController_markExternalFulfillment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders/items/{itemId}/retry-allocation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重试分配库存（BACKORDERED / PENDING 行） */
+        post: operations["OrderController_retryAllocation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1630,108 +1664,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/orders": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 订单列表（分页 + 汇总计数 + 未处理异常数） */
-        get: operations["OrderController_list"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/orders/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 订单详情（行/预约/历史/异常/拦截/拣货） */
-        get: operations["OrderController_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/orders/ingest": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 标准化订单摄入（管理员/开发测试入口；未来 SyncService 复用 Service） */
-        post: operations["OrderController_ingest"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/orders/{id}/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 取消订单（按行处理库存：Reserved 释放 / Picked 拦截） */
-        post: operations["OrderController_cancel"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/orders/{id}/mark-external-fulfillment": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 标记外部履约（订单在系统外完成：行关账、不产生库存流水、关闭缺货/时限异常） */
-        post: operations["OrderController_markExternalFulfillment"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/orders/items/{itemId}/retry-allocation": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 重试分配库存（BACKORDERED / PENDING 行） */
-        post: operations["OrderController_retryAllocation"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/notifications": {
         parameters: {
             query?: never;
@@ -1810,7 +1742,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 自动为待拣货（READY_TO_PICK）订单创建拣货任务（跳过已有进行中任务的订单） */
+        /** 批量创建拣货任务：传 orderIds 只处理勾选订单；省略则自动选取待拣货（READY_TO_PICK）订单；均跳过已有进行中任务的订单 */
         post: operations["PickingController_autoCreate"];
         delete?: never;
         options?: never;
@@ -2164,6 +2096,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/purchase-receipts/from-po/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量从采购单生成收货单草稿（采购单页多选；单笔失败不影响其余） */
+        post: operations["PurchaseReceiptController_generateFromPosBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/purchase-receipts/from-po/{poId}": {
         parameters: {
             query?: never;
@@ -2382,6 +2331,91 @@ export interface paths {
         put?: never;
         /** 封箱（OPEN/REPACK_REQUIRED → SEALED；齐全后发货单 READY_TO_SHIP） */
         post: operations["PackageController_seal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports/templates/{type}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download a fixed-template Excel (SKU / LISTING_MAPPING), header + one example row */
+        get: operations["ImportController_downloadTemplate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload a fixed-template Excel, parse + validate, return the error report */
+        post: operations["ImportController_upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports/{id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm import: enqueues the job to the import worker */
+        post: operations["ImportController_confirm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List import jobs */
+        get: operations["ImportController_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Import job detail incl. row-level errors */
+        get: operations["ImportController_getById"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2761,6 +2795,40 @@ export interface paths {
         get: operations["PlatformWarehouseController_list"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders/batch-prepare-shipment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量获取运单号（订单页多选；逐单平台组包，真实平台写操作，单笔失败不影响其余） */
+        post: operations["OrderFulfillmentController_prepareShipmentBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders/batch-ship": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量发货（订单页多选；逐单一键出库扣库存，单笔失败不影响其余） */
+        post: operations["OrderFulfillmentController_quickShipBatch"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4627,34 +4695,338 @@ export interface components {
             /** @example 7365 */
             mappingCount: number;
         };
-        ImportJobResponseDto: {
-            /** Format: uuid */
+        OrderListItemDto: {
             id: string;
+            /** @example ORD00000001 */
+            orderNo: string;
+            storeId: string;
+            /** @example OZON A店 */
+            storeName: string;
+            /** @example OZON */
+            platformCode: string;
+            /** @example 123456789 */
+            platformOrderId: string;
+            /** @example awaiting_packaging */
+            platformStatus: string | null;
             /** @enum {string} */
-            importType: "SKU" | "BARCODE" | "WAREHOUSE" | "BIN" | "LISTING_MAPPING" | "INITIAL_INVENTORY";
+            erpStatus: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+            fulfillmentMode: string | null;
+            currency: string | null;
+            /** Format: date-time */
+            orderedAt: string;
+            /**
+             * Format: date-time
+             * @description 平台要求的发货截止时间（平台事实，非 ERP 状态）
+             */
+            shipmentDeadline?: string | null;
+            /** @description 平台运单号（平台事实）；已组包后由平台返回，出库时自动填入发货单物流单号 */
+            platformTrackingNo: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** @enum {string|null} */
+            syncSource: "MANUAL" | "API" | "POLLING" | "WEBHOOK" | null;
+            itemsCount: number;
+            reservedCount: number;
+            backorderedCount: number;
+            pickedCount: number;
+            mappingFailedCount: number;
+            openExceptionsCount: number;
+            /** @description 该单 SKU 编码的字典序最小值（主表 SKU 列展示 + SKU 排序键；全行未映射为 null） */
+            firstSkuCode?: string | null;
+            /** @description 该单不同 SKU 编码的种类数 */
+            skuKindCount: number;
+            /** @description 缺货行中已登记采购（ORDERED，purchase.md §3.5 派生）的行数（双轴 §2.3） */
+            backorderedOrderedCount?: number;
+            /** @description 缺货行中采购已到货（ARRIVED，purchase.md §3.5 派生）的行数（双轴 §2.3） */
+            backorderedArrivedCount?: number;
+        };
+        OrderItemExceptionDto: {
+            id: string;
+            /** @example EXC00000001 */
+            exceptionNo: string;
+            exceptionType: string;
+            status: string;
+            message: string;
+        };
+        OrderItemDto: {
+            id: string;
+            orderId: string;
+            lineNo: number;
+            platformProductId: string | null;
+            platformSkuId: string | null;
+            sellerSku: string | null;
+            offerId: string | null;
+            listingSkuId: string | null;
+            skuId: string | null;
+            /** @example VK87-BLK */
+            skuCode: string;
+            /** @example VK87 MAX V2 黑色 */
+            skuName: string;
+            /** @description 最近采购价（SKU 主数据操作者维护，master-data.md §4.3；用户指示 2026-09-17 展开行展示） */
+            latestPurchasePrice?: string | null;
+            warehouseId: string | null;
+            /** @example 2.000 */
+            quantity: string;
+            /**
+             * @description 平台单价（财务事实，finance.md §2）；平台未提供为 null
+             * @example 107.0000
+             */
+            unitPrice?: Record<string, never> | null;
+            /**
+             * @description 行金额 = 单价 × 数量；无价为 null
+             * @example 214.0000
+             */
+            totalPrice?: Record<string, never> | null;
+            /** @description 已映射行使用内部 SKU 主图签名 URL；未映射行使用平台公开图片直链 */
+            imageUrl?: string | null;
+            /** @enum {string|null} */
+            imageSource: "INTERNAL" | "PLATFORM" | null;
             /** @enum {string} */
-            status: "VALIDATED" | "PENDING_IMPORT" | "IMPORTING" | "COMPLETED" | "FAILED";
-            /** @example skus-2026.xlsx */
-            originalFilename: string;
-            /** @example 100 */
-            totalRows: number;
-            /** @example 92 */
-            validRows: number;
-            /** @example 8 */
-            invalidRows: number;
-            /** @example 92 */
-            importedRows: number;
-            /** @example 0 */
-            failedRows: number;
-            /** @description Row-level errors with exact Excel row numbers */
-            errors: string[];
-            createdBy: Record<string, never> | null;
+            fulfillmentStatus: "PENDING" | "RESERVED" | "BACKORDERED" | "PICKED" | "SHIPPED" | "RELEASED" | "EXTERNAL_FULFILLED";
+            /** @enum {string} */
+            mappingStatus: "PENDING" | "MAPPED" | "FAILED";
+            /**
+             * @description 派生采购状态（purchase.md §3.5，不落库）；未映射行为 NULL
+             * @enum {string|null}
+             */
+            procurementState?: "NOT_ORDERED" | "ORDERED" | "ARRIVED" | null;
+            reservationId: string | null;
+            /** @description 库存预约（含多 Bin 分配行，task §49-§50） */
+            reservation: Record<string, never> | null;
+            rawData: Record<string, never> | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+            exceptions: components["schemas"]["OrderItemExceptionDto"][];
+        };
+        OrderHistoryDto: {
+            id: string;
+            fromStatus: string | null;
+            toStatus: string;
+            reason: string | null;
+            operatorName: string | null;
             /** Format: date-time */
-            importedAt: Record<string, never> | null;
+            createdAt: string;
+        };
+        PlatformStatusHistoryDto: {
+            id: string;
+            /** @example awaiting_packaging */
+            fromStatus: string | null;
+            /** @example delivering */
+            toStatus: string;
+            /** @example ORDER_SYNC */
+            source: string | null;
+            /**
+             * Format: date-time
+             * @description 平台侧的迁移时间（webhook changed_state_date / 回读阶段锚点）；缺失时以 createdAt 为准（双轴 T2）
+             */
+            platformChangedAt?: string | null;
+            operatorName: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        OrderInterceptionDto: {
+            id: string;
+            /** @example ITC00000001 */
+            interceptionNo: string;
+            orderItemId: string | null;
+            warehouseId: string;
+            /** @enum {string} */
+            status: "CREATED" | "ASSIGNED" | "LOCATING" | "INTERCEPTED" | "FAILED" | "RETURNED_TO_STOCK" | "CLOSED";
+            reason: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        OrderPickingTaskDto: {
+            id: string;
+            /** @example PCK00000001 */
+            pickingNo: string;
+            warehouseId: string;
+            status: string;
+            totalItems: number;
+            pickedItems: number;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        OrderDetailDto: {
+            id: string;
+            /** @example ORD00000001 */
+            orderNo: string;
+            storeId: string;
+            /** @example OZON A店 */
+            storeName: string;
+            /** @example OZON */
+            platformCode: string;
+            /** @example 123456789 */
+            platformOrderId: string;
+            platformStatus: string | null;
+            /** @enum {string} */
+            erpStatus: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+            fulfillmentMode: string | null;
+            currency: string | null;
+            /** Format: date-time */
+            orderedAt: string;
+            /**
+             * Format: date-time
+             * @description 平台要求的发货截止时间（平台事实，非 ERP 状态）
+             */
+            shipmentDeadline?: string | null;
+            /** @description 平台运单号（平台事实）；已组包后由平台返回，出库时自动填入发货单物流单号 */
+            platformTrackingNo: string | null;
+            /**
+             * @description 该店铺平台是否支持订单履约写能力（获取运单号 / 打单）。前端据此显隐按钮，不猜测平台；后端同时以 PLATFORM_CAPABILITY_UNSUPPORTED 兜底。
+             * @example {
+             *       "prepareShipment": true,
+             *       "fetchShippingLabel": true
+             *     }
+             */
+            platformCapabilities: Record<string, never>;
+            rawData: Record<string, never> | null;
+            remark: string | null;
+            /** @enum {string|null} */
+            syncSource: "MANUAL" | "API" | "POLLING" | "WEBHOOK" | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            items: components["schemas"]["OrderItemDto"][];
+            history: components["schemas"]["OrderHistoryDto"][];
+            /** @description 平台状态迁移时间线（与 ERP 历史按 createdAt 合并展示） */
+            platformStatusHistory: components["schemas"]["PlatformStatusHistoryDto"][];
+            interceptions: components["schemas"]["OrderInterceptionDto"][];
+            pickingTasks: components["schemas"]["OrderPickingTaskDto"][];
+        };
+        OrderIngestItemResultDto: {
+            orderItemId: string;
+            lineNo: number;
+            /** @enum {string} */
+            mappingStatus: "PENDING" | "MAPPED" | "FAILED";
+            /** @enum {string} */
+            fulfillmentStatus: "PENDING" | "RESERVED" | "BACKORDERED" | "PICKED" | "SHIPPED" | "RELEASED" | "EXTERNAL_FULFILLED";
+            skuId: string | null;
+            reservationId: string | null;
+        };
+        OrderIngestResultDto: {
+            orderId: string;
+            /** @example ORD00000001 */
+            orderNo: string;
+            /** @enum {string} */
+            erpStatus: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+            /** @example false */
+            alreadyIngested: boolean;
+            itemResults: components["schemas"]["OrderIngestItemResultDto"][];
+        };
+        NormalizedOrderItemInputDto: {
+            platformProductId?: string;
+            platformSkuId?: string;
+            sellerSku?: string;
+            offerId?: string;
+            /** @example 2 */
+            quantity: string;
+            /**
+             * @description 平台单价（财务事实，finance.md §2）；平台未提供为 null，禁止臆造为 0
+             * @example 107.0000
+             */
+            unitPrice?: Record<string, never> | null;
+            rawData?: Record<string, never>;
+        };
+        NormalizedOrderInputDto: {
+            storeId: string;
+            /** @example OZON-123456789 */
+            platformOrderId: string;
+            /** @example awaiting_packaging */
+            platformStatus?: string;
+            /**
+             * @description 归一化平台物流阶段（平台事实，非 ERP 状态）；未归类/未同步为 null（双轴 T1）
+             * @enum {string|null}
+             */
+            platformStage?: "AWAITING_SHIPMENT" | "IN_TRANSIT" | "DELIVERED" | "CANCELLED" | null;
+            /**
+             * Format: date-time
+             * @description 平台自身记录的进入该阶段时间（停滞时钟锚点）；缺失为 null
+             */
+            platformStageChangedAt?: string | null;
+            /** @example FBS */
+            fulfillmentMode?: string;
+            /** Format: date-time */
+            orderedAt: string;
+            /**
+             * Format: date-time
+             * @description 平台要求的发货截止时间（平台事实，非 ERP 状态；可空）
+             */
+            shipmentDeadline?: string;
+            /**
+             * @description 平台运单号（OZON tracking_number，平台事实）；出库时自动填入发货单物流单号。这不是被禁止的 orders.tracking_number 物流模型——Shipment/Package 仍是唯一物流载体。
+             * @example 89491381-0072-1
+             */
+            platformTrackingNo?: Record<string, never> | null;
+            /** @example RUB */
+            currency?: string;
+            items: components["schemas"]["NormalizedOrderItemInputDto"][];
+            /** @description 平台原始报文（保留事实，task §14） */
+            rawData?: Record<string, never>;
+            remark?: string;
+            /**
+             * @description 订单进入系统的渠道（Sprint 5 §58；默认 API）
+             * @enum {string}
+             */
+            syncSource?: "MANUAL" | "API" | "POLLING" | "WEBHOOK";
+        };
+        OrderBatchMarkExternalFulfillmentItemDto: {
+            orderId: string;
+            /** @description 订单不可读时为 null（前端用缓存行标注） */
+            orderNo: string | null;
+            ok: boolean;
+            /** @description 失败时的错误码 */
+            code?: string | null;
+            /** @description 失败时的错误信息 */
+            message?: string | null;
+            /** @description 标记后订单 ERP 状态（成功时为 SHIPPED） */
+            erpStatus: string | null;
+            /** @description 关账的订单行数（成功时） */
+            releasedItems: number | null;
+        };
+        OrderBatchMarkExternalFulfillmentResultDto: {
+            total: number;
+            succeeded: number;
+            failed: number;
+            results: components["schemas"]["OrderBatchMarkExternalFulfillmentItemDto"][];
+        };
+        OrderBatchMarkExternalFulfillmentRequestDto: {
+            /** @description 勾选的订单（单批上限 50，逐单执行） */
+            orderIds: string[];
+            /** @description 外部履约原因（必填，应用于全部勾选订单，逐单记入状态历史与操作日志） */
+            reason: string;
+        };
+        OrderCancelResultDto: {
+            orderId: string;
+            /** @enum {string} */
+            erpStatus: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+            releasedItems: number;
+            interceptions: number;
+        };
+        OrderCancelRequestDto: {
+            /** @description 取消原因（记入历史与拦截任务） */
+            reason?: string;
+        };
+        OrderMarkExternalFulfillmentResultDto: {
+            orderId: string;
+            /** @enum {string} */
+            erpStatus: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+            releasedItems: number;
+        };
+        OrderMarkExternalFulfillmentRequestDto: {
+            /** @description 外部履约原因（必填，记入状态历史与操作日志；如线下直发买家） */
+            reason: string;
+        };
+        OrderRetryAllocationResultDto: {
+            orderItemId: string;
+            /** @enum {string} */
+            fulfillmentStatus: "PENDING" | "RESERVED" | "BACKORDERED" | "PICKED" | "SHIPPED" | "RELEASED" | "EXTERNAL_FULFILLED";
+            reserved: boolean;
+            /** @description 本次是否修复了平台映射（修复失败的订单行时会先补映射、关异常，再按分配状态决定是否占库存） */
+            mappingRepaired: boolean;
         };
         InventoryRowDto: {
             id: string;
@@ -5017,307 +5389,6 @@ export interface components {
             /** @description 处理备注（记录在 details.closeRemark） */
             remark?: string;
         };
-        OrderListItemDto: {
-            id: string;
-            /** @example ORD00000001 */
-            orderNo: string;
-            storeId: string;
-            /** @example OZON A店 */
-            storeName: string;
-            /** @example OZON */
-            platformCode: string;
-            /** @example 123456789 */
-            platformOrderId: string;
-            /** @example awaiting_packaging */
-            platformStatus: string | null;
-            /** @enum {string} */
-            erpStatus: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
-            fulfillmentMode: string | null;
-            currency: string | null;
-            /** Format: date-time */
-            orderedAt: string;
-            /**
-             * Format: date-time
-             * @description 平台要求的发货截止时间（平台事实，非 ERP 状态）
-             */
-            shipmentDeadline?: string | null;
-            /** @description 平台运单号（平台事实）；已组包后由平台返回，出库时自动填入发货单物流单号 */
-            platformTrackingNo: string | null;
-            /** Format: date-time */
-            createdAt: string;
-            /** @enum {string|null} */
-            syncSource: "MANUAL" | "API" | "POLLING" | "WEBHOOK" | null;
-            itemsCount: number;
-            reservedCount: number;
-            backorderedCount: number;
-            pickedCount: number;
-            mappingFailedCount: number;
-            openExceptionsCount: number;
-            /** @description 缺货行中已登记采购（ORDERED，purchase.md §3.5 派生）的行数（双轴 §2.3） */
-            backorderedOrderedCount?: number;
-            /** @description 缺货行中采购已到货（ARRIVED，purchase.md §3.5 派生）的行数（双轴 §2.3） */
-            backorderedArrivedCount?: number;
-        };
-        OrderItemExceptionDto: {
-            id: string;
-            /** @example EXC00000001 */
-            exceptionNo: string;
-            exceptionType: string;
-            status: string;
-            message: string;
-        };
-        OrderItemDto: {
-            id: string;
-            orderId: string;
-            lineNo: number;
-            platformProductId: string | null;
-            platformSkuId: string | null;
-            sellerSku: string | null;
-            offerId: string | null;
-            listingSkuId: string | null;
-            skuId: string | null;
-            /** @example VK87-BLK */
-            skuCode: string;
-            /** @example VK87 MAX V2 黑色 */
-            skuName: string;
-            /** @description 最近采购价（SKU 主数据操作者维护，master-data.md §4.3；用户指示 2026-09-17 展开行展示） */
-            latestPurchasePrice?: string | null;
-            warehouseId: string | null;
-            /** @example 2.000 */
-            quantity: string;
-            /**
-             * @description 平台单价（财务事实，finance.md §2）；平台未提供为 null
-             * @example 107.0000
-             */
-            unitPrice?: Record<string, never> | null;
-            /**
-             * @description 行金额 = 单价 × 数量；无价为 null
-             * @example 214.0000
-             */
-            totalPrice?: Record<string, never> | null;
-            /** @description 已映射行使用内部 SKU 主图签名 URL；未映射行使用平台公开图片直链 */
-            imageUrl?: string | null;
-            /** @enum {string|null} */
-            imageSource: "INTERNAL" | "PLATFORM" | null;
-            /** @enum {string} */
-            fulfillmentStatus: "PENDING" | "RESERVED" | "BACKORDERED" | "PICKED" | "SHIPPED" | "RELEASED" | "EXTERNAL_FULFILLED";
-            /** @enum {string} */
-            mappingStatus: "PENDING" | "MAPPED" | "FAILED";
-            /**
-             * @description 派生采购状态（purchase.md §3.5，不落库）；未映射行为 NULL
-             * @enum {string|null}
-             */
-            procurementState?: "NOT_ORDERED" | "ORDERED" | "ARRIVED" | null;
-            reservationId: string | null;
-            /** @description 库存预约（含多 Bin 分配行，task §49-§50） */
-            reservation: Record<string, never> | null;
-            rawData: Record<string, never> | null;
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            updatedAt: string;
-            exceptions: components["schemas"]["OrderItemExceptionDto"][];
-        };
-        OrderHistoryDto: {
-            id: string;
-            fromStatus: string | null;
-            toStatus: string;
-            reason: string | null;
-            operatorName: string | null;
-            /** Format: date-time */
-            createdAt: string;
-        };
-        PlatformStatusHistoryDto: {
-            id: string;
-            /** @example awaiting_packaging */
-            fromStatus: string | null;
-            /** @example delivering */
-            toStatus: string;
-            /** @example ORDER_SYNC */
-            source: string | null;
-            /**
-             * Format: date-time
-             * @description 平台侧的迁移时间（webhook changed_state_date / 回读阶段锚点）；缺失时以 createdAt 为准（双轴 T2）
-             */
-            platformChangedAt?: string | null;
-            operatorName: string | null;
-            /** Format: date-time */
-            createdAt: string;
-        };
-        OrderInterceptionDto: {
-            id: string;
-            /** @example ITC00000001 */
-            interceptionNo: string;
-            orderItemId: string | null;
-            warehouseId: string;
-            /** @enum {string} */
-            status: "CREATED" | "ASSIGNED" | "LOCATING" | "INTERCEPTED" | "FAILED" | "RETURNED_TO_STOCK" | "CLOSED";
-            reason: string | null;
-            /** Format: date-time */
-            createdAt: string;
-        };
-        OrderPickingTaskDto: {
-            id: string;
-            /** @example PCK00000001 */
-            pickingNo: string;
-            warehouseId: string;
-            status: string;
-            totalItems: number;
-            pickedItems: number;
-            /** Format: date-time */
-            createdAt: string;
-        };
-        OrderDetailDto: {
-            id: string;
-            /** @example ORD00000001 */
-            orderNo: string;
-            storeId: string;
-            /** @example OZON A店 */
-            storeName: string;
-            /** @example OZON */
-            platformCode: string;
-            /** @example 123456789 */
-            platformOrderId: string;
-            platformStatus: string | null;
-            /** @enum {string} */
-            erpStatus: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
-            fulfillmentMode: string | null;
-            currency: string | null;
-            /** Format: date-time */
-            orderedAt: string;
-            /**
-             * Format: date-time
-             * @description 平台要求的发货截止时间（平台事实，非 ERP 状态）
-             */
-            shipmentDeadline?: string | null;
-            /** @description 平台运单号（平台事实）；已组包后由平台返回，出库时自动填入发货单物流单号 */
-            platformTrackingNo: string | null;
-            /**
-             * @description 该店铺平台是否支持订单履约写能力（获取运单号 / 打单）。前端据此显隐按钮，不猜测平台；后端同时以 PLATFORM_CAPABILITY_UNSUPPORTED 兜底。
-             * @example {
-             *       "prepareShipment": true,
-             *       "fetchShippingLabel": true
-             *     }
-             */
-            platformCapabilities: Record<string, never>;
-            rawData: Record<string, never> | null;
-            remark: string | null;
-            /** @enum {string|null} */
-            syncSource: "MANUAL" | "API" | "POLLING" | "WEBHOOK" | null;
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            updatedAt: string;
-            items: components["schemas"]["OrderItemDto"][];
-            history: components["schemas"]["OrderHistoryDto"][];
-            /** @description 平台状态迁移时间线（与 ERP 历史按 createdAt 合并展示） */
-            platformStatusHistory: components["schemas"]["PlatformStatusHistoryDto"][];
-            interceptions: components["schemas"]["OrderInterceptionDto"][];
-            pickingTasks: components["schemas"]["OrderPickingTaskDto"][];
-        };
-        OrderIngestItemResultDto: {
-            orderItemId: string;
-            lineNo: number;
-            /** @enum {string} */
-            mappingStatus: "PENDING" | "MAPPED" | "FAILED";
-            /** @enum {string} */
-            fulfillmentStatus: "PENDING" | "RESERVED" | "BACKORDERED" | "PICKED" | "SHIPPED" | "RELEASED" | "EXTERNAL_FULFILLED";
-            skuId: string | null;
-            reservationId: string | null;
-        };
-        OrderIngestResultDto: {
-            orderId: string;
-            /** @example ORD00000001 */
-            orderNo: string;
-            /** @enum {string} */
-            erpStatus: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
-            /** @example false */
-            alreadyIngested: boolean;
-            itemResults: components["schemas"]["OrderIngestItemResultDto"][];
-        };
-        NormalizedOrderItemInputDto: {
-            platformProductId?: string;
-            platformSkuId?: string;
-            sellerSku?: string;
-            offerId?: string;
-            /** @example 2 */
-            quantity: string;
-            /**
-             * @description 平台单价（财务事实，finance.md §2）；平台未提供为 null，禁止臆造为 0
-             * @example 107.0000
-             */
-            unitPrice?: Record<string, never> | null;
-            rawData?: Record<string, never>;
-        };
-        NormalizedOrderInputDto: {
-            storeId: string;
-            /** @example OZON-123456789 */
-            platformOrderId: string;
-            /** @example awaiting_packaging */
-            platformStatus?: string;
-            /**
-             * @description 归一化平台物流阶段（平台事实，非 ERP 状态）；未归类/未同步为 null（双轴 T1）
-             * @enum {string|null}
-             */
-            platformStage?: "AWAITING_SHIPMENT" | "IN_TRANSIT" | "DELIVERED" | "CANCELLED" | null;
-            /**
-             * Format: date-time
-             * @description 平台自身记录的进入该阶段时间（停滞时钟锚点）；缺失为 null
-             */
-            platformStageChangedAt?: string | null;
-            /** @example FBS */
-            fulfillmentMode?: string;
-            /** Format: date-time */
-            orderedAt: string;
-            /**
-             * Format: date-time
-             * @description 平台要求的发货截止时间（平台事实，非 ERP 状态；可空）
-             */
-            shipmentDeadline?: string;
-            /**
-             * @description 平台运单号（OZON tracking_number，平台事实）；出库时自动填入发货单物流单号。这不是被禁止的 orders.tracking_number 物流模型——Shipment/Package 仍是唯一物流载体。
-             * @example 89491381-0072-1
-             */
-            platformTrackingNo?: Record<string, never> | null;
-            /** @example RUB */
-            currency?: string;
-            items: components["schemas"]["NormalizedOrderItemInputDto"][];
-            /** @description 平台原始报文（保留事实，task §14） */
-            rawData?: Record<string, never>;
-            remark?: string;
-            /**
-             * @description 订单进入系统的渠道（Sprint 5 §58；默认 API）
-             * @enum {string}
-             */
-            syncSource?: "MANUAL" | "API" | "POLLING" | "WEBHOOK";
-        };
-        OrderCancelResultDto: {
-            orderId: string;
-            /** @enum {string} */
-            erpStatus: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
-            releasedItems: number;
-            interceptions: number;
-        };
-        OrderCancelRequestDto: {
-            /** @description 取消原因（记入历史与拦截任务） */
-            reason?: string;
-        };
-        OrderMarkExternalFulfillmentResultDto: {
-            orderId: string;
-            /** @enum {string} */
-            erpStatus: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
-            releasedItems: number;
-        };
-        OrderMarkExternalFulfillmentRequestDto: {
-            /** @description 外部履约原因（必填，记入状态历史与操作日志；如线下直发买家） */
-            reason: string;
-        };
-        OrderRetryAllocationResultDto: {
-            orderItemId: string;
-            /** @enum {string} */
-            fulfillmentStatus: "PENDING" | "RESERVED" | "BACKORDERED" | "PICKED" | "SHIPPED" | "RELEASED" | "EXTERNAL_FULFILLED";
-            reserved: boolean;
-        };
         NotificationDto: {
             id: string;
             /** @enum {string} */
@@ -5381,10 +5452,14 @@ export interface components {
             orderId: string;
         };
         AutoCreatePickingTasksResultDto: {
-            /** @description 候选订单数（READY_TO_PICK） */
+            /** @description 候选订单数（多选 = 去重后解析成功的订单数） */
             candidates: number;
-            /** @description 成功创建任务的订单数 */
+            /** @description 新建任务数（批量按仓合并：一任务可含多个订单） */
             created: number;
+            /** @description 进入新建任务的订单数 */
+            createdOrders: number;
+            /** @description 新建任务包含的拣货行总数 */
+            itemsTotal: number;
             /** @description 跳过数（已有进行中的拣货任务） */
             skipped: number;
             /** @description 失败数（域错误，逐单记录） */
@@ -5404,8 +5479,10 @@ export interface components {
              * @description 仅处理该店铺的订单；省略 = 全部店铺
              */
             storeId?: string;
+            /** @description 订单页多选批量（2026-10-13）：只为这些订单生成拣货任务；省略 = 自动选取待拣货订单 */
+            orderIds?: string[];
             /**
-             * @description 单次批量上限
+             * @description 单次批量上限（自动选取模式）
              * @default 100
              */
             limit: number;
@@ -5835,6 +5912,33 @@ export interface components {
             remark?: string;
             items: components["schemas"]["PurchaseReceiptItemInputDto"][];
         };
+        GenerateReceiptFromPoBatchItemResultDto: {
+            poId: string;
+            /** @description 采购单号（单据不存在时为 null） */
+            poNo: string | null;
+            ok: boolean;
+            receiptId?: string | null;
+            receiptNo?: string | null;
+            /** @description 失败时的错误码 */
+            code?: string | null;
+            /** @description 失败时的错误信息 */
+            message?: string | null;
+        };
+        GenerateReceiptsFromPosResultDto: {
+            total: number;
+            succeeded: number;
+            failed: number;
+            results: components["schemas"]["GenerateReceiptFromPoBatchItemResultDto"][];
+        };
+        GenerateReceiptFromPoBatchItemDto: {
+            /** Format: uuid */
+            poId: string;
+            /** @description 收货仓库（省略 = 用采购单上的收货仓库意向；两者皆无则该单失败） */
+            warehouseId?: string;
+        };
+        GenerateReceiptsFromPosRequestDto: {
+            items: components["schemas"]["GenerateReceiptFromPoBatchItemDto"][];
+        };
         GenerateReceiptFromPoRequestDto: {
             /** @description 收货仓库（可省略：省略时使用采购单上的收货仓库意向，ERP 建议#4） */
             warehouseId?: string;
@@ -6155,6 +6259,35 @@ export interface components {
             /** @description 封箱时录入重量/尺寸 */
             dimensions?: components["schemas"]["PackageDimensionsDto"];
         };
+        ImportJobResponseDto: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            importType: "SKU" | "BARCODE" | "WAREHOUSE" | "BIN" | "LISTING_MAPPING" | "INITIAL_INVENTORY";
+            /** @enum {string} */
+            status: "VALIDATED" | "PENDING_IMPORT" | "IMPORTING" | "COMPLETED" | "FAILED";
+            /** @example skus-2026.xlsx */
+            originalFilename: string;
+            /** @example 100 */
+            totalRows: number;
+            /** @example 92 */
+            validRows: number;
+            /** @example 8 */
+            invalidRows: number;
+            /** @example 92 */
+            importedRows: number;
+            /** @example 0 */
+            failedRows: number;
+            /** @description Row-level errors with exact Excel row numbers */
+            errors: string[];
+            createdBy: Record<string, never> | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** Format: date-time */
+            importedAt: Record<string, never> | null;
+        };
         PlatformReturnDto: {
             id: string;
             storeId: string;
@@ -6387,6 +6520,60 @@ export interface components {
             partnerName?: Record<string, never> | null;
             isActive?: boolean | null;
         };
+        BatchPrepareShipmentItemDto: {
+            orderId: string;
+            /** @description 失败且订单不可读时为 null（前端用自己缓存的列表行标注） */
+            orderNo: string | null;
+            ok: boolean;
+            /** @description 失败时的错误码 */
+            code?: string | null;
+            /** @description 失败时的错误信息 */
+            message?: string | null;
+            /** @description 平台运单号（成功时） */
+            trackingNumber: string | null;
+            /** @description 组包后的平台订单状态 */
+            platformStatus: string | null;
+            /** @description 平台此前已受理该订单 */
+            alreadyPrepared: boolean;
+            /** @description 平台已受理组包但尚未确认（运单号稍后可取） */
+            assemblyPending: boolean;
+        };
+        BatchPrepareShipmentResultDto: {
+            total: number;
+            succeeded: number;
+            failed: number;
+            results: components["schemas"]["BatchPrepareShipmentItemDto"][];
+        };
+        BatchOrderActionRequestDto: {
+            /** @description 勾选的订单（单批上限 50，逐单执行） */
+            orderIds: string[];
+        };
+        QuickShipShipmentDto: {
+            shipmentId: string;
+            /** @example SHP00000001 */
+            shipmentNo: string;
+            /** @description 本次自动装箱的包裹（已备好时为 null） */
+            packageId: string | null;
+            packageNo: string | null;
+            /** @description 该发货单此前已出库（本次未再次扣减库存） */
+            alreadyShipped: boolean;
+        };
+        BatchShipItemDto: {
+            orderId: string;
+            orderNo: string | null;
+            ok: boolean;
+            code?: string | null;
+            message?: string | null;
+            /** @description 出库后订单 ERP 状态（成功时） */
+            orderErpStatus: string | null;
+            shipments: components["schemas"]["QuickShipShipmentDto"][];
+        };
+        BatchShipResultDto: {
+            total: number;
+            succeeded: number;
+            failed: number;
+            results: components["schemas"]["BatchShipItemDto"][];
+        };
         PrepareShipmentResultDto: {
             orderId: string;
             /** @example ORD00000001 */
@@ -6403,16 +6590,6 @@ export interface components {
             assemblyPending: boolean;
             /** @description 本次点击是否完成平台组包写（受理中/已组包过则为 false） */
             platformWritePerformed: boolean;
-        };
-        QuickShipShipmentDto: {
-            shipmentId: string;
-            /** @example SHP00000001 */
-            shipmentNo: string;
-            /** @description 本次自动装箱的包裹（已备好时为 null） */
-            packageId: string | null;
-            packageNo: string | null;
-            /** @description 该发货单此前已出库（本次未再次扣减库存） */
-            alreadyShipped: boolean;
         };
         QuickShipResultDto: {
             orderId: string;
@@ -7815,7 +7992,7 @@ export interface operations {
     SkuController_list: {
         parameters: {
             query?: {
-                /** @description Matches sku_code / name_zh / name_ru / model */
+                /** @description Matches sku_code / name_zh / name_ru / model / barcode */
                 keyword?: string;
                 /** @description SKUs of this brand (V1: brand is a SKU field, decision D5) */
                 brandId?: string;
@@ -9377,83 +9554,27 @@ export interface operations {
             };
         };
     };
-    ImportController_downloadTemplate: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                type: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Fixed-template xlsx workbook (binary download) */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": string;
-                };
-            };
-        };
-    };
-    ImportController_upload: {
-        parameters: {
-            query: {
-                type: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["ImportJobResponseDto"];
-                    };
-                };
-            };
-        };
-    };
-    ImportController_confirm: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["ImportJobResponseDto"];
-                    };
-                };
-            };
-        };
-    };
-    ImportController_list: {
+    OrderController_list: {
         parameters: {
             query?: {
-                importType?: "SKU" | "BARCODE" | "WAREHOUSE" | "BIN" | "LISTING_MAPPING" | "INITIAL_INVENTORY";
-                status?: "VALIDATED" | "PENDING_IMPORT" | "IMPORTING" | "COMPLETED" | "FAILED";
+                /** @description 混合搜索（用户指示 2026-09-28）：订单号 / 平台订单号 / 内部 SKU 编码 / offer_id / seller_sku / platform_sku_id 任一命中 */
+                keyword?: string;
+                /** @description 平台代码精确过滤（stores 所属平台 code，如 OZON/WB/YANDEX） */
+                platform?: string;
+                erpStatus?: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+                /** @description 一级 · 物流阶段（双轴 §2.1）：PENDING=erp_status 非 SHIPPED/CANCELLED（缺货/分歧单均在内）；IN_TRANSIT=已发货且平台未妥投（platform_stage 非 DELIVERED，含未同步）；COMPLETED=已发货且平台已妥投 */
+                stage?: "PENDING" | "IN_TRANSIT" | "COMPLETED";
+                /** @description 二级 · 行级货物状态（双轴 §2.2，单选）：TO_PICK=存在 RESERVED 行；PICKING=erp_status PICKING；TO_SHIP=存在 PICKED 行；BACKORDERED=存在缺货行；MAPPING_FAILED=存在映射失败行；SHIPMENT_OVERDUE=已过发货时限未发完（平台已事实发货 IN_TRANSIT/DELIVERED 的不算，用户指示 2026-10-14）；ABNORMAL=缺货∪映射失败∪发货超时∪物流停滞（OPEN ORDER_TRACKING_STALLED） */
+                goodsState?: "TO_PICK" | "PICKING" | "TO_SHIP" | "BACKORDERED" | "MAPPING_FAILED" | "SHIPMENT_OVERDUE" | "ABNORMAL";
+                storeId?: string;
+                /** @description 履约方式精确匹配（用户指示 2026-09-17）：订单头 fulfillment_mode 原值，OZON 订单为 FBS / RFBS / FBP / FBO 短码 */
+                fulfillmentMode?: string;
+                /** @description 待采购视图：存在 MAPPED+BACKORDERED 且无未取消采购单覆盖的订单行 */
+                pendingProcurement?: "true";
+                /** @description 排序字段（2026-10-14）：skuCode=该单最小 SKU 编码（全未映射排最后）；orderedAt=下单时间（默认）；shipmentDeadline=发货时限（无时限排最后） */
+                sortBy?: "orderedAt" | "skuCode" | "shipmentDeadline";
+                /** @description 排序方向；默认 desc */
+                sortOrder?: "asc" | "desc";
             };
             header?: never;
             path?: never;
@@ -9469,7 +9590,7 @@ export interface operations {
                     "application/json": {
                         /** @enum {boolean} */
                         success: true;
-                        data: components["schemas"]["ImportJobResponseDto"][];
+                        data: components["schemas"]["OrderListItemDto"][];
                         meta: {
                             page: number;
                             pageSize: number;
@@ -9480,7 +9601,7 @@ export interface operations {
             };
         };
     };
-    ImportController_getById: {
+    OrderController_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -9499,7 +9620,144 @@ export interface operations {
                     "application/json": {
                         /** @enum {boolean} */
                         success: true;
-                        data: components["schemas"]["ImportJobResponseDto"];
+                        data: components["schemas"]["OrderDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    OrderController_ingest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NormalizedOrderInputDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderIngestResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    OrderController_markExternalFulfillmentBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderBatchMarkExternalFulfillmentRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderBatchMarkExternalFulfillmentResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    OrderController_cancel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderCancelRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderCancelResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    OrderController_markExternalFulfillment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderMarkExternalFulfillmentRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderMarkExternalFulfillmentResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    OrderController_retryAllocation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                itemId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderRetryAllocationResultDto"];
                     };
                 };
             };
@@ -9515,6 +9773,8 @@ export interface operations {
                 condition?: "SELLABLE" | "QC_PENDING" | "DEFECTIVE" | "REPAIR" | "SCRAPPED";
                 /** @description IN_STOCK=有可售, OUT_OF_STOCK=无可售 */
                 status?: "IN_STOCK" | "OUT_OF_STOCK";
+                /** @description true = 连全零事实行一起返回（盘点核对）；缺省 false = 隐藏清零残留行 */
+                includeEmpty?: string;
             };
             header?: never;
             path?: never;
@@ -10114,184 +10374,6 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["ExceptionItemDto"];
-                    };
-                };
-            };
-        };
-    };
-    OrderController_list: {
-        parameters: {
-            query?: {
-                /** @description 混合搜索（用户指示 2026-09-28）：订单号 / 平台订单号 / 内部 SKU 编码 / offer_id / seller_sku / platform_sku_id 任一命中 */
-                keyword?: string;
-                /** @description 平台代码精确过滤（stores 所属平台 code，如 OZON/WB/YANDEX） */
-                platform?: string;
-                erpStatus?: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
-                /** @description 一级 · 物流阶段（双轴 §2.1）：PENDING=erp_status 非 SHIPPED/CANCELLED（缺货/分歧单均在内）；IN_TRANSIT=已发货且平台未妥投（platform_stage 非 DELIVERED，含未同步）；COMPLETED=已发货且平台已妥投 */
-                stage?: "PENDING" | "IN_TRANSIT" | "COMPLETED";
-                /** @description 二级 · 行级货物状态（双轴 §2.2，单选）：TO_PICK=存在 RESERVED 行；PICKING=erp_status PICKING；TO_SHIP=存在 PICKED 行；BACKORDERED=存在缺货行；MAPPING_FAILED=存在映射失败行；SHIPMENT_OVERDUE=已过发货时限未发完；ABNORMAL=缺货∪映射失败∪发货超时∪物流停滞（OPEN ORDER_TRACKING_STALLED） */
-                goodsState?: "TO_PICK" | "PICKING" | "TO_SHIP" | "BACKORDERED" | "MAPPING_FAILED" | "SHIPMENT_OVERDUE" | "ABNORMAL";
-                storeId?: string;
-                /** @description 履约方式精确匹配（用户指示 2026-09-17）：订单头 fulfillment_mode 原值，OZON 订单为 FBS / RFBS / FBP / FBO 短码 */
-                fulfillmentMode?: string;
-                /** @description 待采购视图：存在 MAPPED+BACKORDERED 且无未取消采购单覆盖的订单行 */
-                pendingProcurement?: "true";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["OrderListItemDto"][];
-                        meta: {
-                            page: number;
-                            pageSize: number;
-                            total: number;
-                        };
-                    };
-                };
-            };
-        };
-    };
-    OrderController_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["OrderDetailDto"];
-                    };
-                };
-            };
-        };
-    };
-    OrderController_ingest: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["NormalizedOrderInputDto"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["OrderIngestResultDto"];
-                    };
-                };
-            };
-        };
-    };
-    OrderController_cancel: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["OrderCancelRequestDto"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["OrderCancelResultDto"];
-                    };
-                };
-            };
-        };
-    };
-    OrderController_markExternalFulfillment: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["OrderMarkExternalFulfillmentRequestDto"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["OrderMarkExternalFulfillmentResultDto"];
-                    };
-                };
-            };
-        };
-    };
-    OrderController_retryAllocation: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                itemId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["OrderRetryAllocationResultDto"];
                     };
                 };
             };
@@ -11186,6 +11268,33 @@ export interface operations {
             };
         };
     };
+    PurchaseReceiptController_generateFromPosBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerateReceiptsFromPosRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["GenerateReceiptsFromPosResultDto"];
+                    };
+                };
+            };
+        };
+    };
     PurchaseReceiptController_generateFromPo: {
         parameters: {
             query?: never;
@@ -11616,6 +11725,134 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["SealPackageResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    ImportController_downloadTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                type: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Fixed-template xlsx workbook (binary download) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": string;
+                };
+            };
+        };
+    };
+    ImportController_upload: {
+        parameters: {
+            query: {
+                type: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ImportJobResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    ImportController_confirm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ImportJobResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    ImportController_list: {
+        parameters: {
+            query?: {
+                importType?: "SKU" | "BARCODE" | "WAREHOUSE" | "BIN" | "LISTING_MAPPING" | "INITIAL_INVENTORY";
+                status?: "VALIDATED" | "PENDING_IMPORT" | "IMPORTING" | "COMPLETED" | "FAILED";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ImportJobResponseDto"][];
+                        meta: {
+                            page: number;
+                            pageSize: number;
+                            total: number;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    ImportController_getById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ImportJobResponseDto"];
                     };
                 };
             };
@@ -12357,6 +12594,60 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["PlatformWarehouseOptionDto"];
+                    };
+                };
+            };
+        };
+    };
+    OrderFulfillmentController_prepareShipmentBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchOrderActionRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BatchPrepareShipmentResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    OrderFulfillmentController_quickShipBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchOrderActionRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BatchShipResultDto"];
                     };
                 };
             };

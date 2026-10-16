@@ -1614,7 +1614,7 @@
             "name": "keyword",
             "required": false,
             "in": "query",
-            "description": "Matches sku_code / name_zh / name_ru / model",
+            "description": "Matches sku_code / name_zh / name_ru / model / barcode",
             "schema": {
               "type": "string"
             }
@@ -4405,134 +4405,122 @@
         "tags": ["listings"]
       }
     },
-    "/api/v1/imports/templates/{type}": {
+    "/api/v1/orders": {
       "get": {
-        "operationId": "ImportController_downloadTemplate",
+        "operationId": "OrderController_list",
         "parameters": [
           {
-            "name": "type",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Fixed-template xlsx workbook (binary download)",
-            "content": {
-              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
-                "schema": {
-                  "type": "string",
-                  "format": "binary"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Download a fixed-template Excel (SKU / LISTING_MAPPING), header + one example row",
-        "tags": ["imports"]
-      }
-    },
-    "/api/v1/imports/upload": {
-      "post": {
-        "operationId": "ImportController_upload",
-        "parameters": [
-          {
-            "name": "type",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/ImportJobResponseDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "Upload a fixed-template Excel, parse + validate, return the error report",
-        "tags": ["imports"]
-      }
-    },
-    "/api/v1/imports/{id}/confirm": {
-      "post": {
-        "operationId": "ImportController_confirm",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/ImportJobResponseDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "Confirm import: enqueues the job to the import worker",
-        "tags": ["imports"]
-      }
-    },
-    "/api/v1/imports": {
-      "get": {
-        "operationId": "ImportController_list",
-        "parameters": [
-          {
-            "name": "importType",
+            "name": "keyword",
             "required": false,
             "in": "query",
+            "description": "混合搜索（用户指示 2026-09-28）：订单号 / 平台订单号 / 内部 SKU 编码 / offer_id / seller_sku / platform_sku_id 任一命中",
             "schema": {
-              "type": "string",
-              "enum": ["SKU", "BARCODE", "WAREHOUSE", "BIN", "LISTING_MAPPING", "INITIAL_INVENTORY"]
+              "type": "string"
             }
           },
           {
-            "name": "status",
+            "name": "platform",
+            "required": false,
+            "in": "query",
+            "description": "平台代码精确过滤（stores 所属平台 code，如 OZON/WB/YANDEX）",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "erpStatus",
             "required": false,
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": ["VALIDATED", "PENDING_IMPORT", "IMPORTING", "COMPLETED", "FAILED"]
+              "enum": [
+                "NEW",
+                "ALLOCATING",
+                "READY_TO_PICK",
+                "PARTIALLY_BACKORDERED",
+                "BACKORDERED",
+                "PICKING",
+                "PICKED",
+                "PARTIALLY_SHIPPED",
+                "SHIPPED",
+                "CANCELLED",
+                "EXCEPTION"
+              ]
+            }
+          },
+          {
+            "name": "stage",
+            "required": false,
+            "in": "query",
+            "description": "一级 · 物流阶段（双轴 §2.1）：PENDING=erp_status 非 SHIPPED/CANCELLED（缺货/分歧单均在内）；IN_TRANSIT=已发货且平台未妥投（platform_stage 非 DELIVERED，含未同步）；COMPLETED=已发货且平台已妥投",
+            "schema": {
+              "type": "string",
+              "enum": ["PENDING", "IN_TRANSIT", "COMPLETED"]
+            }
+          },
+          {
+            "name": "goodsState",
+            "required": false,
+            "in": "query",
+            "description": "二级 · 行级货物状态（双轴 §2.2，单选）：TO_PICK=存在 RESERVED 行；PICKING=erp_status PICKING；TO_SHIP=存在 PICKED 行；BACKORDERED=存在缺货行；MAPPING_FAILED=存在映射失败行；SHIPMENT_OVERDUE=已过发货时限未发完（平台已事实发货 IN_TRANSIT/DELIVERED 的不算，用户指示 2026-10-14）；ABNORMAL=缺货∪映射失败∪发货超时∪物流停滞（OPEN ORDER_TRACKING_STALLED）",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "TO_PICK",
+                "PICKING",
+                "TO_SHIP",
+                "BACKORDERED",
+                "MAPPING_FAILED",
+                "SHIPMENT_OVERDUE",
+                "ABNORMAL"
+              ]
+            }
+          },
+          {
+            "name": "storeId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fulfillmentMode",
+            "required": false,
+            "in": "query",
+            "description": "履约方式精确匹配（用户指示 2026-09-17）：订单头 fulfillment_mode 原值，OZON 订单为 FBS / RFBS / FBP / FBO 短码",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pendingProcurement",
+            "required": false,
+            "in": "query",
+            "description": "待采购视图：存在 MAPPED+BACKORDERED 且无未取消采购单覆盖的订单行",
+            "schema": {
+              "type": "string",
+              "enum": ["true"]
+            }
+          },
+          {
+            "name": "sortBy",
+            "required": false,
+            "in": "query",
+            "description": "排序字段（2026-10-14）：skuCode=该单最小 SKU 编码（全未映射排最后）；orderedAt=下单时间（默认）；shipmentDeadline=发货时限（无时限排最后）",
+            "schema": {
+              "type": "string",
+              "enum": ["orderedAt", "skuCode", "shipmentDeadline"]
+            }
+          },
+          {
+            "name": "sortOrder",
+            "required": false,
+            "in": "query",
+            "description": "排序方向；默认 desc",
+            "schema": {
+              "type": "string",
+              "enum": ["asc", "desc"]
             }
           }
         ],
@@ -4552,7 +4540,7 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/ImportJobResponseDto"
+                        "$ref": "#/components/schemas/OrderListItemDto"
                       }
                     },
                     "meta": {
@@ -4579,13 +4567,13 @@
             }
           }
         },
-        "summary": "List import jobs",
-        "tags": ["imports"]
+        "summary": "订单列表（分页 + 汇总计数 + 未处理异常数）",
+        "tags": ["orders"]
       }
     },
-    "/api/v1/imports/{id}": {
+    "/api/v1/orders/{id}": {
       "get": {
-        "operationId": "ImportController_getById",
+        "operationId": "OrderController_get",
         "parameters": [
           {
             "name": "id",
@@ -4610,7 +4598,7 @@
                       "enum": [true]
                     },
                     "data": {
-                      "$ref": "#/components/schemas/ImportJobResponseDto"
+                      "$ref": "#/components/schemas/OrderDetailDto"
                     }
                   }
                 }
@@ -4618,8 +4606,225 @@
             }
           }
         },
-        "summary": "Import job detail incl. row-level errors",
-        "tags": ["imports"]
+        "summary": "订单详情（行/预约/历史/异常/拦截/拣货）",
+        "tags": ["orders"]
+      }
+    },
+    "/api/v1/orders/ingest": {
+      "post": {
+        "operationId": "OrderController_ingest",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NormalizedOrderInputDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/OrderIngestResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "标准化订单摄入（管理员/开发测试入口；未来 SyncService 复用 Service）",
+        "tags": ["orders"]
+      }
+    },
+    "/api/v1/orders/batch-mark-external-fulfillment": {
+      "post": {
+        "operationId": "OrderController_markExternalFulfillmentBatch",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderBatchMarkExternalFulfillmentRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/OrderBatchMarkExternalFulfillmentResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "批量标记外部履约（订单页多选；同一原因逐单关账，不产生库存流水，单笔失败不影响其余）",
+        "tags": ["orders"]
+      }
+    },
+    "/api/v1/orders/{id}/cancel": {
+      "post": {
+        "operationId": "OrderController_cancel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderCancelRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/OrderCancelResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "取消订单（按行处理库存：Reserved 释放 / Picked 拦截）",
+        "tags": ["orders"]
+      }
+    },
+    "/api/v1/orders/{id}/mark-external-fulfillment": {
+      "post": {
+        "operationId": "OrderController_markExternalFulfillment",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderMarkExternalFulfillmentRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/OrderMarkExternalFulfillmentResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "标记外部履约（订单在系统外完成：行关账、不产生库存流水、关闭缺货/时限异常）",
+        "tags": ["orders"]
+      }
+    },
+    "/api/v1/orders/items/{itemId}/retry-allocation": {
+      "post": {
+        "operationId": "OrderController_retryAllocation",
+        "parameters": [
+          {
+            "name": "itemId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/OrderRetryAllocationResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "重试分配库存（BACKORDERED / PENDING 行）",
+        "tags": ["orders"]
       }
     },
     "/api/v1/inventory": {
@@ -4675,6 +4880,15 @@
             "schema": {
               "type": "string",
               "enum": ["IN_STOCK", "OUT_OF_STOCK"]
+            }
+          },
+          {
+            "name": "includeEmpty",
+            "required": false,
+            "in": "query",
+            "description": "true = 连全零事实行一起返回（盘点核对）；缺省 false = 隐藏清零残留行",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -5853,368 +6067,6 @@
         "tags": ["exceptions"]
       }
     },
-    "/api/v1/orders": {
-      "get": {
-        "operationId": "OrderController_list",
-        "parameters": [
-          {
-            "name": "keyword",
-            "required": false,
-            "in": "query",
-            "description": "混合搜索（用户指示 2026-09-28）：订单号 / 平台订单号 / 内部 SKU 编码 / offer_id / seller_sku / platform_sku_id 任一命中",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "platform",
-            "required": false,
-            "in": "query",
-            "description": "平台代码精确过滤（stores 所属平台 code，如 OZON/WB/YANDEX）",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "erpStatus",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": [
-                "NEW",
-                "ALLOCATING",
-                "READY_TO_PICK",
-                "PARTIALLY_BACKORDERED",
-                "BACKORDERED",
-                "PICKING",
-                "PICKED",
-                "PARTIALLY_SHIPPED",
-                "SHIPPED",
-                "CANCELLED",
-                "EXCEPTION"
-              ]
-            }
-          },
-          {
-            "name": "stage",
-            "required": false,
-            "in": "query",
-            "description": "一级 · 物流阶段（双轴 §2.1）：PENDING=erp_status 非 SHIPPED/CANCELLED（缺货/分歧单均在内）；IN_TRANSIT=已发货且平台未妥投（platform_stage 非 DELIVERED，含未同步）；COMPLETED=已发货且平台已妥投",
-            "schema": {
-              "type": "string",
-              "enum": ["PENDING", "IN_TRANSIT", "COMPLETED"]
-            }
-          },
-          {
-            "name": "goodsState",
-            "required": false,
-            "in": "query",
-            "description": "二级 · 行级货物状态（双轴 §2.2，单选）：TO_PICK=存在 RESERVED 行；PICKING=erp_status PICKING；TO_SHIP=存在 PICKED 行；BACKORDERED=存在缺货行；MAPPING_FAILED=存在映射失败行；SHIPMENT_OVERDUE=已过发货时限未发完；ABNORMAL=缺货∪映射失败∪发货超时∪物流停滞（OPEN ORDER_TRACKING_STALLED）",
-            "schema": {
-              "type": "string",
-              "enum": [
-                "TO_PICK",
-                "PICKING",
-                "TO_SHIP",
-                "BACKORDERED",
-                "MAPPING_FAILED",
-                "SHIPMENT_OVERDUE",
-                "ABNORMAL"
-              ]
-            }
-          },
-          {
-            "name": "storeId",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "fulfillmentMode",
-            "required": false,
-            "in": "query",
-            "description": "履约方式精确匹配（用户指示 2026-09-17）：订单头 fulfillment_mode 原值，OZON 订单为 FBS / RFBS / FBP / FBO 短码",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "pendingProcurement",
-            "required": false,
-            "in": "query",
-            "description": "待采购视图：存在 MAPPED+BACKORDERED 且无未取消采购单覆盖的订单行",
-            "schema": {
-              "type": "string",
-              "enum": ["true"]
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data", "meta"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/OrderListItemDto"
-                      }
-                    },
-                    "meta": {
-                      "type": "object",
-                      "required": ["page", "pageSize", "total"],
-                      "properties": {
-                        "page": {
-                          "type": "integer",
-                          "minimum": 1
-                        },
-                        "pageSize": {
-                          "type": "integer",
-                          "minimum": 1
-                        },
-                        "total": {
-                          "type": "integer",
-                          "minimum": 0
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "订单列表（分页 + 汇总计数 + 未处理异常数）",
-        "tags": ["orders"]
-      }
-    },
-    "/api/v1/orders/{id}": {
-      "get": {
-        "operationId": "OrderController_get",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/OrderDetailDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "订单详情（行/预约/历史/异常/拦截/拣货）",
-        "tags": ["orders"]
-      }
-    },
-    "/api/v1/orders/ingest": {
-      "post": {
-        "operationId": "OrderController_ingest",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/NormalizedOrderInputDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/OrderIngestResultDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "标准化订单摄入（管理员/开发测试入口；未来 SyncService 复用 Service）",
-        "tags": ["orders"]
-      }
-    },
-    "/api/v1/orders/{id}/cancel": {
-      "post": {
-        "operationId": "OrderController_cancel",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OrderCancelRequestDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/OrderCancelResultDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "取消订单（按行处理库存：Reserved 释放 / Picked 拦截）",
-        "tags": ["orders"]
-      }
-    },
-    "/api/v1/orders/{id}/mark-external-fulfillment": {
-      "post": {
-        "operationId": "OrderController_markExternalFulfillment",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OrderMarkExternalFulfillmentRequestDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/OrderMarkExternalFulfillmentResultDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "标记外部履约（订单在系统外完成：行关账、不产生库存流水、关闭缺货/时限异常）",
-        "tags": ["orders"]
-      }
-    },
-    "/api/v1/orders/items/{itemId}/retry-allocation": {
-      "post": {
-        "operationId": "OrderController_retryAllocation",
-        "parameters": [
-          {
-            "name": "itemId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["success", "data"],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [true]
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/OrderRetryAllocationResultDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "summary": "重试分配库存（BACKORDERED / PENDING 行）",
-        "tags": ["orders"]
-      }
-    },
     "/api/v1/notifications": {
       "get": {
         "operationId": "NotificationController_list",
@@ -6531,7 +6383,7 @@
             }
           }
         },
-        "summary": "自动为待拣货（READY_TO_PICK）订单创建拣货任务（跳过已有进行中任务的订单）",
+        "summary": "批量创建拣货任务：传 orderIds 只处理勾选订单；省略则自动选取待拣货（READY_TO_PICK）订单；均跳过已有进行中任务的订单",
         "tags": ["picking-tasks"]
       }
     },
@@ -7814,6 +7666,46 @@
         "tags": ["purchase-receipts"]
       }
     },
+    "/api/v1/purchase-receipts/from-po/batch": {
+      "post": {
+        "operationId": "PurchaseReceiptController_generateFromPosBatch",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateReceiptsFromPosRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/GenerateReceiptsFromPosResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "批量从采购单生成收货单草稿（采购单页多选；单笔失败不影响其余）",
+        "tags": ["purchase-receipts"]
+      }
+    },
     "/api/v1/purchase-receipts/from-po/{poId}": {
       "post": {
         "operationId": "PurchaseReceiptController_generateFromPo",
@@ -8546,6 +8438,223 @@
         },
         "summary": "封箱（OPEN/REPACK_REQUIRED → SEALED；齐全后发货单 READY_TO_SHIP）",
         "tags": ["packages"]
+      }
+    },
+    "/api/v1/imports/templates/{type}": {
+      "get": {
+        "operationId": "ImportController_downloadTemplate",
+        "parameters": [
+          {
+            "name": "type",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fixed-template xlsx workbook (binary download)",
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Download a fixed-template Excel (SKU / LISTING_MAPPING), header + one example row",
+        "tags": ["imports"]
+      }
+    },
+    "/api/v1/imports/upload": {
+      "post": {
+        "operationId": "ImportController_upload",
+        "parameters": [
+          {
+            "name": "type",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ImportJobResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Upload a fixed-template Excel, parse + validate, return the error report",
+        "tags": ["imports"]
+      }
+    },
+    "/api/v1/imports/{id}/confirm": {
+      "post": {
+        "operationId": "ImportController_confirm",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ImportJobResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Confirm import: enqueues the job to the import worker",
+        "tags": ["imports"]
+      }
+    },
+    "/api/v1/imports": {
+      "get": {
+        "operationId": "ImportController_list",
+        "parameters": [
+          {
+            "name": "importType",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["SKU", "BARCODE", "WAREHOUSE", "BIN", "LISTING_MAPPING", "INITIAL_INVENTORY"]
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["VALIDATED", "PENDING_IMPORT", "IMPORTING", "COMPLETED", "FAILED"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data", "meta"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ImportJobResponseDto"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": ["page", "pageSize", "total"],
+                      "properties": {
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "pageSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "List import jobs",
+        "tags": ["imports"]
+      }
+    },
+    "/api/v1/imports/{id}": {
+      "get": {
+        "operationId": "ImportController_getById",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ImportJobResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Import job detail incl. row-level errors",
+        "tags": ["imports"]
       }
     },
     "/api/v1/returns/platform": {
@@ -9766,6 +9875,86 @@
         },
         "summary": "查询店铺的平台仓库目录（实时调用平台 API；当前仅 OZON）",
         "tags": ["platform-warehouses"]
+      }
+    },
+    "/api/v1/orders/batch-prepare-shipment": {
+      "post": {
+        "operationId": "OrderFulfillmentController_prepareShipmentBatch",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchOrderActionRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/BatchPrepareShipmentResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "批量获取运单号（订单页多选；逐单平台组包，真实平台写操作，单笔失败不影响其余）",
+        "tags": ["orders"]
+      }
+    },
+    "/api/v1/orders/batch-ship": {
+      "post": {
+        "operationId": "OrderFulfillmentController_quickShipBatch",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchOrderActionRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/BatchShipResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "批量发货（订单页多选；逐单一键出库扣库存，单笔失败不影响其余）",
+        "tags": ["orders"]
       }
     },
     "/api/v1/orders/{id}/prepare-shipment": {
@@ -14407,53 +14596,277 @@
         },
         "required": ["platformId", "created", "mappingCount"]
       },
-      "ImportJobResponseDto": {
+      "OrderListItemDto": {
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "type": "string"
           },
-          "importType": {
+          "orderNo": {
             "type": "string",
-            "enum": ["SKU", "BARCODE", "WAREHOUSE", "BIN", "LISTING_MAPPING", "INITIAL_INVENTORY"]
+            "example": "ORD00000001"
+          },
+          "storeId": {
+            "type": "string"
+          },
+          "storeName": {
+            "type": "string",
+            "example": "OZON A店"
+          },
+          "platformCode": {
+            "type": "string",
+            "example": "OZON"
+          },
+          "platformOrderId": {
+            "type": "string",
+            "example": "123456789"
+          },
+          "platformStatus": {
+            "type": "string",
+            "nullable": true,
+            "example": "awaiting_packaging"
+          },
+          "erpStatus": {
+            "type": "string",
+            "enum": [
+              "NEW",
+              "ALLOCATING",
+              "READY_TO_PICK",
+              "PARTIALLY_BACKORDERED",
+              "BACKORDERED",
+              "PICKING",
+              "PICKED",
+              "PARTIALLY_SHIPPED",
+              "SHIPPED",
+              "CANCELLED",
+              "EXCEPTION"
+            ]
+          },
+          "fulfillmentMode": {
+            "type": "string",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string",
+            "nullable": true
+          },
+          "orderedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "shipmentDeadline": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "平台要求的发货截止时间（平台事实，非 ERP 状态）"
+          },
+          "platformTrackingNo": {
+            "type": "string",
+            "nullable": true,
+            "description": "平台运单号（平台事实）；已组包后由平台返回，出库时自动填入发货单物流单号"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "syncSource": {
+            "type": "string",
+            "nullable": true,
+            "enum": ["MANUAL", "API", "POLLING", "WEBHOOK"]
+          },
+          "itemsCount": {
+            "type": "number"
+          },
+          "reservedCount": {
+            "type": "number"
+          },
+          "backorderedCount": {
+            "type": "number"
+          },
+          "pickedCount": {
+            "type": "number"
+          },
+          "mappingFailedCount": {
+            "type": "number"
+          },
+          "openExceptionsCount": {
+            "type": "number"
+          },
+          "firstSkuCode": {
+            "type": "string",
+            "nullable": true,
+            "description": "该单 SKU 编码的字典序最小值（主表 SKU 列展示 + SKU 排序键；全行未映射为 null）"
+          },
+          "skuKindCount": {
+            "type": "number",
+            "description": "该单不同 SKU 编码的种类数"
+          },
+          "backorderedOrderedCount": {
+            "type": "number",
+            "description": "缺货行中已登记采购（ORDERED，purchase.md §3.5 派生）的行数（双轴 §2.3）"
+          },
+          "backorderedArrivedCount": {
+            "type": "number",
+            "description": "缺货行中采购已到货（ARRIVED，purchase.md §3.5 派生）的行数（双轴 §2.3）"
+          }
+        },
+        "required": [
+          "id",
+          "orderNo",
+          "storeId",
+          "storeName",
+          "platformCode",
+          "platformOrderId",
+          "platformStatus",
+          "erpStatus",
+          "fulfillmentMode",
+          "currency",
+          "orderedAt",
+          "platformTrackingNo",
+          "createdAt",
+          "syncSource",
+          "itemsCount",
+          "reservedCount",
+          "backorderedCount",
+          "pickedCount",
+          "mappingFailedCount",
+          "openExceptionsCount",
+          "skuKindCount"
+        ]
+      },
+      "OrderItemExceptionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "exceptionNo": {
+            "type": "string",
+            "example": "EXC00000001"
+          },
+          "exceptionType": {
+            "type": "string"
           },
           "status": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "exceptionNo", "exceptionType", "status", "message"]
+      },
+      "OrderItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "orderId": {
+            "type": "string"
+          },
+          "lineNo": {
+            "type": "number"
+          },
+          "platformProductId": {
             "type": "string",
-            "enum": ["VALIDATED", "PENDING_IMPORT", "IMPORTING", "COMPLETED", "FAILED"]
+            "nullable": true
           },
-          "originalFilename": {
+          "platformSkuId": {
             "type": "string",
-            "example": "skus-2026.xlsx"
+            "nullable": true
           },
-          "totalRows": {
-            "type": "number",
-            "example": 100
+          "sellerSku": {
+            "type": "string",
+            "nullable": true
           },
-          "validRows": {
-            "type": "number",
-            "example": 92
+          "offerId": {
+            "type": "string",
+            "nullable": true
           },
-          "invalidRows": {
-            "type": "number",
-            "example": 8
+          "listingSkuId": {
+            "type": "string",
+            "nullable": true
           },
-          "importedRows": {
-            "type": "number",
-            "example": 92
+          "skuId": {
+            "type": "string",
+            "nullable": true
           },
-          "failedRows": {
-            "type": "number",
-            "example": 0
+          "skuCode": {
+            "type": "string",
+            "example": "VK87-BLK"
           },
-          "errors": {
-            "description": "Row-level errors with exact Excel row numbers",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
+          "skuName": {
+            "type": "string",
+            "example": "VK87 MAX V2 黑色"
           },
-          "createdBy": {
+          "latestPurchasePrice": {
+            "type": "string",
+            "nullable": true,
+            "description": "最近采购价（SKU 主数据操作者维护，master-data.md §4.3；用户指示 2026-09-17 展开行展示）"
+          },
+          "warehouseId": {
+            "type": "string",
+            "nullable": true
+          },
+          "quantity": {
+            "type": "string",
+            "example": "2.000"
+          },
+          "unitPrice": {
+            "type": "object",
+            "nullable": true,
+            "example": "107.0000",
+            "description": "平台单价（财务事实，finance.md §2）；平台未提供为 null"
+          },
+          "totalPrice": {
+            "type": "object",
+            "nullable": true,
+            "example": "214.0000",
+            "description": "行金额 = 单价 × 数量；无价为 null"
+          },
+          "imageUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "已映射行使用内部 SKU 主图签名 URL；未映射行使用平台公开图片直链"
+          },
+          "imageSource": {
+            "type": "string",
+            "nullable": true,
+            "enum": ["INTERNAL", "PLATFORM"]
+          },
+          "fulfillmentStatus": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "RESERVED",
+              "BACKORDERED",
+              "PICKED",
+              "SHIPPED",
+              "RELEASED",
+              "EXTERNAL_FULFILLED"
+            ]
+          },
+          "mappingStatus": {
+            "type": "string",
+            "enum": ["PENDING", "MAPPED", "FAILED"]
+          },
+          "procurementState": {
+            "type": "string",
+            "nullable": true,
+            "enum": ["NOT_ORDERED", "ORDERED", "ARRIVED"],
+            "description": "派生采购状态（purchase.md §3.5，不落库）；未映射行为 NULL"
+          },
+          "reservationId": {
+            "type": "string",
+            "nullable": true
+          },
+          "reservation": {
+            "type": "object",
+            "nullable": true,
+            "description": "库存预约（含多 Bin 分配行，task §49-§50）"
+          },
+          "rawData": {
             "type": "object",
             "nullable": true
           },
@@ -14465,28 +14878,710 @@
             "format": "date-time",
             "type": "string"
           },
-          "importedAt": {
-            "type": "object",
-            "format": "date-time",
-            "nullable": true
+          "exceptions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderItemExceptionDto"
+            }
           }
         },
         "required": [
           "id",
-          "importType",
-          "status",
-          "originalFilename",
-          "totalRows",
-          "validRows",
-          "invalidRows",
-          "importedRows",
-          "failedRows",
-          "errors",
-          "createdBy",
+          "orderId",
+          "lineNo",
+          "platformProductId",
+          "platformSkuId",
+          "sellerSku",
+          "offerId",
+          "listingSkuId",
+          "skuId",
+          "skuCode",
+          "skuName",
+          "warehouseId",
+          "quantity",
+          "imageSource",
+          "fulfillmentStatus",
+          "mappingStatus",
+          "reservationId",
+          "reservation",
+          "rawData",
           "createdAt",
           "updatedAt",
-          "importedAt"
+          "exceptions"
         ]
+      },
+      "OrderHistoryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "fromStatus": {
+            "type": "string",
+            "nullable": true
+          },
+          "toStatus": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "operatorName": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": ["id", "fromStatus", "toStatus", "reason", "operatorName", "createdAt"]
+      },
+      "PlatformStatusHistoryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "fromStatus": {
+            "type": "string",
+            "nullable": true,
+            "example": "awaiting_packaging"
+          },
+          "toStatus": {
+            "type": "string",
+            "example": "delivering"
+          },
+          "source": {
+            "type": "string",
+            "nullable": true,
+            "example": "ORDER_SYNC"
+          },
+          "platformChangedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "平台侧的迁移时间（webhook changed_state_date / 回读阶段锚点）；缺失时以 createdAt 为准（双轴 T2）"
+          },
+          "operatorName": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": ["id", "fromStatus", "toStatus", "source", "operatorName", "createdAt"]
+      },
+      "OrderInterceptionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "interceptionNo": {
+            "type": "string",
+            "example": "ITC00000001"
+          },
+          "orderItemId": {
+            "type": "string",
+            "nullable": true
+          },
+          "warehouseId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "CREATED",
+              "ASSIGNED",
+              "LOCATING",
+              "INTERCEPTED",
+              "FAILED",
+              "RETURNED_TO_STOCK",
+              "CLOSED"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "interceptionNo",
+          "orderItemId",
+          "warehouseId",
+          "status",
+          "reason",
+          "createdAt"
+        ]
+      },
+      "OrderPickingTaskDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "pickingNo": {
+            "type": "string",
+            "example": "PCK00000001"
+          },
+          "warehouseId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "totalItems": {
+            "type": "number"
+          },
+          "pickedItems": {
+            "type": "number"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "pickingNo",
+          "warehouseId",
+          "status",
+          "totalItems",
+          "pickedItems",
+          "createdAt"
+        ]
+      },
+      "OrderDetailDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "orderNo": {
+            "type": "string",
+            "example": "ORD00000001"
+          },
+          "storeId": {
+            "type": "string"
+          },
+          "storeName": {
+            "type": "string",
+            "example": "OZON A店"
+          },
+          "platformCode": {
+            "type": "string",
+            "example": "OZON"
+          },
+          "platformOrderId": {
+            "type": "string",
+            "example": "123456789"
+          },
+          "platformStatus": {
+            "type": "string",
+            "nullable": true
+          },
+          "erpStatus": {
+            "type": "string",
+            "enum": [
+              "NEW",
+              "ALLOCATING",
+              "READY_TO_PICK",
+              "PARTIALLY_BACKORDERED",
+              "BACKORDERED",
+              "PICKING",
+              "PICKED",
+              "PARTIALLY_SHIPPED",
+              "SHIPPED",
+              "CANCELLED",
+              "EXCEPTION"
+            ]
+          },
+          "fulfillmentMode": {
+            "type": "string",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string",
+            "nullable": true
+          },
+          "orderedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "shipmentDeadline": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "平台要求的发货截止时间（平台事实，非 ERP 状态）"
+          },
+          "platformTrackingNo": {
+            "type": "string",
+            "nullable": true,
+            "description": "平台运单号（平台事实）；已组包后由平台返回，出库时自动填入发货单物流单号"
+          },
+          "platformCapabilities": {
+            "type": "object",
+            "description": "该店铺平台是否支持订单履约写能力（获取运单号 / 打单）。前端据此显隐按钮，不猜测平台；后端同时以 PLATFORM_CAPABILITY_UNSUPPORTED 兜底。",
+            "example": {
+              "prepareShipment": true,
+              "fetchShippingLabel": true
+            }
+          },
+          "rawData": {
+            "type": "object",
+            "nullable": true
+          },
+          "remark": {
+            "type": "string",
+            "nullable": true
+          },
+          "syncSource": {
+            "type": "string",
+            "nullable": true,
+            "enum": ["MANUAL", "API", "POLLING", "WEBHOOK"]
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderItemDto"
+            }
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderHistoryDto"
+            }
+          },
+          "platformStatusHistory": {
+            "description": "平台状态迁移时间线（与 ERP 历史按 createdAt 合并展示）",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlatformStatusHistoryDto"
+            }
+          },
+          "interceptions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderInterceptionDto"
+            }
+          },
+          "pickingTasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderPickingTaskDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "orderNo",
+          "storeId",
+          "storeName",
+          "platformCode",
+          "platformOrderId",
+          "platformStatus",
+          "erpStatus",
+          "fulfillmentMode",
+          "currency",
+          "orderedAt",
+          "platformTrackingNo",
+          "platformCapabilities",
+          "rawData",
+          "remark",
+          "syncSource",
+          "createdAt",
+          "updatedAt",
+          "items",
+          "history",
+          "platformStatusHistory",
+          "interceptions",
+          "pickingTasks"
+        ]
+      },
+      "OrderIngestItemResultDto": {
+        "type": "object",
+        "properties": {
+          "orderItemId": {
+            "type": "string"
+          },
+          "lineNo": {
+            "type": "number"
+          },
+          "mappingStatus": {
+            "type": "string",
+            "enum": ["PENDING", "MAPPED", "FAILED"]
+          },
+          "fulfillmentStatus": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "RESERVED",
+              "BACKORDERED",
+              "PICKED",
+              "SHIPPED",
+              "RELEASED",
+              "EXTERNAL_FULFILLED"
+            ]
+          },
+          "skuId": {
+            "type": "string",
+            "nullable": true
+          },
+          "reservationId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "orderItemId",
+          "lineNo",
+          "mappingStatus",
+          "fulfillmentStatus",
+          "skuId",
+          "reservationId"
+        ]
+      },
+      "OrderIngestResultDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "orderNo": {
+            "type": "string",
+            "example": "ORD00000001"
+          },
+          "erpStatus": {
+            "type": "string",
+            "enum": [
+              "NEW",
+              "ALLOCATING",
+              "READY_TO_PICK",
+              "PARTIALLY_BACKORDERED",
+              "BACKORDERED",
+              "PICKING",
+              "PICKED",
+              "PARTIALLY_SHIPPED",
+              "SHIPPED",
+              "CANCELLED",
+              "EXCEPTION"
+            ]
+          },
+          "alreadyIngested": {
+            "type": "boolean",
+            "example": false
+          },
+          "itemResults": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderIngestItemResultDto"
+            }
+          }
+        },
+        "required": ["orderId", "orderNo", "erpStatus", "alreadyIngested", "itemResults"]
+      },
+      "NormalizedOrderItemInputDto": {
+        "type": "object",
+        "properties": {
+          "platformProductId": {
+            "type": "string"
+          },
+          "platformSkuId": {
+            "type": "string"
+          },
+          "sellerSku": {
+            "type": "string"
+          },
+          "offerId": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "string",
+            "example": "2"
+          },
+          "unitPrice": {
+            "type": "object",
+            "example": "107.0000",
+            "nullable": true,
+            "description": "平台单价（财务事实，finance.md §2）；平台未提供为 null，禁止臆造为 0"
+          },
+          "rawData": {
+            "type": "object"
+          }
+        },
+        "required": ["quantity"]
+      },
+      "NormalizedOrderInputDto": {
+        "type": "object",
+        "properties": {
+          "storeId": {
+            "type": "string"
+          },
+          "platformOrderId": {
+            "type": "string",
+            "example": "OZON-123456789"
+          },
+          "platformStatus": {
+            "type": "string",
+            "example": "awaiting_packaging"
+          },
+          "platformStage": {
+            "type": "string",
+            "enum": ["AWAITING_SHIPMENT", "IN_TRANSIT", "DELIVERED", "CANCELLED"],
+            "nullable": true,
+            "description": "归一化平台物流阶段（平台事实，非 ERP 状态）；未归类/未同步为 null（双轴 T1）"
+          },
+          "platformStageChangedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "平台自身记录的进入该阶段时间（停滞时钟锚点）；缺失为 null"
+          },
+          "fulfillmentMode": {
+            "type": "string",
+            "example": "FBS"
+          },
+          "orderedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "shipmentDeadline": {
+            "type": "string",
+            "format": "date-time",
+            "description": "平台要求的发货截止时间（平台事实，非 ERP 状态；可空）"
+          },
+          "platformTrackingNo": {
+            "type": "object",
+            "example": "89491381-0072-1",
+            "nullable": true,
+            "description": "平台运单号（OZON tracking_number，平台事实）；出库时自动填入发货单物流单号。这不是被禁止的 orders.tracking_number 物流模型——Shipment/Package 仍是唯一物流载体。"
+          },
+          "currency": {
+            "type": "string",
+            "example": "RUB"
+          },
+          "items": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NormalizedOrderItemInputDto"
+            }
+          },
+          "rawData": {
+            "type": "object",
+            "description": "平台原始报文（保留事实，task §14）"
+          },
+          "remark": {
+            "type": "string"
+          },
+          "syncSource": {
+            "type": "string",
+            "enum": ["MANUAL", "API", "POLLING", "WEBHOOK"],
+            "description": "订单进入系统的渠道（Sprint 5 §58；默认 API）"
+          }
+        },
+        "required": ["storeId", "platformOrderId", "orderedAt", "items"]
+      },
+      "OrderBatchMarkExternalFulfillmentItemDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "orderNo": {
+            "type": "string",
+            "nullable": true,
+            "description": "订单不可读时为 null（前端用缓存行标注）"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "code": {
+            "type": "string",
+            "nullable": true,
+            "description": "失败时的错误码"
+          },
+          "message": {
+            "type": "string",
+            "nullable": true,
+            "description": "失败时的错误信息"
+          },
+          "erpStatus": {
+            "type": "string",
+            "nullable": true,
+            "description": "标记后订单 ERP 状态（成功时为 SHIPPED）"
+          },
+          "releasedItems": {
+            "type": "number",
+            "nullable": true,
+            "description": "关账的订单行数（成功时）"
+          }
+        },
+        "required": ["orderId", "orderNo", "ok", "erpStatus", "releasedItems"]
+      },
+      "OrderBatchMarkExternalFulfillmentResultDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "succeeded": {
+            "type": "number"
+          },
+          "failed": {
+            "type": "number"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderBatchMarkExternalFulfillmentItemDto"
+            }
+          }
+        },
+        "required": ["total", "succeeded", "failed", "results"]
+      },
+      "OrderBatchMarkExternalFulfillmentRequestDto": {
+        "type": "object",
+        "properties": {
+          "orderIds": {
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "勾选的订单（单批上限 50，逐单执行）",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "reason": {
+            "type": "string",
+            "description": "外部履约原因（必填，应用于全部勾选订单，逐单记入状态历史与操作日志）"
+          }
+        },
+        "required": ["orderIds", "reason"]
+      },
+      "OrderCancelResultDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "erpStatus": {
+            "type": "string",
+            "enum": [
+              "NEW",
+              "ALLOCATING",
+              "READY_TO_PICK",
+              "PARTIALLY_BACKORDERED",
+              "BACKORDERED",
+              "PICKING",
+              "PICKED",
+              "PARTIALLY_SHIPPED",
+              "SHIPPED",
+              "CANCELLED",
+              "EXCEPTION"
+            ]
+          },
+          "releasedItems": {
+            "type": "number"
+          },
+          "interceptions": {
+            "type": "number"
+          }
+        },
+        "required": ["orderId", "erpStatus", "releasedItems", "interceptions"]
+      },
+      "OrderCancelRequestDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "取消原因（记入历史与拦截任务）"
+          }
+        }
+      },
+      "OrderMarkExternalFulfillmentResultDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "erpStatus": {
+            "type": "string",
+            "enum": [
+              "NEW",
+              "ALLOCATING",
+              "READY_TO_PICK",
+              "PARTIALLY_BACKORDERED",
+              "BACKORDERED",
+              "PICKING",
+              "PICKED",
+              "PARTIALLY_SHIPPED",
+              "SHIPPED",
+              "CANCELLED",
+              "EXCEPTION"
+            ]
+          },
+          "releasedItems": {
+            "type": "number"
+          }
+        },
+        "required": ["orderId", "erpStatus", "releasedItems"]
+      },
+      "OrderMarkExternalFulfillmentRequestDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "外部履约原因（必填，记入状态历史与操作日志；如线下直发买家）"
+          }
+        },
+        "required": ["reason"]
+      },
+      "OrderRetryAllocationResultDto": {
+        "type": "object",
+        "properties": {
+          "orderItemId": {
+            "type": "string"
+          },
+          "fulfillmentStatus": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "RESERVED",
+              "BACKORDERED",
+              "PICKED",
+              "SHIPPED",
+              "RELEASED",
+              "EXTERNAL_FULFILLED"
+            ]
+          },
+          "reserved": {
+            "type": "boolean"
+          },
+          "mappingRepaired": {
+            "type": "boolean",
+            "description": "本次是否修复了平台映射（修复失败的订单行时会先补映射、关异常，再按分配状态决定是否占库存）"
+          }
+        },
+        "required": ["orderItemId", "fulfillmentStatus", "reserved", "mappingRepaired"]
       },
       "InventoryRowDto": {
         "type": "object",
@@ -15589,901 +16684,6 @@
           }
         }
       },
-      "OrderListItemDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "orderNo": {
-            "type": "string",
-            "example": "ORD00000001"
-          },
-          "storeId": {
-            "type": "string"
-          },
-          "storeName": {
-            "type": "string",
-            "example": "OZON A店"
-          },
-          "platformCode": {
-            "type": "string",
-            "example": "OZON"
-          },
-          "platformOrderId": {
-            "type": "string",
-            "example": "123456789"
-          },
-          "platformStatus": {
-            "type": "string",
-            "nullable": true,
-            "example": "awaiting_packaging"
-          },
-          "erpStatus": {
-            "type": "string",
-            "enum": [
-              "NEW",
-              "ALLOCATING",
-              "READY_TO_PICK",
-              "PARTIALLY_BACKORDERED",
-              "BACKORDERED",
-              "PICKING",
-              "PICKED",
-              "PARTIALLY_SHIPPED",
-              "SHIPPED",
-              "CANCELLED",
-              "EXCEPTION"
-            ]
-          },
-          "fulfillmentMode": {
-            "type": "string",
-            "nullable": true
-          },
-          "currency": {
-            "type": "string",
-            "nullable": true
-          },
-          "orderedAt": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "shipmentDeadline": {
-            "type": "string",
-            "nullable": true,
-            "format": "date-time",
-            "description": "平台要求的发货截止时间（平台事实，非 ERP 状态）"
-          },
-          "platformTrackingNo": {
-            "type": "string",
-            "nullable": true,
-            "description": "平台运单号（平台事实）；已组包后由平台返回，出库时自动填入发货单物流单号"
-          },
-          "createdAt": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "syncSource": {
-            "type": "string",
-            "nullable": true,
-            "enum": ["MANUAL", "API", "POLLING", "WEBHOOK"]
-          },
-          "itemsCount": {
-            "type": "number"
-          },
-          "reservedCount": {
-            "type": "number"
-          },
-          "backorderedCount": {
-            "type": "number"
-          },
-          "pickedCount": {
-            "type": "number"
-          },
-          "mappingFailedCount": {
-            "type": "number"
-          },
-          "openExceptionsCount": {
-            "type": "number"
-          },
-          "backorderedOrderedCount": {
-            "type": "number",
-            "description": "缺货行中已登记采购（ORDERED，purchase.md §3.5 派生）的行数（双轴 §2.3）"
-          },
-          "backorderedArrivedCount": {
-            "type": "number",
-            "description": "缺货行中采购已到货（ARRIVED，purchase.md §3.5 派生）的行数（双轴 §2.3）"
-          }
-        },
-        "required": [
-          "id",
-          "orderNo",
-          "storeId",
-          "storeName",
-          "platformCode",
-          "platformOrderId",
-          "platformStatus",
-          "erpStatus",
-          "fulfillmentMode",
-          "currency",
-          "orderedAt",
-          "platformTrackingNo",
-          "createdAt",
-          "syncSource",
-          "itemsCount",
-          "reservedCount",
-          "backorderedCount",
-          "pickedCount",
-          "mappingFailedCount",
-          "openExceptionsCount"
-        ]
-      },
-      "OrderItemExceptionDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "exceptionNo": {
-            "type": "string",
-            "example": "EXC00000001"
-          },
-          "exceptionType": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          }
-        },
-        "required": ["id", "exceptionNo", "exceptionType", "status", "message"]
-      },
-      "OrderItemDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "orderId": {
-            "type": "string"
-          },
-          "lineNo": {
-            "type": "number"
-          },
-          "platformProductId": {
-            "type": "string",
-            "nullable": true
-          },
-          "platformSkuId": {
-            "type": "string",
-            "nullable": true
-          },
-          "sellerSku": {
-            "type": "string",
-            "nullable": true
-          },
-          "offerId": {
-            "type": "string",
-            "nullable": true
-          },
-          "listingSkuId": {
-            "type": "string",
-            "nullable": true
-          },
-          "skuId": {
-            "type": "string",
-            "nullable": true
-          },
-          "skuCode": {
-            "type": "string",
-            "example": "VK87-BLK"
-          },
-          "skuName": {
-            "type": "string",
-            "example": "VK87 MAX V2 黑色"
-          },
-          "latestPurchasePrice": {
-            "type": "string",
-            "nullable": true,
-            "description": "最近采购价（SKU 主数据操作者维护，master-data.md §4.3；用户指示 2026-09-17 展开行展示）"
-          },
-          "warehouseId": {
-            "type": "string",
-            "nullable": true
-          },
-          "quantity": {
-            "type": "string",
-            "example": "2.000"
-          },
-          "unitPrice": {
-            "type": "object",
-            "nullable": true,
-            "example": "107.0000",
-            "description": "平台单价（财务事实，finance.md §2）；平台未提供为 null"
-          },
-          "totalPrice": {
-            "type": "object",
-            "nullable": true,
-            "example": "214.0000",
-            "description": "行金额 = 单价 × 数量；无价为 null"
-          },
-          "imageUrl": {
-            "type": "string",
-            "nullable": true,
-            "description": "已映射行使用内部 SKU 主图签名 URL；未映射行使用平台公开图片直链"
-          },
-          "imageSource": {
-            "type": "string",
-            "nullable": true,
-            "enum": ["INTERNAL", "PLATFORM"]
-          },
-          "fulfillmentStatus": {
-            "type": "string",
-            "enum": [
-              "PENDING",
-              "RESERVED",
-              "BACKORDERED",
-              "PICKED",
-              "SHIPPED",
-              "RELEASED",
-              "EXTERNAL_FULFILLED"
-            ]
-          },
-          "mappingStatus": {
-            "type": "string",
-            "enum": ["PENDING", "MAPPED", "FAILED"]
-          },
-          "procurementState": {
-            "type": "string",
-            "nullable": true,
-            "enum": ["NOT_ORDERED", "ORDERED", "ARRIVED"],
-            "description": "派生采购状态（purchase.md §3.5，不落库）；未映射行为 NULL"
-          },
-          "reservationId": {
-            "type": "string",
-            "nullable": true
-          },
-          "reservation": {
-            "type": "object",
-            "nullable": true,
-            "description": "库存预约（含多 Bin 分配行，task §49-§50）"
-          },
-          "rawData": {
-            "type": "object",
-            "nullable": true
-          },
-          "createdAt": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "updatedAt": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "exceptions": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OrderItemExceptionDto"
-            }
-          }
-        },
-        "required": [
-          "id",
-          "orderId",
-          "lineNo",
-          "platformProductId",
-          "platformSkuId",
-          "sellerSku",
-          "offerId",
-          "listingSkuId",
-          "skuId",
-          "skuCode",
-          "skuName",
-          "warehouseId",
-          "quantity",
-          "imageSource",
-          "fulfillmentStatus",
-          "mappingStatus",
-          "reservationId",
-          "reservation",
-          "rawData",
-          "createdAt",
-          "updatedAt",
-          "exceptions"
-        ]
-      },
-      "OrderHistoryDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "fromStatus": {
-            "type": "string",
-            "nullable": true
-          },
-          "toStatus": {
-            "type": "string"
-          },
-          "reason": {
-            "type": "string",
-            "nullable": true
-          },
-          "operatorName": {
-            "type": "string",
-            "nullable": true
-          },
-          "createdAt": {
-            "format": "date-time",
-            "type": "string"
-          }
-        },
-        "required": ["id", "fromStatus", "toStatus", "reason", "operatorName", "createdAt"]
-      },
-      "PlatformStatusHistoryDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "fromStatus": {
-            "type": "string",
-            "nullable": true,
-            "example": "awaiting_packaging"
-          },
-          "toStatus": {
-            "type": "string",
-            "example": "delivering"
-          },
-          "source": {
-            "type": "string",
-            "nullable": true,
-            "example": "ORDER_SYNC"
-          },
-          "platformChangedAt": {
-            "type": "string",
-            "nullable": true,
-            "format": "date-time",
-            "description": "平台侧的迁移时间（webhook changed_state_date / 回读阶段锚点）；缺失时以 createdAt 为准（双轴 T2）"
-          },
-          "operatorName": {
-            "type": "string",
-            "nullable": true
-          },
-          "createdAt": {
-            "format": "date-time",
-            "type": "string"
-          }
-        },
-        "required": ["id", "fromStatus", "toStatus", "source", "operatorName", "createdAt"]
-      },
-      "OrderInterceptionDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "interceptionNo": {
-            "type": "string",
-            "example": "ITC00000001"
-          },
-          "orderItemId": {
-            "type": "string",
-            "nullable": true
-          },
-          "warehouseId": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "CREATED",
-              "ASSIGNED",
-              "LOCATING",
-              "INTERCEPTED",
-              "FAILED",
-              "RETURNED_TO_STOCK",
-              "CLOSED"
-            ]
-          },
-          "reason": {
-            "type": "string",
-            "nullable": true
-          },
-          "createdAt": {
-            "format": "date-time",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "interceptionNo",
-          "orderItemId",
-          "warehouseId",
-          "status",
-          "reason",
-          "createdAt"
-        ]
-      },
-      "OrderPickingTaskDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "pickingNo": {
-            "type": "string",
-            "example": "PCK00000001"
-          },
-          "warehouseId": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "totalItems": {
-            "type": "number"
-          },
-          "pickedItems": {
-            "type": "number"
-          },
-          "createdAt": {
-            "format": "date-time",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "pickingNo",
-          "warehouseId",
-          "status",
-          "totalItems",
-          "pickedItems",
-          "createdAt"
-        ]
-      },
-      "OrderDetailDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "orderNo": {
-            "type": "string",
-            "example": "ORD00000001"
-          },
-          "storeId": {
-            "type": "string"
-          },
-          "storeName": {
-            "type": "string",
-            "example": "OZON A店"
-          },
-          "platformCode": {
-            "type": "string",
-            "example": "OZON"
-          },
-          "platformOrderId": {
-            "type": "string",
-            "example": "123456789"
-          },
-          "platformStatus": {
-            "type": "string",
-            "nullable": true
-          },
-          "erpStatus": {
-            "type": "string",
-            "enum": [
-              "NEW",
-              "ALLOCATING",
-              "READY_TO_PICK",
-              "PARTIALLY_BACKORDERED",
-              "BACKORDERED",
-              "PICKING",
-              "PICKED",
-              "PARTIALLY_SHIPPED",
-              "SHIPPED",
-              "CANCELLED",
-              "EXCEPTION"
-            ]
-          },
-          "fulfillmentMode": {
-            "type": "string",
-            "nullable": true
-          },
-          "currency": {
-            "type": "string",
-            "nullable": true
-          },
-          "orderedAt": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "shipmentDeadline": {
-            "type": "string",
-            "nullable": true,
-            "format": "date-time",
-            "description": "平台要求的发货截止时间（平台事实，非 ERP 状态）"
-          },
-          "platformTrackingNo": {
-            "type": "string",
-            "nullable": true,
-            "description": "平台运单号（平台事实）；已组包后由平台返回，出库时自动填入发货单物流单号"
-          },
-          "platformCapabilities": {
-            "type": "object",
-            "description": "该店铺平台是否支持订单履约写能力（获取运单号 / 打单）。前端据此显隐按钮，不猜测平台；后端同时以 PLATFORM_CAPABILITY_UNSUPPORTED 兜底。",
-            "example": {
-              "prepareShipment": true,
-              "fetchShippingLabel": true
-            }
-          },
-          "rawData": {
-            "type": "object",
-            "nullable": true
-          },
-          "remark": {
-            "type": "string",
-            "nullable": true
-          },
-          "syncSource": {
-            "type": "string",
-            "nullable": true,
-            "enum": ["MANUAL", "API", "POLLING", "WEBHOOK"]
-          },
-          "createdAt": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "updatedAt": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OrderItemDto"
-            }
-          },
-          "history": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OrderHistoryDto"
-            }
-          },
-          "platformStatusHistory": {
-            "description": "平台状态迁移时间线（与 ERP 历史按 createdAt 合并展示）",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PlatformStatusHistoryDto"
-            }
-          },
-          "interceptions": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OrderInterceptionDto"
-            }
-          },
-          "pickingTasks": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OrderPickingTaskDto"
-            }
-          }
-        },
-        "required": [
-          "id",
-          "orderNo",
-          "storeId",
-          "storeName",
-          "platformCode",
-          "platformOrderId",
-          "platformStatus",
-          "erpStatus",
-          "fulfillmentMode",
-          "currency",
-          "orderedAt",
-          "platformTrackingNo",
-          "platformCapabilities",
-          "rawData",
-          "remark",
-          "syncSource",
-          "createdAt",
-          "updatedAt",
-          "items",
-          "history",
-          "platformStatusHistory",
-          "interceptions",
-          "pickingTasks"
-        ]
-      },
-      "OrderIngestItemResultDto": {
-        "type": "object",
-        "properties": {
-          "orderItemId": {
-            "type": "string"
-          },
-          "lineNo": {
-            "type": "number"
-          },
-          "mappingStatus": {
-            "type": "string",
-            "enum": ["PENDING", "MAPPED", "FAILED"]
-          },
-          "fulfillmentStatus": {
-            "type": "string",
-            "enum": [
-              "PENDING",
-              "RESERVED",
-              "BACKORDERED",
-              "PICKED",
-              "SHIPPED",
-              "RELEASED",
-              "EXTERNAL_FULFILLED"
-            ]
-          },
-          "skuId": {
-            "type": "string",
-            "nullable": true
-          },
-          "reservationId": {
-            "type": "string",
-            "nullable": true
-          }
-        },
-        "required": [
-          "orderItemId",
-          "lineNo",
-          "mappingStatus",
-          "fulfillmentStatus",
-          "skuId",
-          "reservationId"
-        ]
-      },
-      "OrderIngestResultDto": {
-        "type": "object",
-        "properties": {
-          "orderId": {
-            "type": "string"
-          },
-          "orderNo": {
-            "type": "string",
-            "example": "ORD00000001"
-          },
-          "erpStatus": {
-            "type": "string",
-            "enum": [
-              "NEW",
-              "ALLOCATING",
-              "READY_TO_PICK",
-              "PARTIALLY_BACKORDERED",
-              "BACKORDERED",
-              "PICKING",
-              "PICKED",
-              "PARTIALLY_SHIPPED",
-              "SHIPPED",
-              "CANCELLED",
-              "EXCEPTION"
-            ]
-          },
-          "alreadyIngested": {
-            "type": "boolean",
-            "example": false
-          },
-          "itemResults": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OrderIngestItemResultDto"
-            }
-          }
-        },
-        "required": ["orderId", "orderNo", "erpStatus", "alreadyIngested", "itemResults"]
-      },
-      "NormalizedOrderItemInputDto": {
-        "type": "object",
-        "properties": {
-          "platformProductId": {
-            "type": "string"
-          },
-          "platformSkuId": {
-            "type": "string"
-          },
-          "sellerSku": {
-            "type": "string"
-          },
-          "offerId": {
-            "type": "string"
-          },
-          "quantity": {
-            "type": "string",
-            "example": "2"
-          },
-          "unitPrice": {
-            "type": "object",
-            "example": "107.0000",
-            "nullable": true,
-            "description": "平台单价（财务事实，finance.md §2）；平台未提供为 null，禁止臆造为 0"
-          },
-          "rawData": {
-            "type": "object"
-          }
-        },
-        "required": ["quantity"]
-      },
-      "NormalizedOrderInputDto": {
-        "type": "object",
-        "properties": {
-          "storeId": {
-            "type": "string"
-          },
-          "platformOrderId": {
-            "type": "string",
-            "example": "OZON-123456789"
-          },
-          "platformStatus": {
-            "type": "string",
-            "example": "awaiting_packaging"
-          },
-          "platformStage": {
-            "type": "string",
-            "enum": ["AWAITING_SHIPMENT", "IN_TRANSIT", "DELIVERED", "CANCELLED"],
-            "nullable": true,
-            "description": "归一化平台物流阶段（平台事实，非 ERP 状态）；未归类/未同步为 null（双轴 T1）"
-          },
-          "platformStageChangedAt": {
-            "type": "string",
-            "nullable": true,
-            "format": "date-time",
-            "description": "平台自身记录的进入该阶段时间（停滞时钟锚点）；缺失为 null"
-          },
-          "fulfillmentMode": {
-            "type": "string",
-            "example": "FBS"
-          },
-          "orderedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "shipmentDeadline": {
-            "type": "string",
-            "format": "date-time",
-            "description": "平台要求的发货截止时间（平台事实，非 ERP 状态；可空）"
-          },
-          "platformTrackingNo": {
-            "type": "object",
-            "example": "89491381-0072-1",
-            "nullable": true,
-            "description": "平台运单号（OZON tracking_number，平台事实）；出库时自动填入发货单物流单号。这不是被禁止的 orders.tracking_number 物流模型——Shipment/Package 仍是唯一物流载体。"
-          },
-          "currency": {
-            "type": "string",
-            "example": "RUB"
-          },
-          "items": {
-            "minItems": 1,
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/NormalizedOrderItemInputDto"
-            }
-          },
-          "rawData": {
-            "type": "object",
-            "description": "平台原始报文（保留事实，task §14）"
-          },
-          "remark": {
-            "type": "string"
-          },
-          "syncSource": {
-            "type": "string",
-            "enum": ["MANUAL", "API", "POLLING", "WEBHOOK"],
-            "description": "订单进入系统的渠道（Sprint 5 §58；默认 API）"
-          }
-        },
-        "required": ["storeId", "platformOrderId", "orderedAt", "items"]
-      },
-      "OrderCancelResultDto": {
-        "type": "object",
-        "properties": {
-          "orderId": {
-            "type": "string"
-          },
-          "erpStatus": {
-            "type": "string",
-            "enum": [
-              "NEW",
-              "ALLOCATING",
-              "READY_TO_PICK",
-              "PARTIALLY_BACKORDERED",
-              "BACKORDERED",
-              "PICKING",
-              "PICKED",
-              "PARTIALLY_SHIPPED",
-              "SHIPPED",
-              "CANCELLED",
-              "EXCEPTION"
-            ]
-          },
-          "releasedItems": {
-            "type": "number"
-          },
-          "interceptions": {
-            "type": "number"
-          }
-        },
-        "required": ["orderId", "erpStatus", "releasedItems", "interceptions"]
-      },
-      "OrderCancelRequestDto": {
-        "type": "object",
-        "properties": {
-          "reason": {
-            "type": "string",
-            "description": "取消原因（记入历史与拦截任务）"
-          }
-        }
-      },
-      "OrderMarkExternalFulfillmentResultDto": {
-        "type": "object",
-        "properties": {
-          "orderId": {
-            "type": "string"
-          },
-          "erpStatus": {
-            "type": "string",
-            "enum": [
-              "NEW",
-              "ALLOCATING",
-              "READY_TO_PICK",
-              "PARTIALLY_BACKORDERED",
-              "BACKORDERED",
-              "PICKING",
-              "PICKED",
-              "PARTIALLY_SHIPPED",
-              "SHIPPED",
-              "CANCELLED",
-              "EXCEPTION"
-            ]
-          },
-          "releasedItems": {
-            "type": "number"
-          }
-        },
-        "required": ["orderId", "erpStatus", "releasedItems"]
-      },
-      "OrderMarkExternalFulfillmentRequestDto": {
-        "type": "object",
-        "properties": {
-          "reason": {
-            "type": "string",
-            "description": "外部履约原因（必填，记入状态历史与操作日志；如线下直发买家）"
-          }
-        },
-        "required": ["reason"]
-      },
-      "OrderRetryAllocationResultDto": {
-        "type": "object",
-        "properties": {
-          "orderItemId": {
-            "type": "string"
-          },
-          "fulfillmentStatus": {
-            "type": "string",
-            "enum": [
-              "PENDING",
-              "RESERVED",
-              "BACKORDERED",
-              "PICKED",
-              "SHIPPED",
-              "RELEASED",
-              "EXTERNAL_FULFILLED"
-            ]
-          },
-          "reserved": {
-            "type": "boolean"
-          }
-        },
-        "required": ["orderItemId", "fulfillmentStatus", "reserved"]
-      },
       "NotificationDto": {
         "type": "object",
         "properties": {
@@ -16676,11 +16876,19 @@
         "properties": {
           "candidates": {
             "type": "number",
-            "description": "候选订单数（READY_TO_PICK）"
+            "description": "候选订单数（多选 = 去重后解析成功的订单数）"
           },
           "created": {
             "type": "number",
-            "description": "成功创建任务的订单数"
+            "description": "新建任务数（批量按仓合并：一任务可含多个订单）"
+          },
+          "createdOrders": {
+            "type": "number",
+            "description": "进入新建任务的订单数"
+          },
+          "itemsTotal": {
+            "type": "number",
+            "description": "新建任务包含的拣货行总数"
           },
           "skipped": {
             "type": "number",
@@ -16716,7 +16924,16 @@
             "description": "失败明细"
           }
         },
-        "required": ["candidates", "created", "skipped", "failed", "createdTaskNos", "failures"]
+        "required": [
+          "candidates",
+          "created",
+          "createdOrders",
+          "itemsTotal",
+          "skipped",
+          "failed",
+          "createdTaskNos",
+          "failures"
+        ]
       },
       "AutoCreatePickingTasksRequestDto": {
         "type": "object",
@@ -16726,11 +16943,21 @@
             "format": "uuid",
             "description": "仅处理该店铺的订单；省略 = 全部店铺"
           },
+          "orderIds": {
+            "minItems": 1,
+            "maxItems": 100,
+            "description": "订单页多选批量（2026-10-13）：只为这些订单生成拣货任务；省略 = 自动选取待拣货订单",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
           "limit": {
             "type": "number",
             "default": 100,
             "maximum": 200,
-            "description": "单次批量上限"
+            "description": "单次批量上限（自动选取模式）"
           }
         }
       },
@@ -17884,6 +18111,90 @@
         },
         "required": ["warehouseId", "items"]
       },
+      "GenerateReceiptFromPoBatchItemResultDto": {
+        "type": "object",
+        "properties": {
+          "poId": {
+            "type": "string"
+          },
+          "poNo": {
+            "type": "string",
+            "nullable": true,
+            "description": "采购单号（单据不存在时为 null）"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "receiptId": {
+            "type": "string",
+            "nullable": true
+          },
+          "receiptNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "code": {
+            "type": "string",
+            "nullable": true,
+            "description": "失败时的错误码"
+          },
+          "message": {
+            "type": "string",
+            "nullable": true,
+            "description": "失败时的错误信息"
+          }
+        },
+        "required": ["poId", "poNo", "ok"]
+      },
+      "GenerateReceiptsFromPosResultDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "succeeded": {
+            "type": "number"
+          },
+          "failed": {
+            "type": "number"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GenerateReceiptFromPoBatchItemResultDto"
+            }
+          }
+        },
+        "required": ["total", "succeeded", "failed", "results"]
+      },
+      "GenerateReceiptFromPoBatchItemDto": {
+        "type": "object",
+        "properties": {
+          "poId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "warehouseId": {
+            "type": "string",
+            "description": "收货仓库（省略 = 用采购单上的收货仓库意向；两者皆无则该单失败）"
+          }
+        },
+        "required": ["poId"]
+      },
+      "GenerateReceiptsFromPosRequestDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "minItems": 1,
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GenerateReceiptFromPoBatchItemDto"
+            }
+          }
+        },
+        "required": ["items"]
+      },
       "GenerateReceiptFromPoRequestDto": {
         "type": "object",
         "properties": {
@@ -18843,6 +19154,87 @@
           }
         }
       },
+      "ImportJobResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "importType": {
+            "type": "string",
+            "enum": ["SKU", "BARCODE", "WAREHOUSE", "BIN", "LISTING_MAPPING", "INITIAL_INVENTORY"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["VALIDATED", "PENDING_IMPORT", "IMPORTING", "COMPLETED", "FAILED"]
+          },
+          "originalFilename": {
+            "type": "string",
+            "example": "skus-2026.xlsx"
+          },
+          "totalRows": {
+            "type": "number",
+            "example": 100
+          },
+          "validRows": {
+            "type": "number",
+            "example": 92
+          },
+          "invalidRows": {
+            "type": "number",
+            "example": 8
+          },
+          "importedRows": {
+            "type": "number",
+            "example": 92
+          },
+          "failedRows": {
+            "type": "number",
+            "example": 0
+          },
+          "errors": {
+            "description": "Row-level errors with exact Excel row numbers",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "createdBy": {
+            "type": "object",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "importedAt": {
+            "type": "object",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "importType",
+          "status",
+          "originalFilename",
+          "totalRows",
+          "validRows",
+          "invalidRows",
+          "importedRows",
+          "failedRows",
+          "errors",
+          "createdBy",
+          "createdAt",
+          "updatedAt",
+          "importedAt"
+        ]
+      },
       "PlatformReturnDto": {
         "type": "object",
         "properties": {
@@ -19531,6 +19923,178 @@
         },
         "required": ["platformWarehouseId", "name", "fulfillmentMode", "category"]
       },
+      "BatchPrepareShipmentItemDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "orderNo": {
+            "type": "string",
+            "nullable": true,
+            "description": "失败且订单不可读时为 null（前端用自己缓存的列表行标注）"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "code": {
+            "type": "string",
+            "nullable": true,
+            "description": "失败时的错误码"
+          },
+          "message": {
+            "type": "string",
+            "nullable": true,
+            "description": "失败时的错误信息"
+          },
+          "trackingNumber": {
+            "type": "string",
+            "nullable": true,
+            "description": "平台运单号（成功时）"
+          },
+          "platformStatus": {
+            "type": "string",
+            "nullable": true,
+            "description": "组包后的平台订单状态"
+          },
+          "alreadyPrepared": {
+            "type": "boolean",
+            "description": "平台此前已受理该订单"
+          },
+          "assemblyPending": {
+            "type": "boolean",
+            "description": "平台已受理组包但尚未确认（运单号稍后可取）"
+          }
+        },
+        "required": [
+          "orderId",
+          "orderNo",
+          "ok",
+          "trackingNumber",
+          "platformStatus",
+          "alreadyPrepared",
+          "assemblyPending"
+        ]
+      },
+      "BatchPrepareShipmentResultDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "succeeded": {
+            "type": "number"
+          },
+          "failed": {
+            "type": "number"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BatchPrepareShipmentItemDto"
+            }
+          }
+        },
+        "required": ["total", "succeeded", "failed", "results"]
+      },
+      "BatchOrderActionRequestDto": {
+        "type": "object",
+        "properties": {
+          "orderIds": {
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "勾选的订单（单批上限 50，逐单执行）",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": ["orderIds"]
+      },
+      "QuickShipShipmentDto": {
+        "type": "object",
+        "properties": {
+          "shipmentId": {
+            "type": "string"
+          },
+          "shipmentNo": {
+            "type": "string",
+            "example": "SHP00000001"
+          },
+          "packageId": {
+            "type": "string",
+            "nullable": true,
+            "description": "本次自动装箱的包裹（已备好时为 null）"
+          },
+          "packageNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "alreadyShipped": {
+            "type": "boolean",
+            "description": "该发货单此前已出库（本次未再次扣减库存）"
+          }
+        },
+        "required": ["shipmentId", "shipmentNo", "packageId", "packageNo", "alreadyShipped"]
+      },
+      "BatchShipItemDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "orderNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "message": {
+            "type": "string",
+            "nullable": true
+          },
+          "orderErpStatus": {
+            "type": "string",
+            "nullable": true,
+            "description": "出库后订单 ERP 状态（成功时）"
+          },
+          "shipments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuickShipShipmentDto"
+            }
+          }
+        },
+        "required": ["orderId", "orderNo", "ok", "orderErpStatus", "shipments"]
+      },
+      "BatchShipResultDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "succeeded": {
+            "type": "number"
+          },
+          "failed": {
+            "type": "number"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BatchShipItemDto"
+            }
+          }
+        },
+        "required": ["total", "succeeded", "failed", "results"]
+      },
       "PrepareShipmentResultDto": {
         "type": "object",
         "properties": {
@@ -19578,32 +20142,6 @@
           "assemblyPending",
           "platformWritePerformed"
         ]
-      },
-      "QuickShipShipmentDto": {
-        "type": "object",
-        "properties": {
-          "shipmentId": {
-            "type": "string"
-          },
-          "shipmentNo": {
-            "type": "string",
-            "example": "SHP00000001"
-          },
-          "packageId": {
-            "type": "string",
-            "nullable": true,
-            "description": "本次自动装箱的包裹（已备好时为 null）"
-          },
-          "packageNo": {
-            "type": "string",
-            "nullable": true
-          },
-          "alreadyShipped": {
-            "type": "boolean",
-            "description": "该发货单此前已出库（本次未再次扣减库存）"
-          }
-        },
-        "required": ["shipmentId", "shipmentNo", "packageId", "packageNo", "alreadyShipped"]
       },
       "QuickShipResultDto": {
         "type": "object",
