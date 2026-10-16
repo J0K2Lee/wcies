@@ -2886,18 +2886,17 @@ export function OrdersPage() {
     return selectedId === null ? [] : [selectedId];
   }, [viewSettings.defaultExpandAll, list, selectedId]);
 
-  const stageCountOf = (tabKey: string): number => {
-    if (tabKey === 'all') {
-      return allCount.data?.meta.total ?? 0;
-    }
-    if (tabKey === 'pending') {
-      return pendingCount.data?.meta.total ?? 0;
-    }
-    if (tabKey === 'inTransit') {
-      return inTransitCount.data?.meta.total ?? 0;
-    }
-    return completedCount.data?.meta.total ?? 0;
+  // 阶段 Tab 计数：显式按 tab key 取各自的服务端 total。此前是 if-else 链且把
+  // 未知 key 兜底到 completedCount——新增「外部履约」Tab 时静默取了「已完成」
+  // 的数（外部履约显示 21、实际 4）。改成显式查表，杜绝这类落空串数。
+  const stageCounts: Record<string, number> = {
+    all: allCount.data?.meta.total ?? 0,
+    pending: pendingCount.data?.meta.total ?? 0,
+    external: externalCount.data?.meta.total ?? 0,
+    inTransit: inTransitCount.data?.meta.total ?? 0,
+    completed: completedCount.data?.meta.total ?? 0,
   };
+  const stageCountOf = (tabKey: string): number => stageCounts[tabKey] ?? 0;
 
   // 浮岛与表格共用同一份总数（服务端 meta.total，不是当前页行数）。
   const totalCount = query.data?.meta.total ?? 0;
