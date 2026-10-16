@@ -10,6 +10,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Pagination,
   Select,
   Tabs,
   Timeline,
@@ -24,6 +25,7 @@ import { buildOzonProductUrl, buildPlatformProductUrl } from '../../utils/platfo
 import { ListingOnboardModal, OnboardMatchIdentifiers } from '../../components/ListingOnboardModal';
 import { ListingVariantMapModal } from '../../components/ListingVariantMapModal';
 import {
+  ActionIsland,
   ContextAction,
   ContextMetric,
   ContextSection,
@@ -1245,7 +1247,7 @@ export function OrdersPage() {
   // 自动创建拣货任务已于 2026-10-13 改造为「勾选订单 → 批量生成拣货单」：
   // 按钮从右栏迁到主页面批量条（用户指示），不再按店铺全量扫单。
 
-  // ---- 多选批量操作（用户指示 2026-10-13）：主页面批量条驱动 ----
+  // ---- 多选批量操作（用户指示 2026-10-13）：页面底部浮岛（ActionIsland）驱动 ----
   // 三类动作都逐单在后端执行（单笔失败不拖垮整批），这里只聚合展示结果。
 
   const batchPickingMutation = useMutation({
@@ -2041,7 +2043,7 @@ export function OrdersPage() {
             <RailHint>
               点击订单行快速预览风险与状态；缺货订单可在右栏重试分配或登记采购。批量操作
               （生成拣货单 / 获取运单号 /
-              发货）在主页面批量条上，勾选订单行首复选框即可（跨分页保留）。
+              发货）在页面底部浮岛上，勾选订单行首复选框即可（跨分页保留）。
             </RailHint>
           </ContextSection>
         ),
@@ -2794,6 +2796,9 @@ export function OrdersPage() {
     return completedCount.data?.meta.total ?? 0;
   };
 
+  // 浮岛与表格共用同一份总数（服务端 meta.total，不是当前页行数）。
+  const totalCount = query.data?.meta.total ?? 0;
+
   return (
     <div>
       <PageHeader
@@ -2802,83 +2807,9 @@ export function OrdersPage() {
         secondary={<Button onClick={() => setViewOpen(true)}>视图设置</Button>}
         extra={
           <>
-            {/* 批量操作条（用户指示 2026-10-13）：放中央主页面，页面名称下、
-                分类标签上方；不再进右侧抽屉。勾选跨分页保留。 */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                flexWrap: 'wrap',
-                padding: '8px 12px',
-                marginBottom: 12,
-                border: `1px solid ${selectedOrderIds.length > 0 ? colors.primary : colors.border}`,
-                borderRadius: 8,
-                background: selectedOrderIds.length > 0 ? colors.primarySoft : undefined,
-              }}
-            >
-              {selectedOrderIds.length > 0 ? (
-                <>
-                  <span style={{ fontSize: 13, fontWeight: 550 }}>
-                    已选 {selectedOrderIds.length} 单
-                  </span>
-                  <span style={{ fontSize: 12, color: colors.textTertiary }}>（跨分页保留）</span>
-                  <Button
-                    loading={batchPickingMutation.isPending}
-                    disabled={
-                      batchPrepareMutation.isPending ||
-                      batchShipMutation.isPending ||
-                      batchMarkExternalMutation.isPending
-                    }
-                    onClick={confirmBatchPicking}
-                  >
-                    批量生成拣货单
-                  </Button>
-                  <Button
-                    loading={batchPrepareMutation.isPending}
-                    disabled={
-                      batchPickingMutation.isPending ||
-                      batchShipMutation.isPending ||
-                      batchMarkExternalMutation.isPending
-                    }
-                    onClick={confirmBatchPrepare}
-                  >
-                    批量获取运单号
-                  </Button>
-                  <Button
-                    danger
-                    loading={batchShipMutation.isPending}
-                    disabled={
-                      batchPickingMutation.isPending ||
-                      batchPrepareMutation.isPending ||
-                      batchMarkExternalMutation.isPending
-                    }
-                    onClick={confirmBatchShip}
-                  >
-                    批量发货
-                  </Button>
-                  <Button
-                    loading={batchMarkExternalMutation.isPending}
-                    disabled={
-                      batchPickingMutation.isPending ||
-                      batchPrepareMutation.isPending ||
-                      batchShipMutation.isPending
-                    }
-                    onClick={requestBatchMarkExternal}
-                  >
-                    批量外部履约
-                  </Button>
-                  <Button type="text" onClick={clearOrderSelection}>
-                    清空选择
-                  </Button>
-                </>
-              ) : (
-                <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
-                  勾选订单行首复选框后可批量操作（支持跨分页）：批量生成拣货单 / 批量获取运单号 /
-                  批量发货 / 批量外部履约
-                </span>
-              )}
-            </div>
+            {/* 批量操作条已于 2026-10-16 迁入页面底部浮岛（ActionIsland）：
+                分页与批量动作同处一条吸底浮岛，长列表无需滚回页首即可翻页/批量操作。
+                浮岛必须挂在页面根节点下，不能留在 PageHeader.extra。 */}
             <Tabs
               activeKey={activeTab}
               onChange={(key) => {
@@ -3049,22 +2980,10 @@ export function OrdersPage() {
             preserveSelectedRowKeys: true,
             onChange: handleOrderSelectionChange,
           }}
-          pagination={{
-            current: page,
-            pageSize: viewSettings.pageSize,
-            total: query.data?.meta.total ?? 0,
-            showTotal: (total) => `共 ${total} 单`,
-            // pageSize 是受控值（视图设置）：必须接住 size 变化写回设置，
-            // 否则下拉选了新条数会被受控值打回（2026-10-14 用户报告的 bug）。
-            onChange: (next, size) => {
-              if (size !== viewSettings.pageSize) {
-                setPage(1);
-                updateViewSettings({ pageSize: size });
-              } else {
-                setPage(next);
-              }
-            },
-          }}
+          // 分页从表格内部迁到页面底部浮岛（用户指示 2026-10-16）：状态仍全部
+          // 受控在本组件（page / viewSettings.pageSize / meta.total），这里关掉
+          // 表格自带分页即可，浮岛里的 <Pagination> 接管同一份状态。
+          pagination={false}
           expandable={{
             // 选中即展开（用户指示 2026-09-17）：行点击选择驱动展开/收起，
             // 不显示独立展开列；内容复用 railDetail（已缓存详情）。
@@ -3110,6 +3029,103 @@ export function OrdersPage() {
           columns={mainColumns}
         />
       </SectionCard>
+
+      {/* ---- 底部动作浮岛（用户指示 2026-10-16）----
+          分页与批量动作固定在主滚动区底部：长列表不必滚回页首即可翻页/批量操作。
+          未勾选时只渲染分页行（行动行不渲染 → 选中行数随之隐藏）；
+          勾选后行动行出现，浮岛边框转为 primary 作为唯一状态信号。
+          位置约束：必须是页面根节点下的最后一个流内子节点，sticky 才能吸附在
+          <main> 内（放 PageHeader.extra 会随头部滚出而失效）。 */}
+      <ActionIsland
+        summary={
+          selectedOrderIds.length > 0 ? (
+            <>
+              <span style={{ fontSize: 13, fontWeight: 550 }}>
+                已选 {selectedOrderIds.length} 单
+              </span>
+              <span style={{ fontSize: 12, color: colors.textTertiary }}>（跨分页保留）</span>
+            </>
+          ) : undefined
+        }
+        actions={
+          selectedOrderIds.length > 0 ? (
+            <>
+              <Button
+                loading={batchPickingMutation.isPending}
+                disabled={
+                  batchPrepareMutation.isPending ||
+                  batchShipMutation.isPending ||
+                  batchMarkExternalMutation.isPending
+                }
+                onClick={confirmBatchPicking}
+              >
+                批量生成拣货单
+              </Button>
+              <Button
+                loading={batchPrepareMutation.isPending}
+                disabled={
+                  batchPickingMutation.isPending ||
+                  batchShipMutation.isPending ||
+                  batchMarkExternalMutation.isPending
+                }
+                onClick={confirmBatchPrepare}
+              >
+                批量获取运单号
+              </Button>
+              <Button
+                danger
+                loading={batchShipMutation.isPending}
+                disabled={
+                  batchPickingMutation.isPending ||
+                  batchPrepareMutation.isPending ||
+                  batchMarkExternalMutation.isPending
+                }
+                onClick={confirmBatchShip}
+              >
+                批量发货
+              </Button>
+              <Button
+                loading={batchMarkExternalMutation.isPending}
+                disabled={
+                  batchPickingMutation.isPending ||
+                  batchPrepareMutation.isPending ||
+                  batchShipMutation.isPending
+                }
+                onClick={requestBatchMarkExternal}
+              >
+                批量外部履约
+              </Button>
+              <Button type="text" onClick={clearOrderSelection}>
+                清空选择
+              </Button>
+            </>
+          ) : undefined
+        }
+        leading={
+          <span style={{ fontSize: 13, color: colors.textSecondary }}>共 {totalCount} 单</span>
+        }
+        trailing={
+          <Pagination
+            current={page}
+            pageSize={viewSettings.pageSize}
+            total={totalCount}
+            // 与「视图设置 → 每页行数」的可选值保持一致（2026-10-16）。
+            pageSizeOptions={[10, 20, 50, 100]}
+            // pageSize 是受控值（视图设置）：必须接住 size 变化写回设置，
+            // 否则下拉选了新条数会被受控值打回（2026-10-14 用户报告的 bug）。
+            onChange={(next, size) => {
+              if (size !== viewSettings.pageSize) {
+                setPage(1);
+                updateViewSettings({ pageSize: size });
+              } else {
+                setPage(next);
+              }
+            }}
+          />
+        }
+        // 无结果时整条浮岛收起（空状态卡片已说明「暂无订单」）。
+        hidden={totalCount === 0}
+      />
 
       <Drawer
         open={detailId !== null}
