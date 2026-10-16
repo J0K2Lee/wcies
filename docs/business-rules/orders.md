@@ -289,7 +289,8 @@ EXTERNAL_FULFILLED 行不属于内部可履约行（与 RELEASED 同样被 rollu
    无任何可履约行且**已无** mapping FAILED 行（全部 EXTERNAL_FULFILLED / RELEASED，
    典型：FBP 行映射修复后转 EXTERNAL_FULFILLED）时：当前态为 `EXCEPTION` 的
    回落 `NEW`（其成立前提「存在 FAILED 行」已消失，不得保留陈旧异常），其余
-   当前态保持不变（已 SHIPPED 保持 SHIPPED、外部履约单停在 NEW 等平台事件）。
+   当前态保持不变（已 SHIPPED 保持 SHIPPED、外部履约单停在 NEW 等平台事件——
+   列表侧这类单归入「外部履约」阶段，不再混入「待处理」）。
    2026-10-16 修复：陈旧的 EXCEPTION 此前被无条件 `return current` 保留，导致
    FBP 订单补齐映射后永久卡异常（真实样本 ORD00000207）。
 3. 存在未完成拣货的拣货任务行（订单行进入 CREATED/IN_PROGRESS 的 PickingTask 且未全部拣完）→ `PICKING`。
@@ -785,12 +786,20 @@ Sprint 4 在此基础上增加三个原子业务命令（显式 QueryRunner + In
 | 标签 | 查询 `stage` | 判定 |
 |---|---|---|
 | 全部 | —（无筛选） | 含已取消 |
-| 待处理 | `PENDING` | `erp_status NOT IN ('SHIPPED','CANCELLED')`；含「平台已妥投但系统未发货」的分歧单（保留 ⚠ 提示人工收口）；缺货单天然落在其中 |
+| 待处理 | `PENDING` | `erp_status NOT IN ('SHIPPED','CANCELLED')` **且非外部履约单**；含「平台已妥投但系统未发货」的分歧单（保留 ⚠ 提示人工收口）；缺货单天然落在其中 |
+| 外部履约 | `EXTERNAL` | 外部履约单（`fulfillment_mode` 为 FBO/FBP/FBW/FBY）**且 ERP 无可履约行**（全部行 `EXTERNAL_FULFILLED`/`RELEASED`）、**无**映射失败行、尚未发货/取消（用户指示 2026-10-16） |
 | 待收货 | `IN_TRANSIT` | `erp_status='SHIPPED'` 且 `platform_stage ≠ 'DELIVERED'`（含 `platform_stage IS NULL` 的未同步单） |
 | 已完成 | `COMPLETED` | `erp_status='SHIPPED'` 且 `platform_stage='DELIVERED'` |
 
 - 已取消只在「全部」可见（不算物流阶段，也不属于异常）。
 - 标签计数必须与同筛选条件（含当前店铺/关键词）的列表 `total` 一致。
+- **外部履约单独立成 Tab（用户指示 2026-10-16）**：FBO/FBP/FBW/FBY 由平台仓库
+  持货发货，ERP 侧没有拣货/发货动作，此前停在 `NEW`（§7）混在「待处理」里像待办。
+  现单列「外部履约」阶段收纳；平台发货后随 `erp_status` 转 `SHIPPED` 归入「待收货」，
+  妥投后归入「已完成」。**存在映射失败行的外部履约单不归此处**（仍需人工补映射，
+  留在「待处理/异常」）。
+- 外部履约单不评估发货时限异常（§7 规则 7），列表「时限」列对它们也不显示倒计时
+  （显示 `—`），避免"看着紧急实则无动作"。
 
 ## 二级 · 行级货物状态（chips，单选，与行内徽标同源）
 

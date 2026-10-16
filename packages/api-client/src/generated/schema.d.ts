@@ -9667,8 +9667,8 @@ export interface operations {
                 /** @description 平台代码精确过滤（stores 所属平台 code，如 OZON/WB/YANDEX） */
                 platform?: string;
                 erpStatus?: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
-                /** @description 一级 · 物流阶段（双轴 §2.1）：PENDING=erp_status 非 SHIPPED/CANCELLED（缺货/分歧单均在内）；IN_TRANSIT=已发货且平台未妥投（platform_stage 非 DELIVERED，含未同步）；COMPLETED=已发货且平台已妥投 */
-                stage?: "PENDING" | "IN_TRANSIT" | "COMPLETED";
+                /** @description 一级 · 物流阶段（双轴 §2.1）：PENDING=erp_status 非 SHIPPED/CANCELLED（缺货/分歧单均在内，**不含**外部履约单）；EXTERNAL=外部履约单（FBO/FBP/FBW/FBY，ERP 无可履约行）尚未平台妥投（用户指示 2026-10-16）；IN_TRANSIT=已发货且平台未妥投（platform_stage 非 DELIVERED，含未同步）；COMPLETED=已发货且平台已妥投 */
+                stage?: "PENDING" | "EXTERNAL" | "IN_TRANSIT" | "COMPLETED";
                 /** @description 二级 · 行级货物状态（双轴 §2.2，单选）：TO_PICK=存在 RESERVED 行；PICKING=erp_status PICKING；TO_SHIP=存在 PICKED 行；BACKORDERED=存在缺货行；MAPPING_FAILED=存在映射失败行；SHIPMENT_OVERDUE=已过发货时限未发完（平台已事实发货 IN_TRANSIT/DELIVERED 的不算，用户指示 2026-10-14）；ABNORMAL=缺货∪映射失败∪发货超时∪物流停滞（OPEN ORDER_TRACKING_STALLED） */
                 goodsState?: "TO_PICK" | "PICKING" | "TO_SHIP" | "BACKORDERED" | "MAPPING_FAILED" | "SHIPMENT_OVERDUE" | "ABNORMAL";
                 storeId?: string;

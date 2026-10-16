@@ -481,12 +481,38 @@ export class OrderRepository {
 function stagePredicate(stage: OrderStageFilter): string {
   switch (stage) {
     case 'PENDING':
-      return `o.erp_status NOT IN ('SHIPPED', 'CANCELLED')`;
+      // 外部履约单不混入「待处理」（用户指示 2026-10-16）：它们 ERP 无内部
+      // 动作，独立归入 EXTERNAL Tab；其余未发货/未取消订单照旧。
+      return `(o.erp_status NOT IN ('SHIPPED', 'CANCELLED') AND NOT ${externalFulfillmentPredicate()})`;
+    case 'EXTERNAL':
+      return externalFulfillmentPredicate();
     case 'IN_TRANSIT':
       return `o.erp_status = 'SHIPPED' AND (o.platform_stage IS NULL OR o.platform_stage <> 'DELIVERED')`;
     case 'COMPLETED':
       return `o.erp_status = 'SHIPPED' AND o.platform_stage = 'DELIVERED'`;
   }
+}
+
+/**
+ * 外部履约单判定（用户指示 2026-10-16）：履约模式为平台托管/半托管
+ * （FBO/FBP/FBW/FBY，含完整常量与短码），ERP 无可履约行（全部行
+ * `EXTERNAL_FULFILLED` / `RELEASED`）且无未映射阻塞，且尚未发货/取消。
+ *
+ * 结果：这类订单在 ERP 侧没有作业可做（平台仓库持货发货），单列
+ * 「外部履约」阶段 Tab，不再占据「待处理」。**未映射阻塞（存在 FAILED 行）
+ * 的外部履约单不归此处**——它仍需人工补映射，留在「待处理/异常」。
+ *
+ * 模式用正则匹配，等价于后端 `isExternalFulfillmentMode` 的 token 判定
+ * （`FBO|FBP|FBW|FBY` 作为整段或 `_` 后缀）；`FBS`/`RFBS` 不匹配。
+ */
+function externalFulfillmentPredicate(): string {
+  return `(o.erp_status NOT IN ('SHIPPED', 'CANCELLED')
+    AND o.fulfillment_mode ~ '(^|_)(FBO|FBP|FBW|FBY)$'
+    AND NOT EXISTS (SELECT 1 FROM order_items i
+          WHERE i.order_id = o.id AND i.mapping_status = 'FAILED')
+    AND NOT EXISTS (SELECT 1 FROM order_items i
+          WHERE i.order_id = o.id
+            AND i.fulfillment_status NOT IN ('EXTERNAL_FULFILLED', 'RELEASED')))`;
 }
 
 /**

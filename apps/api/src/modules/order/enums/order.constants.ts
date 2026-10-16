@@ -89,12 +89,17 @@ export const orderReleaseKey = (orderItemId: string): string => `ORDER_RELEASE:$
  * Dual-axis list filters (2026-09-15, docs/business-rules/orders.md §17a).
  * Axis 1 - logistics stage of the ORDER header:
  *   PENDING    erp_status NOT IN (SHIPPED, CANCELLED) - includes divergent
- *              orders (platform delivered but ERP not shipped)
+ *              orders (platform delivered but ERP not shipped) **except**
+ *              external-fulfillment orders (see EXTERNAL)
+ *   EXTERNAL   外部履约单（FBO/FBP/FBW/FBY，ERP 无可履约行）尚未平台妥投
+ *              （用户指示 2026-10-16）：ERP 无内部动作，独立 Tab 收纳，
+ *              不再混入「待处理」；平台发货后随 erp_status 转 SHIPPED 归入
+ *              IN_TRANSIT，妥投后归入 COMPLETED。
  *   IN_TRANSIT erp_status = SHIPPED and platform stage not DELIVERED
  *              (platform_stage NULL counts as not delivered - unsynced)
  *   COMPLETED  erp_status = SHIPPED and platform_stage = DELIVERED
  */
-export const ORDER_STAGE_FILTERS = ['PENDING', 'IN_TRANSIT', 'COMPLETED'] as const;
+export const ORDER_STAGE_FILTERS = ['PENDING', 'EXTERNAL', 'IN_TRANSIT', 'COMPLETED'] as const;
 export type OrderStageFilter = (typeof ORDER_STAGE_FILTERS)[number];
 
 /**

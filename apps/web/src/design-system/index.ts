@@ -33,6 +33,7 @@ export {
   FULFILLMENT_MODE_META,
   FULFILLMENT_CATEGORY_LABEL,
   fulfillmentModeLabel,
+  isExternalFulfillmentMode,
   BARCODE_TYPE_LABEL,
   CREDENTIAL_TYPE_LABEL,
   ACTIVE_STATUS_LABEL,

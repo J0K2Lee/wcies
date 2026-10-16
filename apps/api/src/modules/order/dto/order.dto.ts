@@ -199,7 +199,8 @@ export class OrderListQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
     enum: ORDER_STAGE_FILTERS,
     description:
-      '一级 · 物流阶段（双轴 §2.1）：PENDING=erp_status 非 SHIPPED/CANCELLED（缺货/分歧单均在内）；' +
+      '一级 · 物流阶段（双轴 §2.1）：PENDING=erp_status 非 SHIPPED/CANCELLED（缺货/分歧单均在内，' +
+      '**不含**外部履约单）；EXTERNAL=外部履约单（FBO/FBP/FBW/FBY，ERP 无可履约行）尚未平台妥投（用户指示 2026-10-16）；' +
       'IN_TRANSIT=已发货且平台未妥投（platform_stage 非 DELIVERED，含未同步）；COMPLETED=已发货且平台已妥投',
   })
   @IsOptional()

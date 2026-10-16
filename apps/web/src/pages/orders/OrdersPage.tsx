@@ -37,6 +37,7 @@ import {
   FULFILLMENT_MODE_META,
   FilterBar,
   InfoGrid,
+  isExternalFulfillmentMode,
   PageHeader,
   PICKING_STATUS_META,
   PlatformTag,
@@ -211,6 +212,10 @@ interface ShippingLabelItem {
 const STAGE_TABS: Array<{ key: string; label: string; stage?: string }> = [
   { key: 'all', label: '全部' },
   { key: 'pending', label: '待处理', stage: 'PENDING' },
+  // 外部履约单（FBO/FBP/FBW/FBY）独立收纳（用户指示 2026-10-16）：ERP 无内部
+  // 动作，此前混在「待处理」里像待办。平台发货后随 erp_status 转 SHIPPED 归入
+  // 「待收货」，妥投后归入「已完成」。
+  { key: 'external', label: '外部履约', stage: 'EXTERNAL' },
   { key: 'inTransit', label: '待收货', stage: 'IN_TRANSIT' },
   { key: 'completed', label: '已完成', stage: 'COMPLETED' },
 ];
@@ -624,13 +629,20 @@ function deadlineBadge(deadline: string | null): {
  * 扩展）：货物在平台侧已经发走，时限同样不再构成内部压力——与 ERP
  * SHIPPED 同样按中性「已发货」展示（已发货但映射异常的订单不属于发货
  * 超时，倒计时继续飘红会自相矛盾）。
+ * 外部履约单（用户指示 2026-10-16）：FBO/FBP 等由平台仓库发货，ERP 不评估
+ * 发货时限异常，也就不显示倒计时（返回 null → 列渲染「—」），避免"看着
+ * 紧急实则无事可做"。
  */
 function deadlineBadgeFor(
   deadline: string | null,
   erpStatus: string,
   platformStatus: string | null = null,
+  fulfillmentMode: string | null = null,
 ): ReturnType<typeof deadlineBadge> {
   if (deadline === null || erpStatus === 'CANCELLED') {
+    return null;
+  }
+  if (isExternalFulfillmentMode(fulfillmentMode)) {
     return null;
   }
   const badge = deadlineBadge(deadline);
@@ -898,6 +910,11 @@ export function OrdersPage() {
     '/api/v1/orders',
     { ...countFilters, stage: 'PENDING' },
     ['orders-count', 'PENDING', keyword, platformFilter, storeId],
+  );
+  const externalCount = useApiQuery<Envelope<OrderListItem[]>>(
+    '/api/v1/orders',
+    { ...countFilters, stage: 'EXTERNAL' },
+    ['orders-count', 'EXTERNAL', keyword, platformFilter, storeId],
   );
   const inTransitCount = useApiQuery<Envelope<OrderListItem[]>>(
     '/api/v1/orders',
@@ -1582,7 +1599,12 @@ export function OrdersPage() {
   const detailDeadline =
     detail === undefined
       ? null
-      : deadlineBadgeFor(detail.shipmentDeadline, detail.erpStatus, detail.platformStatus);
+      : deadlineBadgeFor(
+          detail.shipmentDeadline,
+          detail.erpStatus,
+          detail.platformStatus,
+          detail.fulfillmentMode,
+        );
   const selectedRow = useMemo(
     () => list.find((row) => row.id === selectedId) ?? null,
     [list, selectedId],
@@ -2063,6 +2085,7 @@ export function OrdersPage() {
           <ContextSection title="订单概览">
             <ContextMetric label="当前筛选" value={`${query.data?.meta.total ?? 0} 单`} />
             <ContextMetric label="待处理" value={pendingCount.data?.meta.total ?? 0} />
+            <ContextMetric label="外部履约" value={externalCount.data?.meta.total ?? 0} />
             <ContextMetric label="待收货" value={inTransitCount.data?.meta.total ?? 0} />
             <ContextMetric label="已完成" value={completedCount.data?.meta.total ?? 0} />
             <RailHint>
@@ -2082,6 +2105,7 @@ export function OrdersPage() {
       selectedRow.shipmentDeadline,
       selectedRow.erpStatus,
       selectedRow.platformStatus,
+      railDetail?.fulfillmentMode ?? selectedRow.fulfillmentMode,
     );
     // 发货流程按钮显隐（2026-09-18）。能力来自后端的能力位——前端不判断平台，
     // 后端也不靠平台名硬编码：没接入发货能力的平台这两个按钮就不出现。
@@ -2819,7 +2843,12 @@ export function OrdersPage() {
       key: 'shipmentDeadline',
       width: 130,
       render: (value: string | null, row: OrderListItem) => {
-        const badge = deadlineBadgeFor(value, row.erpStatus, row.platformStatus);
+        const badge = deadlineBadgeFor(
+          value,
+          row.erpStatus,
+          row.platformStatus,
+          row.fulfillmentMode,
+        );
         return badge === null ? (
           '—'
         ) : (

@@ -998,13 +998,14 @@ describe('dual-axis list contract: stage + goodsState filters (T3)', () => {
     shipmentDeadline?: string;
     platformStage?: string;
     platformStatus?: string;
+    fulfillmentMode?: string;
   }) {
     const result = await client.post<IngestResult>('/api/v1/orders/ingest', {
       storeId: storeA,
       platformOrderId: `PO-${randomUUID()}`,
       platformStatus: options.platformStatus ?? 'awaiting_packaging',
       platformStage: options.platformStage,
-      fulfillmentMode: 'FBS',
+      fulfillmentMode: options.fulfillmentMode ?? 'FBS',
       orderedAt: new Date().toISOString(),
       currency: 'RUB',
       ...(options.shipmentDeadline !== undefined
@@ -1052,6 +1053,38 @@ describe('dual-axis list contract: stage + goodsState filters (T3)', () => {
     expect((await listOne(backordered.orderId, 'stage=IN_TRANSIT')).hit).toBe(true);
     expect((await listOne(reserved.orderId, 'stage=IN_TRANSIT')).hit).toBe(false);
     expect((await listOne(reserved.orderId, 'stage=COMPLETED')).hit).toBe(false);
+  });
+
+  it('stage=EXTERNAL collects external-fulfillment orders and keeps them out of PENDING', async () => {
+    // 外部履约单（FBP）已映射 → 行 EXTERNAL_FULFILLED、erp NEW。
+    const skuF = await newSku('AXF');
+    await mapSku(skuF, `${PREFIX}-AXF-1`);
+    const fbp = await ingestWith({
+      fulfillmentMode: 'FBP',
+      items: [{ platformSkuId: `${PREFIX}-AXF-1`, quantity: '1' }],
+    });
+    expect(fbp.erpStatus).toBe('NEW');
+
+    // 归入「外部履约」，不再混入「待处理」。
+    expect((await listOne(fbp.orderId, 'stage=EXTERNAL')).hit).toBe(true);
+    expect((await listOne(fbp.orderId, 'stage=PENDING')).hit).toBe(false);
+
+    // 普通 FBS 自管仓单不受影响：仍在「待处理」。
+    const skuS = await newSku('AXFE');
+    await initialize({ skuId: skuS, binId: binA01, quantity: '5' });
+    await mapSku(skuS, `${PREFIX}-AXFE-1`);
+    const fbs = await ingestWith({ items: [{ platformSkuId: `${PREFIX}-AXFE-1`, quantity: '1' }] });
+    expect((await listOne(fbs.orderId, 'stage=PENDING')).hit).toBe(true);
+    expect((await listOne(fbs.orderId, 'stage=EXTERNAL')).hit).toBe(false);
+
+    // 映射失败的外部履约单仍需人工补映射 → 留在「待处理」，不归「外部履约」。
+    const fbpFailed = await ingestWith({
+      fulfillmentMode: 'FBP',
+      items: [{ platformSkuId: `${PREFIX}-NO-SUCH-FBP`, quantity: '1' }],
+    });
+    expect(fbpFailed.erpStatus).toBe('EXCEPTION');
+    expect((await listOne(fbpFailed.orderId, 'stage=PENDING')).hit).toBe(true);
+    expect((await listOne(fbpFailed.orderId, 'stage=EXTERNAL')).hit).toBe(false);
   });
 
   it('goodsState chips resolve line-level facts hidden by the rollup status', async () => {

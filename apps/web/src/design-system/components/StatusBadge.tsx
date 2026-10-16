@@ -407,6 +407,26 @@ export const FULFILLMENT_MODE_LABEL: Record<string, string> = Object.fromEntries
   Object.keys(FULFILLMENT_MODE_META).map((mode) => [mode, fulfillmentModeLabel(mode)]),
 );
 
+/**
+ * 外部履约判定（用户指示 2026-10-16）：FBO/FBP/FBW/FBY（托管/半托管）由平台
+ * 仓库持货发货，ERP 无内部动作。镜像后端 `isExternalFulfillmentMode`
+ * （platform.constants.ts）——完整常量（OZON_FBP）与订单短码（FBP）都要识别。
+ * 前端仅用于展示判断（如外部履约单不显示发货时限倒计时）；事实仍以后端为准。
+ */
+const EXTERNAL_FULFILLMENT_TOKENS = ['FBO', 'FBP', 'FBW', 'FBY'];
+
+export function isExternalFulfillmentMode(mode: string | null | undefined): boolean {
+  if (typeof mode !== 'string' || mode === '') {
+    return false;
+  }
+  const meta = FULFILLMENT_MODE_META[mode];
+  if (meta !== undefined && (meta.category === 'MANAGED' || meta.category === 'SEMI_MANAGED')) {
+    return true;
+  }
+  const suffix = mode.includes('_') ? mode.slice(mode.lastIndexOf('_') + 1) : mode;
+  return EXTERNAL_FULFILLMENT_TOKENS.includes(suffix);
+}
+
 /** Barcode type → label (SKU barcodes). */
 export const BARCODE_TYPE_LABEL: Record<string, string> = {
   EAN: 'EAN 商品码',
