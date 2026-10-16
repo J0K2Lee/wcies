@@ -253,6 +253,12 @@ EXTERNAL_FULFILLED 行不属于内部可履约行（与 RELEASED 同样被 rollu
 
 1. `CANCELLED` 为终态，取消后不再重算。
 2. 无任何可履约行（全部 mapping FAILED）→ `EXCEPTION`。
+   无任何可履约行且**已无** mapping FAILED 行（全部 EXTERNAL_FULFILLED / RELEASED，
+   典型：FBP 行映射修复后转 EXTERNAL_FULFILLED）时：当前态为 `EXCEPTION` 的
+   回落 `NEW`（其成立前提「存在 FAILED 行」已消失，不得保留陈旧异常），其余
+   当前态保持不变（已 SHIPPED 保持 SHIPPED、外部履约单停在 NEW 等平台事件）。
+   2026-10-16 修复：陈旧的 EXCEPTION 此前被无条件 `return current` 保留，导致
+   FBP 订单补齐映射后永久卡异常（真实样本 ORD00000207）。
 3. 存在未完成拣货的拣货任务行（订单行进入 CREATED/IN_PROGRESS 的 PickingTask 且未全部拣完）→ `PICKING`。
 4. 全部可履约行（mapping != FAILED 且 fulfillment != RELEASED）均为 SHIPPED → `SHIPPED`。
 5. 存在 SHIPPED 行但并非全部 → `PARTIALLY_SHIPPED`。

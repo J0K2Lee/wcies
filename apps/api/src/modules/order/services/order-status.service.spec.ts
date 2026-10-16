@@ -162,6 +162,30 @@ describe('OrderStatusService rollup (orders.md §7)', () => {
     ).resolves.toBe('EXCEPTION');
   });
 
+  it('全 EXTERNAL_FULFILLED 且无 FAILED 行：陈旧 EXCEPTION 回落持有态 NEW（2026-10-16 FBP 映射修复）', async () => {
+    // 现实来源：FBP 订单摄入时 SKU 尚未建档 → 行 FAILED、订单 EXCEPTION；运营
+    // 补齐映射后行转 MAPPED+EXTERNAL_FULFILLED、映射异常关闭。此前 rollup 的
+    // 「无可履约行」分支无条件返回 current，把陈旧 EXCEPTION 保留（其成立前提
+    // 「存在 FAILED 行」已消失）→ 订单卡在异常（真实样本 ORD00000207）。
+    const { service } = buildService({
+      order: makeOrder('EXCEPTION'),
+      items: [makeItem('EXTERNAL_FULFILLED')],
+    });
+    await expect(
+      service.recomputeOrderStatus('order-1', { userId: null, username: 't' }, 'r'),
+    ).resolves.toBe('NEW');
+  });
+
+  it('全 EXTERNAL_FULFILLED 且无 FAILED 行：非 EXCEPTION 的当前态保持不变（等平台事件）', async () => {
+    const { service } = buildService({
+      order: makeOrder('NEW'),
+      items: [makeItem('EXTERNAL_FULFILLED')],
+    });
+    await expect(
+      service.recomputeOrderStatus('order-1', { userId: null, username: 't' }, 'r'),
+    ).resolves.toBe('NEW');
+  });
+
   it('mapping failures alongside fulfillable lines keep the business rollup', async () => {
     const { service } = buildService({
       order: makeOrder('NEW'),

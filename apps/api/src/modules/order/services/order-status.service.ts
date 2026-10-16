@@ -91,10 +91,18 @@ export class OrderStatusService {
         item.fulfillmentStatus !== 'EXTERNAL_FULFILLED',
     );
     if (fulfillable.length === 0) {
-      // Nothing left to fulfill: pure mapping failures keep the exception
-      // status; a fully released order is on its way to CANCELLED anyway;
-      // a fully external order stays put until the platform ships it.
-      return items.some((item) => item.mappingStatus === 'FAILED') ? 'EXCEPTION' : current;
+      // Nothing left to fulfill (orders.md §7 rule 2/EXTERNAL_FULFILLED 说明):
+      // - 仍有 mapping FAILED 行 → EXCEPTION（未映射阻塞）。
+      // - 否则（全部 EXTERNAL_FULFILLED / RELEASED）保持当前状态：已 SHIPPED
+      //   的保持 SHIPPED，新摄入的外部履约单停在 NEW 等平台事件推进。
+      // 但 EXCEPTION 的成立前提是「存在 mapping FAILED 行」——前提消失后不得
+      // 保留（2026-10-16 用户 bug：FBP 行映射修复为 EXTERNAL_FULFILLED 后订单
+      // 仍卡 EXCEPTION，因为旧代码无条件返回 current 把陈旧 EXCEPTION 保留）。
+      // 陈旧的 EXCEPTION 回落到失败前的持有态 NEW。
+      if (items.some((item) => item.mappingStatus === 'FAILED')) {
+        return 'EXCEPTION';
+      }
+      return current === 'EXCEPTION' ? 'NEW' : current;
     }
     if ((await this.pickingState.countActivePickingItems(orderId)) > 0) {
       return 'PICKING';
