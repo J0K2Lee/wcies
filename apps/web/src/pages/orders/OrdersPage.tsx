@@ -603,6 +603,12 @@ function ExpandedOrderItems({
     return <span style={{ fontSize: 12.5, color: colors.textTertiary }}>暂无商品明细</span>;
   }
   const totalQuantity = detail.items.reduce((sum, item) => sum + Number(item.quantity), 0);
+  /**
+   * 行级状态是否一致（2026-10-17 用户反馈「重复的状态标签太多」）。
+   * 整单缺货时主行已经显示「缺货」，明细每块再挂一个「缺货」纯属噪音；
+   * 只有各行状态不同（一行已就绪、一行缺货）时，逐行标注才有信息量。
+   */
+  const uniformStatus = new Set(detail.items.map((item) => item.fulfillmentStatus)).size <= 1;
   // 合计只在**每一行都有小计**时才给（2026-10-17）：任一行价格缺失就只报件数，
   // 否则会把缺价的行按 0 计入，显示一个看起来精确其实是错的金额。
   const totalAmount =
@@ -621,6 +627,7 @@ function ExpandedOrderItems({
             thumbnailSize={thumbnailSize}
             selected={selectedItem?.id === item.id}
             first={index === 0}
+            uniformStatus={uniformStatus}
             onActivate={() => onItemRowClick(item)}
           />
         ))}
@@ -672,6 +679,7 @@ function ExpandedItemBlock({
   thumbnailSize,
   selected,
   first,
+  uniformStatus,
   onActivate,
 }: {
   item: OrderItem;
@@ -680,6 +688,8 @@ function ExpandedItemBlock({
   thumbnailSize: number;
   selected: boolean;
   first: boolean;
+  /** 各行状态一致时不逐行重复状态徽标（主行已表达）。 */
+  uniformStatus: boolean;
   onActivate: () => void;
 }) {
   const visible = new Set(fields);
@@ -765,7 +775,7 @@ function ExpandedItemBlock({
                 </span>
               </>
             ))}
-          {visible.has('fulfillmentStatus') && (
+          {visible.has('fulfillmentStatus') && !uniformStatus && (
             // 右对齐（2026-10-17 用户按设计稿指正）：多个 SKU 块上下排列时，
             // 右对齐能形成一条竖向的「状态列」，扫读比跟在名称后面更整齐。
             <span style={{ marginLeft: 'auto', flex: '0 0 auto' }}>
@@ -2790,32 +2800,29 @@ export function OrdersPage() {
             </span>
           );
         }
+        const distribution = [
+          row.backorderedCount > 0 ? `缺货 ${row.backorderedCount}` : null,
+          row.backorderedOrderedCount > 0 ? `已采购 ${row.backorderedOrderedCount}` : null,
+          row.reservedCount > 0 ? `已占用 ${row.reservedCount}` : null,
+        ].filter((part): part is string => part !== null);
         return (
-          <span
-            style={{
-              display: 'inline-flex',
-              gap: 6,
-              alignItems: 'center',
-              flexWrap: 'wrap',
-            }}
-          >
-            <span>{row.itemsCount} 行</span>
-            {row.backorderedCount > 0 && (
-              <StatusBadge tone="warning" label={`缺货 ${row.backorderedCount}`} />
-            )}
-            {row.backorderedOrderedCount > 0 && (
-              <Tooltip title={`缺货行中已登记采购 ${row.backorderedOrderedCount} 行（采购未到货）`}>
-                <StatusBadge
-                  tone="info"
-                  label={`已采购 ${row.backorderedOrderedCount}`}
-                  showDot={false}
-                />
-              </Tooltip>
+          // 2026-10-17 用户反馈「重复的状态标签太多」：这里原本最多堆 4 个胶囊
+          // （缺货 / 已采购 / 已到货 / 已占用），其中「缺货 N」与 ERP 状态列的
+          // 「缺货 ×N」读起来一模一样，一个订单能看到三四个「缺货」。现在本列只报
+          // **行级分布**，用次级文本呈现；实心徽标只保留在 ERP 状态列（订单主状态），
+          // 真正的动作（已到货 → 重新尝试分配）仍是按钮。
+          <div style={{ minWidth: 0 }}>
+            <div>{row.itemsCount} 行</div>
+            {distribution.length > 0 && (
+              <div
+                title={`行级分布：${distribution.join('，')}（共 ${row.itemsCount} 行）`}
+                style={{ fontSize: 12, color: colors.textSecondary, lineHeight: 1.45 }}
+              >
+                {distribution.join(' · ')}
+              </div>
             )}
             {row.backorderedArrivedCount > 0 && (
-              <Tooltip
-                title={`缺货行中采购已到货 ${row.backorderedArrivedCount} 行，可「重新尝试分配」`}
-              >
+              <div style={{ marginTop: 4 }}>
                 {railDetail?.id === row.id && detailQuery.isSuccess ? (
                   <Button
                     size="small"
@@ -2828,22 +2835,19 @@ export function OrdersPage() {
                     }}
                     onDoubleClick={(event) => event.stopPropagation()}
                   >
-                    已到货 {row.backorderedArrivedCount}
+                    重新分配 {row.backorderedArrivedCount}
                   </Button>
                 ) : (
-                  <StatusBadge
-                    tone="success"
-                    label={`已到货 ${row.backorderedArrivedCount}`}
-                    hint="请先展开订单加载明细，再点击重新分配"
-                    showDot={false}
-                  />
+                  <span
+                    title="请先展开订单加载明细，再点击重新分配"
+                    style={{ fontSize: 12, color: colors.success }}
+                  >
+                    已到货 {row.backorderedArrivedCount}
+                  </span>
                 )}
-              </Tooltip>
+              </div>
             )}
-            {row.reservedCount > 0 && (
-              <StatusBadge tone="info" label={`已占用 ${row.reservedCount}`} showDot={false} />
-            )}
-          </span>
+          </div>
         );
       },
     },
@@ -2860,11 +2864,19 @@ export function OrdersPage() {
               row.skuKindCount > 1 ? `该单共 ${row.skuKindCount} 种 SKU，展开查看明细` : undefined
             }
           >
-            <span style={{ fontSize: 12.5 }}>
+            {/* 只显示首个 SKU 编码（2026-10-17）：此前末尾跟「等 N 种」，在 140px 列里
+                被挤成两行（「等 2」/「种」）；多种 SKU 的提示改由悬浮说明承担，
+                行数已在「商品」列表达。 */}
+            <span
+              style={{
+                fontSize: 12.5,
+                display: 'block',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
               {row.firstSkuCode}
-              {row.skuKindCount > 1 && (
-                <span style={{ color: colors.textTertiary }}> 等 {row.skuKindCount} 种</span>
-              )}
             </span>
           </Tooltip>
         ),
