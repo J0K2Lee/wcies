@@ -603,6 +603,12 @@ function ExpandedOrderItems({
     return <span style={{ fontSize: 12.5, color: colors.textTertiary }}>暂无商品明细</span>;
   }
   const totalQuantity = detail.items.reduce((sum, item) => sum + Number(item.quantity), 0);
+  // 合计只在**每一行都有小计**时才给（2026-10-17）：任一行价格缺失就只报件数，
+  // 否则会把缺价的行按 0 计入，显示一个看起来精确其实是错的金额。
+  const totalAmount =
+    detail.items.length > 0 && detail.items.every((item) => item.totalPrice !== null)
+      ? detail.items.reduce((sum, item) => sum + Number(item.totalPrice), 0)
+      : null;
   return (
     <Image.PreviewGroup>
       <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -630,6 +636,9 @@ function ExpandedOrderItems({
             }}
           >
             {detail.items.length} 个 SKU · 共 {totalQuantity} 件
+            {totalAmount === null
+              ? ''
+              : ` · 合计 ${fmtMoney(String(totalAmount), detail.currency)}`}
           </div>
         )}
       </div>

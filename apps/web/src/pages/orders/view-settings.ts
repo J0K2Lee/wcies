@@ -49,8 +49,10 @@ export const DEFAULT_VIEW_SETTINGS: OrdersViewSettings = {
     { key: 'storeFulfillment', visible: true },
     { key: 'shipmentDeadline', visible: true },
     { key: 'orderedAt', visible: true },
-    // 平台运单号默认收起（2026-10-17）：多数订单该字段为空（整列「—」），
-    // 却要占 170px。需要时在视图设置里打开——打开后会重新出现横向滚动，属预期。
+    // 平台运单号默认收起（2026-10-17）。实测 100 单里 68 单有值，但 68 单**全部**
+    // 与平台单号相同——OZON 官方物流（rFBS）的 tracking_number 就是 posting number，
+    // 列表里它等于把订单号重复一列，还占 170px。换承运商后才会出现真正的运单号，
+    // 需要时在这里打开即可（打开后主表会重新出现横向滚动，属预期）。
     { key: 'platformTrackingNo', visible: false },
   ],
   expandedColumns: [
