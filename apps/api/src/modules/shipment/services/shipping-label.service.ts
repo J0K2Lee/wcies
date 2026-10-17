@@ -117,6 +117,18 @@ export class ShippingLabelService {
     );
   }
 
+  /**
+   * 读取面单文件字节（服务端内部使用：批量打印时合并成一个 PDF，用户指示
+   * 2026-10-17）。对外仍只返回签名 URL（AGENTS.md §68）。
+   */
+  async bytesOfLabel(labelId: string): Promise<Buffer> {
+    const label = await this.labelRepo.findById(labelId);
+    if (label === null) {
+      throw new ShippingLabelInvalidError('面单不存在', { labelId });
+    }
+    return this.objectStorage.download(label.objectKey);
+  }
+
   /** Reuses the newest stored order label of a source, if any (no re-fetch). */
   async findLatestOrderLabel(
     orderId: string,

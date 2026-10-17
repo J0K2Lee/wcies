@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { PDFDocument } from 'pdf-lib';
 import { StoreContext } from '@wcies/platform-contracts';
 import { OperatorContext, OperationLogService } from '../../operation-log/operation-log.service';
 import { OrderService } from '../../order/services/order.service';
@@ -99,6 +100,8 @@ function makeService(adapter: object, order = ORDER) {
       signedUrl: 'https://s3/l.pdf',
     })),
     listByOrder: vi.fn(async () => []),
+    // 批量打印会读取面单字节做合并；默认给空字节（仅批量用例覆盖为真实 PDF）。
+    bytesOfLabel: vi.fn(async () => Buffer.alloc(0)),
   };
   const operationLog = { record: vi.fn(async () => undefined) };
   const logger = { log: vi.fn(), warn: vi.fn() };
@@ -301,5 +304,28 @@ describe('OrderPlatformShipService.fetchShippingLabelBatch (2026-10-17 批量打
     expect(result.results[1]?.code).toBe('PLATFORM_LABEL_NOT_READY');
     // 失败单也带可读订单号（先读了一次订单）。
     expect(orderService.getOrderOrThrow).toHaveBeenCalledTimes(2);
+  });
+
+  it('把成功面单合并成一个 PDF，并保留 OZON 面单原纸张尺寸', async () => {
+    const { service, labelService } = makeService(new PreparableAdapter());
+    // OZON 实测面单纸张：57.9mm × 40mm。
+    const doc = await PDFDocument.create();
+    doc.addPage([(57.9 * 72) / 25.4, (40 * 72) / 25.4]);
+    const labelBytes = Buffer.from(await doc.save());
+    labelService.bytesOfLabel.mockResolvedValue(labelBytes);
+    vi.spyOn(service, 'fetchShippingLabel').mockResolvedValue({
+      id: 'label-1',
+      signedUrl: 'https://s3/l1.pdf',
+      fileName: 'label-1.pdf',
+    } as ShippingLabelDto);
+
+    const result = await service.fetchShippingLabelBatch(['o1'], { refresh: false }, OPERATOR);
+
+    expect(result.mergedPageCount).toBe(1);
+    expect(result.mergedPdfBase64).not.toBeNull();
+    const merged = await PDFDocument.load(Buffer.from(result.mergedPdfBase64 as string, 'base64'));
+    const { width, height } = merged.getPage(0).getSize();
+    expect(((width / 72) * 25.4).toFixed(1)).toBe('57.9');
+    expect(((height / 72) * 25.4).toFixed(1)).toBe('40.0');
   });
 });

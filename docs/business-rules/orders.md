@@ -1054,7 +1054,7 @@ createShipmentsFromOrder（仅 PICKED 行，1 发货单 = 1 仓）
 | 批量生成拣货单 | `POST /picking-tasks/auto-create`（请求体带 `orderIds`） | 勾选订单的 RESERVED 行**按仓合并**生成拣货任务（2026-10-15 语义修正）：同一仓库合并为一个任务（合并拣货，`picking_task_items` 行保留各自订单引用，任务内订单取消只摘除该订单行）；省略 `orderIds` 仍是旧的按店铺自动选取（同样合并）；跳过/幂等规则不变 |
 | 批量获取运单号 | `POST /orders/batch-prepare-shipment` | 逐单执行 ① 的全部平台/幂等/事实回写逻辑；仍是真实平台写操作 |
 | 批量发货 | `POST /orders/batch-ship` | 逐单执行 ④（含按订单 advisory lock）；库存仍只走 `shipShipment` |
-| 批量打印面单 | `POST /orders/batch-shipping-label` | 逐单执行 ③（默认复用本地已存档面单，`refresh=true` 才重新打平台）；**串行**以尊重平台面单接口限流；返回每单签名 URL |
+| 批量打印面单 | `POST /orders/batch-shipping-label` | 逐单执行 ③（默认复用本地已存档面单，`refresh=true` 才重新打平台）；**串行**以尊重平台面单接口限流；成功面单在**服务端合并成一个 PDF** 返回（`mergedPdfBase64`），每页保留平台原纸张尺寸 |
 | 批量外部履约 | `POST /orders/batch-mark-external-fulfillment` | 逐单执行 Sprint 9 T6 的标记外部履约（同一 reason 记入每单的状态历史与操作日志）；不产生任何库存流水 |
 
 规则不变，只是编排：**逐单执行、单笔失败只记录结果不拖垮整批**（§36/§43），
@@ -1063,10 +1063,12 @@ createShipmentsFromOrder（仅 PICKED 行，1 发货单 = 1 仓）
 改为按勾选执行。批量外部履约的校验与单笔一致：已取消/已发货、存在
 RESERVED / PICKED 行的订单逐单拒绝并说明原因。
 
-**批量打印面单的浏览器侧约定（2026-10-17）**：平台面单是 PDF，逐张
-`window.open` 会被弹窗拦截，因此前端在点击的同步栈里先开**一个**打印窗口，
-把全部成功面单以 `<iframe>` 放进同一页（每张一页）后一次调起打印；
-无成功面单时关闭该窗口并提示失败原因。
+**批量打印面单的纸张尺寸（2026-10-17 修正）**：平台面单 PDF 自带纸张尺寸
+（OZON 实测 `57.9mm × 40mm`，MediaBox 164.25×113.25pt）。**必须**用浏览器
+原生 PDF 查看器打印——把 PDF 嵌进 HTML 打印页会被缩放成 A4，尺寸错误
+（2026-10-17 用户实测报错）。因此后端把成功面单合并成一个 PDF（`pdf-lib`，
+`copyPages` 保留每页 MediaBox），前端以 Blob URL 在该窗口打开；合并失败时
+逐单结果仍返回签名 URL，可单张补打。
 
 ## 异常
 

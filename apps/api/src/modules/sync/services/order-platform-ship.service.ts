@@ -9,6 +9,7 @@ import { OperatorContext, OperationLogService } from '../../operation-log/operat
 import { OrderService } from '../../order/services/order.service';
 import { ExceptionService } from '../../exception/services/exception.service';
 import { ShippingLabelService } from '../../shipment/services/shipping-label.service';
+import { mergePdfs } from '../../shipment/services/pdf-merge';
 import { ShippingLabelDto } from '../../shipment/dto/shipment.dto';
 import { PlatformCapabilityUnsupportedError } from '../../integration/integration.errors';
 import { DomainError } from '../../../common/errors/domain.error';
@@ -71,6 +72,10 @@ export interface BatchShippingLabelResult {
   total: number;
   succeeded: number;
   failed: number;
+  /** 成功面单合并成的单个 PDF（base64）；合并失败或全部失败时为 null。 */
+  mergedPdfBase64: string | null;
+  /** 合并 PDF 的总页数（每张面单通常 1 页）。 */
+  mergedPageCount: number;
   results: BatchShippingLabelItem[];
 }
 
@@ -212,8 +217,10 @@ export class OrderPlatformShipService {
    * 批量打单（用户指示 2026-10-17）：逐单顺序取面单（**串行**，尊重平台面单
    * 接口限流），单笔失败不影响其余。默认复用本地已存档面单，不重复打平台。
    *
-   * 返回每单的 `signedUrl` / `fileName`；前端把所有成功的面单放进同一个打印
-   * 窗口一次打印（逐张开标签页会被浏览器弹窗拦截）。
+   * 成功面单在服务端**合并成一个 PDF**（`mergedPdfBase64`）：平台面单自带纸张
+   * 尺寸（OZON 实测 57.9×40mm），只有交给浏览器原生 PDF 查看器打印才能保持
+   * 原尺寸；嵌进 HTML 打印页会被缩放成 A4（2026-10-17 用户实测报错）。
+   * 每单的 `signedUrl` 仍随结果返回，供单张补打/排查。
    */
   async fetchShippingLabelBatch(
     orderIds: string[],
@@ -221,6 +228,7 @@ export class OrderPlatformShipService {
     operator: OperatorContext,
   ): Promise<BatchShippingLabelResult> {
     const results: BatchShippingLabelItem[] = [];
+    const labelIds: string[] = [];
     for (const orderId of new Set(orderIds)) {
       // 先读一次订单拿单号（失败结果也要有可读标识）；读不到由 catch 处理。
       let orderNo: string | null = null;
@@ -228,6 +236,7 @@ export class OrderPlatformShipService {
         const order = await this.orderService.getOrderOrThrow(orderId);
         orderNo = order.orderNo;
         const label = await this.fetchShippingLabel(orderId, options, operator);
+        labelIds.push(label.id);
         results.push({
           orderId,
           orderNo,
@@ -249,8 +258,36 @@ export class OrderPlatformShipService {
         });
       }
     }
+
+    let mergedPdfBase64: string | null = null;
+    let mergedPageCount = 0;
+    if (labelIds.length > 0) {
+      try {
+        const buffers: Buffer[] = [];
+        for (const labelId of labelIds) {
+          buffers.push(await this.labelService.bytesOfLabel(labelId));
+        }
+        const merged = await mergePdfs(buffers);
+        mergedPdfBase64 = Buffer.from(merged.bytes).toString('base64');
+        mergedPageCount = merged.pageCount;
+      } catch (error: unknown) {
+        // 合并失败不影响逐单结果：前端会提示并允许逐张补打。
+        this.logger.warn(
+          `batch label merge failed (${labelIds.length} labels): ${String(error)}`,
+          'OrderPlatformShipService',
+        );
+      }
+    }
+
     const failed = results.filter((item) => !item.ok).length;
-    return { total: results.length, succeeded: results.length - failed, failed, results };
+    return {
+      total: results.length,
+      succeeded: results.length - failed,
+      failed,
+      mergedPdfBase64,
+      mergedPageCount,
+      results,
+    };
   }
 
   private batchFailureOf(orderId: string, error: unknown): BatchPrepareShipmentItem {

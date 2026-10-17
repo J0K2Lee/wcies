@@ -6740,6 +6740,10 @@ export interface components {
             total: number;
             succeeded: number;
             failed: number;
+            /** @description 成功面单合并成的单个 PDF（base64）。平台面单自带纸张尺寸（OZON 57.9×40mm），必须用浏览器原生 PDF 查看器打印才能保持原尺寸；合并失败或全部失败时为 null */
+            mergedPdfBase64: string | null;
+            /** @description 合并 PDF 的总页数（每张面单通常 1 页） */
+            mergedPageCount: number;
             results: components["schemas"]["BatchShippingLabelItemDto"][];
         };
         BatchShippingLabelRequestDto: {

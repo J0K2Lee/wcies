@@ -100,6 +100,22 @@ export class ObjectStorageService implements OnModuleInit {
     });
   }
 
+  /**
+   * 读取对象字节（服务端内部使用，例如把多张面单 PDF 合并成一个文件）。
+   * 业务模块不得把该字节流直接回给浏览器——对外仍只给签名 URL（§68）。
+   */
+  async download(key: string): Promise<Buffer> {
+    const object = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    if (object.Body === undefined) {
+      throw new Error(`object body missing: ${key}`);
+    }
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of object.Body as AsyncIterable<Uint8Array>) {
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks);
+  }
+
   async exists(key: string): Promise<boolean> {
     try {
       await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));

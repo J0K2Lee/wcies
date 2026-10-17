@@ -120,18 +120,16 @@ export function printTasksBrowser(tasks: readonly PrintTask[]): void {
 }
 
 /**
- * 批量打印面单（用户指示 2026-10-17）。
+ * 批量打印面单（用户指示 2026-10-17；2026-10-17 修正纸张尺寸）。
  *
- * 平台面单是 PDF；逐张 `window.open` 会被浏览器弹窗拦截，所以把多张 PDF 放进
- * **同一个**打印窗口，一次调起打印对话框（每张一页）。
+ * 平台面单自带纸张尺寸（OZON 实测 57.9mm × 40mm）。**不能**把 PDF 嵌进 HTML
+ * 打印页——浏览器会把它缩放成 A4，打印尺寸错误。正确做法是交给浏览器**原生
+ * PDF 查看器**打印：后端把面单合并成一个 PDF，前端转成 Blob URL 在该窗口打开。
  *
- * 用法必须分两步，且第一步调用在用户点击的**同步栈**里：
- *   const win = openShippingLabelPrintWindow();   // 先开窗口，避免被拦截
- *   const result = await fetchLabels();           // 再取数据
- *   renderShippingLabelsIntoWindow(win, urls);    // 最后写入并打印
- *
- * `win.document.open()/write/close` 前保持 opener 已置空（与 printTasksBrowser
- * 同一处理：不要用 window.open(url, '_blank', 'noopener')，那会返回 null）。
+ * 用法（第一步必须在用户点击的同步栈里执行，否则弹窗被拦截）：
+ *   const win = openShippingLabelPrintWindow();
+ *   const result = await fetchBatchLabels();
+ *   showMergedPdfInWindow(win, result.mergedPdfBase64);
  */
 export function openShippingLabelPrintWindow(): Window | null {
   const win = window.open('', '_blank');
@@ -148,39 +146,18 @@ export function openShippingLabelPrintWindow(): Window | null {
   return win;
 }
 
-/** 把面单 PDF 写入已打开的打印窗口并调起打印（每张一页）。 */
-export function renderShippingLabelsIntoWindow(
-  win: Window,
-  labels: ReadonlyArray<{ url: string; title?: string }>,
-): void {
-  const parts = labels.map((label, index) => {
-    const name = label.title ?? `面单 ${index + 1}`;
-    return (
-      '<section class="label">' +
-      `<iframe src="${escapeHtml(label.url)}" title="${escapeHtml(name)}"></iframe>` +
-      '</section>'
-    );
-  });
-  const html = `<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8"/>
-<title></title>
-<style>
-  @page { margin: 0; }
-  html, body { margin: 0; padding: 0; background: #fff; }
-  /* 每张面单独占一页；iframe 由浏览器内置 PDF 查看器渲染。 */
-  .label { page-break-after: always; }
-  .label:last-child { page-break-after: auto; }
-  .label iframe { display: block; width: 100%; height: 100vh; border: 0; }
-</style>
-</head>
-<body>${parts.join('\n')}</body>
-</html>`;
-  win.document.open();
-  win.document.write(html);
-  win.document.close();
-  win.focus();
-  // PDF 查看器需要一点时间渲染第一张，早于它调 print() 会打出空白页。
-  win.setTimeout(() => win.print(), 800);
+/**
+ * 在已打开的窗口里显示合并后的面单 PDF（原生查看器 → 打印保持原纸张尺寸）。
+ *
+ * 不 revokeObjectURL：新页面仍持有该 blob，撤销会让 PDF 打不开/打印空白；
+ * 标签页关闭后由浏览器回收。
+ */
+export function showMergedPdfInWindow(win: Window, base64: string): void {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+  win.location.href = url;
 }

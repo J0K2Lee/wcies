@@ -58,4 +58,8 @@ export class ShippingLabelRepository {
       .getRepository(ShippingLabelEntity)
       .findOne({ where: { orderId, source }, order: { createdAt: 'DESC' } });
   }
+
+  async findById(id: string): Promise<ShippingLabelEntity | null> {
+    return this.dataSource.getRepository(ShippingLabelEntity).findOneBy({ id });
+  }
 }

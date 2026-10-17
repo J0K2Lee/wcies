@@ -22,10 +22,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router';
 import { apiGet, apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime, fmtMoney } from '../../utils/format';
 import { buildOzonProductUrl, buildPlatformProductUrl } from '../../utils/platformUrl';
-import {
-  openShippingLabelPrintWindow,
-  renderShippingLabelsIntoWindow,
-} from '../../printing/print-browser';
+import { openShippingLabelPrintWindow, showMergedPdfInWindow } from '../../printing/print-browser';
 import { ListingOnboardModal, OnboardMatchIdentifiers } from '../../components/ListingOnboardModal';
 import { ListingVariantMapModal } from '../../components/ListingVariantMapModal';
 import {
@@ -1488,6 +1485,8 @@ export function OrdersPage() {
         total: number;
         succeeded: number;
         failed: number;
+        mergedPdfBase64: string | null;
+        mergedPageCount: number;
         results: Array<{
           orderId: string;
           orderNo: string | null;
@@ -1502,17 +1501,19 @@ export function OrdersPage() {
       const printable = result.results.filter(
         (item): item is typeof item & { signedUrl: string } => item.ok && item.signedUrl !== null,
       );
-      if (printable.length === 0) {
+      if (printable.length === 0 || result.mergedPdfBase64 === null) {
         vars.printWindow.close();
         notification.warning({
           type: 'warning',
-          title: '没有可打印的面单',
+          title: printable.length === 0 ? '没有可打印的面单' : '面单合并失败，请逐张打印',
           description: (
             <div style={{ maxHeight: 260, overflowY: 'auto' }}>
               {result.results.map((item) => (
                 <div key={item.orderId}>
                   {item.orderNo ?? selectedOrdersById.get(item.orderId)?.orderNo ?? item.orderId}：
-                  {item.message ?? item.code ?? '未知错误'}
+                  {item.ok
+                    ? '面单已取到，可在右栏单张打印'
+                    : (item.message ?? item.code ?? '未知错误')}
                 </div>
               ))}
             </div>
@@ -1521,13 +1522,11 @@ export function OrdersPage() {
         });
         return;
       }
-      renderShippingLabelsIntoWindow(
-        vars.printWindow,
-        printable.map((item) => ({ url: item.signedUrl, title: item.orderNo ?? undefined })),
-      );
+      // 合并后的 PDF 交给浏览器原生查看器：保持平台面单原纸张尺寸（57.9×40mm）。
+      showMergedPdfInWindow(vars.printWindow, result.mergedPdfBase64);
       notification.open({
         type: result.failed > 0 ? 'warning' : 'success',
-        title: `批量打印面单：已放入 ${printable.length} 张（共 ${result.total} 单）`,
+        title: `批量打印面单：已合并 ${result.mergedPageCount} 页（成功 ${result.succeeded} / 共 ${result.total} 单）`,
         description:
           result.failed === 0 ? undefined : (
             <div style={{ maxHeight: 260, overflowY: 'auto' }}>
