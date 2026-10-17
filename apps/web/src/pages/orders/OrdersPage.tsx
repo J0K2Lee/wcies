@@ -3272,8 +3272,22 @@ export function OrdersPage() {
           }}
           onRow={(record) => {
             const activate = (): void => {
-              setSelectedItemId(null);
-              setSelectedId(record.id === selectedId ? null : record.id);
+              /**
+               * 选中分两级（2026-10-17 用户要求）：订单行 / 明细里的 SKU 行。
+               * 用户先点明细里的 SKU、再点订单行时，焦点只是从 SKU 收回订单行，
+               * **不该顺手把订单取消掉**；只有「焦点本来就在订单行」时，再点才是取消。
+               */
+              if (selectedId !== record.id) {
+                setSelectedItemId(null);
+                setSelectedId(record.id);
+                return;
+              }
+              if (selectedItemId !== null) {
+                // 焦点在 SKU 行 → 收回订单行，保持选中。
+                setSelectedItemId(null);
+                return;
+              }
+              setSelectedId(null);
             };
             return {
               onClick: (event) => {
