@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, Outlet } from 'react-router';
 import { useMutation } from '@tanstack/react-query';
 import { App, Avatar, Button, Drawer, Dropdown, Menu, Tooltip } from 'antd';
@@ -21,6 +21,8 @@ import {
 import { AppRailSetterProvider, colors, layout, ContextRailContent } from '../design-system';
 import { GlobalSearch } from './GlobalSearch';
 import { NotificationBell } from './NotificationBell';
+import { PageFallback } from './RouteFallback';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useAuth } from './AuthGate';
 import { apiClient } from '../api/client';
 
@@ -144,7 +146,9 @@ function useViewportTier(): ViewportTier {
   if (width >= layout.railBreakpointWide) {
     return 'wide';
   }
-  return width >= 1400 ? 'mid' : 'narrow';
+  // 断点统一从 tokens 读取（2026-10-17 体检 P2-12：此前这里硬编码 1400，
+  // 而 tokens 里的 railBreakpointNarrow 全站无人引用）。
+  return width >= layout.railBreakpointNarrow ? 'mid' : 'narrow';
 }
 
 export function AppLayout() {
@@ -435,7 +439,15 @@ export function AppLayout() {
               }}
             >
               <div style={{ maxWidth: layout.contentMaxWidth, margin: '0 auto' }}>
-                <Outlet />
+                {/* 路由级错误边界（2026-10-17 体检 P1-8）：页面崩溃只毁内容区，
+                    且以 location.key 复位 —— 换页即自动恢复，不必整页刷新。
+                    懒加载 chunk 拉取失败也在这里被接住。 */}
+                <ErrorBoundary inset resetKeys={[location.key]}>
+                  {/* 页面按需加载（S1-1）：骨架只占内容区，左导航/顶栏/右栏不闪白。 */}
+                  <Suspense fallback={<PageFallback />}>
+                    <Outlet />
+                  </Suspense>
+                </ErrorBoundary>
               </div>
             </main>
 
