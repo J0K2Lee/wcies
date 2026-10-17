@@ -603,12 +603,6 @@ function ExpandedOrderItems({
     return <span style={{ fontSize: 12.5, color: colors.textTertiary }}>暂无商品明细</span>;
   }
   const totalQuantity = detail.items.reduce((sum, item) => sum + Number(item.quantity), 0);
-  /**
-   * 行级状态是否一致（2026-10-17 用户反馈「重复的状态标签太多」）。
-   * 整单缺货时主行已经显示「缺货」，明细每块再挂一个「缺货」纯属噪音；
-   * 只有各行状态不同（一行已就绪、一行缺货）时，逐行标注才有信息量。
-   */
-  const uniformStatus = new Set(detail.items.map((item) => item.fulfillmentStatus)).size <= 1;
   // 合计只在**每一行都有小计**时才给（2026-10-17）：任一行价格缺失就只报件数，
   // 否则会把缺价的行按 0 计入，显示一个看起来精确其实是错的金额。
   const totalAmount =
@@ -627,7 +621,6 @@ function ExpandedOrderItems({
             thumbnailSize={thumbnailSize}
             selected={selectedItem?.id === item.id}
             first={index === 0}
-            uniformStatus={uniformStatus}
             onActivate={() => onItemRowClick(item)}
           />
         ))}
@@ -679,7 +672,6 @@ function ExpandedItemBlock({
   thumbnailSize,
   selected,
   first,
-  uniformStatus,
   onActivate,
 }: {
   item: OrderItem;
@@ -688,8 +680,6 @@ function ExpandedItemBlock({
   thumbnailSize: number;
   selected: boolean;
   first: boolean;
-  /** 各行状态一致时不逐行重复状态徽标（主行已表达）。 */
-  uniformStatus: boolean;
   onActivate: () => void;
 }) {
   const visible = new Set(fields);
@@ -697,6 +687,15 @@ function ExpandedItemBlock({
   const metaFields = fields.filter(
     (key) => key !== 'image' && key !== 'sku' && key !== 'fulfillmentStatus',
   );
+  /**
+   * 采购进度（2026-10-17 用户定稿）：只标「已采购 / 已到货」。
+   * 「待采购」与「缺货」几乎总是同时出现，再挂一个红徽标只是噪音；
+   * 需要时看履约状态就知道还没采购。
+   */
+  const procurement =
+    item.procurementState === 'ORDERED' || item.procurementState === 'ARRIVED'
+      ? (PROCUREMENT_META[item.procurementState] ?? null)
+      : null;
   // 键盘可达（2026-10-17 体检 P2-9）：Enter / 空格 = 点击。
   const interaction = rowInteractionProps({
     selected,
@@ -775,10 +774,30 @@ function ExpandedItemBlock({
                 </span>
               </>
             ))}
-          {visible.has('fulfillmentStatus') && !uniformStatus && (
-            // 右对齐（2026-10-17 用户按设计稿指正）：多个 SKU 块上下排列时，
-            // 右对齐能形成一条竖向的「状态列」，扫读比跟在名称后面更整齐。
-            <span style={{ marginLeft: 'auto', flex: '0 0 auto' }}>
+          {/* 右侧状态（2026-10-17 用户定稿）：采购进度 + 履约状态同一行右对齐。
+              主行不再重复这些信息，所以这里每行都显示（哪怕整单状态一致）。 */}
+          <span
+            style={{
+              marginLeft: 'auto',
+              flex: '0 0 auto',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            {procurement !== null && (
+              <StatusBadge
+                tone={procurement.tone}
+                label={procurement.label}
+                hint={
+                  item.procurementState === 'ARRIVED'
+                    ? '该行采购已到货，可在「商品」列点「重新分配」'
+                    : '该行已登记采购，采购未到货'
+                }
+                showDot={false}
+              />
+            )}
+            {visible.has('fulfillmentStatus') && (
               <StatusBadge
                 tone={FULFILLMENT_STATUS_META[item.fulfillmentStatus]?.tone ?? 'neutral'}
                 label={
@@ -786,8 +805,8 @@ function ExpandedItemBlock({
                 }
                 showDot={false}
               />
-            </span>
-          )}
+            )}
+          </span>
         </div>
 
         {metaFields.length > 0 && (
@@ -2806,21 +2825,18 @@ export function OrdersPage() {
           row.reservedCount > 0 ? `已占用 ${row.reservedCount}` : null,
         ].filter((part): part is string => part !== null);
         return (
-          // 2026-10-17 用户反馈「重复的状态标签太多」：这里原本最多堆 4 个胶囊
-          // （缺货 / 已采购 / 已到货 / 已占用），其中「缺货 N」与 ERP 状态列的
-          // 「缺货 ×N」读起来一模一样，一个订单能看到三四个「缺货」。现在本列只报
-          // **行级分布**，用次级文本呈现；实心徽标只保留在 ERP 状态列（订单主状态），
-          // 真正的动作（已到货 → 重新尝试分配）仍是按钮。
-          <div style={{ minWidth: 0 }}>
+          // 2026-10-17 用户定稿：主行只报「N 行」。缺货 / 已采购 / 已占用的行级细节
+          // 挪进展开明细的每一块（能挂到具体 SKU 上），主行只在悬浮说明里汇总。
+          <div
+            title={
+              distribution.length > 0
+                ? `共 ${row.itemsCount} 行：${distribution.join('，')}（展开查看每行状态）`
+                : undefined
+            }
+            style={{ minWidth: 0 }}
+          >
             <div>{row.itemsCount} 行</div>
-            {distribution.length > 0 && (
-              <div
-                title={`行级分布：${distribution.join('，')}（共 ${row.itemsCount} 行）`}
-                style={{ fontSize: 12, color: colors.textSecondary, lineHeight: 1.45 }}
-              >
-                {distribution.join(' · ')}
-              </div>
-            )}
+
             {row.backorderedArrivedCount > 0 && (
               <div style={{ marginTop: 4 }}>
                 {railDetail?.id === row.id && detailQuery.isSuccess ? (
