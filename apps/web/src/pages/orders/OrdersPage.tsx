@@ -710,7 +710,8 @@ function ExpandedItemBlock({
         display: 'flex',
         gap: 12,
         alignItems: 'flex-start',
-        padding: '10px 6px',
+        // 上下内边距 10 → 4（2026-10-17 用户要求压缩内容上下的区间）：块高从 93 降到 81。
+        padding: '4px 6px',
         borderTop: first ? undefined : `1px solid ${colors.borderSoft}`,
         background: selected ? colors.primarySoft : undefined,
         borderRadius: 6,
@@ -3246,7 +3247,11 @@ export function OrdersPage() {
             expandedRowKeys: expandedRowKeys,
             showExpandColumn: false,
             expandedRowRender: (record: OrderListItem) => (
-              <div onClick={(event) => event.stopPropagation()}>
+              // 负外边距抵消 antd 展开行单元格的上下 padding（12px×2）：项目没有全局
+              // 样式表、全站内联样式，无法直接改 .ant-table-expanded-row > td 的 padding，
+              // 这里用 -6px 把上下各吃掉一半 → 展开块外的留白从 12 收到 6
+              // （2026-10-17 用户要求压缩内容上下的区间）。
+              <div onClick={(event) => event.stopPropagation()} style={{ margin: '-6px 0' }}>
                 <ExpandedOrderItems
                   order={record}
                   fields={expandedFields}
