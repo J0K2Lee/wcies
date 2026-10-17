@@ -335,6 +335,7 @@ export class ReturnsService {
       const runner = this.dataSource.createQueryRunner();
       await runner.connect();
       await runner.startTransaction();
+      let wroteStock = false;
       try {
         const outcome = await this.inventoryService.receiveStockInTx(runner, {
           skuId: item.skuId,
@@ -349,6 +350,7 @@ export class ReturnsService {
           operator,
         });
         if (outcome.wrote) {
+          wroteStock = true;
           await this.batchRepo.updateItem(runner.manager, item.id, {
             condition: input.condition,
             binId: targetBinId,
@@ -360,6 +362,14 @@ export class ReturnsService {
         throw error;
       } finally {
         await runner.release();
+      }
+      // 提交后广播（2026-10-17）：事务内广播时新建余额行对监听器不可见。
+      if (wroteStock) {
+        this.inventoryService.emitStockIncreased({
+          skuId: item.skuId,
+          warehouseId: batch.warehouseId,
+          eventType: 'RECEIVE',
+        });
       }
     } else {
       // LOST: verdict only, zero stock action.

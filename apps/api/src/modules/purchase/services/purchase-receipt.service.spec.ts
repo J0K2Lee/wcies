@@ -347,6 +347,8 @@ describe('confirm over-receipt guard (决策 0021)', () => {
     };
     const inventoryService = {
       receiveStockInTx: vi.fn().mockResolvedValue({ wrote: true }),
+      // 提交后广播库存增加事件（2026-10-17 自动分配修复）。
+      emitStockIncreased: vi.fn(),
     };
     const service = new PurchaseReceiptService(
       {
@@ -405,5 +407,43 @@ describe('confirm over-receipt guard (决策 0021)', () => {
     expect(result.idempotentReplay).toBe(false);
     expect(ctx.inventoryService.receiveStockInTx).toHaveBeenCalledOnce();
     expect(ctx.runner.commitTransaction).toHaveBeenCalled();
+  });
+
+  it('库存增加事件在**提交之后**广播（2026-10-17 自动分配修复）', async () => {
+    const ctx = setupConfirm({ quantity: '10.000', receivedQuantity: '7.000' });
+    ctx.repository.findItemsWithRefs.mockResolvedValue([
+      {
+        item: {
+          id: 'item-r1',
+          skuId: 'sku-1',
+          binId: 'bin-1',
+          quantity: '3.000',
+          unitCost: null,
+          serialNumbers: null,
+          purchaseOrderItemId: 'po-item-1',
+        },
+        skuCode: 'SKU000000001',
+        skuName: 'x',
+        binCode: 'A01',
+      },
+    ]);
+    // 提交前广播会让监听器读不到新建的余额行 → 误判库存不足（原 bug）。
+    let committed = false;
+    let emittedAfterCommit = true;
+    ctx.runner.commitTransaction.mockImplementation(async () => {
+      committed = true;
+    });
+    ctx.inventoryService.emitStockIncreased.mockImplementation(() => {
+      emittedAfterCommit = committed;
+    });
+
+    await ctx.service.confirm('receipt-1', operator);
+
+    expect(ctx.inventoryService.emitStockIncreased).toHaveBeenCalledWith({
+      skuId: 'sku-1',
+      warehouseId: expect.any(String),
+      eventType: 'RECEIVE',
+    });
+    expect(emittedAfterCommit).toBe(true);
   });
 });

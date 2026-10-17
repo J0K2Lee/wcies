@@ -484,6 +484,9 @@ export class PurchaseReceiptService {
     await runner.connect();
     await runner.startTransaction();
     const touchedPoIds = new Set<string>();
+    // 库存增加事件在**提交后**广播（2026-10-17 修复：事务内广播时，新建的余额行
+    // 对监听器的独立连接不可见，会误判库存不足 → 收货后不自动分配）。
+    const increasedSkus = new Set<string>();
     try {
       // Status re-check under the row lock: a concurrent confirm of the same
       // receipt serializes here instead of double-booking.
@@ -534,6 +537,7 @@ export class PurchaseReceiptService {
         });
 
         if (outcome.wrote) {
+          increasedSkus.add(item.skuId);
           if (item.purchaseOrderItemId !== null) {
             await this.repository.accruePoItemReceived(
               runner,
@@ -581,6 +585,15 @@ export class PurchaseReceiptService {
       throw error;
     } finally {
       await runner.release();
+    }
+
+    // 提交后再广播：此时余额行已可见，缺货订单行才能被自动分配。
+    for (const skuId of increasedSkus) {
+      this.inventoryService.emitStockIncreased({
+        skuId,
+        warehouseId: receipt.warehouseId,
+        eventType: 'RECEIVE',
+      });
     }
 
     await this.operationLog.record({

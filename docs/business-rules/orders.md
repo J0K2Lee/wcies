@@ -125,6 +125,12 @@ BACKORDERED（不再停留 PENDING）；历史卡行由 Migration 20260917_007 �
 3. 失败（仍不足）：保持缺货，不重复刷异常。
 4. 失败自吞：重分配失败不得影响库存主流程（AGENTS.md §10）。
 5. 人工重试（含「已到货」批量重试）继续走 `POST /orders/items/:itemId/retry-allocation`。
+6. **事件必须在库存事务提交之后广播**（2026-10-17 修复）：监听器用独立连接读
+   余额，事务内广播时**本次新建**的余额行对它不可见，会被误判为库存不足——
+   表现为「收货后没有自动分配、手动重试才成功」（真实样本 ORD00000219 /
+   SKU000012012：首次入库到某库位时余额行由该事务 INSERT）。因此 `addStock`
+   在 commit 后广播；`receiveStockInTx` / `transferInInTx` 由调用方（收货确认 /
+   退货入库 / 调拨确认）在各自事务提交后逐条广播。
 
 **候选范围与排序（2026-10-16 决策 0022）**：候选来自
 `findUnallocatedItemIdsBySku(skuId, warehouseId)`，只含**事件仓库被该订单店铺

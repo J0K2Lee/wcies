@@ -4,7 +4,10 @@ import { SkuService } from '../../product/services/sku.service';
 import { WarehouseService } from '../../warehouse/services/warehouse.service';
 import { WarehouseBinService } from '../../warehouse/services/warehouse-bin.service';
 import { OperatorContext, OperationLogService } from '../../operation-log/operation-log.service';
-import { InventoryStockListenerRegistry } from './inventory-stock-listener-registry';
+import {
+  InventoryStockListenerRegistry,
+  StockIncreasedEvent,
+} from './inventory-stock-listener-registry';
 import { formatQty, parseQty, qtyFromDb } from '../../../common/utils/quantity';
 import { InventoryBalanceEntity } from '../entities/inventory-balance.entity';
 import {
@@ -320,7 +323,25 @@ export class InventoryService {
       changes: { onHandQty: { from: outcome.from, to: outcome.balance.onHandQty } },
       operator: input.operator,
     });
+    // 提交之后才广播（见 addStockInTx 内注释）：此刻新余额行已对其它连接可见，
+    // 监听器不会把"新建余额行"误判为库存不足。
+    this.emitStockIncreased({
+      skuId: prevalidated.dim.skuId,
+      warehouseId: prevalidated.dim.warehouseId,
+      eventType,
+    });
     return outcome;
+  }
+
+  /**
+   * 库存增加事件广播（进程内监听器 → 订单缺货行自动重新分配）。
+   *
+   * **只能在事务提交之后调用**：监听器用独立连接读余额，未提交的新建余额行
+   * 对它不可见，会误判库存不足（2026-10-17 实测 bug）。
+   * `receiveStockInTx` / `transferInInTx` 的调用方必须在自己的事务提交后逐条广播。
+   */
+  emitStockIncreased(event: StockIncreasedEvent): void {
+    this.stockListeners.emitStockIncreased(event);
   }
 
   /**
@@ -410,14 +431,10 @@ export class InventoryService {
       }
     }
 
-    // 库存增加流水已产生（用户指示 2026-09-17）：通知进程内监听器
-    // （订单模块据此自动重新分配缺货行）。fire-and-forget、独立连接——
-    // 监听器的行锁会等到本事务提交后再拿到；回滚则预留自然失败。
-    this.stockListeners.emitStockIncreased({
-      skuId: dim.skuId,
-      warehouseId: dim.warehouseId,
-      eventType,
-    });
+    // 库存增加事件**不在这里广播**：本方法运行在调用方事务内，而监听器用
+    // 独立连接读余额——未提交的**新建**余额行对它不可见，会把"首次入库到某
+    // 库位"误判成库存不足（2026-10-17 实测：收货后未自动分配，手动重试才成功）。
+    // 事件由各入口在**提交之后**通过 emitStockIncreased 广播（AGENTS §49）。
 
     return {
       eventNo: event.eventNo,

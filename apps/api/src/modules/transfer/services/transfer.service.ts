@@ -182,6 +182,8 @@ export class TransferService {
     const runner = this.dataSource.createQueryRunner();
     await runner.connect();
     await runner.startTransaction();
+    // 调入事件在**提交后**广播（2026-10-17：事务内广播时新建余额行对监听器不可见）。
+    const transferredInSkus = new Set<string>();
     try {
       await this.repository.updateStatus(runner.manager, transfer.id, 'CONFIRMED');
       for (const line of lines) {
@@ -206,6 +208,9 @@ export class TransferService {
           idempotencyKey: transferInKey(line.id),
           operator,
         });
+        if (inc.wrote) {
+          transferredInSkus.add(line.skuId);
+        }
         await this.repository.markLineLegs(runner.manager, line.id, {
           outEventNo: out.eventNo,
           inEventNo: inc.eventNo,
@@ -217,6 +222,14 @@ export class TransferService {
       throw error;
     } finally {
       await runner.release();
+    }
+
+    for (const skuId of transferredInSkus) {
+      this.inventoryService.emitStockIncreased({
+        skuId,
+        warehouseId: transfer.toWarehouseId,
+        eventType: 'TRANSFER_IN',
+      });
     }
 
     await this.operationLog.record({
