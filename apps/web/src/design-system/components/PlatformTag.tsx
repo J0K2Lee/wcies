@@ -59,6 +59,10 @@ export function PlatformTag({ code, suffix }: PlatformTagProps) {
           style={{
             color: colors.textSecondary,
             fontSize: 13,
+            // 店铺名单行省略（2026-10-17）：此前没有 nowrap，「OZON 香港店」在
+            // 紧凑列里会折成两行，把整行顶高；宁可省略也不能断行。
+            whiteSpace: 'nowrap',
+            minWidth: 0,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
           }}

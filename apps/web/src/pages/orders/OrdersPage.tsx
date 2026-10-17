@@ -1,4 +1,4 @@
-import { Key, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Key, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ColumnsType } from 'antd/es/table';
 import {
   App as AntdApp,
@@ -303,10 +303,10 @@ const MAIN_COLUMN_LABELS: Record<string, string> = {
   items: '商品',
   sku: 'SKU',
   erpStatus: 'ERP 状态',
-  store: '店铺',
-  fulfillmentMode: '履约方式',
+  storeFulfillment: '店铺·履约',
   shipmentDeadline: '时限',
   orderedAt: '下单时间',
+  platformTrackingNo: '运单号',
 };
 
 /**
@@ -566,19 +566,26 @@ function deadlineBadgeFor(
 }
 
 /**
- * 展开行内容（用户指示 2026-09-18 bug 修复）：每个展开行自带订单详情查询
- * ——与右栏/抽屉共用同一 `['order-detail', orderId]` 缓存键，互不重复请求。
- * 此前展开内容依赖「当前选中订单」的详情，「默认展开所有订单行」开启时
- * 未选中任何行导致全部显示「暂无商品明细」。
+ * 展开行内容 —— 纵向明细（2026-10-17 用户拍板）。
+ *
+ * 改造前这里是一张 8 列的「第二张表」，与主表 9 列形成两套互不相干的列网格：
+ * 主表要横滚时子表跟着滚、右端永远露半截；子表还出现过「唯一没声明 width 的列
+ * 吞掉近一半宽度」。改成纵向明细后：每个 SKU 行一块、字段纵向排布，不吃表格
+ * 宽度，任何视口下都不会被裁切。
+ *
+ * 数据仍复用 `['order-detail', orderId]` 缓存键（§68），展开不产生额外请求。
  */
 function ExpandedOrderItems({
   order,
-  columns,
+  fields,
+  thumbnailSize,
   selectedItem,
   onItemRowClick,
 }: {
   order: OrderListItem;
-  columns: Array<ColumnsType<OrderItem>[number]>;
+  /** 明细要显示的字段 key（已按视图设置的显隐 + 顺序过滤）。 */
+  fields: string[];
+  thumbnailSize: number;
   selectedItem: OrderItem | null;
   onItemRowClick: (item: OrderItem) => void;
 }) {
@@ -595,26 +602,201 @@ function ExpandedOrderItems({
   if (detail === undefined || detail.id !== order.id) {
     return <span style={{ fontSize: 12.5, color: colors.textTertiary }}>暂无商品明细</span>;
   }
+  const totalQuantity = detail.items.reduce((sum, item) => sum + Number(item.quantity), 0);
   return (
     <Image.PreviewGroup>
-      <DataTable<OrderItem>
-        size="small"
-        rowKey="id"
-        dataSource={detail.items}
-        pagination={false}
-        emptyTitle="无商品行"
-        columns={columns}
-        onRow={(item) => ({
-          // 点击展开行 → 侧边栏显示该 SKU 信息（用户指示 2026-09-17）；
-          // 同时选中所属订单，供右栏详情查询使用。
-          onClick: () => onItemRowClick(item),
-          style: {
-            cursor: 'pointer',
-            background: selectedItem?.id === item.id ? colors.primarySoft : undefined,
-          },
-        })}
-      />
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {detail.items.map((item, index) => (
+          <ExpandedItemBlock
+            key={item.id}
+            item={item}
+            currency={detail.currency}
+            fields={fields}
+            thumbnailSize={thumbnailSize}
+            selected={selectedItem?.id === item.id}
+            first={index === 0}
+            onActivate={() => onItemRowClick(item)}
+          />
+        ))}
+        {detail.items.length > 1 && (
+          <div
+            style={{
+              fontSize: 12,
+              color: colors.textSecondary,
+              textAlign: 'right',
+              padding: '8px 6px 0',
+              marginTop: 6,
+              borderTop: `1px solid ${colors.borderSoft}`,
+            }}
+          >
+            {detail.items.length} 个 SKU · 共 {totalQuantity} 件
+          </div>
+        )}
+      </div>
     </Image.PreviewGroup>
+  );
+}
+
+/** 元信息行的取值（块头三项之外的字段）。 */
+function expandedFieldText(key: string, item: OrderItem, currency: string | null): ReactNode {
+  switch (key) {
+    case 'offerId':
+      return item.offerId ?? '—';
+    case 'quantity':
+      return `${Number(item.quantity)} 件`;
+    case 'unitPrice':
+      return fmtMoney(item.unitPrice, currency);
+    case 'totalPrice':
+      return fmtMoney(item.totalPrice, currency);
+    case 'latestPurchasePrice':
+      return item.latestPurchasePrice === null ? '—' : fmtMoney(item.latestPurchasePrice, currency);
+    default:
+      return '—';
+  }
+}
+
+/** 单个 SKU 行：块头（图 + 编码 + 名称 + 履约状态）+ 元信息行。 */
+function ExpandedItemBlock({
+  item,
+  currency,
+  fields,
+  thumbnailSize,
+  selected,
+  first,
+  onActivate,
+}: {
+  item: OrderItem;
+  currency: string | null;
+  fields: string[];
+  thumbnailSize: number;
+  selected: boolean;
+  first: boolean;
+  onActivate: () => void;
+}) {
+  const visible = new Set(fields);
+  // 主图 / SKU / 履约状态 固定在块头，其余字段按视图设置的顺序排在元信息行。
+  const metaFields = fields.filter(
+    (key) => key !== 'image' && key !== 'sku' && key !== 'fulfillmentStatus',
+  );
+  // 键盘可达（2026-10-17 体检 P2-9）：Enter / 空格 = 点击。
+  const interaction = rowInteractionProps({
+    selected,
+    onActivate,
+    label: `商品行 ${item.skuCode ?? item.offerId ?? `第 ${item.lineNo} 行`}`,
+  });
+  return (
+    <div
+      onClick={onActivate}
+      {...interaction}
+      style={{
+        display: 'flex',
+        gap: 12,
+        alignItems: 'flex-start',
+        padding: '10px 6px',
+        borderTop: first ? undefined : `1px solid ${colors.borderSoft}`,
+        background: selected ? colors.primarySoft : undefined,
+        borderRadius: 6,
+        cursor: 'pointer',
+      }}
+    >
+      {visible.has('image') && (
+        <div style={{ flex: '0 0 auto' }}>
+          {item.imageUrl === null ? (
+            <div
+              style={{
+                width: thumbnailSize,
+                height: thumbnailSize,
+                borderRadius: 6,
+                background: colors.neutralBg,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: colors.textTertiary,
+                fontSize: 11,
+              }}
+            >
+              无图
+            </div>
+          ) : (
+            <Image
+              src={item.imageUrl}
+              width={thumbnailSize}
+              height={thumbnailSize}
+              style={{ objectFit: 'contain', borderRadius: 6, background: colors.neutralBg }}
+            />
+          )}
+        </div>
+      )}
+
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {visible.has('sku') &&
+            (item.skuId === null ? (
+              <StatusBadge
+                tone="purple"
+                label="无法映射"
+                hint="缺少 SKU 映射，去 SKU 映射补齐后重试"
+                showDot={false}
+              />
+            ) : (
+              <>
+                <span style={{ fontWeight: 550 }}>{item.skuCode}</span>
+                <span
+                  title={item.skuName ?? undefined}
+                  style={{
+                    fontSize: 12.5,
+                    color: colors.textSecondary,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    maxWidth: 420,
+                  }}
+                >
+                  {item.skuName}
+                </span>
+              </>
+            ))}
+          {visible.has('fulfillmentStatus') && (
+            // 紧跟名称而不是推到最右（2026-10-17）：明细块近 1000px 宽，
+            // 右对齐会让徽标孤零零飘在远端，反而看不出属于哪一行。
+            <span style={{ flex: '0 0 auto' }}>
+              <StatusBadge
+                tone={FULFILLMENT_STATUS_META[item.fulfillmentStatus]?.tone ?? 'neutral'}
+                label={
+                  FULFILLMENT_STATUS_META[item.fulfillmentStatus]?.label ?? item.fulfillmentStatus
+                }
+                showDot={false}
+              />
+            </span>
+          )}
+        </div>
+
+        {metaFields.length > 0 && (
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '4px 20px',
+              marginTop: 6,
+              fontSize: 12.5,
+              color: colors.textPrimary,
+            }}
+          >
+            {metaFields.map((key) => (
+              <span
+                key={key}
+                style={key === 'offerId' ? { flexBasis: '100%', minWidth: 0 } : undefined}
+              >
+                <span style={{ color: colors.textTertiary }}>
+                  {EXPANDED_COLUMN_LABELS[key] ?? key}
+                </span>
+                <span style={{ marginLeft: 6 }}>{expandedFieldText(key, item, currency)}</span>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -1623,169 +1805,14 @@ export function OrdersPage() {
   const railDetail = selectedId !== null ? detailQuery.data?.data : undefined;
 
   /**
-   * 展开行列注册表（用户指示 2026-09-17）：主图方形不裁剪、新增最近采购价；
-   * 列的显示顺序/显隐由视图设置驱动。数据复用右栏已共享的 detail 查询
-   * （§68），展开不产生额外请求。
+   * 展开行字段（2026-10-17 改纵向明细）：视图设置里的「展开列」语义从
+   * 「第二张表的列」变成「明细块里显示哪些字段」—— 显隐照旧生效，
+   * 顺序决定元信息行的排列；主图 / SKU / 履约状态 固定在块头，不参与排序。
    */
-  const expandedCurrency = detail !== undefined ? detail.currency : (railDetail?.currency ?? null);
-  const expandedColumnDefs = useMemo<Record<string, ColumnsType<OrderItem>[number]>>(
-    () => ({
-      image: {
-        title: '主图',
-        key: 'image',
-        width: viewSettings.thumbnailSize + 20,
-        render: (_: unknown, row: OrderItem) =>
-          row.imageUrl === null ? (
-            <div
-              style={{
-                width: viewSettings.thumbnailSize,
-                height: viewSettings.thumbnailSize,
-                borderRadius: 6,
-                background: colors.neutralBg,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: colors.textTertiary,
-                fontSize: 11,
-              }}
-            >
-              无图
-            </div>
-          ) : (
-            <Tooltip title={row.imageSource === 'PLATFORM' ? '平台图' : undefined}>
-              <span style={{ display: 'inline-block' }}>
-                <Image
-                  src={row.imageUrl}
-                  width={viewSettings.thumbnailSize}
-                  height={viewSettings.thumbnailSize}
-                  style={{
-                    objectFit: 'contain',
-                    borderRadius: 6,
-                    background: colors.neutralBg,
-                    cursor: 'zoom-in',
-                  }}
-                />
-              </span>
-            </Tooltip>
-          ),
-      },
-      sku: {
-        title: 'SKU',
-        key: 'sku',
-        /**
-         * 必须定宽（2026-10-17 用户反馈「展开行 SKU 列最难看」）。
-         * 定宽表会把剩余空间全部分给**唯一没有 width 的列** —— 此前 8 列里只有
-         * SKU 没声明宽度，实测被拉到 632px、占子表 46%，右侧留下一大片空白，
-         * 整行重心全歪。给上宽度后各列按比例分配，不再有单列吞宽。
-         */
-        width: 240,
-        render: (_: unknown, row: OrderItem) =>
-          row.skuId === null ? (
-            <div>
-              <StatusBadge
-                tone="purple"
-                label="无法映射"
-                hint="缺少 SKU 映射，去 SKU 映射补齐后重试"
-                showDot={false}
-              />
-              <div style={{ fontSize: 12, color: colors.textTertiary, marginTop: 2 }}>
-                {row.platformSkuId ?? row.sellerSku ?? `第 ${row.lineNo} 行`}
-              </div>
-            </div>
-          ) : (
-            <div>
-              <div style={{ fontWeight: 550 }}>{row.skuCode}</div>
-              {/* 名称单行省略 + 悬浮看全名：长名不再把行高顶起来，也不会挤走邻列 */}
-              <div
-                title={row.skuName ?? undefined}
-                style={{
-                  fontSize: 12.5,
-                  color: colors.textSecondary,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {row.skuName}
-              </div>
-            </div>
-          ),
-      },
-      offerId: {
-        title: 'Offer ID',
-        key: 'offerId',
-        width: 180,
-        render: (_: unknown, row: OrderItem) => (
-          // break-all 会在单词中间硬断（实测把「Ultra+」切成「Ultr / a+」），
-          // 改为 break-word：优先在空格/连字符处换行。
-          <span style={{ fontSize: 12.5, wordBreak: 'break-word' as const }}>
-            {row.offerId ?? '—'}
-          </span>
-        ),
-      },
-      quantity: {
-        title: '数量',
-        dataIndex: 'quantity',
-        key: 'quantity',
-        width: 70,
-        align: 'right' as const,
-        render: (value: string) => Number(value),
-      },
-      unitPrice: {
-        title: '单价',
-        dataIndex: 'unitPrice',
-        key: 'unitPrice',
-        width: 110,
-        align: 'right' as const,
-        render: (value: string | null) => fmtMoney(value, expandedCurrency),
-      },
-      totalPrice: {
-        title: '小计',
-        dataIndex: 'totalPrice',
-        key: 'totalPrice',
-        width: 110,
-        align: 'right' as const,
-        render: (value: string | null) => fmtMoney(value, expandedCurrency),
-      },
-      latestPurchasePrice: {
-        title: '最近采购价',
-        dataIndex: 'latestPurchasePrice',
-        key: 'latestPurchasePrice',
-        width: 110,
-        align: 'right' as const,
-        render: (value: string | null, row: OrderItem) =>
-          value === null ? (
-            <span style={{ color: colors.textTertiary }}>—</span>
-          ) : (
-            <Tooltip title={`SKU 主数据维护值（当前行数 ×${Number(row.quantity)}）`}>
-              <span style={{ fontSize: 12.5 }}>{fmtMoney(value, expandedCurrency)}</span>
-            </Tooltip>
-          ),
-      },
-      fulfillmentStatus: {
-        title: '履约状态',
-        dataIndex: 'fulfillmentStatus',
-        key: 'fulfillmentStatus',
-        width: 110,
-        render: (value: string) => (
-          <StatusBadge
-            tone={FULFILLMENT_STATUS_META[value]?.tone ?? 'neutral'}
-            label={FULFILLMENT_STATUS_META[value]?.label ?? value}
-            showDot={false}
-          />
-        ),
-      },
-    }),
-    [expandedCurrency, viewSettings.thumbnailSize],
-  );
-
-  const expandedColumns = useMemo(
+  const expandedFields = useMemo(
     () =>
-      viewSettings.expandedColumns
-        .filter((column) => column.visible)
-        .map((column) => expandedColumnDefs[column.key])
-        .filter((column) => column !== undefined),
-    [viewSettings.expandedColumns, expandedColumnDefs],
+      viewSettings.expandedColumns.filter((column) => column.visible).map((column) => column.key),
+    [viewSettings.expandedColumns],
   );
 
   /** 快速建档：按订单行标识反查商品链接（storeId 来自列表行，单击选中即有）。 */
@@ -2740,7 +2767,7 @@ export function OrdersPage() {
     items: {
       title: '商品',
       key: 'items',
-      width: 170,
+      width: 133,
       render: (_: unknown, row: OrderListItem) => {
         if (row.mappingFailedCount > 0) {
           return (
@@ -2814,7 +2841,7 @@ export function OrdersPage() {
     sku: {
       title: 'SKU',
       key: 'sku',
-      width: 170,
+      width: 140,
       render: (_: unknown, row: OrderListItem) =>
         row.firstSkuCode === null ? (
           <span style={{ color: colors.textTertiary }}>—</span>
@@ -2837,7 +2864,7 @@ export function OrdersPage() {
       title: 'ERP 状态',
       dataIndex: 'erpStatus',
       key: 'erpStatus',
-      width: 130,
+      width: 105,
       render: (value: string, row: OrderListItem) => (
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
           <StatusBadge
@@ -2863,24 +2890,34 @@ export function OrdersPage() {
         </span>
       ),
     },
-    store: {
-      title: '店铺',
-      key: 'store',
-      width: 190,
-      render: (_: unknown, row: OrderListItem) => (
-        <PlatformTag code={row.platformCode} suffix={row.storeName} />
-      ),
-    },
-    fulfillmentMode: {
-      title: '履约方式',
-      key: 'fulfillmentMode',
-      width: 100,
+    storeFulfillment: {
+      title: '店铺·履约',
+      key: 'storeFulfillment',
+      // 合并列（2026-10-17 用户拍板 A 方案）：店铺与履约方式是同一件事的两个面，
+      // 分两列白占近 300px，正是主表必须横向滚动的直接原因。现在合成
+      // 「OZON 香港店 · rFBS」，订单一眼能读完，主表也回到不横滚。
+      width: 210,
       render: (_: unknown, row: OrderListItem) => {
         const mode = fulfillmentModeChip(row.fulfillmentMode);
-        return mode === null ? (
-          '—'
-        ) : (
-          <StatusBadge tone="neutral" label={mode.short} hint={mode.hint} showDot={false} />
+        return (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+            <PlatformTag code={row.platformCode} suffix={row.storeName} />
+            {mode !== null && (
+              // 履约方式用纯文本而非徽标（2026-10-17）：徽标的内边距+边框要多吃
+              // 50px，会把店铺名挤成省略号；纯文本保留悬浮说明，观感也更安静。
+              <span
+                title={mode.hint}
+                style={{
+                  flexShrink: 0,
+                  fontSize: 12,
+                  color: colors.textSecondary,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                · {mode.short}
+              </span>
+            )}
+          </span>
         );
       },
     },
@@ -2888,7 +2925,7 @@ export function OrdersPage() {
       title: '时限',
       dataIndex: 'shipmentDeadline',
       key: 'shipmentDeadline',
-      width: 130,
+      width: 104,
       render: (value: string | null, row: OrderListItem) => {
         const badge = deadlineBadgeFor(
           value,
@@ -2914,7 +2951,7 @@ export function OrdersPage() {
       title: '下单时间',
       dataIndex: 'orderedAt',
       key: 'orderedAt',
-      width: 150,
+      width: 94,
       render: (value: string) => <RelativeTime value={value} />,
     },
   };
@@ -3171,7 +3208,8 @@ export function OrdersPage() {
               <div onClick={(event) => event.stopPropagation()}>
                 <ExpandedOrderItems
                   order={record}
-                  columns={expandedColumns}
+                  fields={expandedFields}
+                  thumbnailSize={viewSettings.thumbnailSize}
                   selectedItem={
                     selectedItemId !== null && railDetail !== undefined
                       ? (railDetail.items.find((item) => item.id === selectedItemId) ?? null)
