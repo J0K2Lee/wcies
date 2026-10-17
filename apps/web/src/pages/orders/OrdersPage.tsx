@@ -766,9 +766,9 @@ function ExpandedItemBlock({
               </>
             ))}
           {visible.has('fulfillmentStatus') && (
-            // 紧跟名称而不是推到最右（2026-10-17）：明细块近 1000px 宽，
-            // 右对齐会让徽标孤零零飘在远端，反而看不出属于哪一行。
-            <span style={{ flex: '0 0 auto' }}>
+            // 右对齐（2026-10-17 用户按设计稿指正）：多个 SKU 块上下排列时，
+            // 右对齐能形成一条竖向的「状态列」，扫读比跟在名称后面更整齐。
+            <span style={{ marginLeft: 'auto', flex: '0 0 auto' }}>
               <StatusBadge
                 tone={FULFILLMENT_STATUS_META[item.fulfillmentStatus]?.tone ?? 'neutral'}
                 label={
