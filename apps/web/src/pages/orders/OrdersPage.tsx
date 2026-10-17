@@ -1672,6 +1672,13 @@ export function OrdersPage() {
       sku: {
         title: 'SKU',
         key: 'sku',
+        /**
+         * 必须定宽（2026-10-17 用户反馈「展开行 SKU 列最难看」）。
+         * 定宽表会把剩余空间全部分给**唯一没有 width 的列** —— 此前 8 列里只有
+         * SKU 没声明宽度，实测被拉到 632px、占子表 46%，右侧留下一大片空白，
+         * 整行重心全歪。给上宽度后各列按比例分配，不再有单列吞宽。
+         */
+        width: 240,
         render: (_: unknown, row: OrderItem) =>
           row.skuId === null ? (
             <div>
@@ -1688,16 +1695,30 @@ export function OrdersPage() {
           ) : (
             <div>
               <div style={{ fontWeight: 550 }}>{row.skuCode}</div>
-              <div style={{ fontSize: 12.5, color: colors.textSecondary }}>{row.skuName}</div>
+              {/* 名称单行省略 + 悬浮看全名：长名不再把行高顶起来，也不会挤走邻列 */}
+              <div
+                title={row.skuName ?? undefined}
+                style={{
+                  fontSize: 12.5,
+                  color: colors.textSecondary,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {row.skuName}
+              </div>
             </div>
           ),
       },
       offerId: {
         title: 'Offer ID',
         key: 'offerId',
-        width: 170,
+        width: 180,
         render: (_: unknown, row: OrderItem) => (
-          <span style={{ fontSize: 12.5, wordBreak: 'break-all' as const }}>
+          // break-all 会在单词中间硬断（实测把「Ultra+」切成「Ultr / a+」），
+          // 改为 break-word：优先在空格/连字符处换行。
+          <span style={{ fontSize: 12.5, wordBreak: 'break-word' as const }}>
             {row.offerId ?? '—'}
           </span>
         ),
@@ -2644,7 +2665,9 @@ export function OrdersPage() {
     platformOrderId: {
       title: '订单号',
       key: 'platformOrderId',
-      width: 170,
+      // 170 → 200（2026-10-17 用户反馈「很丑」）：17 位平台单号在连字符处被
+      // break-all 硬断成两行（「0161741011-0036」/「-1」），首列三行、行高被顶到 75px。
+      width: 200,
       render: (_: unknown, row: OrderListItem) => {
         // 加急旗标（用户指示 2026-10-16）：点击即切换。红=加急，黑白=普通。
         // 终态订单（已发货/已取消）不可切换，旗标仅以低饱和提示（后端亦拒绝）。
@@ -2684,8 +2707,21 @@ export function OrdersPage() {
               <FlagFilled />
             </button>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 550, wordBreak: 'break-all' }}>
-                {row.platformOrderId}
+              {/* 单号单行显示、超长才省略（悬浮看全号）；break-all 会把
+                  「0161741011-0036-1」在连字符处切成两行，首列三行高。 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <span
+                  title={row.platformOrderId}
+                  style={{
+                    fontWeight: 550,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    minWidth: 0,
+                  }}
+                >
+                  {row.platformOrderId}
+                </span>
                 {urgent && (
                   <StatusBadge
                     tone="danger"

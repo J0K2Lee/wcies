@@ -1266,6 +1266,9 @@ const EXPANDED_PO_ITEM_COLUMNS: ColumnsType<PurchaseOrderItem> = [
   {
     title: 'SKU',
     key: 'sku',
+    // 定宽（2026-10-17，与订单页同因）：此前是这一列唯一没有 width，定宽表会把
+    // 剩余空间全分给它，右侧（数量/成本/小计）被挤到最右，中间留一大片空白。
+    width: 320,
     render: (_: unknown, row: PurchaseOrderItem) => (
       <div>
         <span style={{ fontWeight: 550 }}>{row.skuCode}</span>
