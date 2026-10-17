@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Key, useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
 import {
@@ -9,8 +9,10 @@ import {
   Input,
   InputNumber,
   Modal,
+  Pagination,
   Select,
   Tabs,
+  Tooltip,
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { ColumnsType } from 'antd/es/table';
@@ -18,6 +20,7 @@ import { apiPost, useApiQuery } from '../../api/hooks';
 import { apiClient } from '../../api/client';
 import { fmtDateTime } from '../../utils/format';
 import {
+  ActionIsland,
   colors,
   ContextAction,
   ContextMetric,
@@ -54,6 +57,10 @@ interface ReceiptRow {
   receivedAt: string | null;
   itemCount: number;
   totalQuantity: string;
+  /** 明细第一行的 SKU 编码 / 名称 / 数量（列表「采购商品」列）。 */
+  firstItemSkuCode: string | null;
+  firstItemName: string | null;
+  firstItemQuantity: string | null;
 }
 
 interface ReceiptItem {
@@ -185,9 +192,14 @@ async function resolveBarcode(
 }
 
 export function PurchaseReceiptsPage() {
-  const { message, modal } = AntdApp.useApp();
+  const { message, modal, notification } = AntdApp.useApp();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
+  // 批量勾选（用户指示 2026-10-17）：跨分页保留，浮岛驱动批量删除。
+  const [selectedReceiptIds, setSelectedReceiptIds] = useState<string[]>([]);
+  const [selectedReceiptsById, setSelectedReceiptsById] = useState<Map<string, ReceiptRow>>(
+    () => new Map(),
+  );
   const [keyword, setKeyword] = useState('');
   const [statusTab, setStatusTab] = useState<ReceiptStatusTab>('pending');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -366,6 +378,97 @@ export function PurchaseReceiptsPage() {
     },
     onError: (error: Error) => void message.error(error.message),
   });
+
+  // ---- 批量删除（用户指示 2026-10-17）：仅删除从未入库的单据 ----
+  const selectedReceiptRows = useMemo(
+    () =>
+      selectedReceiptIds
+        .map((id) => selectedReceiptsById.get(id))
+        .filter((row): row is ReceiptRow => row !== undefined),
+    [selectedReceiptIds, selectedReceiptsById],
+  );
+  const handleReceiptSelectionChange = useCallback((keys: Key[], rows: ReceiptRow[]) => {
+    const ids = keys.map(String);
+    setSelectedReceiptIds(ids);
+    setSelectedReceiptsById((current) => {
+      const next = new Map<string, ReceiptRow>();
+      for (const id of ids) {
+        const kept = current.get(id);
+        if (kept !== undefined) next.set(id, kept);
+      }
+      for (const row of rows) next.set(row.id, row);
+      return next;
+    });
+  }, []);
+  const clearReceiptSelection = useCallback(() => {
+    setSelectedReceiptIds([]);
+    setSelectedReceiptsById(new Map());
+  }, []);
+
+  const batchDeleteMutation = useMutation({
+    mutationFn: (ids: string[]) =>
+      apiPost<{
+        total: number;
+        succeeded: number;
+        failed: number;
+        results: Array<{
+          id: string;
+          code: string | null;
+          ok: boolean;
+          errorCode: string | null;
+          message: string | null;
+        }>;
+      }>('/api/v1/purchase-receipts/batch-delete', { ids }),
+    onSuccess: (result) => {
+      notification.open({
+        type: result.failed > 0 ? 'warning' : 'success',
+        title: `批量删除收货单：成功 ${result.succeeded} / 失败 ${result.failed}（共 ${result.total}）`,
+        description:
+          result.failed === 0 ? undefined : (
+            <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+              {result.results
+                .filter((item) => !item.ok)
+                .map((item) => (
+                  <div key={item.id}>
+                    {item.code ?? selectedReceiptsById.get(item.id)?.receiptNo ?? item.id}：
+                    {item.message ?? item.errorCode ?? '未知错误'}
+                  </div>
+                ))}
+            </div>
+          ),
+        duration: result.failed > 0 ? 0 : 6,
+      });
+      const deleted = new Set(result.results.filter((item) => item.ok).map((item) => item.id));
+      if (deleted.size > 0) {
+        handleReceiptSelectionChange(
+          selectedReceiptIds.filter((id) => !deleted.has(id)),
+          selectedReceiptRows.filter((row) => !deleted.has(row.id)),
+        );
+        if (selectedId !== null && deleted.has(selectedId)) {
+          setSelectedId(null);
+        }
+      }
+      invalidate();
+    },
+    onError: (error: Error) => void message.error(`批量删除失败：${error.message}`),
+  });
+
+  const requestBatchDelete = useCallback(() => {
+    if (selectedReceiptIds.length === 0) {
+      return;
+    }
+    modal.confirm({
+      title: `删除勾选的 ${selectedReceiptIds.length} 张收货单？`,
+      content:
+        '仅草稿/已取消（从未入库）的收货单会被删除；已确认收货的单会保留并提示失败。删除不可恢复。',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '返回',
+      onOk: () => {
+        batchDeleteMutation.mutate(selectedReceiptIds);
+      },
+    });
+  }, [modal, selectedReceiptIds, batchDeleteMutation]);
 
   const fromPoMutation = useMutation({
     // 表单字段整体作为 values 传入时含 poId，但 poId 只属于路径参数——
@@ -645,7 +748,7 @@ export function PurchaseReceiptsPage() {
 
       <FilterBar>
         <Input.Search
-          placeholder="收货单号 / 货源说明"
+          placeholder="收货单号 / 货源说明 / SKU"
           allowClear
           onSearch={(value) => {
             setPage(1);
@@ -677,13 +780,13 @@ export function PurchaseReceiptsPage() {
           rowKey="id"
           loading={list.isLoading}
           dataSource={rows}
-          pagination={{
-            current: page,
-            pageSize: 50,
-            total: list.data?.meta.total ?? 0,
-            showTotal: (total) => `共 ${total} 单`,
-            onChange: setPage,
+          rowSelection={{
+            selectedRowKeys: selectedReceiptIds,
+            preserveSelectedRowKeys: true,
+            onChange: handleReceiptSelectionChange,
           }}
+          // 分页迁到页面底部浮岛（用户指示 2026-10-17，与订单页同款）。
+          pagination={false}
           expandable={{
             // 选中即展开（与订单/采购单页一致）：行点击选择驱动展开，
             // 直接显示该单的收货商品明细（需求 2026-10-09）。
@@ -696,7 +799,13 @@ export function PurchaseReceiptsPage() {
             ),
           }}
           onRow={(record) => ({
-            onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
+            onClick: (event) => {
+              // 勾选复选框不触发行选中/展开（多选与单击选中互不干扰）。
+              if ((event.target as HTMLElement).closest('.ant-table-selection-column') !== null) {
+                return;
+              }
+              setSelectedId(record.id === selectedId ? null : record.id);
+            },
             onDoubleClick: () => setDetailId(record.id),
             style: {
               cursor: 'pointer',
@@ -720,6 +829,29 @@ export function PurchaseReceiptsPage() {
               width: 90,
               render: (value: string | null, row: ReceiptRow) =>
                 value ?? row.warehouseId.slice(0, 8),
+            },
+            // 「采购商品」列（用户指示 2026-10-17）：明细第一行的 SKU 名称 + 数量。
+            {
+              title: '采购商品',
+              key: 'firstItem',
+              width: 260,
+              render: (_: unknown, row: ReceiptRow) => {
+                if (row.firstItemName === null && row.firstItemSkuCode === null) {
+                  return <span style={{ color: colors.textTertiary }}>—</span>;
+                }
+                return (
+                  <Tooltip title={row.firstItemSkuCode ?? undefined}>
+                    <span style={{ fontSize: 12.5, wordBreak: 'break-all' }}>
+                      {row.firstItemName ?? row.firstItemSkuCode}
+                      {row.firstItemQuantity !== null && (
+                        <span style={{ color: colors.textSecondary }}>
+                          x{Number(row.firstItemQuantity)}
+                        </span>
+                      )}
+                    </span>
+                  </Tooltip>
+                );
+              },
             },
             {
               title: '状态',
@@ -1008,6 +1140,47 @@ export function PurchaseReceiptsPage() {
           </span>
         </Form>
       </Modal>
+
+      {/* ---- 底部动作浮岛（用户指示 2026-10-17：与订单页同款）----
+          分页与批量动作固定在主滚动区底部；必须是页面根节点的流内末尾。 */}
+      <ActionIsland
+        summary={
+          selectedReceiptIds.length > 0 ? (
+            <>
+              <span style={{ fontSize: 13, fontWeight: 550 }}>
+                已选 {selectedReceiptIds.length} 单
+              </span>
+              <span style={{ fontSize: 12, color: colors.textTertiary }}>（跨分页保留）</span>
+            </>
+          ) : undefined
+        }
+        actions={
+          selectedReceiptIds.length > 0 ? (
+            <>
+              <Button danger loading={batchDeleteMutation.isPending} onClick={requestBatchDelete}>
+                批量删除
+              </Button>
+              <Button type="text" onClick={clearReceiptSelection}>
+                清空选择
+              </Button>
+            </>
+          ) : undefined
+        }
+        leading={
+          <span style={{ fontSize: 13, color: colors.textSecondary }}>
+            共 {list.data?.meta.total ?? 0} 单
+          </span>
+        }
+        trailing={
+          <Pagination
+            current={page}
+            pageSize={50}
+            total={list.data?.meta.total ?? 0}
+            onChange={(next) => setPage(next)}
+          />
+        }
+        hidden={(list.data?.meta.total ?? 0) === 0}
+      />
     </div>
   );
 }

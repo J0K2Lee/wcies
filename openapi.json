@@ -7366,7 +7366,7 @@
             "name": "keyword",
             "required": false,
             "in": "query",
-            "description": "PO号 / 货源说明 / 供应商名 模糊搜索",
+            "description": "PO号 / 货源说明 / 供应商名 / 明细 SKU 编码或名称 模糊搜索（2026-10-17）",
             "schema": {
               "type": "string"
             }
@@ -7515,6 +7515,46 @@
         "tags": ["purchase-orders"]
       }
     },
+    "/api/v1/purchase-orders/batch-delete": {
+      "post": {
+        "operationId": "PurchaseOrderController_deleteBatch",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurchaseBatchDeleteRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PurchaseBatchDeleteResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "批量删除采购单（仅从未产生库存事实的：无 RECEIVED 收货单且未收数量为 0；逐笔隔离失败）",
+        "tags": ["purchase-orders"]
+      }
+    },
     "/api/v1/purchase-orders/{id}": {
       "get": {
         "operationId": "PurchaseOrderController_getById",
@@ -7648,7 +7688,7 @@
             "name": "keyword",
             "required": false,
             "in": "query",
-            "description": "收货单号 / 货源说明 模糊搜索",
+            "description": "收货单号 / 货源说明 / 明细 SKU 编码或名称 模糊搜索（2026-10-17）",
             "schema": {
               "type": "string"
             }
@@ -7761,6 +7801,46 @@
           }
         },
         "summary": "新建收货单草稿（确认时才写库存）",
+        "tags": ["purchase-receipts"]
+      }
+    },
+    "/api/v1/purchase-receipts/batch-delete": {
+      "post": {
+        "operationId": "PurchaseReceiptController_deleteBatch",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurchaseBatchDeleteRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PurchaseBatchDeleteResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "批量删除收货单（仅 DRAFT/CANCELLED；确认入库的 RECEIVED 拒绝；逐笔隔离失败）",
         "tags": ["purchase-receipts"]
       }
     },
@@ -17798,6 +17878,24 @@
             "type": "string",
             "example": "2.000"
           },
+          "firstItemSkuCode": {
+            "type": "object",
+            "nullable": true,
+            "example": "SKU000012022",
+            "description": "明细第一行的内部 SKU 编码（列表「采购商品」列）"
+          },
+          "firstItemName": {
+            "type": "object",
+            "nullable": true,
+            "example": "迈从-A7 V3 Ultra+-鼠标-玄影",
+            "description": "明细第一行的 SKU 名称（列表「采购商品」列）"
+          },
+          "firstItemQuantity": {
+            "type": "object",
+            "nullable": true,
+            "example": "1.000",
+            "description": "明细第一行的数量（列表「采购商品」列）"
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -18011,6 +18109,66 @@
         },
         "required": ["items"]
       },
+      "PurchaseBatchDeleteItemResultDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "object",
+            "nullable": true,
+            "example": "PO000001"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "errorCode": {
+            "type": "object",
+            "nullable": true,
+            "example": "PURCHASE_ORDER_INVALID_STATE"
+          },
+          "message": {
+            "type": "object",
+            "nullable": true
+          }
+        },
+        "required": ["id", "ok"]
+      },
+      "PurchaseBatchDeleteResultDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "succeeded": {
+            "type": "number"
+          },
+          "failed": {
+            "type": "number"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PurchaseBatchDeleteItemResultDto"
+            }
+          }
+        },
+        "required": ["total", "succeeded", "failed", "results"]
+      },
+      "PurchaseBatchDeleteRequestDto": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "description": "要删除的单据 id 列表（最多 200）",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["ids"]
+      },
       "UpdatePurchaseOrderRequestDto": {
         "type": "object",
         "properties": {
@@ -18090,6 +18248,24 @@
           "totalQuantity": {
             "type": "string",
             "example": "2.000"
+          },
+          "firstItemSkuCode": {
+            "type": "object",
+            "nullable": true,
+            "example": "SKU000012022",
+            "description": "明细第一行的内部 SKU 编码（列表「采购商品」列）"
+          },
+          "firstItemName": {
+            "type": "object",
+            "nullable": true,
+            "example": "迈从-A7 V3 Ultra+-鼠标-玄影",
+            "description": "明细第一行的 SKU 名称（列表「采购商品」列）"
+          },
+          "firstItemQuantity": {
+            "type": "object",
+            "nullable": true,
+            "example": "1.000",
+            "description": "明细第一行的数量（列表「采购商品」列）"
           },
           "createdAt": {
             "format": "date-time",

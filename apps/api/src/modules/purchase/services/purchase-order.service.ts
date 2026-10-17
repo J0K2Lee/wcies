@@ -39,6 +39,11 @@ import {
   UpdatePurchaseOrderRequestDto,
 } from '../dto/purchase-order.dto';
 import { offsetOf } from '../../../common/dto/pagination.dto';
+import { DomainError } from '../../../common/errors/domain.error';
+import {
+  PurchaseBatchDeleteItemResultDto,
+  PurchaseBatchDeleteResultDto,
+} from '../dto/purchase-batch-delete.dto';
 
 const ENTITY_TYPE = 'PURCHASE_ORDER';
 
@@ -338,11 +343,74 @@ export class PurchaseOrderService {
         receivingWarehouseId: row.order.receivingWarehouseId,
         itemCount: row.itemCount,
         totalQuantity: row.totalQuantity,
+        firstItemSkuCode: row.firstItemSkuCode,
+        firstItemName: row.firstItemName,
+        firstItemQuantity: row.firstItemQuantity,
         createdAt: row.order.createdAt,
         updatedAt: row.order.updatedAt,
       })),
       meta: { page, pageSize, total },
     };
+  }
+
+  /**
+   * 批量删除采购单（用户指示 2026-10-17）：物理删除，但只允许从未产生库存
+   * 事实的单据——无 `RECEIVED` 收货单且所有明细 `received_quantity = 0`
+   * （其 DRAFT/CANCELLED 收货单随采购单一起删除）。
+   *
+   * 已入库的采购单拒绝删除并给出可读原因（库存事实以收货单为凭证，
+   * AGENTS §14/§39；应走「取消」或后续退货流程）。逐笔独立：单笔失败只记录
+   * 结果、不拖垮整批；删除前写操作日志保留审计痕迹。
+   */
+  async deleteBatch(
+    ids: string[],
+    operator: OperatorContext,
+  ): Promise<PurchaseBatchDeleteResultDto> {
+    const results: PurchaseBatchDeleteItemResultDto[] = [];
+    for (const id of new Set(ids)) {
+      const order = await this.repository.findById(id);
+      try {
+        if (order === null) {
+          throw new PurchaseOrderNotFoundError(id);
+        }
+        await this.dataSource.transaction(async (manager) => {
+          const locked = await this.repository.lockById(manager, id);
+          if (locked === null) {
+            throw new PurchaseOrderNotFoundError(id);
+          }
+          if (await this.repository.hasReceivingFacts(manager, id)) {
+            throw new PurchaseOrderInvalidStateError(
+              `采购单已发生收货（${locked.status}），库存事实不可撤销，不能删除；如需终止请走取消流程`,
+              { poNo: locked.poNo, status: locked.status },
+            );
+          }
+          await this.repository.deleteWithUnreceivedReceipts(manager, id);
+        });
+        await this.operationLog.record({
+          entityType: ENTITY_TYPE,
+          entityId: id,
+          entityCode: order.poNo,
+          action: 'DELETE',
+          changes: {
+            poNo: { from: order.poNo, to: null },
+            status: { from: order.status, to: null },
+            batchDelete: { from: null, to: true },
+          },
+          operator,
+        });
+        results.push({ id, code: order.poNo, ok: true, errorCode: null, message: null });
+      } catch (error: unknown) {
+        results.push({
+          id,
+          code: order?.poNo ?? null,
+          ok: false,
+          errorCode: error instanceof DomainError ? error.code : 'PURCHASE_ORDER_DELETE_FAILED',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    const failed = results.filter((item) => !item.ok).length;
+    return { total: results.length, succeeded: results.length - failed, failed, results };
   }
 
   async getDetail(id: string): Promise<PurchaseOrderDetailDto> {

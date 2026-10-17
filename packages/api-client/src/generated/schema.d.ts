@@ -2077,6 +2077,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/purchase-orders/batch-delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量删除采购单（仅从未产生库存事实的：无 RECEIVED 收货单且未收数量为 0；逐笔隔离失败） */
+        post: operations["PurchaseOrderController_deleteBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/purchase-orders/{id}": {
         parameters: {
             query?: never;
@@ -2124,6 +2141,23 @@ export interface paths {
         put?: never;
         /** 新建收货单草稿（确认时才写库存） */
         post: operations["PurchaseReceiptController_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-receipts/batch-delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量删除收货单（仅 DRAFT/CANCELLED；确认入库的 RECEIVED 拒绝；逐笔隔离失败） */
+        post: operations["PurchaseReceiptController_deleteBatch"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5801,6 +5835,21 @@ export interface components {
             itemCount: number;
             /** @example 2.000 */
             totalQuantity: string;
+            /**
+             * @description 明细第一行的内部 SKU 编码（列表「采购商品」列）
+             * @example SKU000012022
+             */
+            firstItemSkuCode?: Record<string, never> | null;
+            /**
+             * @description 明细第一行的 SKU 名称（列表「采购商品」列）
+             * @example 迈从-A7 V3 Ultra+-鼠标-玄影
+             */
+            firstItemName?: Record<string, never> | null;
+            /**
+             * @description 明细第一行的数量（列表「采购商品」列）
+             * @example 1.000
+             */
+            firstItemQuantity?: Record<string, never> | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -5889,6 +5938,25 @@ export interface components {
             remark?: string;
             items: components["schemas"]["PurchaseOrderItemInputDto"][];
         };
+        PurchaseBatchDeleteItemResultDto: {
+            id: string;
+            /** @example PO000001 */
+            code?: Record<string, never> | null;
+            ok: boolean;
+            /** @example PURCHASE_ORDER_INVALID_STATE */
+            errorCode?: Record<string, never> | null;
+            message?: Record<string, never> | null;
+        };
+        PurchaseBatchDeleteResultDto: {
+            total: number;
+            succeeded: number;
+            failed: number;
+            results: components["schemas"]["PurchaseBatchDeleteItemResultDto"][];
+        };
+        PurchaseBatchDeleteRequestDto: {
+            /** @description 要删除的单据 id 列表（最多 200） */
+            ids: string[];
+        };
         UpdatePurchaseOrderRequestDto: {
             supplierId?: string;
             sourceNote?: string;
@@ -5918,6 +5986,21 @@ export interface components {
             itemCount: number;
             /** @example 2.000 */
             totalQuantity: string;
+            /**
+             * @description 明细第一行的内部 SKU 编码（列表「采购商品」列）
+             * @example SKU000012022
+             */
+            firstItemSkuCode?: Record<string, never> | null;
+            /**
+             * @description 明细第一行的 SKU 名称（列表「采购商品」列）
+             * @example 迈从-A7 V3 Ultra+-鼠标-玄影
+             */
+            firstItemName?: Record<string, never> | null;
+            /**
+             * @description 明细第一行的数量（列表「采购商品」列）
+             * @example 1.000
+             */
+            firstItemQuantity?: Record<string, never> | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -11200,7 +11283,7 @@ export interface operations {
     PurchaseOrderController_list: {
         parameters: {
             query?: {
-                /** @description PO号 / 货源说明 / 供应商名 模糊搜索 */
+                /** @description PO号 / 货源说明 / 供应商名 / 明细 SKU 编码或名称 模糊搜索（2026-10-17） */
                 keyword?: string;
                 status?: "ORDERED" | "PARTIALLY_RECEIVED" | "RECEIVED" | "CANCELLED";
                 /** @description 多状态过滤（repeated query key，如 ?statuses=ORDERED&statuses=PARTIALLY_RECEIVED） */
@@ -11257,6 +11340,33 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["PurchaseOrderDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    PurchaseOrderController_deleteBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurchaseBatchDeleteRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PurchaseBatchDeleteResultDto"];
                     };
                 };
             };
@@ -11344,7 +11454,7 @@ export interface operations {
     PurchaseReceiptController_list: {
         parameters: {
             query?: {
-                /** @description 收货单号 / 货源说明 模糊搜索 */
+                /** @description 收货单号 / 货源说明 / 明细 SKU 编码或名称 模糊搜索（2026-10-17） */
                 keyword?: string;
                 status?: "DRAFT" | "RECEIVED" | "CANCELLED";
                 warehouseId?: string;
@@ -11397,6 +11507,33 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["PurchaseReceiptDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    PurchaseReceiptController_deleteBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurchaseBatchDeleteRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PurchaseBatchDeleteResultDto"];
                     };
                 };
             };

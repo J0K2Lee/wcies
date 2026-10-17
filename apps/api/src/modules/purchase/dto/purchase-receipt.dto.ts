@@ -172,6 +172,24 @@ export class PurchaseReceiptListItemDto {
   @ApiPropertyOptional({ nullable: true, type: Date }) receivedAt!: Date | null;
   @ApiProperty() itemCount!: number;
   @ApiProperty({ example: '2.000' }) totalQuantity!: string;
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'SKU000012022',
+    description: '明细第一行的内部 SKU 编码（列表「采购商品」列）',
+  })
+  firstItemSkuCode!: string | null;
+  @ApiPropertyOptional({
+    nullable: true,
+    example: '迈从-A7 V3 Ultra+-鼠标-玄影',
+    description: '明细第一行的 SKU 名称（列表「采购商品」列）',
+  })
+  firstItemName!: string | null;
+  @ApiPropertyOptional({
+    nullable: true,
+    example: '1.000',
+    description: '明细第一行的数量（列表「采购商品」列）',
+  })
+  firstItemQuantity!: string | null;
   @ApiProperty({ type: Date }) createdAt!: Date;
   @ApiProperty({ type: Date }) updatedAt!: Date;
 }
@@ -195,7 +213,9 @@ export class PurchaseReceiptDetailDto {
 }
 
 export class PurchaseReceiptListQueryDto extends PaginationQueryDto {
-  @ApiPropertyOptional({ description: '收货单号 / 货源说明 模糊搜索' })
+  @ApiPropertyOptional({
+    description: '收货单号 / 货源说明 / 明细 SKU 编码或名称 模糊搜索（2026-10-17）',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(100)

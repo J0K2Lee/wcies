@@ -26,6 +26,10 @@ import {
   PurchaseReceiptListQueryDto,
   UpdatePurchaseReceiptRequestDto,
 } from '../dto/purchase-receipt.dto';
+import {
+  PurchaseBatchDeleteRequestDto,
+  PurchaseBatchDeleteResultDto,
+} from '../dto/purchase-batch-delete.dto';
 import { PurchaseReceiptService } from '../services/purchase-receipt.service';
 
 @ApiTags('purchase-receipts')
@@ -55,6 +59,19 @@ export class PurchaseReceiptController {
   }
 
   // 批量路由必须先于 from-po/:poId 声明，否则 'batch' 会被当成 poId 参数。
+  @Post('batch-delete')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '批量删除收货单（仅 DRAFT/CANCELLED；确认入库的 RECEIVED 拒绝；逐笔隔离失败）',
+  })
+  @ApiOkEnvelope(PurchaseBatchDeleteResultDto)
+  async deleteBatch(
+    @Body() request: PurchaseBatchDeleteRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: PurchaseBatchDeleteResultDto }> {
+    return ok(await this.receiptService.deleteBatch(request.ids, operator));
+  }
+
   @Post('from-po/batch')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

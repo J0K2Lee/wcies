@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { DataSource, EntityManager, Not, QueryRunner } from 'typeorm';
+import { DataSource, EntityManager, In, Not, QueryRunner } from 'typeorm';
 import { rawStr } from '../../../common/utils/raw';
 import { PurchaseReceiptEntity } from '../entities/purchase-receipt.entity';
 import { PurchaseReceiptItemEntity } from '../entities/purchase-receipt-item.entity';
@@ -18,6 +18,10 @@ export interface PurchaseReceiptRowWithRefs {
   warehouseCode: string | null;
   itemCount: number;
   totalQuantity: string;
+  /** 明细第一行（created_at, id）的 SKU 编码 / 名称 / 数量（列表「采购商品」列）。 */
+  firstItemSkuCode: string | null;
+  firstItemName: string | null;
+  firstItemQuantity: string | null;
 }
 
 export interface PurchaseReceiptItemWithRefs {
@@ -58,6 +62,36 @@ export class PurchaseReceiptRepository {
       where: { purchaseOrderId, status: Not('CANCELLED') },
       order: { createdAt: 'ASC', id: 'ASC' },
     });
+  }
+
+  /**
+   * 事务内锁行并回读状态（删除守卫用）：`FOR UPDATE` 与并发的确认/取消串行化，
+   * 避免「查到 DRAFT → 并发 confirm → 删掉已入库单据」的窗口。
+   * 返回 null 表示单据不存在。
+   */
+  async lockStatusInTx(manager: EntityManager, id: string): Promise<string | null> {
+    const rows = await manager.query<Array<{ status: string }>>(
+      `SELECT status FROM purchase_receipts WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    return rows[0]?.status ?? null;
+  }
+
+  /**
+   * 物理删除收货单（用户指示 2026-10-17 批量删除）：明细由 FK ON DELETE
+   * CASCADE 带走。调用方必须在同一事务内锁行并确认状态为 DRAFT/CANCELLED
+   * ——`RECEIVED` 的收货单已产生库存流水，删除会让账实失去凭证。
+   * 这里再加状态过滤是第二道防线（并发确认溜过检查时留下 RECEIVED 单）。
+   *
+   * 用 QueryBuilder 的 delete（`affected`）而不是裸 SQL + RETURNING：
+   * TypeORM 的 `UPDATE/DELETE ... RETURNING` 经 raw query 返回
+   * `[rows, rowCount]` 二元组，直接把结果当行数组会让守卫永远"成功"。
+   */
+  async deleteIfUnreceived(manager: EntityManager, id: string): Promise<boolean> {
+    const result = await manager
+      .getRepository(PurchaseReceiptEntity)
+      .delete({ id, status: In(['DRAFT', 'CANCELLED']) });
+    return (result.affected ?? 0) > 0;
   }
 
   /** Row lock inside the confirm transaction (status re-check, §4.3). */
@@ -190,11 +224,43 @@ export class PurchaseReceiptRepository {
       .addSelect(
         `(SELECT COALESCE(SUM(i.quantity), 0) FROM purchase_receipt_items i WHERE i.receipt_id = pr.id)`,
         'total_quantity',
+      )
+      // 列表「采购商品」列（用户指示 2026-10-17）：同采购单列表，取明细第一行。
+      .addSelect(
+        `(SELECT sk.sku_code FROM purchase_receipt_items i
+             JOIN skus sk ON sk.id = i.sku_id
+            WHERE i.receipt_id = pr.id
+            ORDER BY i.created_at, i.id
+            LIMIT 1)`,
+        'first_item_sku_code',
+      )
+      .addSelect(
+        `(SELECT sk.name_zh FROM purchase_receipt_items i
+             JOIN skus sk ON sk.id = i.sku_id
+            WHERE i.receipt_id = pr.id
+            ORDER BY i.created_at, i.id
+            LIMIT 1)`,
+        'first_item_name',
+      )
+      .addSelect(
+        `(SELECT i.quantity FROM purchase_receipt_items i
+            WHERE i.receipt_id = pr.id
+            ORDER BY i.created_at, i.id
+            LIMIT 1)`,
+        'first_item_quantity',
       );
     if (filters.keyword !== undefined && filters.keyword !== '') {
-      qb.andWhere('(pr.receipt_no ILIKE :kw OR pr.source_note ILIKE :kw)', {
-        kw: `%${filters.keyword}%`,
-      });
+      // 搜索覆盖明细 SKU（用户指示 2026-10-17）：同采购单列表。
+      qb.andWhere(
+        `(pr.receipt_no ILIKE :kw OR pr.source_note ILIKE :kw
+          OR EXISTS (
+            SELECT 1 FROM purchase_receipt_items i
+              JOIN skus sk ON sk.id = i.sku_id
+             WHERE i.receipt_id = pr.id
+               AND (sk.sku_code ILIKE :kw OR sk.name_zh ILIKE :kw)
+          ))`,
+        { kw: `%${filters.keyword}%` },
+      );
     }
     if (filters.status !== undefined) {
       qb.andWhere('pr.status = :status', { status: filters.status });
@@ -221,6 +287,9 @@ export class PurchaseReceiptRepository {
         warehouseCode: (rawList[index]?.['warehouse_code'] as string | null) ?? null,
         itemCount: Number(rawList[index]?.['item_count'] ?? 0),
         totalQuantity: rawStr(rawList[index]?.['total_quantity']) || '0',
+        firstItemSkuCode: (rawList[index]?.['first_item_sku_code'] as string | null) ?? null,
+        firstItemName: (rawList[index]?.['first_item_name'] as string | null) ?? null,
+        firstItemQuantity: (rawList[index]?.['first_item_quantity'] as string | null) ?? null,
       })),
       total,
     };

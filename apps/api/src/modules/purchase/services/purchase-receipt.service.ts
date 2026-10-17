@@ -28,6 +28,10 @@ import {
   GenerateReceiptsFromPosResultDto,
 } from '../dto/purchase-receipt.dto';
 import {
+  PurchaseBatchDeleteItemResultDto,
+  PurchaseBatchDeleteResultDto,
+} from '../dto/purchase-batch-delete.dto';
+import {
   PurchaseReceiptRepository,
   PurchaseReceiptListFilters,
 } from '../repositories/purchase-receipt.repository';
@@ -379,6 +383,70 @@ export class PurchaseReceiptService {
     return this.getDetail(id);
   }
 
+  /**
+   * 批量删除收货单（用户指示 2026-10-17）：物理删除，但只允许删除从未入库的
+   * 单据（`DRAFT` / `CANCELLED`）。已确认的 `RECEIVED` 拒绝——它已产生库存
+   * 流水，删除会让账实失去凭证（AGENTS §14/§39）。
+   *
+   * 逐笔独立失败隔离；删除前写操作日志。
+   */
+  async deleteBatch(
+    ids: string[],
+    operator: OperatorContext,
+  ): Promise<PurchaseBatchDeleteResultDto> {
+    const results: PurchaseBatchDeleteItemResultDto[] = [];
+    for (const id of new Set(ids)) {
+      const receipt = await this.repository.findById(id);
+      try {
+        if (receipt === null) {
+          throw new PurchaseReceiptNotFoundError(id);
+        }
+        await this.dataSource.transaction(async (manager) => {
+          const lockedStatus = await this.repository.lockStatusInTx(manager, id);
+          if (lockedStatus === null) {
+            throw new PurchaseReceiptNotFoundError(id);
+          }
+          if (lockedStatus === 'RECEIVED') {
+            throw new PurchaseReceiptInvalidStateError(
+              `收货单已确认入库（${receipt.receiptNo}），库存事实不可撤销，不能删除`,
+              { receiptNo: receipt.receiptNo, status: lockedStatus },
+            );
+          }
+          const deleted = await this.repository.deleteIfUnreceived(manager, id);
+          if (!deleted) {
+            throw new PurchaseReceiptInvalidStateError('收货单状态不允许删除', {
+              receiptNo: receipt.receiptNo,
+              status: lockedStatus,
+            });
+          }
+        });
+        await this.operationLog.record({
+          entityType: ENTITY_TYPE,
+          entityId: id,
+          entityCode: receipt.receiptNo,
+          action: 'DELETE',
+          changes: {
+            receiptNo: { from: receipt.receiptNo, to: null },
+            status: { from: receipt.status, to: null },
+            batchDelete: { from: null, to: true },
+          },
+          operator,
+        });
+        results.push({ id, code: receipt.receiptNo, ok: true, errorCode: null, message: null });
+      } catch (error: unknown) {
+        results.push({
+          id,
+          code: receipt?.receiptNo ?? null,
+          ok: false,
+          errorCode: error instanceof DomainError ? error.code : 'PURCHASE_RECEIPT_DELETE_FAILED',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    const failed = results.filter((item) => !item.ok).length;
+    return { total: results.length, succeeded: results.length - failed, failed, results };
+  }
+
   // --------------------------------------------------------------------------
   // Confirm - the core receiving action (task §T4.2)
   // --------------------------------------------------------------------------
@@ -559,6 +627,9 @@ export class PurchaseReceiptService {
         receivedAt: row.receipt.receivedAt,
         itemCount: row.itemCount,
         totalQuantity: row.totalQuantity,
+        firstItemSkuCode: row.firstItemSkuCode,
+        firstItemName: row.firstItemName,
+        firstItemQuantity: row.firstItemQuantity,
         createdAt: row.receipt.createdAt,
         updatedAt: row.receipt.updatedAt,
       })),

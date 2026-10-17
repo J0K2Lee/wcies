@@ -9,15 +9,18 @@ import {
   Input,
   InputNumber,
   Modal,
+  Pagination,
   Select,
   Switch,
   Tabs,
+  Tooltip,
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { ColumnsType } from 'antd/es/table';
 import { apiGet, apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime } from '../../utils/format';
 import {
+  ActionIsland,
   colors,
   ContextAction,
   ContextMetric,
@@ -53,6 +56,10 @@ interface PurchaseOrderRow {
   receivingWarehouseId: string | null;
   itemCount: number;
   totalQuantity: string;
+  /** 明细第一行的 SKU 编码 / 名称 / 数量（列表「采购商品」列）。 */
+  firstItemSkuCode: string | null;
+  firstItemName: string | null;
+  firstItemQuantity: string | null;
 }
 
 interface PurchaseOrderItem {
@@ -511,6 +518,72 @@ export function PurchaseOrdersPage() {
     runBatchGenerateReceipt,
   ]);
 
+  // ---- 批量删除（用户指示 2026-10-17）：仅删除从未产生库存事实的采购单 ----
+  const batchDeleteMutation = useMutation({
+    mutationFn: (ids: string[]) =>
+      apiPost<{
+        total: number;
+        succeeded: number;
+        failed: number;
+        results: Array<{
+          id: string;
+          code: string | null;
+          ok: boolean;
+          errorCode: string | null;
+          message: string | null;
+        }>;
+      }>('/api/v1/purchase-orders/batch-delete', { ids }),
+    onSuccess: (result) => {
+      notification.open({
+        type: result.failed > 0 ? 'warning' : 'success',
+        title: `批量删除采购单：成功 ${result.succeeded} / 失败 ${result.failed}（共 ${result.total}）`,
+        description:
+          result.failed === 0 ? undefined : (
+            <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+              {result.results
+                .filter((item) => !item.ok)
+                .map((item) => (
+                  <div key={item.id}>
+                    {item.code ?? selectedPosById.get(item.id)?.poNo ?? item.id}：
+                    {item.message ?? item.errorCode ?? '未知错误'}
+                  </div>
+                ))}
+            </div>
+          ),
+        duration: result.failed > 0 ? 0 : 6,
+      });
+      // 删除成功的行从勾选集合移除，避免浮岛仍显示"已选 N 单"。
+      const deleted = new Set(result.results.filter((item) => item.ok).map((item) => item.id));
+      if (deleted.size > 0) {
+        handlePoSelectionChange(
+          selectedPoIds.filter((id) => !deleted.has(id)),
+          selectedPoRows.filter((row) => !deleted.has(row.id)),
+        );
+      }
+      void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['purchase-receipts'] });
+    },
+    onError: (error: Error) => void message.error(`批量删除失败：${error.message}`),
+  });
+
+  const requestBatchDelete = useCallback(() => {
+    if (selectedPoIds.length === 0) {
+      return;
+    }
+    modal.confirm({
+      title: `删除勾选的 ${selectedPoIds.length} 个采购单？`,
+      content:
+        '仅「从未发生收货」的采购单会被删除（其未入库的收货草稿一并删除）；' +
+        '已确认收货的单会保留并提示失败。删除不可恢复。',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '返回',
+      onOk: () => {
+        batchDeleteMutation.mutate(selectedPoIds);
+      },
+    });
+  }, [modal, selectedPoIds, batchDeleteMutation]);
+
   // ---- Context rail ----
   const railContent = useMemo<ContextRailContent>(() => {
     if (selectedRow === null) {
@@ -618,51 +691,11 @@ export function PurchaseOrdersPage() {
             登记采购
           </Button>
         }
-        extra={
-          /* 批量操作条（用户指示 2026-10-13）：放中央主页面、页面名称下；
-             与订单页同款跨分页勾选。 */
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              flexWrap: 'wrap',
-              padding: '8px 12px',
-              border: `1px solid ${selectedPoIds.length > 0 ? colors.primary : colors.border}`,
-              borderRadius: 8,
-              background: selectedPoIds.length > 0 ? colors.primarySoft : undefined,
-            }}
-          >
-            {selectedPoIds.length > 0 ? (
-              <>
-                <span style={{ fontSize: 13, fontWeight: 550 }}>
-                  已选 {selectedPoIds.length} 单
-                </span>
-                <span style={{ fontSize: 12, color: colors.textTertiary }}>
-                  （可生成 {eligibleBatchPos.length}，跨分页保留）
-                </span>
-                <Button
-                  loading={batchGenerateReceiptMutation.isPending}
-                  onClick={requestBatchGenerateReceipt}
-                >
-                  批量生成收货单
-                </Button>
-                <Button type="text" onClick={clearPoSelection}>
-                  清空选择
-                </Button>
-              </>
-            ) : (
-              <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
-                勾选采购单行首复选框后可批量操作（支持跨分页）：批量生成收货单
-              </span>
-            )}
-          </div>
-        }
       />
 
       <FilterBar>
         <Input.Search
-          placeholder="PO号 / 货源说明 / 供应商"
+          placeholder="PO号 / 货源说明 / 供应商 / SKU"
           allowClear
           onSearch={(value) => {
             setPage(1);
@@ -700,13 +733,8 @@ export function PurchaseOrdersPage() {
             preserveSelectedRowKeys: true,
             onChange: handlePoSelectionChange,
           }}
-          pagination={{
-            current: page,
-            pageSize: 50,
-            total: list.data?.meta.total ?? 0,
-            showTotal: (total) => `共 ${total} 单`,
-            onChange: setPage,
-          }}
+          // 分页迁到页面底部浮岛（用户指示 2026-10-17，与订单页同款）。
+          pagination={false}
           expandable={{
             // 选中即展开（与订单页一致的用户指示 2026-09-17）：行点击选择
             // 驱动展开，直接显示该单的采购商品明细（需求 2026-10-09）。
@@ -741,6 +769,30 @@ export function PurchaseOrdersPage() {
               key: 'source',
               render: (_: unknown, row: PurchaseOrderRow) =>
                 row.supplierName ?? row.sourceNote ?? '—',
+            },
+            // 「采购商品」列（用户指示 2026-10-17）：明细第一行的 SKU 名称 + 数量，
+            // 格式如 迈从-A7 V3 Ultra+-鼠标-玄影x1；多行时在「明细」列已显示行数。
+            {
+              title: '采购商品',
+              key: 'firstItem',
+              width: 260,
+              render: (_: unknown, row: PurchaseOrderRow) => {
+                if (row.firstItemName === null && row.firstItemSkuCode === null) {
+                  return <span style={{ color: colors.textTertiary }}>—</span>;
+                }
+                return (
+                  <Tooltip title={row.firstItemSkuCode ?? undefined}>
+                    <span style={{ fontSize: 12.5, wordBreak: 'break-all' }}>
+                      {row.firstItemName ?? row.firstItemSkuCode}
+                      {row.firstItemQuantity !== null && (
+                        <span style={{ color: colors.textSecondary }}>
+                          x{Number(row.firstItemQuantity)}
+                        </span>
+                      )}
+                    </span>
+                  </Tooltip>
+                );
+              },
             },
             {
               title: '状态',
@@ -1135,6 +1187,60 @@ export function PurchaseOrdersPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* ---- 底部动作浮岛（用户指示 2026-10-17：与订单页同款）----
+          分页与批量动作固定在主滚动区底部，必须在页面根节点的流内末尾；
+          sticky 才能吸附在 <main> 内。未勾选时只渲染分页行。 */}
+      <ActionIsland
+        summary={
+          selectedPoIds.length > 0 ? (
+            <>
+              <span style={{ fontSize: 13, fontWeight: 550 }}>已选 {selectedPoIds.length} 单</span>
+              <span style={{ fontSize: 12, color: colors.textTertiary }}>
+                （可生成 {eligibleBatchPos.length}，跨分页保留）
+              </span>
+            </>
+          ) : undefined
+        }
+        actions={
+          selectedPoIds.length > 0 ? (
+            <>
+              <Button
+                loading={batchGenerateReceiptMutation.isPending}
+                disabled={batchDeleteMutation.isPending}
+                onClick={requestBatchGenerateReceipt}
+              >
+                批量生成收货单
+              </Button>
+              <Button
+                danger
+                loading={batchDeleteMutation.isPending}
+                disabled={batchGenerateReceiptMutation.isPending}
+                onClick={requestBatchDelete}
+              >
+                批量删除
+              </Button>
+              <Button type="text" onClick={clearPoSelection}>
+                清空选择
+              </Button>
+            </>
+          ) : undefined
+        }
+        leading={
+          <span style={{ fontSize: 13, color: colors.textSecondary }}>
+            共 {list.data?.meta.total ?? 0} 单
+          </span>
+        }
+        trailing={
+          <Pagination
+            current={page}
+            pageSize={50}
+            total={list.data?.meta.total ?? 0}
+            onChange={(next) => setPage(next)}
+          />
+        }
+        hidden={(list.data?.meta.total ?? 0) === 0}
+      />
     </div>
   );
 }

@@ -22,6 +22,10 @@ import {
   PurchaseOrderListQueryDto,
   UpdatePurchaseOrderRequestDto,
 } from '../dto/purchase-order.dto';
+import {
+  PurchaseBatchDeleteRequestDto,
+  PurchaseBatchDeleteResultDto,
+} from '../dto/purchase-batch-delete.dto';
 import { PurchaseOrderService } from '../services/purchase-order.service';
 
 @ApiTags('purchase-orders')
@@ -48,6 +52,21 @@ export class PurchaseOrderController {
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true; data: PurchaseOrderDetailDto }> {
     return ok(await this.poService.create(dto, operator));
+  }
+
+  // 批量路由必须先于 :id 参数路由声明（同订单模块约定，避免段名被当成 id）。
+  @Post('batch-delete')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      '批量删除采购单（仅从未产生库存事实的：无 RECEIVED 收货单且未收数量为 0；逐笔隔离失败）',
+  })
+  @ApiOkEnvelope(PurchaseBatchDeleteResultDto)
+  async deleteBatch(
+    @Body() request: PurchaseBatchDeleteRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: PurchaseBatchDeleteResultDto }> {
+    return ok(await this.poService.deleteBatch(request.ids, operator));
   }
 
   @Get(':id')

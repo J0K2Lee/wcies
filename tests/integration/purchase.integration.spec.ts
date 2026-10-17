@@ -241,3 +241,155 @@ describe('purchase registration (Sprint 7 T3)', () => {
     expect(badLine.status).toBe(404);
   });
 });
+
+describe('列表搜索 / 采购商品列 / 批量删除（用户指示 2026-10-17）', () => {
+  interface PoRow {
+    id: string;
+    poNo: string;
+    status: string;
+    firstItemSkuCode: string | null;
+    firstItemName: string | null;
+    firstItemQuantity: string | null;
+  }
+  interface ReceiptRow {
+    id: string;
+    receiptNo: string;
+    status: string;
+    purchaseOrderId: string | null;
+    firstItemName: string | null;
+    firstItemQuantity: string | null;
+  }
+
+  let binId = '';
+
+  beforeAll(async () => {
+    const bins = await client.post<{ bins: Array<{ binCode: string; id: string }> }>(
+      `/api/v1/warehouses/${warehouseId}/bins/batch`,
+      { zone: 'D', rackStart: 1, rackCount: 1, levelsPerRack: 1 },
+    );
+    binId = bins.body.data.bins[0]?.id ?? '';
+  });
+
+  async function skuCodeOf(skuId: string): Promise<string> {
+    const sku = await client.get<{ skuCode: string }>(`/api/v1/skus/${skuId}`);
+    return sku.body.data.skuCode;
+  }
+
+  async function createPo(
+    label: string,
+    options: { quantity?: string; withDraft?: boolean } = {},
+  ): Promise<{ poId: string; poNo: string; skuId: string; receiptId: string | null }> {
+    const skuId = await newSku(label);
+    const body: Record<string, unknown> = {
+      sourceNote: `${PREFIX} ${label}`,
+      items: [{ skuId, quantity: options.quantity ?? '2' }],
+    };
+    if (options.withDraft === true) {
+      body['receipt'] = { warehouseId, defaultBinId: binId };
+    }
+    const created = await client.post<{ id: string; poNo: string }>(
+      '/api/v1/purchase-orders',
+      body,
+    );
+    expect(created.status, JSON.stringify(created.body.error ?? {})).toBe(200);
+    let receiptId: string | null = null;
+    if (options.withDraft === true) {
+      const receipts = await client.get<ReceiptRow[]>(
+        `/api/v1/purchase-receipts?purchaseOrderId=${created.body.data.id}&pageSize=50`,
+      );
+      receiptId = receipts.body.data[0]?.id ?? null;
+    }
+    return { poId: created.body.data.id, poNo: created.body.data.poNo, skuId, receiptId };
+  }
+
+  it('搜索可命中明细 SKU 的名称与编码；列表返回首行采购商品', async () => {
+    const unique = `玄影${randomUUID().slice(0, 6)}`;
+    const po = await createPo(unique, { quantity: '3' });
+    const code = await skuCodeOf(po.skuId);
+
+    const byName = await client.get<PoRow[]>(
+      `/api/v1/purchase-orders?keyword=${encodeURIComponent(unique)}&pageSize=50`,
+    );
+    expect(byName.status).toBe(200);
+    expect(byName.body.data.some((row) => row.id === po.poId)).toBe(true);
+
+    const byCode = await client.get<PoRow[]>(
+      `/api/v1/purchase-orders?keyword=${encodeURIComponent(code)}&pageSize=50`,
+    );
+    expect(byCode.body.data.some((row) => row.id === po.poId)).toBe(true);
+
+    const row = byName.body.data.find((item) => item.id === po.poId)!;
+    expect(row.firstItemSkuCode).toBe(code);
+    expect(row.firstItemName).toContain(unique);
+    expect(Number(row.firstItemQuantity)).toBe(3);
+  });
+
+  it('一张草稿收货单也可被 SKU 搜索命中', async () => {
+    const unique = `草稿影${randomUUID().slice(0, 6)}`;
+    const po = await createPo(unique, { withDraft: true });
+    expect(po.receiptId).not.toBeNull();
+
+    const found = await client.get<ReceiptRow[]>(
+      `/api/v1/purchase-receipts?keyword=${encodeURIComponent(unique)}&pageSize=50`,
+    );
+    expect(found.status).toBe(200);
+    const row = found.body.data.find((item) => item.id === po.receiptId);
+    expect(row).toBeDefined();
+    expect(row?.firstItemName).toContain(unique);
+    expect(Number(row?.firstItemQuantity)).toBe(2);
+  });
+
+  it('批量删除：无收货的采购单一并删掉其草稿，已确认收货的拒绝', async () => {
+    // A) 无草稿的采购单 → 删除成功。
+    const plain = await createPo('DELPLAIN');
+    // B) 带草稿的采购单 → 删除成功，草稿随之消失。
+    const withDraft = await createPo('DELDRAFT', { withDraft: true });
+    // C) 已确认收货的采购单 → 拒绝（采购单与收货单都不可删）。
+    const received = await createPo('DELRECV', { withDraft: true });
+    const confirm = await client.post(`/api/v1/purchase-receipts/${received.receiptId}/confirm`);
+    expect(confirm.status, JSON.stringify(confirm.body.error ?? {})).toBe(200);
+
+    const poDelete = await client.post<{
+      total: number;
+      succeeded: number;
+      failed: number;
+      results: Array<{ id: string; ok: boolean; errorCode: string | null }>;
+    }>('/api/v1/purchase-orders/batch-delete', {
+      ids: [plain.poId, withDraft.poId, received.poId],
+    });
+    expect(poDelete.status, JSON.stringify(poDelete.body.error ?? {})).toBe(200);
+    expect(poDelete.body.data).toMatchObject({ total: 3, succeeded: 2, failed: 1 });
+
+    const byId = new Map(poDelete.body.data.results.map((item) => [item.id, item]));
+    expect(byId.get(plain.poId)?.ok).toBe(true);
+    expect(byId.get(withDraft.poId)?.ok).toBe(true);
+    expect(byId.get(received.poId)?.ok).toBe(false);
+    expect(byId.get(received.poId)?.errorCode).toBe('PURCHASE_ORDER_INVALID_STATE');
+
+    // 删除后不可再读；其草稿收货单一并消失。
+    expect((await client.get(`/api/v1/purchase-orders/${plain.poId}`)).status).toBe(404);
+    expect((await client.get(`/api/v1/purchase-orders/${withDraft.poId}`)).status).toBe(404);
+    expect((await client.get(`/api/v1/purchase-receipts/${withDraft.receiptId}`)).status).toBe(404);
+    // 已收货的单保留。
+    expect((await client.get(`/api/v1/purchase-orders/${received.poId}`)).status).toBe(200);
+
+    // 收货单批量删除：草稿可删、已确认的拒绝。
+    const draftToDelete = await createPo('DELREC2', { withDraft: true });
+    const receiptDelete = await client.post<{
+      succeeded: number;
+      failed: number;
+      results: Array<{ id: string; ok: boolean; errorCode: string | null }>;
+    }>('/api/v1/purchase-receipts/batch-delete', {
+      ids: [draftToDelete.receiptId, received.receiptId],
+    });
+    expect(receiptDelete.status, JSON.stringify(receiptDelete.body.error ?? {})).toBe(200);
+    expect(receiptDelete.body.data).toMatchObject({ succeeded: 1, failed: 1 });
+    const receiptResults = new Map(receiptDelete.body.data.results.map((item) => [item.id, item]));
+    expect(receiptResults.get(draftToDelete.receiptId!)?.ok).toBe(true);
+    expect(receiptResults.get(received.receiptId!)?.ok).toBe(false);
+    expect(receiptResults.get(received.receiptId!)?.errorCode).toBe(
+      'PURCHASE_RECEIPT_INVALID_STATE',
+    );
+    expect((await client.get(`/api/v1/purchase-receipts/${received.receiptId}`)).status).toBe(200);
+  });
+});

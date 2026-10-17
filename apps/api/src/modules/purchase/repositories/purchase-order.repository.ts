@@ -20,6 +20,10 @@ export interface PurchaseOrderRowWithRefs {
   supplierName: string | null;
   itemCount: number;
   totalQuantity: string;
+  /** 明细第一行（created_at, id）的 SKU 编码 / 名称 / 数量（列表「采购商品」列）。 */
+  firstItemSkuCode: string | null;
+  firstItemName: string | null;
+  firstItemQuantity: string | null;
 }
 
 export interface PurchaseOrderItemWithRefs {
@@ -50,6 +54,43 @@ export class PurchaseOrderRepository {
       where: { poId },
       order: { createdAt: 'ASC', id: 'ASC' },
     });
+  }
+
+  /**
+   * 删除前的下游事实检查（用户指示 2026-10-17 批量删除）：是否存在**已入库**
+   * 的收货单（`RECEIVED`）或已收数量。命中即禁止删除——收货确认已经产生库存
+   * 流水，删除单据会让账实与流水失去凭证（AGENTS.md §14/§39）。
+   *
+   * 在事务内、锁住 PO 之后调用；`purchase_orders` 行锁串行化并发的取消/确认。
+   */
+  async hasReceivingFacts(manager: EntityManager, poId: string): Promise<boolean> {
+    const rows = await manager.query<Array<{ blocked: boolean }>>(
+      `SELECT (
+         EXISTS (SELECT 1 FROM purchase_receipts r
+                  WHERE r.purchase_order_id = $1 AND r.status = 'RECEIVED')
+         OR EXISTS (SELECT 1 FROM purchase_order_items i
+                     WHERE i.po_id = $1 AND i.received_quantity > 0)
+       ) AS blocked`,
+      [poId],
+    );
+    return rows[0]?.blocked === true;
+  }
+
+  /**
+   * 物理删除采购单：先删其**未入库**收货单（DRAFT/CANCELLED，明细由 FK
+   * ON DELETE CASCADE 带走），再删采购单（明细同样级联）。
+   *
+   * 调用方必须已在同一事务内通过 `hasReceivingFacts` 守卫——这里对收货单
+   * 加状态过滤是第二道防线：即便有并发确认溜过检查，`RECEIVED` 单也不会被删，
+   * 随后的 PO 删除会因 FK 失败而整体回滚，不会产生半删状态。
+   */
+  async deleteWithUnreceivedReceipts(manager: EntityManager, poId: string): Promise<void> {
+    await manager.query(
+      `DELETE FROM purchase_receipts
+        WHERE purchase_order_id = $1 AND status IN ('DRAFT', 'CANCELLED')`,
+      [poId],
+    );
+    await manager.query(`DELETE FROM purchase_orders WHERE id = $1`, [poId]);
   }
 
   /**
@@ -215,11 +256,46 @@ export class PurchaseOrderRepository {
       .addSelect(
         `(SELECT COALESCE(SUM(i.quantity), 0) FROM purchase_order_items i WHERE i.po_id = po.id)`,
         'total_quantity',
+      )
+      // 列表「采购商品」列（用户指示 2026-10-17）：明细第一行（created_at, id）
+      // 的 SKU 名称 / 编码 / 数量。三个相关子查询都走 idx_purchase_order_items_po，
+      // 每页 20 行成本可忽略；与详情页 findItemsWithRefs 同一排序口径。
+      .addSelect(
+        `(SELECT sk.sku_code FROM purchase_order_items i
+             JOIN skus sk ON sk.id = i.sku_id
+            WHERE i.po_id = po.id
+            ORDER BY i.created_at, i.id
+            LIMIT 1)`,
+        'first_item_sku_code',
+      )
+      .addSelect(
+        `(SELECT sk.name_zh FROM purchase_order_items i
+             JOIN skus sk ON sk.id = i.sku_id
+            WHERE i.po_id = po.id
+            ORDER BY i.created_at, i.id
+            LIMIT 1)`,
+        'first_item_name',
+      )
+      .addSelect(
+        `(SELECT i.quantity FROM purchase_order_items i
+            WHERE i.po_id = po.id
+            ORDER BY i.created_at, i.id
+            LIMIT 1)`,
+        'first_item_quantity',
       );
     if (filters.keyword !== undefined && filters.keyword !== '') {
-      qb.andWhere('(po.po_no ILIKE :kw OR po.source_note ILIKE :kw OR s.name ILIKE :kw)', {
-        kw: `%${filters.keyword}%`,
-      });
+      // 搜索覆盖明细 SKU（用户指示 2026-10-17）：搜 "A7" / "玄影" 能命中
+      // 含该 SKU 的采购单，而不只是 PO号 / 货源说明 / 供应商。
+      qb.andWhere(
+        `(po.po_no ILIKE :kw OR po.source_note ILIKE :kw OR s.name ILIKE :kw
+          OR EXISTS (
+            SELECT 1 FROM purchase_order_items i
+              JOIN skus sk ON sk.id = i.sku_id
+             WHERE i.po_id = po.id
+               AND (sk.sku_code ILIKE :kw OR sk.name_zh ILIKE :kw)
+          ))`,
+        { kw: `%${filters.keyword}%` },
+      );
     }
     if (filters.status !== undefined) {
       qb.andWhere('po.status = :status', { status: filters.status });
@@ -254,6 +330,9 @@ export class PurchaseOrderRepository {
         supplierName: (rawList[index]?.['supplier_name'] as string | null) ?? null,
         itemCount: Number(rawList[index]?.['item_count'] ?? 0),
         totalQuantity: rawStr(rawList[index]?.['total_quantity']) || '0',
+        firstItemSkuCode: (rawList[index]?.['first_item_sku_code'] as string | null) ?? null,
+        firstItemName: (rawList[index]?.['first_item_name'] as string | null) ?? null,
+        firstItemQuantity: (rawList[index]?.['first_item_quantity'] as string | null) ?? null,
       })),
       total,
     };
