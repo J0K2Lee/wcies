@@ -3880,7 +3880,9 @@ export function OrdersPage() {
               />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 600, marginBottom: 8 }}>展开行列（拖动排序，勾选显示）</div>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>
+                展开明细字段（勾选显示；顺序决定数值字段的排列）
+              </div>
               <SortableColumnList
                 labelFor={EXPANDED_COLUMN_LABELS}
                 columns={viewSettings.expandedColumns}
