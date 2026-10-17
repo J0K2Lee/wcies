@@ -49,6 +49,8 @@ export { DataTable } from './components/DataTable';
 export type { DataTableProps } from './components/DataTable';
 export { ActionIsland } from './components/ActionIsland';
 export type { ActionIslandProps } from './components/ActionIsland';
+export { rowInteractionProps } from './components/rowInteraction';
+export type { RowInteractionOptions } from './components/rowInteraction';
 export { ActionMenu } from './components/ActionMenu';
 export { DeleteConfirmModal } from './components/DeleteConfirmModal';
 export type { DeleteConfirmModalProps } from './components/DeleteConfirmModal';

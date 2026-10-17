@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { ReactNode, useEffect } from 'react';
 import { typography } from '../tokens';
 
 /**
@@ -14,9 +14,33 @@ export interface PageHeaderProps {
   primary?: ReactNode;
   /** Extra row under the header (e.g. tabs) rendered full width. */
   extra?: ReactNode;
+  /**
+   * 浏览器标签页标题。默认取 `title`（字符串时）。
+   * 2026-10-17 体检 P2-10：改造前全站 document.title 从不赋值，所有路由都叫
+   * 「WCIES」，多标签页无法区分、书签与历史记录同名。
+   */
+  documentTitle?: string;
 }
 
-export function PageHeader({ title, description, secondary, primary, extra }: PageHeaderProps) {
+const APP_NAME = 'WCIES';
+
+export function PageHeader({
+  title,
+  description,
+  secondary,
+  primary,
+  extra,
+  documentTitle,
+}: PageHeaderProps) {
+  const pageTitle =
+    documentTitle ?? (typeof title === 'string' && title !== '' ? title : undefined);
+
+  useEffect(() => {
+    // 不写 cleanup：换页时新 PageHeader 的 effect 会覆盖旧标题，
+    // 还原成 'WCIES' 反而会在过渡期闪一下。
+    document.title = pageTitle === undefined ? APP_NAME : `${pageTitle} · ${APP_NAME}`;
+  }, [pageTitle]);
+
   return (
     <header
       style={{
