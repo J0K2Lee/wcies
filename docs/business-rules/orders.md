@@ -1054,6 +1054,7 @@ createShipmentsFromOrder（仅 PICKED 行，1 发货单 = 1 仓）
 | 批量生成拣货单 | `POST /picking-tasks/auto-create`（请求体带 `orderIds`） | 勾选订单的 RESERVED 行**按仓合并**生成拣货任务（2026-10-15 语义修正）：同一仓库合并为一个任务（合并拣货，`picking_task_items` 行保留各自订单引用，任务内订单取消只摘除该订单行）；省略 `orderIds` 仍是旧的按店铺自动选取（同样合并）；跳过/幂等规则不变 |
 | 批量获取运单号 | `POST /orders/batch-prepare-shipment` | 逐单执行 ① 的全部平台/幂等/事实回写逻辑；仍是真实平台写操作 |
 | 批量发货 | `POST /orders/batch-ship` | 逐单执行 ④（含按订单 advisory lock）；库存仍只走 `shipShipment` |
+| 批量打印面单 | `POST /orders/batch-shipping-label` | 逐单执行 ③（默认复用本地已存档面单，`refresh=true` 才重新打平台）；**串行**以尊重平台面单接口限流；返回每单签名 URL |
 | 批量外部履约 | `POST /orders/batch-mark-external-fulfillment` | 逐单执行 Sprint 9 T6 的标记外部履约（同一 reason 记入每单的状态历史与操作日志）；不产生任何库存流水 |
 
 规则不变，只是编排：**逐单执行、单笔失败只记录结果不拖垮整批**（§36/§43），
@@ -1061,6 +1062,11 @@ createShipmentsFromOrder（仅 PICKED 行，1 发货单 = 1 仓）
 （§92）。前端原右栏「自动创建拣货任务」按钮按店铺全量扫单的入口已下线，
 改为按勾选执行。批量外部履约的校验与单笔一致：已取消/已发货、存在
 RESERVED / PICKED 行的订单逐单拒绝并说明原因。
+
+**批量打印面单的浏览器侧约定（2026-10-17）**：平台面单是 PDF，逐张
+`window.open` 会被弹窗拦截，因此前端在点击的同步栈里先开**一个**打印窗口，
+把全部成功面单以 `<iframe>` 放进同一页（每张一页）后一次调起打印；
+无成功面单时关闭该窗口并提示失败原因。
 
 ## 异常
 
@@ -1072,7 +1078,8 @@ RESERVED / PICKED 行的订单逐单拒绝并说明原因。
 
 ## 明确不做
 
-- 批量打单 / 打印子系统（只做订单级「取面单 → 签名 URL → 浏览器打开打印」）。
+- 批量打单已提供 `POST /orders/batch-shipping-label` + 单窗口多面单打印
+  （2026-10-17）；仍未做的是**打印子系统**（本地打印代理 / 免驱标签纸）。
 - FBO / FBP 等外部履约订单的平台写（这些订单在摄入时即 `EXTERNAL_FULFILLED`，不进拣货）。
 - WB / Yandex 的对应平台写：仓库内尚无经核实的接口事实（§88），
   待用户提供官方文档后按同一适配器契约补齐。

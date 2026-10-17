@@ -2903,6 +2903,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/orders/batch-shipping-label": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量打印面单（订单页多选；逐单顺序取平台面单 PDF，复用已存档，单笔失败不影响其余） */
+        post: operations["OrderFulfillmentController_fetchShippingLabelBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/orders/batch-ship": {
         parameters: {
             query?: never;
@@ -6706,6 +6723,30 @@ export interface components {
         BatchOrderActionRequestDto: {
             /** @description 勾选的订单（单批上限 50，逐单执行） */
             orderIds: string[];
+        };
+        BatchShippingLabelItemDto: {
+            orderId: string;
+            /** @description 失败且订单不可读时为 null */
+            orderNo: string | null;
+            ok: boolean;
+            code?: string | null;
+            message?: string | null;
+            /** @description 面单签名 URL（成功时）；前端放进同一个打印窗口批量打印 */
+            signedUrl: string | null;
+            /** @description 面单文件名（成功时） */
+            fileName: string | null;
+        };
+        BatchShippingLabelResultDto: {
+            total: number;
+            succeeded: number;
+            failed: number;
+            results: components["schemas"]["BatchShippingLabelItemDto"][];
+        };
+        BatchShippingLabelRequestDto: {
+            /** @description 勾选的订单（单批上限 50，逐单顺序取面单以尊重平台限流） */
+            orderIds: string[];
+            /** @description true = 忽略已存档面单，逐单向平台重新取（平台面单接口限流，默认复用本地存档） */
+            refresh?: boolean;
         };
         QuickShipShipmentDto: {
             shipmentId: string;
@@ -12917,6 +12958,33 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["BatchPrepareShipmentResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    OrderFulfillmentController_fetchShippingLabelBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchShippingLabelRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["BatchShippingLabelResultDto"];
                     };
                 };
             };

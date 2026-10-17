@@ -10134,6 +10134,46 @@
         "tags": ["orders"]
       }
     },
+    "/api/v1/orders/batch-shipping-label": {
+      "post": {
+        "operationId": "OrderFulfillmentController_fetchShippingLabelBatch",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchShippingLabelRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/BatchShippingLabelResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "批量打印面单（订单页多选；逐单顺序取平台面单 PDF，复用已存档，单笔失败不影响其余）",
+        "tags": ["orders"]
+      }
+    },
     "/api/v1/orders/batch-ship": {
       "post": {
         "operationId": "OrderFulfillmentController_quickShipBatch",
@@ -20371,6 +20411,82 @@
               "type": "string",
               "format": "uuid"
             }
+          }
+        },
+        "required": ["orderIds"]
+      },
+      "BatchShippingLabelItemDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "orderNo": {
+            "type": "string",
+            "nullable": true,
+            "description": "失败且订单不可读时为 null"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "message": {
+            "type": "string",
+            "nullable": true
+          },
+          "signedUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "面单签名 URL（成功时）；前端放进同一个打印窗口批量打印"
+          },
+          "fileName": {
+            "type": "string",
+            "nullable": true,
+            "description": "面单文件名（成功时）"
+          }
+        },
+        "required": ["orderId", "orderNo", "ok", "signedUrl", "fileName"]
+      },
+      "BatchShippingLabelResultDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "succeeded": {
+            "type": "number"
+          },
+          "failed": {
+            "type": "number"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BatchShippingLabelItemDto"
+            }
+          }
+        },
+        "required": ["total", "succeeded", "failed", "results"]
+      },
+      "BatchShippingLabelRequestDto": {
+        "type": "object",
+        "properties": {
+          "orderIds": {
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "勾选的订单（单批上限 50，逐单顺序取面单以尊重平台限流）",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "refresh": {
+            "type": "boolean",
+            "description": "true = 忽略已存档面单，逐单向平台重新取（平台面单接口限流，默认复用本地存档）"
           }
         },
         "required": ["orderIds"]

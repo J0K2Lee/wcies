@@ -11,6 +11,8 @@ import {
   BatchOrderActionRequestDto,
   BatchPrepareShipmentResultDto,
   BatchShipResultDto,
+  BatchShippingLabelRequestDto,
+  BatchShippingLabelResultDto,
   FetchShippingLabelQueryDto,
   PrepareShipmentResultDto,
 } from '../dto/order-fulfillment.dto';
@@ -48,6 +50,25 @@ export class OrderFulfillmentController {
   ) {
     return ok<BatchPrepareShipmentResultDto>(
       await this.platformShipService.prepareShipmentBatch(request.orderIds, operator),
+    );
+  }
+
+  @Post('batch-shipping-label')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '批量打印面单（订单页多选；逐单顺序取平台面单 PDF，复用已存档，单笔失败不影响其余）',
+  })
+  @ApiOkEnvelope(BatchShippingLabelResultDto)
+  async fetchShippingLabelBatch(
+    @Body() request: BatchShippingLabelRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ) {
+    return ok<BatchShippingLabelResultDto>(
+      await this.platformShipService.fetchShippingLabelBatch(
+        request.orderIds,
+        { refresh: request.refresh === true },
+        operator,
+      ),
     );
   }
 

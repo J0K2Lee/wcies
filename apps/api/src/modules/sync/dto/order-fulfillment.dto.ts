@@ -106,3 +106,58 @@ export class BatchShipResultDto {
   @ApiProperty() failed!: number;
   @ApiProperty({ type: [BatchShipItemDto] }) results!: BatchShipItemDto[];
 }
+
+// ---------------------------------------------------------------------------
+// 批量打印面单（用户指示 2026-10-17）
+// ---------------------------------------------------------------------------
+
+/** Request of `POST /orders/batch-shipping-label`. */
+export class BatchShippingLabelRequestDto {
+  @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    minItems: 1,
+    maxItems: 50,
+    description: '勾选的订单（单批上限 50，逐单顺序取面单以尊重平台限流）',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @IsUUID('4', { each: true })
+  orderIds!: string[];
+
+  @ApiPropertyOptional({
+    description: 'true = 忽略已存档面单，逐单向平台重新取（平台面单接口限流，默认复用本地存档）',
+  })
+  @IsOptional()
+  refresh?: boolean;
+}
+
+/** One order's outcome of `POST /orders/batch-shipping-label`. */
+export class BatchShippingLabelItemDto {
+  @ApiProperty() orderId!: string;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: '失败且订单不可读时为 null',
+  })
+  orderNo!: string | null;
+  @ApiProperty() ok!: boolean;
+  @ApiPropertyOptional({ nullable: true, type: String }) code?: string | null;
+  @ApiPropertyOptional({ nullable: true, type: String }) message?: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: '面单签名 URL（成功时）；前端放进同一个打印窗口批量打印',
+  })
+  signedUrl!: string | null;
+  @ApiProperty({ nullable: true, type: String, description: '面单文件名（成功时）' })
+  fileName!: string | null;
+}
+
+export class BatchShippingLabelResultDto {
+  @ApiProperty() total!: number;
+  @ApiProperty() succeeded!: number;
+  @ApiProperty() failed!: number;
+  @ApiProperty({ type: [BatchShippingLabelItemDto] }) results!: BatchShippingLabelItemDto[];
+}

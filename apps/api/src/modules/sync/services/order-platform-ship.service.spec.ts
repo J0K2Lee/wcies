@@ -262,3 +262,44 @@ describe('OrderPlatformShipService.prepareShipmentBatch (2026-10-13 订单页多
     expect(result.results[1]?.code).toBe('PLATFORM_CAPABILITY_UNSUPPORTED');
   });
 });
+
+describe('OrderPlatformShipService.fetchShippingLabelBatch (2026-10-17 批量打印面单)', () => {
+  it('取每单面单（复用存档）、去重，并把单笔失败隔离出来', async () => {
+    const { service, orderService } = makeService(new PreparableAdapter());
+    const single = vi
+      .spyOn(service, 'fetchShippingLabel')
+      .mockResolvedValueOnce({
+        id: 'label-1',
+        signedUrl: 'https://s3/l1.pdf',
+        fileName: 'label-1.pdf',
+      } as ShippingLabelDto)
+      .mockRejectedValueOnce(
+        new PlatformLabelNotReadyError({
+          orderId: 'o2',
+          platformOrderId: ORDER.platformOrderId,
+        }),
+      );
+
+    const result = await service.fetchShippingLabelBatch(
+      ['o1', 'o2', 'o1'],
+      { refresh: false },
+      OPERATOR,
+    );
+
+    // 重复 id 只取一次；默认复用本地存档（refresh=false）。
+    expect(single).toHaveBeenCalledTimes(2);
+    expect(single).toHaveBeenCalledWith('o1', { refresh: false }, OPERATOR);
+    expect(result).toMatchObject({ total: 2, succeeded: 1, failed: 1 });
+    expect(result.results[0]).toMatchObject({
+      orderId: 'o1',
+      orderNo: ORDER.orderNo,
+      ok: true,
+      signedUrl: 'https://s3/l1.pdf',
+      fileName: 'label-1.pdf',
+    });
+    expect(result.results[1]).toMatchObject({ orderId: 'o2', ok: false, signedUrl: null });
+    expect(result.results[1]?.code).toBe('PLATFORM_LABEL_NOT_READY');
+    // 失败单也带可读订单号（先读了一次订单）。
+    expect(orderService.getOrderOrThrow).toHaveBeenCalledTimes(2);
+  });
+});

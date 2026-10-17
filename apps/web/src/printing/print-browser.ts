@@ -118,3 +118,69 @@ export function printTasksBrowser(tasks: readonly PrintTask[]): void {
   // Let the SVG paint before the dialog opens.
   printWindow.setTimeout(() => printWindow.print(), 150);
 }
+
+/**
+ * 批量打印面单（用户指示 2026-10-17）。
+ *
+ * 平台面单是 PDF；逐张 `window.open` 会被浏览器弹窗拦截，所以把多张 PDF 放进
+ * **同一个**打印窗口，一次调起打印对话框（每张一页）。
+ *
+ * 用法必须分两步，且第一步调用在用户点击的**同步栈**里：
+ *   const win = openShippingLabelPrintWindow();   // 先开窗口，避免被拦截
+ *   const result = await fetchLabels();           // 再取数据
+ *   renderShippingLabelsIntoWindow(win, urls);    // 最后写入并打印
+ *
+ * `win.document.open()/write/close` 前保持 opener 已置空（与 printTasksBrowser
+ * 同一处理：不要用 window.open(url, '_blank', 'noopener')，那会返回 null）。
+ */
+export function openShippingLabelPrintWindow(): Window | null {
+  const win = window.open('', '_blank');
+  if (win === null) {
+    return null;
+  }
+  win.opener = null;
+  win.document.write(
+    '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/><title></title></head>' +
+      '<body style="margin:0;font:13px Microsoft YaHei,Arial,sans-serif;padding:12mm;color:#555">' +
+      '正在准备面单…</body></html>',
+  );
+  win.document.close();
+  return win;
+}
+
+/** 把面单 PDF 写入已打开的打印窗口并调起打印（每张一页）。 */
+export function renderShippingLabelsIntoWindow(
+  win: Window,
+  labels: ReadonlyArray<{ url: string; title?: string }>,
+): void {
+  const parts = labels.map((label, index) => {
+    const name = label.title ?? `面单 ${index + 1}`;
+    return (
+      '<section class="label">' +
+      `<iframe src="${escapeHtml(label.url)}" title="${escapeHtml(name)}"></iframe>` +
+      '</section>'
+    );
+  });
+  const html = `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<title></title>
+<style>
+  @page { margin: 0; }
+  html, body { margin: 0; padding: 0; background: #fff; }
+  /* 每张面单独占一页；iframe 由浏览器内置 PDF 查看器渲染。 */
+  .label { page-break-after: always; }
+  .label:last-child { page-break-after: auto; }
+  .label iframe { display: block; width: 100%; height: 100vh; border: 0; }
+</style>
+</head>
+<body>${parts.join('\n')}</body>
+</html>`;
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  // PDF 查看器需要一点时间渲染第一张，早于它调 print() 会打出空白页。
+  win.setTimeout(() => win.print(), 800);
+}

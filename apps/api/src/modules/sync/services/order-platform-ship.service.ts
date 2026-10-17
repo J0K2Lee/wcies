@@ -56,6 +56,24 @@ export interface BatchPrepareShipmentResult {
   results: BatchPrepareShipmentItem[];
 }
 
+/** One order's outcome inside a batch 打单 (批量打印面单, 2026-10-17). */
+export interface BatchShippingLabelItem {
+  orderId: string;
+  orderNo: string | null;
+  ok: boolean;
+  code: string | null;
+  message: string | null;
+  signedUrl: string | null;
+  fileName: string | null;
+}
+
+export interface BatchShippingLabelResult {
+  total: number;
+  succeeded: number;
+  failed: number;
+  results: BatchShippingLabelItem[];
+}
+
 /**
  * Order fulfillment platform operations (2026-09-18 flow): the platform-facing
  * half of 「获取运单号」 and 「打单」.
@@ -184,6 +202,51 @@ export class OrderPlatformShipService {
         });
       } catch (error: unknown) {
         results.push(this.batchFailureOf(orderId, error));
+      }
+    }
+    const failed = results.filter((item) => !item.ok).length;
+    return { total: results.length, succeeded: results.length - failed, failed, results };
+  }
+
+  /**
+   * 批量打单（用户指示 2026-10-17）：逐单顺序取面单（**串行**，尊重平台面单
+   * 接口限流），单笔失败不影响其余。默认复用本地已存档面单，不重复打平台。
+   *
+   * 返回每单的 `signedUrl` / `fileName`；前端把所有成功的面单放进同一个打印
+   * 窗口一次打印（逐张开标签页会被浏览器弹窗拦截）。
+   */
+  async fetchShippingLabelBatch(
+    orderIds: string[],
+    options: { refresh: boolean },
+    operator: OperatorContext,
+  ): Promise<BatchShippingLabelResult> {
+    const results: BatchShippingLabelItem[] = [];
+    for (const orderId of new Set(orderIds)) {
+      // 先读一次订单拿单号（失败结果也要有可读标识）；读不到由 catch 处理。
+      let orderNo: string | null = null;
+      try {
+        const order = await this.orderService.getOrderOrThrow(orderId);
+        orderNo = order.orderNo;
+        const label = await this.fetchShippingLabel(orderId, options, operator);
+        results.push({
+          orderId,
+          orderNo,
+          ok: true,
+          code: null,
+          message: null,
+          signedUrl: label.signedUrl,
+          fileName: label.fileName,
+        });
+      } catch (error: unknown) {
+        results.push({
+          orderId,
+          orderNo,
+          ok: false,
+          code: error instanceof DomainError ? error.code : 'ORDER_SHIPPING_LABEL_FAILED',
+          message: error instanceof Error ? error.message : String(error),
+          signedUrl: null,
+          fileName: null,
+        });
       }
     }
     const failed = results.filter((item) => !item.ok).length;

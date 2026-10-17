@@ -22,6 +22,10 @@ import { Link, useNavigate, useSearchParams } from 'react-router';
 import { apiGet, apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime, fmtMoney } from '../../utils/format';
 import { buildOzonProductUrl, buildPlatformProductUrl } from '../../utils/platformUrl';
+import {
+  openShippingLabelPrintWindow,
+  renderShippingLabelsIntoWindow,
+} from '../../printing/print-browser';
 import { ListingOnboardModal, OnboardMatchIdentifiers } from '../../components/ListingOnboardModal';
 import { ListingVariantMapModal } from '../../components/ListingVariantMapModal';
 import {
@@ -1474,6 +1478,93 @@ export function OrdersPage() {
     });
   };
 
+  // ---- 批量打印面单（用户指示 2026-10-17）----
+  // 逐单取平台面单（后端串行、默认复用已存档），把所有成功的 PDF 放进**同一个**
+  // 打印窗口一次打印——逐张 window.open 会被浏览器弹窗拦截。
+  // 打印窗口必须在点击的同步栈里先打开（onClick 里调），拿到数据后再写入。
+  const batchLabelMutation = useMutation({
+    mutationFn: ({ orderIds }: { orderIds: string[]; printWindow: Window }) =>
+      apiPost<{
+        total: number;
+        succeeded: number;
+        failed: number;
+        results: Array<{
+          orderId: string;
+          orderNo: string | null;
+          ok: boolean;
+          code: string | null;
+          message: string | null;
+          signedUrl: string | null;
+          fileName: string | null;
+        }>;
+      }>('/api/v1/orders/batch-shipping-label', { orderIds }),
+    onSuccess: (result, vars) => {
+      const printable = result.results.filter(
+        (item): item is typeof item & { signedUrl: string } => item.ok && item.signedUrl !== null,
+      );
+      if (printable.length === 0) {
+        vars.printWindow.close();
+        notification.warning({
+          type: 'warning',
+          title: '没有可打印的面单',
+          description: (
+            <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+              {result.results.map((item) => (
+                <div key={item.orderId}>
+                  {item.orderNo ?? selectedOrdersById.get(item.orderId)?.orderNo ?? item.orderId}：
+                  {item.message ?? item.code ?? '未知错误'}
+                </div>
+              ))}
+            </div>
+          ),
+          duration: 0,
+        });
+        return;
+      }
+      renderShippingLabelsIntoWindow(
+        vars.printWindow,
+        printable.map((item) => ({ url: item.signedUrl, title: item.orderNo ?? undefined })),
+      );
+      notification.open({
+        type: result.failed > 0 ? 'warning' : 'success',
+        title: `批量打印面单：已放入 ${printable.length} 张（共 ${result.total} 单）`,
+        description:
+          result.failed === 0 ? undefined : (
+            <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+              {result.results
+                .filter((item) => !item.ok)
+                .map((item) => (
+                  <div key={item.orderId}>
+                    {item.orderNo ?? selectedOrdersById.get(item.orderId)?.orderNo ?? item.orderId}
+                    ：{item.message ?? item.code ?? '未知错误'}
+                  </div>
+                ))}
+            </div>
+          ),
+        duration: result.failed > 0 ? 0 : 6,
+      });
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
+    },
+    onError: (error: Error, vars) => {
+      // 失败时关掉此前打开的空白打印窗口，别留下一个"正在准备面单…"的标签页。
+      vars.printWindow.close();
+      message.error(`批量打印面单失败：${error.message}`);
+    },
+  });
+
+  const confirmBatchPrintLabels = () => {
+    if (selectedOrderIds.length === 0) {
+      return;
+    }
+    const printWindow = openShippingLabelPrintWindow();
+    if (printWindow === null) {
+      void message.warning('浏览器拦截了打印窗口，请允许本站弹窗后重试');
+      return;
+    }
+    batchLabelMutation.mutate({ orderIds: selectedOrderIds, printWindow });
+  };
+
   // ---- 批量外部履约（用户指示 2026-10-14）：同一原因逐单关账 ----
   // 与批量发货的本质区别：不产生任何库存流水。已发货/已取消的单前端先排除，
   // 存在已占用（RESERVED/PICKED）行的单由后端逐单拒绝并说明原因。
@@ -2901,6 +2992,15 @@ export function OrdersPage() {
   // 浮岛与表格共用同一份总数（服务端 meta.total，不是当前页行数）。
   const totalCount = query.data?.meta.total ?? 0;
 
+  // 任一批量动作在跑时，其余批量按钮一并禁用（互斥，避免同时对同一批单
+  // 发起多个平台/库存写操作）。loading 自身的按钮视觉上已是禁用态。
+  const anyBatchPending =
+    batchPickingMutation.isPending ||
+    batchPrepareMutation.isPending ||
+    batchShipMutation.isPending ||
+    batchMarkExternalMutation.isPending ||
+    batchLabelMutation.isPending;
+
   return (
     <div>
       <PageHeader
@@ -3154,45 +3254,36 @@ export function OrdersPage() {
             <>
               <Button
                 loading={batchPickingMutation.isPending}
-                disabled={
-                  batchPrepareMutation.isPending ||
-                  batchShipMutation.isPending ||
-                  batchMarkExternalMutation.isPending
-                }
+                disabled={anyBatchPending}
                 onClick={confirmBatchPicking}
               >
                 批量生成拣货单
               </Button>
               <Button
                 loading={batchPrepareMutation.isPending}
-                disabled={
-                  batchPickingMutation.isPending ||
-                  batchShipMutation.isPending ||
-                  batchMarkExternalMutation.isPending
-                }
+                disabled={anyBatchPending}
                 onClick={confirmBatchPrepare}
               >
                 批量获取运单号
               </Button>
               <Button
+                loading={batchLabelMutation.isPending}
+                disabled={anyBatchPending}
+                onClick={confirmBatchPrintLabels}
+              >
+                批量打印面单
+              </Button>
+              <Button
                 danger
                 loading={batchShipMutation.isPending}
-                disabled={
-                  batchPickingMutation.isPending ||
-                  batchPrepareMutation.isPending ||
-                  batchMarkExternalMutation.isPending
-                }
+                disabled={anyBatchPending}
                 onClick={confirmBatchShip}
               >
                 批量发货
               </Button>
               <Button
                 loading={batchMarkExternalMutation.isPending}
-                disabled={
-                  batchPickingMutation.isPending ||
-                  batchPrepareMutation.isPending ||
-                  batchShipMutation.isPending
-                }
+                disabled={anyBatchPending}
                 onClick={requestBatchMarkExternal}
               >
                 批量外部履约
