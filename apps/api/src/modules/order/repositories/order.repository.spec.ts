@@ -63,15 +63,13 @@ describe('orderSortOf (2026-10-14 列表排序白名单；2026-10-16 加急置�
     });
   });
 
-  it('maps skuCode to the MIN(sku_code) key with NULLS LAST and orderedAt tiebreaker', () => {
+  it('maps skuCode to the selected first_sku_code alias with NULLS LAST and orderedAt tiebreaker', () => {
+    // 必须用 SELECT 别名而非 MIN 子查询原文：分页走 skip/take + joins 时
+    // TypeORM 按 alias.property 解析 ORDER BY，含点的子查询会抛
+    // "(SELECT MIN(sk" alias was not found（2026-10-17 bug）。
     expect(orderSortOf('skuCode', 'asc')).toEqual([
       { expression: 'o.isUrgent', direction: 'DESC' },
-      {
-        expression:
-          '(SELECT MIN(sk.sku_code) FROM order_items i LEFT JOIN skus sk ON sk.id = i.sku_id WHERE i.order_id = o.id)',
-        direction: 'ASC',
-        nulls: 'NULLS LAST',
-      },
+      { expression: 'first_sku_code', direction: 'ASC', nulls: 'NULLS LAST' },
       { expression: 'o.orderedAt', direction: 'DESC' },
     ]);
     expect(orderSortOf('skuCode', 'desc')[1]).toMatchObject({ direction: 'DESC' });

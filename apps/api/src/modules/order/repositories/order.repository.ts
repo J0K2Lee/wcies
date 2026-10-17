@@ -50,6 +50,19 @@ const MIN_SKU_CODE_SQL =
   '(SELECT MIN(sk.sku_code) FROM order_items i LEFT JOIN skus sk ON sk.id = i.sku_id WHERE i.order_id = o.id)';
 
 /**
+ * SKU 排序键的 SELECT 别名（listWithAggregates 用 `addSelect(MIN_SKU_CODE_SQL,
+ * SKU_CODE_SORT_ALIAS)`）。
+ *
+ * ORDER BY 必须用这个**别名**而不是 MIN_SKU_CODE_SQL 本身：分页走
+ * skip/take + joins 时 TypeORM 会用两条查询（先取 id 再取实体），并对每个
+ * ORDER BY 表达式按 `alias.property` 解析——子查询里含点（`sk.sku_code`）
+ * 会被当成别名而抛 `"(SELECT MIN(sk" alias was not found`（2026-10-17 用户
+ * 报告：点 SKU 排序列表 500 / 空列表）。改用 SELECT 别名既避开设解析，又
+ * 复用同一个子查询（显示列与排序键永不矛盾）。
+ */
+const SKU_CODE_SORT_ALIAS = 'first_sku_code';
+
+/**
  * 排序白名单映射（纯函数，可单测）。未列出的 sortBy 回落默认（下单时间
  * 新→旧）；表达式全部来自本文件常量，永不拼接用户输入（防注入）。
  * NULL 统一压最后（发货时限为空 / 全行未映射的订单不打断浏览）。
@@ -70,7 +83,7 @@ export function orderSortOf(
       // SKU 编码 A→Z / Z→A；同键按下单时间新→旧保持分页稳定。
       return [
         urgentKey,
-        { expression: MIN_SKU_CODE_SQL, direction, nulls: 'NULLS LAST' },
+        { expression: SKU_CODE_SORT_ALIAS, direction, nulls: 'NULLS LAST' },
         { expression: 'o.orderedAt', direction: 'DESC' },
       ];
     case 'shipmentDeadline':
@@ -360,8 +373,8 @@ export class OrderRepository {
         'open_exceptions_count',
       )
       // SKU 列展示 + SKU 排序键（2026-10-14）：排序与显示用同一个子查询，
-      // 两列永不可能矛盾。
-      .addSelect(MIN_SKU_CODE_SQL, 'first_sku_code')
+      // 两列永不可能矛盾。排序走这个别名（见 SKU_CODE_SORT_ALIAS 注释）。
+      .addSelect(MIN_SKU_CODE_SQL, SKU_CODE_SORT_ALIAS)
       .addSelect(
         `(SELECT COUNT(DISTINCT sk.sku_code) FROM order_items i
             LEFT JOIN skus sk ON sk.id = i.sku_id WHERE i.order_id = o.id)`,
@@ -423,7 +436,7 @@ export class OrderRepository {
     return {
       rows: entities.map((order, index) => {
         const raw: Record<string, unknown> = rawList[index] ?? {};
-        const firstSkuValue = raw['first_sku_code'];
+        const firstSkuValue = raw[SKU_CODE_SORT_ALIAS];
         return {
           order,
           storeName: rawStr(raw['store_name']),

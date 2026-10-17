@@ -1363,3 +1363,68 @@ describe('urgent orders: marking + allocation priority (ADR 0022)', () => {
     expect((await orderDetail(early.body.data.orderId)).erpStatus).toBe('BACKORDERED');
   });
 });
+
+describe('列表排序（2026-10-17 SKU 排序 500 修复）', () => {
+  interface SortRow {
+    id: string;
+    isUrgent: boolean;
+    firstSkuCode: string | null;
+    shipmentDeadline: string | null;
+  }
+
+  /** 按加急分组后组内的键必须单调（加急恒定置顶，组内才应用所选排序键）。 */
+  function assertGroupedMonotonic(
+    rows: SortRow[],
+    key: (row: SortRow) => string | null,
+    label: string,
+  ): void {
+    const urgentFlags = rows.map((row) => row.isUrgent);
+    const firstNonUrgent = urgentFlags.indexOf(false);
+    const lastUrgent = urgentFlags.lastIndexOf(true);
+    if (firstNonUrgent !== -1 && lastUrgent !== -1) {
+      expect(lastUrgent, `${label}: 加急必须置顶`).toBeLessThan(firstNonUrgent);
+    }
+    for (const urgent of [true, false]) {
+      const group = rows.filter((row) => row.isUrgent === urgent);
+      const values = group.map(key);
+      const defined = values.filter((value): value is string => value !== null);
+      expect(defined, `${label}: 组内升序`).toEqual([...defined].sort());
+      const firstNull = values.findIndex((value) => value === null);
+      if (firstNull !== -1) {
+        expect(
+          values.slice(firstNull).every((value) => value === null),
+          `${label}: 空值压最后`,
+        ).toBe(true);
+      }
+    }
+  }
+
+  it('sortBy=skuCode 返回 200 且按 MIN(sku_code) 组内升序、空值压后', async () => {
+    // 回归：ORDER BY 曾用 MIN 子查询原文，skip/take + joins 下 TypeORM 按
+    // alias.property 解析并抛 '(SELECT MIN(sk' alias was not found → 500/空列表。
+    const response = await client.get<SortRow[]>(
+      '/api/v1/orders?sortBy=skuCode&sortOrder=asc&pageSize=100',
+    );
+    expect(response.status, JSON.stringify(response.body.error ?? {})).toBe(200);
+    expect(response.body.data.length).toBeGreaterThan(0);
+    assertGroupedMonotonic(response.body.data, (row) => row.firstSkuCode, 'skuCode ASC');
+  });
+
+  it('sortBy=skuCode 降序与 sortBy=shipmentDeadline 均返回 200', async () => {
+    const desc = await client.get<SortRow[]>(
+      '/api/v1/orders?sortBy=skuCode&sortOrder=desc&pageSize=50',
+    );
+    expect(desc.status, JSON.stringify(desc.body.error ?? {})).toBe(200);
+
+    const deadlines = await client.get<SortRow[]>(
+      '/api/v1/orders?sortBy=shipmentDeadline&sortOrder=asc&pageSize=50',
+    );
+    expect(deadlines.status, JSON.stringify(deadlines.body.error ?? {})).toBe(200);
+    expect(deadlines.body.data.length).toBeGreaterThan(0);
+    assertGroupedMonotonic(
+      deadlines.body.data,
+      (row) => row.shipmentDeadline,
+      'shipmentDeadline ASC',
+    );
+  });
+});
