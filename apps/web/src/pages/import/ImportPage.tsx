@@ -226,6 +226,8 @@ export function ImportPage() {
           <DataTable<ImportJob>
             rowKey="id"
             loading={jobs.isLoading}
+            error={jobs.error}
+            onRetry={() => void jobs.refetch()}
             dataSource={list}
             pagination={{
               current: page,

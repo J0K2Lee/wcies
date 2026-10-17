@@ -412,6 +412,8 @@ export function ReturnsPage() {
           <DataTable<PlatformReturnRow>
             rowKey="id"
             loading={platformReturns.isLoading}
+            error={platformReturns.error}
+            onRetry={() => void platformReturns.refetch()}
             dataSource={platformReturns.data?.data ?? []}
             pagination={{
               current: platformPage,
@@ -507,6 +509,8 @@ export function ReturnsPage() {
             <DataTable<ReturnBatchRow>
               rowKey="id"
               loading={batches.isLoading}
+              error={batches.error}
+              onRetry={() => void batches.refetch()}
               dataSource={batchList}
               pagination={{
                 current: page,

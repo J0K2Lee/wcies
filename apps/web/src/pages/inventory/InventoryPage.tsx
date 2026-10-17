@@ -13,11 +13,11 @@ import {
   Space,
   Tabs,
 } from 'antd';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { fmtDateTime } from '../../utils/format';
 import { newUuid } from '../../utils/uuid';
-import { apiPost, apiPut, useApiQuery } from '../../api/hooks';
+import { apiPost, apiPut, useApiQuery, useDebouncedValue } from '../../api/hooks';
 import {
   ContextAction,
   ContextMetric,
@@ -132,12 +132,18 @@ export function InventoryPage() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const [keyword, setKeyword] = useState('');
+  // 搜索防抖（2026-10-17 体检 P0-3）：输入态即时回显，查询态防抖 300ms。
+  const debouncedKeyword = useDebouncedValue(keyword.trim(), 300);
   const [warehouseId, setWarehouseId] = useState<string | undefined>();
   const [status, setStatus] = useState<string | undefined>(() => {
     const fromUrl = searchParams.get('status');
     return fromUrl === 'OUT_OF_STOCK' || fromUrl === 'IN_STOCK' ? fromUrl : undefined;
   });
   const [page, setPage] = useState(1);
+  // 关键词（防抖后）变化时回到第 1 页，避免停在末页看到空结果。
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedKeyword]);
   const [action, setAction] = useState<ActionMode | null>(null);
   const [detailSku, setDetailSku] = useState<string | null>(null);
   const [selectedSku, setSelectedSku] = useState<string | null>(null);
@@ -165,12 +171,12 @@ export function InventoryPage() {
     {
       page,
       pageSize: 50,
-      keyword: keyword || undefined,
+      keyword: debouncedKeyword || undefined,
       warehouseId,
       status,
       ...(showEmpty ? { includeEmpty: 'true' } : {}),
     },
-    ['inventory', page, keyword, warehouseId, status, showEmpty],
+    ['inventory', page, debouncedKeyword, warehouseId, status, showEmpty],
   );
   // KPI counters (task §33): three light meta.total queries — real numbers only.
   const inStockTotal = useApiQuery<Envelope<unknown[]>>(
@@ -543,6 +549,8 @@ export function InventoryPage() {
         <DataTable<InventoryRow>
           rowKey="id"
           loading={inventory.isLoading}
+          error={inventory.error}
+          onRetry={() => void inventory.refetch()}
           dataSource={rows}
           pagination={{
             current: page,
@@ -748,6 +756,8 @@ export function InventoryPage() {
                       dataSource={detailReservations.data?.data ?? []}
                       pagination={false}
                       loading={detailReservations.isLoading}
+                      error={detailReservations.error}
+                      onRetry={() => void detailReservations.refetch()}
                       emptyTitle="暂无库存占用"
                       emptyDescription="当前没有订单占用该 SKU 库存。"
                       columns={[
@@ -787,6 +797,8 @@ export function InventoryPage() {
                       dataSource={detailTransactions.data?.data ?? []}
                       pagination={false}
                       loading={detailTransactions.isLoading}
+                      error={detailTransactions.error}
+                      onRetry={() => void detailTransactions.refetch()}
                       emptyTitle="暂无库存流水"
                       emptyDescription="该 SKU 尚未发生库存变动。"
                       columns={[

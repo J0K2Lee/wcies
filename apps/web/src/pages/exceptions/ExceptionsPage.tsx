@@ -541,6 +541,8 @@ export function ExceptionsPage() {
           <DataTable<ExceptionRow>
             rowKey="id"
             loading={list.isLoading}
+            error={list.error}
+            onRetry={() => void list.refetch()}
             dataSource={rows}
             columns={columns}
             emptyTitle="暂无异常"

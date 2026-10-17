@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { App, Alert, Button, Drawer, Form, Input, Modal, Select, Space } from 'antd';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { apiDelete, apiPatch, apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
 import {
@@ -135,6 +135,12 @@ export function ListingsPage() {
   const [mappingState, setMappingState] = useState<string | undefined>();
   // ?keyword= deep link from the exception center / mapping overview.
   const [keyword, setKeyword] = useState(() => searchParams.get('keyword') ?? '');
+  // 搜索防抖（2026-10-17 体检 P0-3）：输入态即时回显，查询态防抖 300ms。
+  const debouncedKeyword = useDebouncedValue(keyword.trim(), 300);
+  // 关键词（防抖后）变化时回到第 1 页，避免停在末页看到空结果。
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedKeyword]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -192,9 +198,9 @@ export function ListingsPage() {
       platformId,
       storeId,
       mappingState,
-      keyword: keyword || undefined,
+      keyword: debouncedKeyword || undefined,
     },
-    ['listings', page, platformId, storeId, mappingState, keyword],
+    ['listings', page, platformId, storeId, mappingState, debouncedKeyword],
   );
   const platforms = useApiQuery<{ data: Array<{ id: string; code: string; name: string }> }>(
     '/api/v1/platforms',
@@ -658,6 +664,8 @@ export function ListingsPage() {
           <DataTable<ListingRow>
             rowKey="id"
             loading={list.isLoading}
+            error={list.error}
+            onRetry={() => void list.refetch()}
             dataSource={rows}
             emptyTitle="暂无商品链接"
             emptyDescription="调整筛选条件，或点击右上角新建映射"
@@ -1020,6 +1028,8 @@ export function ListingsPage() {
                 rowKey="id"
                 size="small"
                 loading={detail.isLoading}
+                error={detail.error}
+                onRetry={() => void detail.refetch()}
                 dataSource={listingDetail.skus}
                 pagination={false}
                 emptyTitle="暂无变体"

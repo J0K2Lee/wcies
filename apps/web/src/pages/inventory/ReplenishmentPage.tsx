@@ -215,6 +215,8 @@ export function ReplenishmentPage() {
         <DataTable<SuggestionRow>
           rowKey="skuId"
           loading={list.isLoading}
+          error={list.error}
+          onRetry={() => void list.refetch()}
           dataSource={rows}
           pagination={{
             current: page,

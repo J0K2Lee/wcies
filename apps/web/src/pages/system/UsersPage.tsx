@@ -230,6 +230,8 @@ export function UsersPage() {
           <DataTable<UserRow>
             rowKey="id"
             loading={users.isLoading}
+            error={users.error}
+            onRetry={() => void users.refetch()}
             dataSource={users.data?.data ?? []}
             columns={columns}
             emptyTitle="暂无用户"

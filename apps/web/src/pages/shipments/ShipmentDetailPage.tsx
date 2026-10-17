@@ -6,6 +6,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiPatch, apiPost, useApiQuery } from '../../api/hooks';
 import {
   DataTable,
+  ErrorState,
   InfoGrid,
   PACKAGE_STATUS_META,
   PageHeader,
@@ -148,6 +149,19 @@ export function ShipmentDetailPage() {
     message.success('面单已上传');
     refresh();
   };
+
+  if (query.isError) {
+    // 改造前这里只有一个「加载中…」兜底：请求失败会永远停在加载中，
+    // 用户既看不到原因也无法重试（2026-10-17 体检 P1-7）。
+    return (
+      <SectionCard title="发货单">
+        <ErrorState
+          description={query.error instanceof Error ? query.error.message : undefined}
+          onRetry={() => void query.refetch()}
+        />
+      </SectionCard>
+    );
+  }
 
   if (shipment === undefined) {
     return <SectionCard title="发货单">加载中…</SectionCard>;

@@ -19,7 +19,7 @@ import {
 import { DownOutlined, FlagFilled, UpOutlined } from '@ant-design/icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { apiGet, apiPost, useApiQuery } from '../../api/hooks';
+import { apiGet, apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
 import { fmtDateTime, fmtMoney } from '../../utils/format';
 import { buildOzonProductUrl, buildPlatformProductUrl } from '../../utils/platformUrl';
 import { openShippingLabelPrintWindow, showMergedPdfInWindow } from '../../printing/print-browser';
@@ -44,6 +44,7 @@ import {
   PlatformTag,
   RailHint,
   RawDataBlock,
+  rowInteractionProps,
   INTERCEPTION_STATUS_META,
   SectionCard,
   StatusBadge,
@@ -52,6 +53,12 @@ import {
   useContextRail,
   ContextRailContent,
 } from '../../design-system';
+import {
+  ColumnSetting,
+  OrdersViewSettings,
+  loadViewSettings,
+  VIEW_SETTINGS_KEY,
+} from './view-settings';
 
 /**
  * Orders workbench (redesign task §37-§43; 用户指示 2026-09-17 改造)：
@@ -290,101 +297,6 @@ const PROCUREMENT_META: Record<string, { tone: 'danger' | 'info' | 'success'; la
 // ---------------------------------------------------------------------------
 // 视图设置（用户指示 2026-09-17）：localStorage 持久化，缺省值前向兼容合并。
 // ---------------------------------------------------------------------------
-
-interface ColumnSetting {
-  key: string;
-  visible: boolean;
-}
-
-interface OrdersViewSettings {
-  /** 默认展开所有订单行。 */
-  defaultExpandAll: boolean;
-  /** 每页显示的订单行数。 */
-  pageSize: number;
-  /** 展开行主图缩略图边长（px，方形不裁剪）。 */
-  thumbnailSize: number;
-  /** 默认排序（2026-10-14 用户指示：在视图设置中配置；排序按钮只切会话态）。 */
-  defaultSortBy: 'orderedAt' | 'skuCode' | 'shipmentDeadline';
-  defaultSortOrder: 'asc' | 'desc';
-  /** 主表列（数组顺序即显示顺序）。 */
-  mainColumns: ColumnSetting[];
-  /** 展开行列（数组顺序即显示顺序）。 */
-  expandedColumns: ColumnSetting[];
-}
-
-// 视图设置版本：v2（2026-10-14）把「运单号」列改为默认可见——平台同步
-// 到的运单号（OZON 组包后分配，delivering/delivered 订单都有）与「获取
-// 运单号」写入的是同一个字段，都应展示（用户指示）。升版让已有用户拿到
-// 新默认值，旧版 v1 偏好自然废弃。
-const VIEW_SETTINGS_KEY = 'wcies.orders.view.v2';
-
-const DEFAULT_VIEW_SETTINGS: OrdersViewSettings = {
-  defaultExpandAll: false,
-  pageSize: 20,
-  thumbnailSize: 48,
-  defaultSortBy: 'orderedAt',
-  defaultSortOrder: 'desc',
-  mainColumns: [
-    { key: 'platformOrderId', visible: true },
-    { key: 'items', visible: true },
-    // SKU 列（2026-10-14）：展示该单最小 SKU 编码，是「SKU 排序」的可视依据。
-    { key: 'sku', visible: true },
-    { key: 'erpStatus', visible: true },
-    { key: 'store', visible: true },
-    { key: 'fulfillmentMode', visible: true },
-    { key: 'shipmentDeadline', visible: true },
-    { key: 'orderedAt', visible: true },
-    // 平台运单号（平台事实）：既包括「获取运单号」写入的，也包括订单同步
-    // 带回的（OZON 组包后分配）——默认展示，未组包订单该列为空。
-    { key: 'platformTrackingNo', visible: true },
-  ],
-  expandedColumns: [
-    { key: 'image', visible: true },
-    { key: 'sku', visible: true },
-    { key: 'offerId', visible: true },
-    { key: 'quantity', visible: true },
-    { key: 'unitPrice', visible: true },
-    { key: 'totalPrice', visible: true },
-    { key: 'latestPurchasePrice', visible: true },
-    { key: 'fulfillmentStatus', visible: true },
-  ],
-};
-
-function loadViewSettings(): OrdersViewSettings {
-  try {
-    const raw = localStorage.getItem(VIEW_SETTINGS_KEY);
-    if (raw === null) {
-      return DEFAULT_VIEW_SETTINGS;
-    }
-    const parsed = JSON.parse(raw) as Partial<OrdersViewSettings>;
-    return {
-      ...DEFAULT_VIEW_SETTINGS,
-      ...parsed,
-      // 前向兼容：新增列自动出现在尾部。
-      mainColumns:
-        parsed.mainColumns === undefined
-          ? DEFAULT_VIEW_SETTINGS.mainColumns
-          : [
-              ...parsed.mainColumns,
-              ...DEFAULT_VIEW_SETTINGS.mainColumns.filter(
-                (column) => !parsed.mainColumns?.some((existing) => existing.key === column.key),
-              ),
-            ],
-      expandedColumns:
-        parsed.expandedColumns === undefined
-          ? DEFAULT_VIEW_SETTINGS.expandedColumns
-          : [
-              ...parsed.expandedColumns,
-              ...DEFAULT_VIEW_SETTINGS.expandedColumns.filter(
-                (column) =>
-                  !parsed.expandedColumns?.some((existing) => existing.key === column.key),
-              ),
-            ],
-    };
-  } catch {
-    return DEFAULT_VIEW_SETTINGS;
-  }
-}
 
 const MAIN_COLUMN_LABELS: Record<string, string> = {
   platformOrderId: '订单号',
@@ -760,6 +672,15 @@ export function OrdersPage() {
   const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState(() => searchParams.get('keyword') ?? '');
+  // 搜索防抖（2026-10-17 体检 P0-3）：输入态即时回显，查询态防抖 300ms。
+  // 改造前 keyword 直连查询参数，每敲一个字符就打一次 /api/v1/orders。
+  const debouncedKeyword = useDebouncedValue(keyword.trim(), 300);
+  // 关键词（防抖后）变化时回到第 1 页：否则停在第 3 页搜索会看到「第 3 页的空结果」。
+  // 代价：停在首页输入时只发 1 次请求；若当前页 > 1，会先后发「同页 + 新词」和
+  // 「第 1 页 + 新词」两次（前者结果被丢弃），仍远好于改造前每敲一个字符都发一次。
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedKeyword]);
   // Dual-axis default view: 待处理 (§2.1) - backordered orders are the norm,
   // not an edge case, so they open front and center.
   const [activeTab, setActiveTab] = useState('pending');
@@ -860,7 +781,7 @@ export function OrdersPage() {
     {
       page,
       pageSize: viewSettings.pageSize,
-      ...(keyword ? { keyword } : {}),
+      ...(debouncedKeyword ? { keyword: debouncedKeyword } : {}),
       // 平台筛选是真实 API 过滤（用户反馈 2026-09-28：此前只过滤店铺下拉，
       // 列表纹丝不动，出现“选着 YANDEX 却显示 OZON 订单”）。
       ...(platformFilter ? { platform: platformFilter } : {}),
@@ -879,7 +800,7 @@ export function OrdersPage() {
       // params 不参与。此前漏了它，「每页行数」写回设置后键不变 → 不重新
       // 拉取，列表仍按旧条数渲染（2026-10-16 端到端验收发现）。
       viewSettings.pageSize,
-      keyword,
+      debouncedKeyword,
       platformFilter,
       stageOfActiveTab,
       goodsState,
@@ -896,36 +817,36 @@ export function OrdersPage() {
   const countFilters = {
     page: 1,
     pageSize: 1,
-    ...(keyword ? { keyword } : {}),
+    ...(debouncedKeyword ? { keyword: debouncedKeyword } : {}),
     ...(platformFilter ? { platform: platformFilter } : {}),
     ...(storeId ? { storeId } : {}),
   } as Record<string, unknown>;
   const allCount = useApiQuery<Envelope<OrderListItem[]>>('/api/v1/orders', countFilters, [
     'orders-count',
     'ALL',
-    keyword,
+    debouncedKeyword,
     platformFilter,
     storeId,
   ]);
   const pendingCount = useApiQuery<Envelope<OrderListItem[]>>(
     '/api/v1/orders',
     { ...countFilters, stage: 'PENDING' },
-    ['orders-count', 'PENDING', keyword, platformFilter, storeId],
+    ['orders-count', 'PENDING', debouncedKeyword, platformFilter, storeId],
   );
   const externalCount = useApiQuery<Envelope<OrderListItem[]>>(
     '/api/v1/orders',
     { ...countFilters, stage: 'EXTERNAL' },
-    ['orders-count', 'EXTERNAL', keyword, platformFilter, storeId],
+    ['orders-count', 'EXTERNAL', debouncedKeyword, platformFilter, storeId],
   );
   const inTransitCount = useApiQuery<Envelope<OrderListItem[]>>(
     '/api/v1/orders',
     { ...countFilters, stage: 'IN_TRANSIT' },
-    ['orders-count', 'IN_TRANSIT', keyword, platformFilter, storeId],
+    ['orders-count', 'IN_TRANSIT', debouncedKeyword, platformFilter, storeId],
   );
   const completedCount = useApiQuery<Envelope<OrderListItem[]>>(
     '/api/v1/orders',
     { ...countFilters, stage: 'COMPLETED' },
-    ['orders-count', 'COMPLETED', keyword, platformFilter, storeId],
+    ['orders-count', 'COMPLETED', debouncedKeyword, platformFilter, storeId],
   );
 
   const storesQuery = useApiQuery<
@@ -2967,6 +2888,23 @@ export function OrdersPage() {
     .map((column) => mainColumnDefs[column.key])
     .filter((column) => column !== undefined);
 
+  /**
+   * 表格横向滚动宽度（2026-10-17 体检 P0-2）。
+   * 9 列固定宽度合计 1380px，而主区可用宽度在 1600（右栏展开）只有 1044px、
+   * 1366 只有 1110px —— 不声明 scroll.x 时 antd 会把列压窄，单元格内容折成
+   * 两三行、行高翻倍。按**当前可见列**的宽度求和（列可在视图设置里增删），
+   * 让表格在自身内部横滚，而不是牺牲列宽。
+   */
+  const tableScrollX = useMemo(() => {
+    const columnsWidth = mainColumns.reduce((sum, column) => {
+      // width 允许是百分比字符串；无法量化的按 120px 估算。
+      const width = typeof column.width === 'number' ? column.width : 120;
+      return sum + width;
+    }, 0);
+    // 行选择列（复选框）随内容自适应，预留 48px。
+    return columnsWidth + 48;
+  }, [mainColumns]);
+
   /** 默认展开所有订单行（视图设置）时整页展开，点击仅选中（侧边栏）。 */
   const expandedRowKeys = useMemo(() => {
     if (viewSettings.defaultExpandAll) {
@@ -3174,6 +3112,8 @@ export function OrdersPage() {
         <DataTable<OrderListItem>
           rowKey="id"
           loading={query.isLoading}
+          error={query.error}
+          onRetry={() => void query.refetch()}
           dataSource={list}
           rowSelection={{
             selectedRowKeys: selectedOrderIds,
@@ -3210,23 +3150,35 @@ export function OrdersPage() {
               </div>
             ),
           }}
-          onRow={(record) => ({
-            onClick: (event) => {
-              // 勾选复选框不触发行选中/展开（多选与单击选中互不干扰）。
-              if ((event.target as HTMLElement).closest('.ant-table-selection-column') !== null) {
-                return;
-              }
+          onRow={(record) => {
+            const activate = (): void => {
               setSelectedItemId(null);
               setSelectedId(record.id === selectedId ? null : record.id);
-            },
-            onDoubleClick: () => setDetailId(record.id),
-            style: {
-              cursor: 'pointer',
-              background: record.id === selectedId ? colors.primarySoft : undefined,
-            },
-          })}
+            };
+            return {
+              onClick: (event) => {
+                // 勾选复选框不触发行选中/展开（多选与单击选中互不干扰）。
+                if ((event.target as HTMLElement).closest('.ant-table-selection-column') !== null) {
+                  return;
+                }
+                activate();
+              },
+              onDoubleClick: () => setDetailId(record.id),
+              // 键盘可达（2026-10-17 体检 P2-9）：Enter / 空格 = 行点击。
+              ...rowInteractionProps({
+                selected: record.id === selectedId,
+                onActivate: activate,
+                label: `订单 ${record.platformOrderId}`,
+              }),
+              style: {
+                cursor: 'pointer',
+                background: record.id === selectedId ? colors.primarySoft : undefined,
+              },
+            };
+          }}
           emptyTitle="暂无订单"
           emptyDescription="当前筛选下没有订单；新订单由平台同步自动进入系统。"
+          scroll={{ x: tableScrollX }}
           columns={mainColumns}
         />
       </SectionCard>

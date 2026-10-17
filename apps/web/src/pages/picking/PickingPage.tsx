@@ -139,6 +139,8 @@ export function PickingPage() {
         <DataTable<PickingTaskListItem>
           rowKey="id"
           loading={query.isLoading}
+          error={query.error}
+          onRetry={() => void query.refetch()}
           dataSource={list}
           pagination={{
             current: page,

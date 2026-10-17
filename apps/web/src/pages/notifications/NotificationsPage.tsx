@@ -172,6 +172,8 @@ export function NotificationsPage() {
           <DataTable<NotificationItem>
             rowKey="id"
             loading={query.isLoading}
+            error={query.error}
+            onRetry={() => void query.refetch()}
             dataSource={rows}
             emptyTitle="暂无通知"
             emptyDescription="系统事件产生后将在这里显示"

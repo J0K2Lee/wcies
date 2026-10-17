@@ -24,7 +24,7 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import { useSearchParams, useNavigate } from 'react-router';
-import { apiDelete, apiPatch, apiPost, useApiQuery } from '../../api/hooks';
+import { apiDelete, apiPatch, apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
 import { fmtDateTime, fmtNumber } from '../../utils/format';
 import {
   ActionMenu,
@@ -279,7 +279,12 @@ export function StoresPage() {
     }
   }, [searchParams]);
 
-  const effectiveKeyword = keyword.trim();
+  // 搜索防抖（2026-10-17 体检 P0-3）：输入态即时回显，查询态防抖 300ms。
+  const debouncedKeyword = useDebouncedValue(keyword.trim(), 300);
+  // 关键词（防抖后）变化时回到第 1 页，避免停在末页看到空结果。
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedKeyword]);
 
   const list = useApiQuery<Envelope<StoreRow[]>>(
     '/api/v1/stores',
@@ -288,9 +293,9 @@ export function StoresPage() {
       pageSize: 50,
       ...(platformId ? { platformId } : {}),
       ...(statusFilter ? { status: statusFilter } : {}),
-      ...(effectiveKeyword ? { keyword: effectiveKeyword } : {}),
+      ...(debouncedKeyword ? { keyword: debouncedKeyword } : {}),
     },
-    ['stores', page, platformId, statusFilter, effectiveKeyword],
+    ['stores', page, platformId, statusFilter, debouncedKeyword],
   );
   const platforms = useApiQuery<Envelope<Array<{ id: string; code: string; name: string }>>>(
     '/api/v1/platforms',
@@ -999,6 +1004,8 @@ export function StoresPage() {
           <DataTable<StoreRow>
             rowKey="id"
             loading={list.isLoading}
+            error={list.error}
+            onRetry={() => void list.refetch()}
             dataSource={rows}
             columns={columns}
             emptyTitle="暂无店铺"

@@ -32,6 +32,7 @@ import {
   PageHeader,
   RailHint,
   RelativeTime,
+  rowInteractionProps,
   SectionCard,
   StatusBadge,
   useContextRail,
@@ -726,6 +727,8 @@ export function PurchaseOrdersPage() {
         <DataTable<PurchaseOrderRow>
           rowKey="id"
           loading={list.isLoading}
+          error={list.error}
+          onRetry={() => void list.refetch()}
           dataSource={rows}
           rowSelection={{
             selectedRowKeys: selectedPoIds,
@@ -746,20 +749,31 @@ export function PurchaseOrdersPage() {
               </div>
             ),
           }}
-          onRow={(record) => ({
-            onClick: (event) => {
-              // 勾选复选框不触发行选中/展开（多选与单击选中互不干扰）。
-              if ((event.target as HTMLElement).closest('.ant-table-selection-column') !== null) {
-                return;
-              }
+          onRow={(record) => {
+            const activate = (): void => {
               setSelectedId(record.id === selectedId ? null : record.id);
-            },
-            onDoubleClick: () => setDetailId(record.id),
-            style: {
-              cursor: 'pointer',
-              background: record.id === selectedId ? colors.primarySoft : undefined,
-            },
-          })}
+            };
+            return {
+              onClick: (event) => {
+                // 勾选复选框不触发行选中/展开（多选与单击选中互不干扰）。
+                if ((event.target as HTMLElement).closest('.ant-table-selection-column') !== null) {
+                  return;
+                }
+                activate();
+              },
+              onDoubleClick: () => setDetailId(record.id),
+              // 键盘可达（2026-10-17 体检 P2-9）：Enter / 空格 = 行点击。
+              ...rowInteractionProps({
+                selected: record.id === selectedId,
+                onActivate: activate,
+                label: `采购单 ${record.poNo}`,
+              }),
+              style: {
+                cursor: 'pointer',
+                background: record.id === selectedId ? colors.primarySoft : undefined,
+              },
+            };
+          }}
           emptyTitle="暂无采购单"
           emptyDescription="在缺货订单的详情里点「登记采购」，或在这里登记备货采购。"
           columns={[

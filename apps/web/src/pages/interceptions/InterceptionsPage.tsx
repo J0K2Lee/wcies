@@ -135,6 +135,8 @@ export function InterceptionsPage() {
         <DataTable<InterceptionListItem>
           rowKey="id"
           loading={query.isLoading}
+          error={query.error}
+          onRetry={() => void query.refetch()}
           dataSource={rows}
           pagination={{
             current: page,

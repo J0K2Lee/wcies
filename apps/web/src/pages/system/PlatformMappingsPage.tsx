@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button, Input, Select, Tooltip } from 'antd';
 import { AppstoreOutlined, LinkOutlined, ReloadOutlined, WarningOutlined } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router';
-import { useApiQuery } from '../../api/hooks';
+import { useApiQuery, useDebouncedValue } from '../../api/hooks';
 import { fmtNumber } from '../../utils/format';
 import {
   colors,
@@ -63,17 +63,22 @@ export function PlatformMappingsPage() {
   const [platformId, setPlatformId] = useState<string | undefined>();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const effectiveKeyword = keyword.trim();
+  // 搜索防抖（2026-10-17 体检 P0-3）：输入态即时回显，查询态防抖 300ms。
+  const debouncedKeyword = useDebouncedValue(keyword.trim(), 300);
+  // 关键词（防抖后）变化时回到第 1 页，避免停在末页看到空结果。
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedKeyword]);
   const list = useApiQuery<Envelope<ListingRow[]>>(
     '/api/v1/listings',
     {
       page,
       pageSize: 20,
-      ...(effectiveKeyword ? { keyword: effectiveKeyword } : {}),
+      ...(debouncedKeyword ? { keyword: debouncedKeyword } : {}),
       ...(mappingState ? { mappingState } : {}),
       ...(platformId ? { platformId } : {}),
     },
-    ['listings', 'overview', page, effectiveKeyword, mappingState, platformId],
+    ['listings', 'overview', page, debouncedKeyword, mappingState, platformId],
   );
 
   const mappedCount = useApiQuery<Envelope<ListingRow[]>>(
@@ -288,6 +293,8 @@ export function PlatformMappingsPage() {
           <DataTable<ListingRow>
             rowKey="id"
             loading={list.isLoading}
+            error={list.error}
+            onRetry={() => void list.refetch()}
             dataSource={rows}
             emptyTitle="暂无商品链接"
             emptyDescription="同步商品后将出现在这里"

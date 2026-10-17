@@ -121,6 +121,8 @@ export function InventoryTransactionsPage() {
         <DataTable<TransactionRow>
           rowKey="id"
           loading={transactions.isLoading}
+          error={transactions.error}
+          onRetry={() => void transactions.refetch()}
           dataSource={transactions.data?.data ?? []}
           pagination={{
             current: page,

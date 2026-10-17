@@ -264,6 +264,8 @@ export function ReservationsPage() {
         <DataTable<ReservationRow>
           rowKey="id"
           loading={reservations.isLoading}
+          error={reservations.error}
+          onRetry={() => void reservations.refetch()}
           dataSource={list}
           pagination={{
             current: page,

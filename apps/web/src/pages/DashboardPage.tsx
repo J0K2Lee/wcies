@@ -557,6 +557,8 @@ export function DashboardPage() {
         <DataTable<SyncJobItem>
           rowKey="id"
           loading={syncJobs.isLoading}
+          error={syncJobs.error}
+          onRetry={() => void syncJobs.refetch()}
           dataSource={abnormalJobs.slice(0, 8)}
           pagination={false}
           emptyTitle="暂无同步异常"

@@ -253,6 +253,12 @@ export function SkusPage() {
   const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState(() => searchParams.get('keyword') ?? '');
+  // 搜索防抖（2026-10-17 体检 P0-3）：输入态即时回显，查询态防抖 300ms。
+  const debouncedKeyword = useDebouncedValue(keyword.trim(), 300);
+  // 关键词（防抖后）变化时回到第 1 页，避免停在末页看到空结果。
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedKeyword]);
   const [brandId, setBrandId] = useState<string | undefined>();
   const [categoryId, setCategoryId] = useState<string | undefined>();
   const [status, setStatus] = useState<string | undefined>();
@@ -309,13 +315,13 @@ export function SkusPage() {
     {
       page,
       pageSize: 50,
-      keyword: keyword || undefined,
+      keyword: debouncedKeyword || undefined,
       brandId,
       categoryId,
       status,
       hasListing,
     },
-    ['skus', page, keyword, brandId, categoryId, status, hasListing],
+    ['skus', page, debouncedKeyword, brandId, categoryId, status, hasListing],
   );
   const brands = useApiQuery<Envelope<BrandItem[]>>('/api/v1/brands', { keyword: '' }, ['brands']);
   // Sprint 8.5R1: tree-lite (column-pruned) - the cascader only reads these
@@ -990,6 +996,8 @@ export function SkusPage() {
         <DataTable<SkuRow>
           rowKey="id"
           loading={list.isLoading}
+          error={list.error}
+          onRetry={() => void list.refetch()}
           dataSource={rows}
           pagination={{
             current: page,
@@ -1347,6 +1355,8 @@ export function SkusPage() {
                     dataSource={barcodes.data?.data ?? []}
                     pagination={false}
                     loading={barcodes.isLoading}
+                    error={barcodes.error}
+                    onRetry={() => void barcodes.refetch()}
                     emptyTitle="暂无条码"
                     columns={[
                       { title: '条码', dataIndex: 'barcode' },
@@ -1456,6 +1466,8 @@ export function SkusPage() {
                     dataSource={mappings.data?.data ?? []}
                     pagination={false}
                     loading={mappings.isLoading}
+                    error={mappings.error}
+                    onRetry={() => void mappings.refetch()}
                     emptyTitle="暂无平台映射"
                     emptyDescription="该 SKU 尚未映射到任何平台商品链接。"
                     columns={[

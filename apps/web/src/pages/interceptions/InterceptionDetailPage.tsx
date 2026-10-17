@@ -7,6 +7,7 @@ import { apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime } from '../../utils/format';
 import {
   colors,
+  ErrorState,
   InfoGrid,
   INTERCEPTION_STATUS_META,
   PageHeader,
@@ -98,6 +99,18 @@ export function InterceptionDetailPage() {
       setFeedback({ kind: 'error', title: '操作失败', detail: error.message });
     },
   });
+
+  if (query.isError) {
+    // 同 ShipmentDetailPage：失败时不再永远停在「加载中」（2026-10-17 体检 P1-7）。
+    return (
+      <SectionCard title="拦截任务">
+        <ErrorState
+          description={query.error instanceof Error ? query.error.message : undefined}
+          onRetry={() => void query.refetch()}
+        />
+      </SectionCard>
+    );
+  }
 
   if (detail === undefined) {
     return <SectionCard title="拦截任务">加载中…</SectionCard>;

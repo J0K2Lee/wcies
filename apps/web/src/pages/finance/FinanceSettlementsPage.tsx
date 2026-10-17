@@ -262,6 +262,8 @@ export function FinanceSettlementsPage() {
         <DataTable<SettlementRow>
           rowKey="id"
           loading={list.isLoading}
+          error={list.error}
+          onRetry={() => void list.refetch()}
           dataSource={rows}
           pagination={{
             current: page,

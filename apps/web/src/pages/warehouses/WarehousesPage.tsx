@@ -696,6 +696,8 @@ export function WarehousesPage() {
           <DataTable<WarehouseRow>
             rowKey="id"
             loading={list.isLoading}
+            error={list.error}
+            onRetry={() => void list.refetch()}
             dataSource={rows}
             emptyTitle="暂无仓库"
             emptyDescription="点击右上角新建仓库"
@@ -1139,6 +1141,8 @@ export function WarehousesPage() {
                 rowKey="id"
                 size="small"
                 loading={drawerBindings.isLoading}
+                error={drawerBindings.error}
+                onRetry={() => void drawerBindings.refetch()}
                 dataSource={drawerBindings.data?.data ?? []}
                 pagination={false}
                 emptyTitle="暂无平台仓库绑定"
@@ -1188,6 +1192,8 @@ export function WarehousesPage() {
                 rowKey="id"
                 size="small"
                 loading={bins.isLoading}
+                error={bins.error}
+                onRetry={() => void bins.refetch()}
                 dataSource={bins.data?.data ?? []}
                 pagination={{ pageSize: 20, showSizeChanger: false }}
                 emptyTitle="暂无库位"

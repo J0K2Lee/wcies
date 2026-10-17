@@ -779,6 +779,8 @@ export function PurchaseReceiptsPage() {
         <DataTable<ReceiptRow>
           rowKey="id"
           loading={list.isLoading}
+          error={list.error}
+          onRetry={() => void list.refetch()}
           dataSource={rows}
           rowSelection={{
             selectedRowKeys: selectedReceiptIds,

@@ -307,6 +307,8 @@ export function TransfersPage() {
         <DataTable<TransferRow>
           rowKey="id"
           loading={list.isLoading}
+          error={list.error}
+          onRetry={() => void list.refetch()}
           dataSource={rows}
           pagination={{
             current: page,

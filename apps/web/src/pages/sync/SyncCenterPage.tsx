@@ -777,6 +777,8 @@ export function SyncCenterPage() {
             <DataTable<SyncJobRow>
               rowKey="id"
               loading={jobs.isLoading}
+              error={jobs.error}
+              onRetry={() => void jobs.refetch()}
               dataSource={rows}
               columns={jobColumns}
               emptyTitle="暂无同步任务"
@@ -804,6 +806,8 @@ export function SyncCenterPage() {
           <DataTable<RawEventRow>
             rowKey="id"
             loading={events.isLoading}
+            error={events.error}
+            onRetry={() => void events.refetch()}
             dataSource={events.data?.data ?? []}
             emptyTitle="暂无事件推送"
             emptyDescription="平台事件推送（订单、商品变更等）将在这里显示"

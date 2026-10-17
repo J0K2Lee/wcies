@@ -125,6 +125,8 @@ export function FinanceOverviewPage() {
         <DataTable<TransactionRow>
           rowKey="id"
           loading={recent.isLoading}
+          error={recent.error}
+          onRetry={() => void recent.refetch()}
           dataSource={rows}
           pagination={false}
           onRow={() => ({

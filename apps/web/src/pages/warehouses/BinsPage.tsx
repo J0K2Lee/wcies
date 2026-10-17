@@ -392,6 +392,8 @@ export function BinsPage() {
             onChange: (keys) => setSelectedBinIds(keys as string[]),
           }}
           loading={bins.isLoading}
+          error={bins.error}
+          onRetry={() => void bins.refetch()}
           dataSource={rows}
           pagination={{
             current: page,
