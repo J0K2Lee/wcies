@@ -35,7 +35,9 @@ export const VIEW_SETTINGS_KEY = 'wcies.orders.view.v3';
 export const DEFAULT_VIEW_SETTINGS: OrdersViewSettings = {
   defaultExpandAll: false,
   pageSize: 20,
-  thumbnailSize: 48,
+  // 主图边长 72（2026-10-17）：展开明细右侧是「SKU/名称 + Offer ID + 数量价格」三行，
+  // 实测高 73px —— 48px 的图会在下方留 25px 空白。72 与三行基本等高，视觉上对齐。
+  thumbnailSize: 72,
   defaultSortBy: 'orderedAt',
   defaultSortOrder: 'desc',
   mainColumns: [

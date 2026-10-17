@@ -718,6 +718,10 @@ function ExpandedItemBlock({
       }}
     >
       {visible.has('image') && (
+        // 缩略图正方形，边长由「视图设置 → 展开行主图尺寸」控制（2026-10-17）。
+        // 默认 72 与右侧三行信息（实测 73px）基本等高，视觉上是对齐的。
+        // 注：不要改成 height:'100%' + alignSelf:stretch —— 行高由最高子元素决定，
+        // 图片用百分比高度会先按自然比例撑高，反而把整块拉到 102px。
         <div style={{ flex: '0 0 auto' }}>
           {item.imageUrl === null ? (
             <div
@@ -3901,7 +3905,7 @@ export function OrdersPage() {
                 size="small"
                 style={{ width: 90 }}
                 value={viewSettings.thumbnailSize}
-                options={[48, 64, 88].map((size) => ({ value: size, label: `${size}px` }))}
+                options={[48, 72, 88].map((size) => ({ value: size, label: `${size}px` }))}
                 onChange={(value) => updateViewSettings({ thumbnailSize: value })}
               />
             </span>
