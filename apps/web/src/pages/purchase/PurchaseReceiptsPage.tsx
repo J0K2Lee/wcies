@@ -279,6 +279,13 @@ export function PurchaseReceiptsPage() {
     void queryClient.invalidateQueries({ queryKey: ['purchase-receipt-detail'] });
     void queryClient.invalidateQueries({ queryKey: ['inventory'] });
     void queryClient.invalidateQueries({ queryKey: ['pos-for-receipt'] });
+    // 收货确认会改来源采购单的状态/已收数量、以及订单行的派生采购状态
+    // （已采购→已到货）和自动分配后的履约状态（2026-10-19 用户反馈：
+    // 确认收货后返回列表，数据没变——此前只失效了收货单自己的缓存）。
+    void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+    void queryClient.invalidateQueries({ queryKey: ['purchase-order-detail'] });
+    void queryClient.invalidateQueries({ queryKey: ['orders'] });
+    void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
   };
 
   const itemsToPayload = (editorItems: EditorItem[]) =>
@@ -887,7 +894,13 @@ export function PurchaseReceiptsPage() {
 
       <Drawer
         open={detailId !== null}
-        onClose={() => setDetailId(null)}
+        onClose={() => {
+          setDetailId(null);
+          // 「返回收货列表」时主动拉一次最新列表（2026-10-19 用户反馈：确认收货
+          // 后回到列表数据没变）。抽屉里的确认已经 invalidate，但这里再兜一层，
+          // 保证关闭抽屉这一刻看到的一定是服务端最新数据。
+          void list.refetch();
+        }}
         size={880}
         title={
           detailRow !== null && (
