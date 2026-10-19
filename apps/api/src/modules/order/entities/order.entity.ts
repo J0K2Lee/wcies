@@ -28,6 +28,7 @@ import { OrderItemEntity } from './order-item.entity';
 @Index('idx_orders_store_stage', ['storeId', 'platformStage'])
 @Index('idx_orders_erp_status_stage', ['erpStatus', 'platformStage'])
 @Index('idx_orders_is_urgent', ['isUrgent'], { where: 'is_urgent = true' })
+@Index('idx_orders_label_printed', ['labelPrintedAt'], { where: 'label_printed_at IS NOT NULL' })
 export class OrderEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -118,6 +119,14 @@ export class OrderEntity {
 
   @Column({ type: 'timestamptz', name: 'urgent_marked_at', nullable: true })
   urgentMarkedAt!: Date | null;
+
+  /**
+   * 面单已打印时间（用户指示 2026-10-19）：人工确认（浏览器无法感知打印
+   * 结果），仅用于「已打印」胶囊与「已打单」筛选（= 已打印 ∧ 未发货）。
+   * 不是 ERP 状态，不属于状态机。
+   */
+  @Column({ type: 'timestamptz', name: 'label_printed_at', nullable: true })
+  labelPrintedAt!: Date | null;
 
   /** How the order entered WCIES (Sprint 5 §58): MANUAL / API / POLLING / WEBHOOK. */
   @Column({ type: 'varchar', length: 30, name: 'sync_source', nullable: true })

@@ -46,6 +46,9 @@ export const DEFAULT_VIEW_SETTINGS: OrdersViewSettings = {
     // SKU 列（2026-10-14）：展示该单最小 SKU 编码，是「SKU 排序」的可视依据。
     { key: 'sku', visible: true },
     { key: 'erpStatus', visible: true },
+    // 物流（2026-10-19 用户指示）：订单级平台物流阶段 待揽收/运输中/已签收，
+    // 并在其前显示「已打印」胶囊。ERP 状态仍保持「已发货」（两轴分离）。
+    { key: 'logistics', visible: true },
     // 店铺与履约方式合并（2026-10-17）：两者说的是同一件事，分两列白占近 300px，
     // 是主表必须横向滚动的直接原因。
     { key: 'storeFulfillment', visible: true },

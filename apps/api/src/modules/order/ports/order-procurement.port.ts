@@ -26,4 +26,11 @@ export interface OrderProcurementPort {
    * lines NOT in this list).
    */
   listActiveOrderItemIds(): Promise<readonly string[]>;
+
+  /**
+   * 采购状态为 ORDERED 的订单行 id（2026-10-19「已采购」筛选）：
+   * 有未取消采购明细且 `SUM(received) < SUM(ordered)`。**不含 ARRIVED**
+   * （用户明确：已到货不算"已采购"筛选）。
+   */
+  listOrderedOrderItemIds(): Promise<readonly string[]>;
 }

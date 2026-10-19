@@ -97,9 +97,16 @@ export const orderReleaseKey = (orderItemId: string): string => `ORDER_RELEASE:$
  *              IN_TRANSIT，妥投后归入 COMPLETED。
  *   IN_TRANSIT erp_status = SHIPPED and platform stage not DELIVERED
  *              (platform_stage NULL counts as not delivered - unsynced)
- *   COMPLETED  erp_status = SHIPPED and platform_stage = DELIVERED
+ *   COMPLETED  erp_status = SHIPPED and platform_stage = DELIVERED（已签收）
+ *   CANCELLED  erp_status = CANCELLED（已取消，2026-10-19 从「全部」独立成 Tab）
  */
-export const ORDER_STAGE_FILTERS = ['PENDING', 'EXTERNAL', 'IN_TRANSIT', 'COMPLETED'] as const;
+export const ORDER_STAGE_FILTERS = [
+  'PENDING',
+  'EXTERNAL',
+  'IN_TRANSIT',
+  'COMPLETED',
+  'CANCELLED',
+] as const;
 export type OrderStageFilter = (typeof ORDER_STAGE_FILTERS)[number];
 
 /**
@@ -116,8 +123,10 @@ export type OrderListSortField = (typeof ORDER_LIST_SORT_FIELDS)[number];
  * problem (e.g. PARTIALLY_SHIPPED + one BACKORDERED line) stay findable.
  */
 export const ORDER_GOODS_STATE_FILTERS = [
+  'PURCHASED',
   'TO_PICK',
   'PICKING',
+  'LABEL_PRINTED',
   'TO_SHIP',
   'BACKORDERED',
   'MAPPING_FAILED',

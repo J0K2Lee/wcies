@@ -172,6 +172,50 @@ export class OrderRepository {
     return rows.map((row) => row.id);
   }
 
+  /** Orders owning a MAPPED 缺货 line whose id is in the given set（已采购筛选）. */
+  async findOrderIdsWithBackorderedLinesIn(orderItemIds: readonly string[]): Promise<string[]> {
+    if (orderItemIds.length === 0) {
+      return [];
+    }
+    const rows = await this.dataSource.query<Array<{ order_id: string }>>(
+      `SELECT DISTINCT i.order_id
+         FROM order_items i
+        WHERE i.id = ANY($1::uuid[])
+          AND i.mapping_status = 'MAPPED'
+          AND i.fulfillment_status IN ('BACKORDERED', 'PENDING')`,
+      [[...orderItemIds]],
+    );
+    return rows.map((row) => row.order_id);
+  }
+
+  /**
+   * 标记面单已打印（用户指示 2026-10-19）：只对**尚未打印**的订单置位
+   * （幂等；重复打印不刷新时间、不重复审计）。返回新置位的订单。
+   *
+   * 裸 SQL + RETURNING 在 TypeORM 下返回 [rows, rowCount] 二元组，这里显式
+   * 拆包（与迁移脚本同一处理）。
+   */
+  async markLabelPrinted(
+    ids: readonly string[],
+    printedAt: Date,
+  ): Promise<Array<{ id: string; orderNo: string }>> {
+    if (ids.length === 0) {
+      return [];
+    }
+    const result: unknown = await this.dataSource.query(
+      `UPDATE orders
+          SET label_printed_at = $2, updated_at = now()
+        WHERE id = ANY($1::uuid[]) AND label_printed_at IS NULL
+        RETURNING id, order_no`,
+      [[...ids], printedAt],
+    );
+    const rows = (Array.isArray(result) && Array.isArray(result[0]) ? result[0] : result) as Array<{
+      id: string;
+      order_no: string;
+    }>;
+    return rows.map((row) => ({ id: String(row.id), orderNo: String(row.order_no) }));
+  }
+
   /**
    * Orders owning a MAPPED 缺货 line that no live purchase order covers
    * (待采购 view, purchase.md §3.5；口径见 orders.md §5——含 MAPPED+PENDING
@@ -548,6 +592,8 @@ function stagePredicate(stage: OrderStageFilter): string {
       return `o.erp_status = 'SHIPPED' AND (o.platform_stage IS NULL OR o.platform_stage <> 'DELIVERED')`;
     case 'COMPLETED':
       return `o.erp_status = 'SHIPPED' AND o.platform_stage = 'DELIVERED'`;
+    case 'CANCELLED':
+      return `o.erp_status = 'CANCELLED'`;
   }
 }
 
@@ -595,6 +641,13 @@ function goodsStatePredicate(state: OrderGoodsStateFilter): string {
       return `o.erp_status = 'PICKING'`;
     case 'TO_SHIP':
       return `EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND i.fulfillment_status = 'PICKED')`;
+    case 'LABEL_PRINTED':
+      // 已打印面单且**未发货**（用户指示 2026-10-19）：已发货/已取消不算。
+      return `(o.label_printed_at IS NOT NULL AND o.erp_status NOT IN ('SHIPPED', 'CANCELLED'))`;
+    case 'PURCHASED':
+      // 由 OrderService 通过采购端口取「采购状态=ORDERED」的行 id，再以
+      // orderIds 过滤（跨模块不写 SQL，AGENTS §9）；这里不应被直接调用。
+      throw new Error('PURCHASED is resolved in OrderService via the procurement port');
     case 'BACKORDERED':
       return backorderedPredicate();
     case 'MAPPING_FAILED':

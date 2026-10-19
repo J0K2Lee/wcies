@@ -794,10 +794,11 @@ Sprint 4 在此基础上增加三个原子业务命令（显式 QueryRunner + In
 | 全部 | —（无筛选） | 含已取消 |
 | 待处理 | `PENDING` | `erp_status NOT IN ('SHIPPED','CANCELLED')` **且非外部履约单**；含「平台已妥投但系统未发货」的分歧单（保留 ⚠ 提示人工收口）；缺货单天然落在其中 |
 | 外部履约 | `EXTERNAL` | 外部履约单（`fulfillment_mode` 为 FBO/FBP/FBW/FBY）**且 ERP 无可履约行**（全部行 `EXTERNAL_FULFILLED`/`RELEASED`）、**无**映射失败行、尚未发货/取消（用户指示 2026-10-16） |
-| 待收货 | `IN_TRANSIT` | `erp_status='SHIPPED'` 且 `platform_stage ≠ 'DELIVERED'`（含 `platform_stage IS NULL` 的未同步单） |
-| 已完成 | `COMPLETED` | `erp_status='SHIPPED'` 且 `platform_stage='DELIVERED'` |
+| 已发货 | `IN_TRANSIT` | `erp_status='SHIPPED'` 且 `platform_stage ≠ 'DELIVERED'`（含 `platform_stage IS NULL` 的未同步单）；2026-10-19 由「待收货」更名 |
+| 已完成 | `COMPLETED` | `erp_status='SHIPPED'` 且 `platform_stage='DELIVERED'`（已签收） |
+| 已取消 | `CANCELLED` | `erp_status='CANCELLED'`（2026-10-19 从「全部」独立成 Tab） |
 
-- 已取消只在「全部」可见（不算物流阶段，也不属于异常）。
+- 「全部」仍包含已取消；已取消不再只在该处可见（2026-10-19 起有独立 Tab）。
 - 标签计数必须与同筛选条件（含当前店铺/关键词）的列表 `total` 一致。
 - **外部履约单独立成 Tab（用户指示 2026-10-16）**：FBO/FBP/FBW/FBY 由平台仓库
   持货发货，ERP 侧没有拣货/发货动作，此前停在 `NEW`（§7）混在「待处理」里像待办。
@@ -807,11 +808,36 @@ Sprint 4 在此基础上增加三个原子业务命令（显式 QueryRunner + In
 - 外部履约单不评估发货时限异常（§7 规则 7），列表「时限」列对它们也不显示倒计时
   （显示 `—`），避免"看着紧急实则无动作"。
 
+## 订单级「物流」列（用户指示 2026-10-19）
+
+ERP 状态与平台物流阶段是两条轴（§1/§38）：ERP 状态保持「已发货」，物流阶段
+单独成列，取自 `orders.platform_stage`：
+
+| 显示 | 判定 | 含义 |
+|---|---|---|
+| 待揽收 | `AWAITING_SHIPMENT` | 平台尚未交给承运商（**未产生物流记录**） |
+| 运输中 | `IN_TRANSIT` | 已交承运商、未签收 |
+| 已签收 | `DELIVERED` | 平台已妥投 |
+| — | `NULL` | 阶段未同步/未归类，不猜 |
+
+**注意**：不能用运单号判断是否"已产生物流记录"——OZON 组包即分配运单号，
+首批实测中"待揽收"订单全部已有运单号。
+
+### 面单已打印标记
+
+`orders.label_printed_at`（人工确认，浏览器无法感知打印结果）：
+- 单笔「打单」或批量打印后，用户回到系统时弹窗确认；确认后置位；
+- 列表在物流列显示绿色胶囊「已打印」（运单号列展示时也会出现在单号前）；
+- 二级 chip「已打单」= `label_printed_at IS NOT NULL AND erp_status NOT IN ('SHIPPED','CANCELLED')`；
+- 幂等：只置位尚未打印的订单，重复确认不刷新时间、不重复审计。
+
 ## 二级 · 行级货物状态（chips，单选，与行内徽标同源）
 
 | chip | 查询 `goodsState` | 判定 |
 |---|---|---|
+| 已采购 | `PURCHASED` | 存在**缺货行**且该行派生采购状态 = `ORDERED`（已下单未收完；**不含 `ARRIVED`**，用户指示 2026-10-19）。由采购模块端口提供行 id，订单仓储只做行事实过滤 |
 | 待拣货 | `TO_PICK` | 存在行 `fulfillment_status='RESERVED'` |
+| 已打单 | `LABEL_PRINTED` | `label_printed_at IS NOT NULL` 且 `erp_status NOT IN ('SHIPPED','CANCELLED')`（已打印未发货） |
 | 拣货中 | `PICKING` | `erp_status='PICKING'`（该状态由「存在未完成拣货任务」汇总产生，§7） |
 | 待发货 | `TO_SHIP` | 存在行 `fulfillment_status='PICKED'` |
 | 缺货 | `BACKORDERED` | 存在行 `fulfillment_status='BACKORDERED'` |
@@ -828,6 +854,12 @@ Sprint 4 在此基础上增加三个原子业务命令（显式 QueryRunner + In
 
 `缺货 N`、`已采购 N`、`已到货 N`、`映射失败 N`。已采购/已到货取缺货行的
 派生采购状态（`ORDERED` / `ARRIVED`，purchase.md §3.5），与行内徽标同源；
+**已到货 = 采购已收货但该行仍未占到库存**（用户指示 2026-10-19）。
+
+**采购状态的展示口径（2026-10-19）**：只在行**仍缺货**（`BACKORDERED`/`PENDING`）
+时显示「待采购 / 已采购 / 已到货」；行一旦分配成功（已占用/已拣/已出库/外部履约/
+已释放）就不再显示采购状态，右栏的「创建采购单 / 去收货」入口也一并隐藏。
+派生值本身不删除——行回到缺货时会自然重新出现。
 列表响应字段 `backorderedOrderedCount` / `backorderedArrivedCount`。
 
 **口径统一（2026-10-15 修复）**：`缺货 N` 计数、已采购/已到货的取行、待采购

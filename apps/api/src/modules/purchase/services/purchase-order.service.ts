@@ -465,6 +465,10 @@ export class PurchaseOrderService {
     return result;
   }
 
+  async listOrderedOrderItemIds(): Promise<string[]> {
+    return this.repository.listOrderedOrderItemIds();
+  }
+
   async listActiveOrderItemIds(): Promise<string[]> {
     return this.repository.listActiveOrderItemIds();
   }

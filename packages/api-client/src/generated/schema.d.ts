@@ -1272,6 +1272,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/orders/batch-mark-label-printed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 标记面单已打印（单笔/批量共用；幂等，只置位尚未打印的订单） */
+        post: operations["OrderController_markLabelPrinted"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/orders/batch-mark-external-fulfillment": {
         parameters: {
             query?: never;
@@ -4822,8 +4839,18 @@ export interface components {
             platformOrderId: string;
             /** @example awaiting_packaging */
             platformStatus: string | null;
+            /**
+             * @description 归一化物流阶段（平台事实，非 ERP 状态）：AWAITING_SHIPMENT=待揽收、IN_TRANSIT=运输中、DELIVERED=已签收；未归类/未同步为 null
+             * @enum {string|null}
+             */
+            platformStage: "AWAITING_SHIPMENT" | "IN_TRANSIT" | "DELIVERED" | "CANCELLED" | null;
             /** @enum {string} */
             erpStatus: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+            /**
+             * Format: date-time
+             * @description 面单已打印时间（人工确认）；null = 未打印，用于「已打单」筛选
+             */
+            labelPrintedAt: string | null;
             fulfillmentMode: string | null;
             currency: string | null;
             /** Format: date-time */
@@ -4977,8 +5004,15 @@ export interface components {
             /** @example 123456789 */
             platformOrderId: string;
             platformStatus: string | null;
+            /**
+             * @description 归一化物流阶段（平台事实，非 ERP 状态）
+             * @enum {string|null}
+             */
+            platformStage: "AWAITING_SHIPMENT" | "IN_TRANSIT" | "DELIVERED" | "CANCELLED" | null;
             /** @enum {string} */
             erpStatus: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+            /** Format: date-time */
+            labelPrintedAt: string | null;
             fulfillmentMode: string | null;
             currency: string | null;
             /** Format: date-time */
@@ -5088,6 +5122,17 @@ export interface components {
              * @enum {string}
              */
             syncSource?: "MANUAL" | "API" | "POLLING" | "WEBHOOK";
+        };
+        OrderMarkLabelPrintedResultDto: {
+            /** @description 请求的订单数（去重后） */
+            total: number;
+            /** @description 本次新置为已打印的订单数（此前已打印的不计） */
+            updated: number;
+            /** @description 本次新置位的订单 id */
+            orderIds: string[];
+        };
+        OrderMarkLabelPrintedRequestDto: {
+            orderIds: string[];
         };
         OrderBatchMarkExternalFulfillmentItemDto: {
             orderId: string;
@@ -9806,9 +9851,9 @@ export interface operations {
                 platform?: string;
                 erpStatus?: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
                 /** @description 一级 · 物流阶段（双轴 §2.1）：PENDING=erp_status 非 SHIPPED/CANCELLED（缺货/分歧单均在内，**不含**外部履约单）；EXTERNAL=外部履约单（FBO/FBP/FBW/FBY，ERP 无可履约行）尚未平台妥投（用户指示 2026-10-16）；IN_TRANSIT=已发货且平台未妥投（platform_stage 非 DELIVERED，含未同步）；COMPLETED=已发货且平台已妥投 */
-                stage?: "PENDING" | "EXTERNAL" | "IN_TRANSIT" | "COMPLETED";
+                stage?: "PENDING" | "EXTERNAL" | "IN_TRANSIT" | "COMPLETED" | "CANCELLED";
                 /** @description 二级 · 行级货物状态（双轴 §2.2，单选）：TO_PICK=存在 RESERVED 行；PICKING=erp_status PICKING；TO_SHIP=存在 PICKED 行；BACKORDERED=存在缺货行；MAPPING_FAILED=存在映射失败行；SHIPMENT_OVERDUE=已过发货时限未发完（平台已事实发货 IN_TRANSIT/DELIVERED 的不算，用户指示 2026-10-14）；ABNORMAL=缺货∪映射失败∪发货超时∪物流停滞（OPEN ORDER_TRACKING_STALLED） */
-                goodsState?: "TO_PICK" | "PICKING" | "TO_SHIP" | "BACKORDERED" | "MAPPING_FAILED" | "SHIPMENT_OVERDUE" | "ABNORMAL";
+                goodsState?: "PURCHASED" | "TO_PICK" | "PICKING" | "LABEL_PRINTED" | "TO_SHIP" | "BACKORDERED" | "MAPPING_FAILED" | "SHIPMENT_OVERDUE" | "ABNORMAL";
                 storeId?: string;
                 /** @description 履约方式精确匹配（用户指示 2026-09-17）：订单头 fulfillment_mode 原值，OZON 订单为 FBS / RFBS / FBP / FBO 短码 */
                 fulfillmentMode?: string;
@@ -9891,6 +9936,33 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["OrderIngestResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    OrderController_markLabelPrinted: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderMarkLabelPrintedRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderMarkLabelPrintedResultDto"];
                     };
                 };
             };

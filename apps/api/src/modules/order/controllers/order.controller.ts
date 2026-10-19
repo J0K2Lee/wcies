@@ -30,6 +30,8 @@ import {
   OrderListQueryDto,
   OrderMarkExternalFulfillmentRequestDto,
   OrderMarkExternalFulfillmentResultDto,
+  OrderMarkLabelPrintedRequestDto,
+  OrderMarkLabelPrintedResultDto,
   OrderRetryAllocationResultDto,
   OrderSetUrgentRequestDto,
   OrderSetUrgentResultDto,
@@ -90,6 +92,21 @@ export class OrderController {
   }
 
   // 批量路由先于 :id 参数路由声明（同 from-po/batch 约定，避免段名被当成 id）。
+  @Post('batch-mark-label-printed')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '标记面单已打印（单笔/批量共用；幂等，只置位尚未打印的订单）',
+  })
+  @ApiOkEnvelope(OrderMarkLabelPrintedResultDto)
+  async markLabelPrinted(
+    @Body() request: OrderMarkLabelPrintedRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ) {
+    return ok<OrderMarkLabelPrintedResultDto>(
+      await this.orderService.markLabelPrinted(request.orderIds, operator),
+    );
+  }
+
   @Post('batch-mark-external-fulfillment')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

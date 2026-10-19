@@ -16,7 +16,7 @@ import {
   Timeline,
   Tooltip,
 } from 'antd';
-import { DownOutlined, FlagFilled, UpOutlined } from '@ant-design/icons';
+import { CopyOutlined, DownOutlined, FlagFilled, UpOutlined } from '@ant-design/icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { apiGet, apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
@@ -78,7 +78,11 @@ interface OrderListItem {
   platformCode: string;
   platformOrderId: string;
   platformStatus: string | null;
+  /** 归一化物流阶段（平台事实）：AWAITING_SHIPMENT/IN_TRANSIT/DELIVERED，未同步为 null。 */
+  platformStage: string | null;
   erpStatus: string;
+  /** 面单已打印时间（人工确认）；null = 未打印。 */
+  labelPrintedAt: string | null;
   fulfillmentMode: string | null;
   currency: string | null;
   orderedAt: string;
@@ -155,7 +159,9 @@ interface OrderDetail {
   platformCode: string;
   platformOrderId: string;
   platformStatus: string | null;
+  platformStage: string | null;
   erpStatus: string;
+  labelPrintedAt: string | null;
   fulfillmentMode: string | null;
   currency: string | null;
   orderedAt: string;
@@ -224,8 +230,11 @@ const STAGE_TABS: Array<{ key: string; label: string; stage?: string }> = [
   // 动作，此前混在「待处理」里像待办。平台发货后随 erp_status 转 SHIPPED 归入
   // 「待收货」，妥投后归入「已完成」。
   { key: 'external', label: '外部履约', stage: 'EXTERNAL' },
-  { key: 'inTransit', label: '待收货', stage: 'IN_TRANSIT' },
+  // 2026-10-19：「待收货」更名为「已发货」（= 已发货未签收）。
+  { key: 'inTransit', label: '已发货', stage: 'IN_TRANSIT' },
   { key: 'completed', label: '已完成', stage: 'COMPLETED' },
+  // 已取消独立成 Tab（2026-10-19）：此前只在「全部」里可见。
+  { key: 'cancelled', label: '已取消', stage: 'CANCELLED' },
 ];
 
 /**
@@ -244,6 +253,12 @@ const GOODS_STATE_CHIPS: Array<{
 }> = [
   { key: 'ALL', label: '全部', flow: true, tooltip: '不按货物状态筛选（仅一级物流阶段）' },
   {
+    key: 'PURCHASED',
+    label: '已采购',
+    flow: true,
+    tooltip: '存在缺货行且该行采购状态为「已采购」（已下单未收完；已到货不计）',
+  },
+  {
     key: 'TO_PICK',
     label: '待拣货',
     flow: true,
@@ -254,6 +269,12 @@ const GOODS_STATE_CHIPS: Array<{
     label: '拣货中',
     flow: true,
     tooltip: '订单存在未完成的拣货任务（可同时命中「待拣货」）',
+  },
+  {
+    key: 'LABEL_PRINTED',
+    label: '已打单',
+    flow: true,
+    tooltip: '面单已打印且订单尚未发货',
   },
   {
     key: 'TO_SHIP',
@@ -303,6 +324,7 @@ const MAIN_COLUMN_LABELS: Record<string, string> = {
   items: '商品',
   sku: 'SKU',
   erpStatus: 'ERP 状态',
+  logistics: '物流',
   storeFulfillment: '店铺·履约',
   shipmentDeadline: '时限',
   orderedAt: '下单时间',
@@ -455,6 +477,96 @@ function fulfillmentModeChip(mode: string | null): { short: string; hint: string
     return { short: mode.slice(mode.lastIndexOf('_') + 1), hint: mode };
   }
   return { short: mode, hint: mode };
+}
+
+/**
+ * 订单级物流阶段（用户指示 2026-10-19）：平台事实，与 ERP 状态两轴分离。
+ * 待揽收 = 平台尚未交给承运商；运输中 = 已交承运商未签收；已签收 = 妥投。
+ * 未归类/未同步（null）显示 `—`，不猜。
+ */
+const LOGISTICS_STAGE_META: Record<
+  string,
+  { tone: 'neutral' | 'info' | 'success'; label: string; hint: string }
+> = {
+  AWAITING_SHIPMENT: { tone: 'neutral', label: '待揽收', hint: '平台尚未交给承运商' },
+  IN_TRANSIT: { tone: 'info', label: '运输中', hint: '已交承运商，尚未签收' },
+  DELIVERED: { tone: 'success', label: '已签收', hint: '平台已妥投' },
+  CANCELLED: { tone: 'neutral', label: '已取消', hint: '平台已取消' },
+};
+
+/** 履约方式胶囊配色（用户指示 2026-10-19）：rFBS/FBS 蓝、FBP/FBO 绿、FBW 紫、FBY 黄。 */
+function fulfillmentModeTone(
+  mode: string | null,
+): 'info' | 'success' | 'purple' | 'warning' | 'neutral' {
+  if (mode === null) {
+    return 'neutral';
+  }
+  const short = (mode.includes('_') ? mode.slice(mode.lastIndexOf('_') + 1) : mode).toUpperCase();
+  if (short === 'RFBS' || short === 'FBS') {
+    return 'info';
+  }
+  if (short === 'FBP' || short === 'FBO') {
+    return 'success';
+  }
+  if (short === 'FBW') {
+    return 'purple';
+  }
+  if (short === 'FBY') {
+    return 'warning';
+  }
+  return 'neutral';
+}
+
+/**
+ * 复制到剪贴板（2026-10-19 用户指示）。局域网 http 属于非安全上下文，
+ * navigator.clipboard 不可用，因此保留 execCommand 兜底。
+ */
+function copyToClipboard(text: string): boolean {
+  if (typeof navigator !== 'undefined' && navigator.clipboard !== undefined) {
+    void navigator.clipboard.writeText(text).catch(() => undefined);
+    return true;
+  }
+  try {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(area);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/** 行内复制按钮：空值不渲染；点击不冒泡（避免触发行选中/展开）。 */
+function CopyTextButton({ value, title }: { value: string | null; title: string }) {
+  const { message } = AntdApp.useApp();
+  if (value === null || value === '') {
+    return null;
+  }
+  return (
+    <Button
+      type="text"
+      size="small"
+      aria-label={`复制${title}`}
+      title={`复制${title}`}
+      style={{ padding: '0 4px', height: 18, minWidth: 18, color: colors.textTertiary }}
+      onClick={(event) => {
+        event.stopPropagation();
+        const ok = copyToClipboard(value);
+        if (ok) {
+          void message.success(`${title}已复制`);
+        } else {
+          void message.error('复制失败，请手动选择文本复制');
+        }
+      }}
+    >
+      <CopyOutlined style={{ fontSize: 12 }} />
+    </Button>
+  );
 }
 
 /**
@@ -692,8 +804,12 @@ function ExpandedItemBlock({
    * 「待采购」与「缺货」几乎总是同时出现，再挂一个红徽标只是噪音；
    * 需要时看履约状态就知道还没采购。
    */
+  // 采购状态只在**仍缺货**（未分配库存）时有意义（用户指示 2026-10-19）：
+  // 已占用/已拣/已出库/外部履约/已释放 → 不显示（派生值仍保留，行回到缺货会再现）。
+  const unallocated =
+    item.fulfillmentStatus === 'BACKORDERED' || item.fulfillmentStatus === 'PENDING';
   const procurement =
-    item.procurementState === 'ORDERED' || item.procurementState === 'ARRIVED'
+    unallocated && (item.procurementState === 'ORDERED' || item.procurementState === 'ARRIVED')
       ? (PROCUREMENT_META[item.procurementState] ?? null)
       : null;
   // 键盘可达（2026-10-17 体检 P2-9）：Enter / 空格 = 点击。
@@ -777,6 +893,7 @@ function ExpandedItemBlock({
                 >
                   {item.skuName}
                 </span>
+                <CopyTextButton value={item.skuName} title="SKU 名称" />
               </>
             ))}
           {/* 右侧状态（2026-10-17 用户定稿）：采购进度 + 履约状态同一行右对齐。
@@ -834,6 +951,7 @@ function ExpandedItemBlock({
                   {EXPANDED_COLUMN_LABELS[key] ?? key}
                 </span>
                 <span style={{ marginLeft: 6 }}>{expandedFieldText(key, item, currency)}</span>
+                {key === 'offerId' && <CopyTextButton value={item.offerId} title="Offer ID" />}
               </span>
             ))}
           </div>
@@ -1073,6 +1191,11 @@ export function OrdersPage() {
     { ...countFilters, stage: 'COMPLETED' },
     ['orders-count', 'COMPLETED', debouncedKeyword, platformFilter, storeId],
   );
+  const cancelledCount = useApiQuery<Envelope<OrderListItem[]>>(
+    '/api/v1/orders',
+    { ...countFilters, stage: 'CANCELLED' },
+    ['orders-count', 'CANCELLED', debouncedKeyword, platformFilter, storeId],
+  );
 
   const storesQuery = useApiQuery<
     Envelope<Array<{ id: string; name: string; storeCode: string; platformCode: string }>>
@@ -1236,6 +1359,52 @@ export function OrdersPage() {
   });
 
   /** 打单：取平台面单 PDF（已存档则复用），新开标签页供浏览器打印。 */
+  // ---- 面单已打印确认（用户指示 2026-10-19）----
+  // 浏览器无法感知打印结果：打开面单后，等用户回到系统（window focus）再弹窗
+  // 确认；确认后把该笔/整批标记为已打印（后端幂等）。
+  const pendingPrintConfirmIds = useRef<string[] | null>(null);
+  const labelPrintedMutation = useMutation({
+    mutationFn: (orderIds: string[]) =>
+      apiPost<{ total: number; updated: number; orderIds: string[] }>(
+        '/api/v1/orders/batch-mark-label-printed',
+        { orderIds },
+      ),
+    onSuccess: (result) => {
+      void message.success(
+        result.updated > 0
+          ? `已标记面单已打印（${result.updated} 单）`
+          : '这些订单此前已标记为已打印',
+      );
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
+    },
+    onError: (error: Error) => message.error(`标记已打印失败：${error.message}`),
+  });
+  const askPrintConfirmation = useCallback((orderIds: string[]) => {
+    pendingPrintConfirmIds.current = orderIds;
+  }, []);
+  useEffect(() => {
+    const onFocus = () => {
+      const ids = pendingPrintConfirmIds.current;
+      if (ids === null) {
+        return;
+      }
+      // 一次性消费：避免每次窗口获得焦点都弹。
+      pendingPrintConfirmIds.current = null;
+      modal.confirm({
+        title: '面单是否已打印？',
+        content: `确认后把这 ${ids.length} 笔订单标记为「已打印」，用于「已打单」筛选。`,
+        okText: '已打印',
+        cancelText: '未打印',
+        onOk: () => {
+          labelPrintedMutation.mutate(ids);
+        },
+      });
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [modal, labelPrintedMutation]);
+
   const shippingLabelMutation = useMutation({
     mutationFn: ({ id, refresh }: { id: string; refresh: boolean }) =>
       apiPost<{ id: string; fileName: string; signedUrl: string }>(
@@ -1244,9 +1413,13 @@ export function OrdersPage() {
         { id },
         refresh ? { refresh: 'true' } : undefined,
       ),
-    onSuccess: (label: { fileName: string; signedUrl: string }) => {
+    onSuccess: (
+      label: { fileName: string; signedUrl: string },
+      variables: { id: string; refresh: boolean },
+    ) => {
       message.success(`面单已就绪（${label.fileName}），已在新标签页打开，可直接打印`);
       window.open(label.signedUrl, '_blank', 'noopener');
+      askPrintConfirmation([variables.id]);
       void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
     },
     onError: (error: Error) => message.error(`打单失败：${error.message}`),
@@ -1675,6 +1848,8 @@ export function OrdersPage() {
       }
       // 合并后的 PDF 交给浏览器原生查看器：保持平台面单原纸张尺寸（57.9×40mm）。
       showMergedPdfInWindow(vars.printWindow, result.mergedPdfBase64);
+      // 整批确认（用户指示 2026-10-19）：回到系统后一次确认，标记本批全部。
+      askPrintConfirmation(printable.map((item) => item.orderId));
       notification.open({
         type: result.failed > 0 ? 'warning' : 'success',
         title: `批量打印面单：已合并 ${result.mergedPageCount} 页（成功 ${result.succeeded} / 共 ${result.total} 单）`,
@@ -2021,8 +2196,12 @@ export function OrdersPage() {
   const railContent = useMemo<ContextRailContent>(() => {
     if (selectedItem !== null) {
       const fulfillmentMeta = FULFILLMENT_STATUS_META[selectedItem.fulfillmentStatus];
+      // 采购状态/入口只在**仍缺货**的行有意义（用户指示 2026-10-19）。
+      const skuUnallocated =
+        selectedItem.fulfillmentStatus === 'BACKORDERED' ||
+        selectedItem.fulfillmentStatus === 'PENDING';
       const procurementMeta =
-        selectedItem.procurementState === null
+        !skuUnallocated || selectedItem.procurementState === null
           ? null
           : (PROCUREMENT_META[selectedItem.procurementState] ?? null);
       return {
@@ -2091,7 +2270,7 @@ export function OrdersPage() {
               )}
             </ContextSection>
             <ContextAction>
-              {selectedItem.procurementState === 'ORDERED' ? (
+              {skuUnallocated && selectedItem.procurementState === 'ORDERED' ? (
                 // 已采购且有进行中采购单：不再允许重复登记，给「去收货」——
                 // 从该行的采购单直接生成收货草稿（2026-10-16 用户需求）。
                 <Button
@@ -2102,7 +2281,7 @@ export function OrdersPage() {
                 >
                   去收货
                 </Button>
-              ) : (
+              ) : skuUnallocated ? (
                 <Button
                   block
                   type="primary"
@@ -2113,16 +2292,18 @@ export function OrdersPage() {
                 >
                   创建采购单
                 </Button>
-              )}
-              {selectedItem.skuId !== null && selectedItem.procurementState !== null && (
-                <RailHint>
-                  {selectedItem.procurementState === 'NOT_ORDERED'
-                    ? '为该订单行登记采购；同一订单行重复登记会被系统拒绝。'
-                    : selectedItem.procurementState === 'ORDERED'
-                      ? '该行已登记采购；点「去收货」从对应采购单生成收货单（预填默认库位）。'
-                      : '该行采购已全部到货，无需重复登记。'}
-                </RailHint>
-              )}
+              ) : null}
+              {skuUnallocated &&
+                selectedItem.skuId !== null &&
+                selectedItem.procurementState !== null && (
+                  <RailHint>
+                    {selectedItem.procurementState === 'NOT_ORDERED'
+                      ? '为该订单行登记采购；同一订单行重复登记会被系统拒绝。'
+                      : selectedItem.procurementState === 'ORDERED'
+                        ? '该行已登记采购；点「去收货」从对应采购单生成收货单（预填默认库位）。'
+                        : '该行采购已全部到货，无需重复登记。'}
+                  </RailHint>
+                )}
               <Button
                 block
                 style={{ marginTop: 8 }}
@@ -2137,6 +2318,15 @@ export function OrdersPage() {
               >
                 打开商品链接
               </Button>
+              {selectedItem.skuId !== null && (
+                <Button
+                  block
+                  style={{ marginTop: 8 }}
+                  onClick={() => void navigate(`/skus?focus=${selectedItem.skuId}`)}
+                >
+                  打开 SKU 管理
+                </Button>
+              )}
               {selectedItem.fulfillmentStatus === 'BACKORDERED' && selectedItem.skuId !== null && (
                 <Button
                   block
@@ -2193,8 +2383,9 @@ export function OrdersPage() {
             <ContextMetric label="当前筛选" value={`${query.data?.meta.total ?? 0} 单`} />
             <ContextMetric label="待处理" value={pendingCount.data?.meta.total ?? 0} />
             <ContextMetric label="外部履约" value={externalCount.data?.meta.total ?? 0} />
-            <ContextMetric label="待收货" value={inTransitCount.data?.meta.total ?? 0} />
+            <ContextMetric label="已发货" value={inTransitCount.data?.meta.total ?? 0} />
             <ContextMetric label="已完成" value={completedCount.data?.meta.total ?? 0} />
+            <ContextMetric label="已取消" value={cancelledCount.data?.meta.total ?? 0} />
             <RailHint>
               点击订单行快速预览风险与状态；缺货订单可在右栏重试分配或登记采购。批量操作
               （生成拣货单 / 获取运单号 /
@@ -2658,7 +2849,11 @@ export function OrdersPage() {
       key: 'procurementState',
       width: 150,
       render: (value: string | null, row: OrderItem) => {
-        if (value === null) {
+        // 仅缺货行显示（用户指示 2026-10-19）：已分配库存后采购状态无意义。
+        if (
+          value === null ||
+          (row.fulfillmentStatus !== 'BACKORDERED' && row.fulfillmentStatus !== 'PENDING')
+        ) {
           return '—';
         }
         const meta = PROCUREMENT_META[value] ?? { tone: 'neutral' as const, label: value };
@@ -2797,6 +2992,7 @@ export function OrdersPage() {
                 >
                   {row.platformOrderId}
                 </span>
+                <CopyTextButton value={row.platformOrderId} title="平台订单号" />
                 {urgent && (
                   <StatusBadge
                     tone="danger"
@@ -2937,6 +3133,27 @@ export function OrdersPage() {
         </span>
       ),
     },
+    logistics: {
+      title: '物流',
+      key: 'logistics',
+      width: 132,
+      render: (_: unknown, row: OrderListItem) => {
+        const meta = LOGISTICS_STAGE_META[row.platformStage ?? ''];
+        return (
+          <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+            {/* 已打印（用户指示 2026-10-19）：绿色胶囊放在物流状态前。 */}
+            {row.labelPrintedAt !== null && (
+              <StatusBadge tone="success" label="已打印" hint="平台面单已打印" showDot={false} />
+            )}
+            {meta === undefined ? (
+              <span style={{ color: colors.textTertiary }}>—</span>
+            ) : (
+              <StatusBadge tone={meta.tone} label={meta.label} hint={meta.hint} showDot={false} />
+            )}
+          </span>
+        );
+      },
+    },
     storeFulfillment: {
       title: '店铺·履约',
       key: 'storeFulfillment',
@@ -2950,19 +3167,14 @@ export function OrdersPage() {
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
             <PlatformTag code={row.platformCode} suffix={row.storeName} />
             {mode !== null && (
-              // 履约方式用纯文本而非徽标（2026-10-17）：徽标的内边距+边框要多吃
-              // 50px，会把店铺名挤成省略号；纯文本保留悬浮说明，观感也更安静。
-              <span
-                title={mode.hint}
-                style={{
-                  flexShrink: 0,
-                  fontSize: 12,
-                  color: colors.textSecondary,
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                · {mode.short}
-              </span>
+              // 履约方式改彩色胶囊（用户指示 2026-10-19）：不同模式不同颜色，
+              // rFBS/FBS 蓝、FBP/FBO 绿、FBW 紫、FBY 黄。
+              <StatusBadge
+                tone={fulfillmentModeTone(row.fulfillmentMode)}
+                label={mode.short}
+                hint={mode.hint}
+                showDot={false}
+              />
             )}
           </span>
         );
@@ -2992,7 +3204,16 @@ export function OrdersPage() {
       dataIndex: 'platformTrackingNo',
       key: 'platformTrackingNo',
       width: 170,
-      render: (value: string | null) => value ?? '—',
+      render: (value: string | null, row: OrderListItem) => (
+        <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+          {/* 「已打印」默认在物流列展示；物流列被隐藏时，退回到单号前方显示
+              （用户指示：胶囊显示在单号前），避免同一事实重复两次。 */}
+          {row.labelPrintedAt !== null && !logisticsColumnVisible && (
+            <StatusBadge tone="success" label="已打印" hint="平台面单已打印" showDot={false} />
+          )}
+          <span>{value ?? '—'}</span>
+        </span>
+      ),
     },
     orderedAt: {
       title: '下单时间',
@@ -3003,6 +3224,9 @@ export function OrdersPage() {
     },
   };
 
+  const logisticsColumnVisible = viewSettings.mainColumns.some(
+    (column) => column.key === 'logistics' && column.visible,
+  );
   const mainColumns = viewSettings.mainColumns
     .filter((column) => column.visible)
     .map((column) => mainColumnDefs[column.key])
@@ -3043,6 +3267,7 @@ export function OrdersPage() {
     external: externalCount.data?.meta.total ?? 0,
     inTransit: inTransitCount.data?.meta.total ?? 0,
     completed: completedCount.data?.meta.total ?? 0,
+    cancelled: cancelledCount.data?.meta.total ?? 0,
   };
   const stageCountOf = (tabKey: string): number => stageCounts[tabKey] ?? 0;
 

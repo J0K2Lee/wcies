@@ -410,6 +410,19 @@ export class PurchaseOrderRepository {
     return states;
   }
 
+  /** 采购状态为 ORDERED 的订单行（未收完；不含 ARRIVED），「已采购」筛选用。 */
+  async listOrderedOrderItemIds(): Promise<string[]> {
+    const rows = await this.dataSource.query<Array<{ order_item_id: string }>>(
+      `SELECT i.order_item_id
+         FROM purchase_order_items i
+         JOIN purchase_orders po ON po.id = i.po_id
+        WHERE po.status <> 'CANCELLED' AND i.order_item_id IS NOT NULL
+        GROUP BY i.order_item_id
+       HAVING SUM(i.received_quantity) < SUM(i.quantity)`,
+    );
+    return rows.map((row) => row.order_item_id);
+  }
+
   /** Order-line ids currently linked to a non-cancelled PO (order list filter). */
   async listActiveOrderItemIds(): Promise<string[]> {
     const rows = await this.dataSource.query<Array<{ order_item_id: string }>>(

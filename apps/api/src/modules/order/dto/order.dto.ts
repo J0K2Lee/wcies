@@ -264,7 +264,23 @@ export class OrderListItemDto {
   @ApiProperty({ example: '123456789' }) platformOrderId!: string;
   @ApiProperty({ nullable: true, type: String, example: 'awaiting_packaging' })
   platformStatus!: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    enum: ['AWAITING_SHIPMENT', 'IN_TRANSIT', 'DELIVERED', 'CANCELLED'],
+    description:
+      '归一化物流阶段（平台事实，非 ERP 状态）：AWAITING_SHIPMENT=待揽收、' +
+      'IN_TRANSIT=运输中、DELIVERED=已签收；未归类/未同步为 null',
+  })
+  platformStage!: string | null;
   @ApiProperty({ enum: ERP_ORDER_STATUSES }) erpStatus!: string;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    format: 'date-time',
+    description: '面单已打印时间（人工确认）；null = 未打印，用于「已打单」筛选',
+  })
+  labelPrintedAt!: Date | null;
   @ApiProperty({ nullable: true, type: String }) fulfillmentMode!: string | null;
   @ApiProperty({ nullable: true, type: String }) currency!: string | null;
   @ApiProperty({ type: Date }) orderedAt!: Date;
@@ -451,7 +467,16 @@ export class OrderDetailDto {
   @ApiProperty({ example: 'OZON' }) platformCode!: string;
   @ApiProperty({ example: '123456789' }) platformOrderId!: string;
   @ApiProperty({ nullable: true, type: String }) platformStatus!: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    enum: ['AWAITING_SHIPMENT', 'IN_TRANSIT', 'DELIVERED', 'CANCELLED'],
+    description: '归一化物流阶段（平台事实，非 ERP 状态）',
+  })
+  platformStage!: string | null;
   @ApiProperty({ enum: ERP_ORDER_STATUSES }) erpStatus!: string;
+  @ApiProperty({ nullable: true, type: String, format: 'date-time' })
+  labelPrintedAt!: Date | null;
   @ApiProperty({ nullable: true, type: String }) fulfillmentMode!: string | null;
   @ApiProperty({ nullable: true, type: String }) currency!: string | null;
   @ApiProperty({ type: Date }) orderedAt!: Date;
@@ -520,6 +545,24 @@ export class OrderCancelResultDto {
   @ApiProperty({ enum: ERP_ORDER_STATUSES }) erpStatus!: string;
   @ApiProperty() releasedItems!: number;
   @ApiProperty() interceptions!: number;
+}
+
+/** 标记面单已打印（用户指示 2026-10-19；单笔与批量共用同一接口）。 */
+export class OrderMarkLabelPrintedRequestDto {
+  @ApiProperty({ type: [String], format: 'uuid', minItems: 1, maxItems: 200 })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @IsUUID('4', { each: true })
+  orderIds!: string[];
+}
+
+export class OrderMarkLabelPrintedResultDto {
+  @ApiProperty({ description: '请求的订单数（去重后）' }) total!: number;
+  @ApiProperty({ description: '本次新置为已打印的订单数（此前已打印的不计）' })
+  updated!: number;
+  @ApiProperty({ type: [String], description: '本次新置位的订单 id' })
+  orderIds!: string[];
 }
 
 /** 标记 / 取消加急（用户指示 2026-10-16，ADR 0022）。 */

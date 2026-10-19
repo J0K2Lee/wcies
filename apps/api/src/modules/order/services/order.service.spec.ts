@@ -456,6 +456,7 @@ describe('OrderService.setUrgent (2026-10-16 加急标记，决策 0022)', () =>
     const orderRepo = {
       findById: vi.fn().mockResolvedValue(order),
       setUrgent: vi.fn().mockResolvedValue(undefined),
+      markLabelPrinted: vi.fn().mockResolvedValue([{ id: 'o1', orderNo: 'ORD1' }]),
     };
     const operationLog = { record: vi.fn().mockResolvedValue(undefined) };
     const service = new OrderService(
@@ -543,4 +544,46 @@ describe('OrderService.setUrgent (2026-10-16 加急标记，决策 0022)', () =>
       expect(orderRepo.setUrgent).not.toHaveBeenCalled();
     },
   );
+});
+
+describe('OrderService.markLabelPrinted (2026-10-19 面单已打印)', () => {
+  function build(marked: Array<{ id: string; orderNo: string }>) {
+    const orderRepo = { markLabelPrinted: vi.fn().mockResolvedValue(marked) };
+    const operationLog = { record: vi.fn().mockResolvedValue(undefined) };
+    const service = new OrderService(
+      {} as unknown as DataSource,
+      orderRepo as unknown as OrderRepository,
+      {} as OrderItemRepository,
+      {} as OrderStatusHistoryRepository,
+      {} as PlatformStatusHistoryRepository,
+      {} as OrderStatusService,
+      {} as OrderDeadlineExceptionService,
+      {} as OrderTrackingStallService,
+      {} as OrderIngestionService,
+      {} as OrderPlatformShippedService,
+      {} as ReservationService,
+      {} as InventoryQueryService,
+      {} as ExceptionService,
+      {} as StoreService,
+      {} as SkuImageService,
+      operationLog as unknown as OperationLogService,
+      {} as AppLoggerService,
+      {} as OrderPickingStatePort,
+      {} as OrderInterceptionPort,
+      {} as OrderProcurementPort,
+      {} as PlatformAdapterRegistry,
+    );
+    return { service, orderRepo, operationLog };
+  }
+
+  it('去重后置位，并逐单写审计；已打印过的单不重复计数', async () => {
+    const { service, orderRepo, operationLog } = build([{ id: 'o1', orderNo: 'ORD1' }]);
+    const result = await service.markLabelPrinted(['o1', 'o1', 'o2'], OPERATOR);
+    expect(orderRepo.markLabelPrinted).toHaveBeenCalledWith(['o1', 'o2'], expect.any(Date));
+    expect(result).toMatchObject({ total: 2, updated: 1, orderIds: ['o1'] });
+    expect(operationLog.record).toHaveBeenCalledTimes(1);
+    expect(operationLog.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'MARK_LABEL_PRINTED', entityCode: 'ORD1' }),
+    );
+  });
 });

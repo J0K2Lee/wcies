@@ -127,6 +127,13 @@ export class OrderService {
         await this.orderRepo.findOrderIdsWithUncoveredBackorderedLines(activeOrderItemIds);
       effectiveFilters = { ...filters, orderIds };
     }
+    if (effectiveFilters.goodsState === 'PURCHASED') {
+      // 已采购（2026-10-19 用户指示）：存在缺货行且该行采购状态 = ORDERED。
+      // **不含 ARRIVED**（已到货不算）。采购事实由采购模块端口提供。
+      const orderedItemIds = await this.procurementPort.listOrderedOrderItemIds();
+      const orderIds = await this.orderRepo.findOrderIdsWithBackorderedLinesIn(orderedItemIds);
+      effectiveFilters = { ...effectiveFilters, goodsState: undefined, orderIds };
+    }
     const { rows, total } = await this.orderRepo.listWithAggregates(
       effectiveFilters,
       page.pageSize,
@@ -161,6 +168,8 @@ export class OrderService {
         platformCode: row.platformCode,
         platformOrderId: row.order.platformOrderId,
         platformStatus: row.order.platformStatus,
+        platformStage: row.order.platformStage,
+        labelPrintedAt: row.order.labelPrintedAt,
         erpStatus: row.order.erpStatus,
         fulfillmentMode: row.order.fulfillmentMode,
         currency: row.order.currency,
@@ -321,6 +330,8 @@ export class OrderService {
       platformCode: store?.platformCode ?? '',
       platformOrderId: order.platformOrderId,
       platformStatus: order.platformStatus,
+      platformStage: order.platformStage,
+      labelPrintedAt: order.labelPrintedAt,
       erpStatus: order.erpStatus,
       fulfillmentMode: order.fulfillmentMode,
       currency: order.currency,
@@ -872,6 +883,30 @@ export class OrderService {
     sortOrder: 'asc' | 'desc' | undefined,
   ): Promise<string[]> {
     return this.orderRepo.findIdsInListOrder(ids, sortBy, sortOrder);
+  }
+
+  /**
+   * 标记面单已打印（用户指示 2026-10-19）：人工确认后置位，幂等——只对尚未
+   * 打印的订单生效，重复确认不会刷新时间也不会重复写审计。
+   * 不是 ERP 状态（AGENTS.md §38），只用于「已打印」胶囊与「已打单」筛选。
+   */
+  async markLabelPrinted(
+    ids: readonly string[],
+    operator: OperatorContext,
+  ): Promise<{ total: number; updated: number; orderIds: string[] }> {
+    const unique = [...new Set(ids)];
+    const marked = await this.orderRepo.markLabelPrinted(unique, new Date());
+    for (const row of marked) {
+      await this.operationLog.record({
+        entityType: 'ORDER',
+        entityId: row.id,
+        entityCode: row.orderNo,
+        action: 'MARK_LABEL_PRINTED',
+        changes: { labelPrintedAt: { from: null, to: new Date().toISOString() } },
+        operator,
+      });
+    }
+    return { total: unique.length, updated: marked.length, orderIds: marked.map((r) => r.id) };
   }
 
   // --------------------------------------------------------------------------
