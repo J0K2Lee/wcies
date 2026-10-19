@@ -2318,13 +2318,16 @@ export function OrdersPage() {
               >
                 打开商品链接
               </Button>
-              {selectedItem.skuId !== null && (
+              {selectedItem.skuId !== null && selectedItem.skuCode !== '' && (
                 <Button
                   block
                   style={{ marginTop: 8 }}
-                  onClick={() => void navigate(`/skus?focus=${selectedItem.skuId}`)}
+                  // 用户指示 2026-10-19：跳转 SKU 管理时**只搜索**该 SKU，不打开详情。
+                  onClick={() =>
+                    void navigate(`/skus?keyword=${encodeURIComponent(selectedItem.skuCode)}`)
+                  }
                 >
-                  打开 SKU 管理
+                  在 SKU 管理搜索
                 </Button>
               )}
               {selectedItem.fulfillmentStatus === 'BACKORDERED' && selectedItem.skuId !== null && (

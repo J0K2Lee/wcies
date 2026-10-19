@@ -603,7 +603,9 @@ export function SkusPage() {
         storeId: values.storeId,
         platformProductId: values.platformProductId,
         title: values.title || undefined,
-        skuVariants: [{ offerId: values.offerId || undefined, skuId: drawerId ?? '' }],
+        skuVariants: [
+          { offerId: values.offerId || undefined, skuId: selectedRow?.id ?? drawerId ?? '' },
+        ],
       }),
     onSuccess: () => {
       void message.success('商品链接已创建并映射到该 SKU');
@@ -839,6 +841,29 @@ export function SkusPage() {
           <ContextAction>
             <Button block onClick={() => setDrawerId(selectedRow.id)}>
               查看详情
+            </Button>
+            {/* 编辑 / 新建商品链接并映射 由 SKU 详情抽屉迁入右栏（用户指示
+                2026-10-19：详情里的按钮统一收敛到这里；删除已在下方，不重复）。 */}
+            <Button
+              block
+              style={{ marginTop: 8 }}
+              onClick={() => {
+                editForm.resetFields();
+                editForm.setFieldsValue(editFormValues(selectedRow, leafCategoryOptions));
+                setEditOpen(true);
+              }}
+            >
+              编辑
+            </Button>
+            <Button
+              block
+              style={{ marginTop: 8 }}
+              onClick={() => {
+                listingForm.resetFields();
+                setListingCreateOpen(true);
+              }}
+            >
+              新建商品链接并映射
             </Button>
             <Button
               block
@@ -1253,44 +1278,6 @@ export function SkusPage() {
               />
             )}
           </div>
-        }
-        extra={
-          sku !== undefined && (
-            <>
-              {/* 操作区（任务3）：新建商品链接并映射自平台映射 tab 移入；编辑唯一入口（行菜单双开行为已废除）；启停在右栏 StatusSwitch。 */}
-              <Button
-                size="small"
-                type="primary"
-                disabled={drawerId === null}
-                onClick={() => {
-                  listingForm.resetFields();
-                  setListingCreateOpen(true);
-                }}
-              >
-                新建商品链接并映射
-              </Button>
-              <Button
-                size="small"
-                onClick={() => {
-                  if (drawerId === null) {
-                    return;
-                  }
-                  editForm.resetFields();
-                  editForm.setFieldsValue(editFormValues(sku, leafCategoryOptions));
-                  setEditOpen(true);
-                }}
-              >
-                编辑
-              </Button>
-              <Button
-                size="small"
-                danger
-                onClick={() => confirmDeleteSku(sku.id, sku.skuCode, sku.listingCount)}
-              >
-                删除
-              </Button>
-            </>
-          )
         }
         styles={{ body: { padding: 0 } }}
         destroyOnHidden
