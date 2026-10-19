@@ -778,14 +778,9 @@ export function PurchaseOrdersPage() {
           emptyDescription="在缺货订单的详情里点「登记采购」，或在这里登记备货采购。"
           columns={[
             { title: 'PO号', dataIndex: 'poNo', key: 'poNo', width: 120 },
-            {
-              title: '供应商 / 货源',
-              key: 'source',
-              render: (_: unknown, row: PurchaseOrderRow) =>
-                row.supplierName ?? row.sourceNote ?? '—',
-            },
-            // 「采购商品」列（用户指示 2026-10-17）：明细第一行的 SKU 名称 + 数量，
-            // 格式如 迈从-A7 V3 Ultra+-鼠标-玄影x1；多行时在「明细」列已显示行数。
+            // 「采购商品」列（用户指示 2026-10-17，2026-10-19 调整格式）：明细第一行的
+            // SKU 名称 + 数量，显示为「名称 × 1」；数量 = 1 绿色、> 1 红色，
+            // 不用点开明细就能看出这单是单品单件还是多件。
             {
               title: '采购商品',
               key: 'firstItem',
@@ -794,14 +789,24 @@ export function PurchaseOrdersPage() {
                 if (row.firstItemName === null && row.firstItemSkuCode === null) {
                   return <span style={{ color: colors.textTertiary }}>—</span>;
                 }
+                const quantity =
+                  row.firstItemQuantity === null ? null : Number(row.firstItemQuantity);
                 return (
                   <Tooltip title={row.firstItemSkuCode ?? undefined}>
                     <span style={{ fontSize: 12.5, wordBreak: 'break-all' }}>
                       {row.firstItemName ?? row.firstItemSkuCode}
-                      {row.firstItemQuantity !== null && (
-                        <span style={{ color: colors.textSecondary }}>
-                          x{Number(row.firstItemQuantity)}
-                        </span>
+                      {quantity !== null && (
+                        <>
+                          <span style={{ color: colors.textTertiary }}> × </span>
+                          <span
+                            style={{
+                              color: quantity > 1 ? colors.danger : colors.success,
+                              fontWeight: quantity > 1 ? 550 : undefined,
+                            }}
+                          >
+                            {quantity}
+                          </span>
+                        </>
                       )}
                     </span>
                   </Tooltip>
@@ -824,8 +829,19 @@ export function PurchaseOrdersPage() {
               title: '明细',
               key: 'items',
               width: 110,
-              render: (_: unknown, row: PurchaseOrderRow) =>
-                `${row.itemCount} 行 / ${Number(row.totalQuantity)} 件`,
+              // 多行 / 多件用红字标出来（2026-10-19 用户指示）：与「采购商品」列的
+              // 数量红字同一套语义 —— 一眼区分单品单件与拼单。
+              render: (_: unknown, row: PurchaseOrderRow) => {
+                const lines = row.itemCount;
+                const pieces = Number(row.totalQuantity);
+                const tone = (value: number) => (value > 1 ? colors.danger : colors.textPrimary);
+                return (
+                  <span style={{ fontSize: 12.5 }}>
+                    <span style={{ color: tone(lines) }}>{lines}</span> 行 /{' '}
+                    <span style={{ color: tone(pieces) }}>{pieces}</span> 件
+                  </span>
+                );
+              },
             },
             {
               title: '采购时间',
@@ -833,6 +849,15 @@ export function PurchaseOrdersPage() {
               key: 'orderedAt',
               width: 130,
               render: (value: string) => <RelativeTime value={value} />,
+            },
+            // 供应商 / 货源移到最后一列（2026-10-19 用户指示）：它信息量低、长度不固定，
+            // 放中间会把「采购商品」挤到视线中段；放末尾顺带吸收剩余宽度。
+            {
+              title: '供应商 / 货源',
+              key: 'source',
+              width: 180,
+              render: (_: unknown, row: PurchaseOrderRow) =>
+                row.supplierName ?? row.sourceNote ?? '—',
             },
           ]}
         />
