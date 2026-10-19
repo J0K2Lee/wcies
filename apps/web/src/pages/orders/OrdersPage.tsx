@@ -3138,18 +3138,34 @@ export function OrdersPage() {
       key: 'logistics',
       width: 132,
       render: (_: unknown, row: OrderListItem) => {
+        // 物流进度列（用户指示 2026-10-19 定稿）：
+        // - 已取消 → —；
+        // - 外部履约单（FBO/FBP/FBW/FBY）由平台履约，**始终按物流阶段显示**，
+        //   不显示打单状态（无需打单，用 — 表达）；
+        // - 自管/半自管单：发货后才显示阶段（未发货时 AWAITING_SHIPMENT 只意味着
+        //   「平台在等我们发货」，不是物流事实）；打单状态则从打单起就显示。
+        if (row.erpStatus === 'CANCELLED') {
+          return <span style={{ color: colors.textTertiary }}>—</span>;
+        }
+        const external = isExternalFulfillmentMode(row.fulfillmentMode);
+        const shippedSide = row.erpStatus === 'SHIPPED' || row.erpStatus === 'PARTIALLY_SHIPPED';
         const meta = LOGISTICS_STAGE_META[row.platformStage ?? ''];
+        const showPrinted = !external && row.labelPrintedAt !== null;
+        const showStage = external || shippedSide;
+        if (!showPrinted && (!showStage || meta === undefined)) {
+          return <span style={{ color: colors.textTertiary }}>—</span>;
+        }
         return (
           <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-            {/* 已打印（用户指示 2026-10-19）：绿色胶囊放在物流状态前。 */}
-            {row.labelPrintedAt !== null && (
+            {showPrinted && (
               <StatusBadge tone="success" label="已打印" hint="平台面单已打印" showDot={false} />
             )}
-            {meta === undefined ? (
-              <span style={{ color: colors.textTertiary }}>—</span>
-            ) : (
-              <StatusBadge tone={meta.tone} label={meta.label} hint={meta.hint} showDot={false} />
-            )}
+            {showStage &&
+              (meta === undefined ? (
+                <span style={{ color: colors.textTertiary }}>—</span>
+              ) : (
+                <StatusBadge tone={meta.tone} label={meta.label} hint={meta.hint} showDot={false} />
+              ))}
           </span>
         );
       },
@@ -3208,9 +3224,11 @@ export function OrdersPage() {
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
           {/* 「已打印」默认在物流列展示；物流列被隐藏时，退回到单号前方显示
               （用户指示：胶囊显示在单号前），避免同一事实重复两次。 */}
-          {row.labelPrintedAt !== null && !logisticsColumnVisible && (
-            <StatusBadge tone="success" label="已打印" hint="平台面单已打印" showDot={false} />
-          )}
+          {row.labelPrintedAt !== null &&
+            !logisticsColumnVisible &&
+            !isExternalFulfillmentMode(row.fulfillmentMode) && (
+              <StatusBadge tone="success" label="已打印" hint="平台面单已打印" showDot={false} />
+            )}
           <span>{value ?? '—'}</span>
         </span>
       ),
