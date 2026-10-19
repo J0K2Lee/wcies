@@ -368,10 +368,59 @@ export function PurchaseReceiptsPage() {
     onError: (error: Error) => void message.error(error.message),
   });
 
+  /**
+   * 确认收货后**立即**改写所有收货单列表缓存（2026-10-19 用户反馈：
+   * 确认后返回列表这笔单仍是待收货，必须手动刷新）。
+   *
+   * 不能只依赖 invalidate 的异步重取：操作者关闭抽屉回到列表的一瞬间，
+   * 列表可能还没拿到新响应。这里直接按 id 更新本地缓存——
+   * 「待收货」视图移除该行，其余视图把状态改为已收货；随后 invalidate()
+   * 再与服务端对账。
+   *
+   * 列表 key 形状：['purchase-receipts', page, keyword, statusTab]（下标 3 是 Tab）。
+   */
+  const applyConfirmedToCaches = (id: string) => {
+    for (const query of queryClient.getQueryCache().findAll({ queryKey: ['purchase-receipts'] })) {
+      const tab = query.queryKey[3];
+      queryClient.setQueryData<Envelope<ReceiptRow[]>>(query.queryKey, (old) => {
+        if (old === undefined) {
+          return old;
+        }
+        if (tab === 'pending') {
+          const data = old.data.filter((row) => row.id !== id);
+          if (data.length === old.data.length) {
+            return old;
+          }
+          return { data, meta: { ...old.meta, total: Math.max(0, old.meta.total - 1) } };
+        }
+        return {
+          ...old,
+          data: old.data.map((row) =>
+            row.id === id
+              ? { ...row, status: 'RECEIVED', receivedAt: new Date().toISOString() }
+              : row,
+          ),
+        };
+      });
+    }
+    // 抽屉里的状态徽标也立即反映（详情缓存按 ['purchase-receipt-detail', id]）。
+    for (const query of queryClient
+      .getQueryCache()
+      .findAll({ queryKey: ['purchase-receipt-detail'] })) {
+      if (query.queryKey[1] !== id) {
+        continue;
+      }
+      queryClient.setQueryData<{ data: ReceiptDetail }>(query.queryKey, (old) =>
+        old === undefined ? old : { ...old, data: { ...old.data, status: 'RECEIVED' } },
+      );
+    }
+  };
+
   const confirmMutation = useMutation({
     mutationFn: (id: string) => apiPost('/api/v1/purchase-receipts/{id}/confirm', {}, { id }),
-    onSuccess: () => {
+    onSuccess: (_result, id) => {
       void message.success('收货确认完成，库存已入账');
+      applyConfirmedToCaches(id);
       invalidate();
     },
     onError: (error: Error) => void message.error(error.message),
