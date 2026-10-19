@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { App, Button, Form, Input, InputNumber, Modal, Select, Space } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiDelete, apiPost, useApiQuery } from '../../api/hooks';
 import { printTasksBrowser } from '../../printing/print-browser';
 import { BinBatchCreateModal } from '../../components/BinBatchCreateModal';
@@ -15,6 +15,7 @@ import {
   DeleteConfirmModal,
   EntitySummary,
   FilterBar,
+  FilterChips,
   PageHeader,
   RailHint,
   SectionCard,
@@ -110,6 +111,14 @@ export function BinsPage() {
     warehouseId !== undefined,
   );
   const selectedWarehouse = (warehouses.data?.data ?? []).find((item) => item.id === warehouseId);
+  // 默认选中第一个仓库（2026-10-19 用户指示）：仓库改成标签区后，「未选仓库」的空白
+  // 状态不再有意义 —— 进页面就该能直接看到库位。列表加载完再设，避免先发一次空 id 请求。
+  const firstWarehouseId = warehouses.data?.data?.[0]?.id;
+  useEffect(() => {
+    if (warehouseId === undefined && firstWarehouseId !== undefined) {
+      setWarehouseId(firstWarehouseId);
+    }
+  }, [warehouseId, firstWarehouseId]);
   const singlePreview =
     selectedWarehouse === undefined || singleValues === undefined
       ? null
@@ -340,6 +349,43 @@ export function BinsPage() {
         }
       />
 
+      {/* 仓库选择区（2026-10-19 用户指示）：原来工具栏里的「选择仓库」下拉改成这里
+          的一排标签 —— 一个仓库一个标签，点击即切换，默认选中第一个。数量少时可一眼
+          看全并直接点，比每次展开下拉更快。 */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          flexWrap: 'wrap',
+          marginBottom: 12,
+        }}
+      >
+        <span style={{ fontSize: 12.5, color: colors.textSecondary, flex: '0 0 auto' }}>仓库</span>
+        {warehouses.isLoading ? (
+          <span style={{ fontSize: 12.5, color: colors.textTertiary }}>加载中…</span>
+        ) : (
+          <FilterChips
+            chips={(warehouses.data?.data ?? []).map((warehouse) => ({
+              key: warehouse.id,
+              label: `${warehouse.warehouseCode} ${warehouse.name}`,
+            }))}
+            value={warehouseId}
+            onChange={(key) => {
+              // 仓库必须始终选中一个：FilterChips 再点已选中的标签会回传 undefined，这里忽略。
+              if (key === undefined) {
+                return;
+              }
+              setPage(1);
+              setZone(undefined);
+              setSelectedId(null);
+              setSelectedBinIds([]);
+              setWarehouseId(key);
+            }}
+          />
+        )}
+      </div>
+
       <FilterBar>
         <Input.Search
           placeholder="搜索库位编码 / 条码"
@@ -351,24 +397,6 @@ export function BinsPage() {
           }}
           style={{ width: 240 }}
           aria-label="搜索库位"
-        />
-        <Select
-          placeholder="选择仓库"
-          style={{ width: 220 }}
-          showSearch
-          optionFilterProp="label"
-          value={warehouseId}
-          onChange={(value) => {
-            setPage(1);
-            setZone(undefined);
-            setSelectedId(null);
-            setSelectedBinIds([]);
-            setWarehouseId(value);
-          }}
-          options={(warehouses.data?.data ?? []).map((warehouse) => ({
-            value: warehouse.id,
-            label: `${warehouse.warehouseCode} ${warehouse.name}`,
-          }))}
         />
         <Select
           allowClear
@@ -403,11 +431,22 @@ export function BinsPage() {
             showSizeChanger: false,
             showTotal: (total) => `共 ${total} 个库位`,
           }}
-          emptyTitle={warehouseId === undefined ? '请先选择仓库' : '暂无库位'}
+          // 空态文案（2026-10-19）：仓库改成标签且默认选中第一个之后，
+          // 「未选仓库」基本只剩「列表还在加载」和「一个仓库都没有」两种情况，
+          // 原来那句「请先选择仓库」已经对不上了。
+          emptyTitle={
+            warehouseId !== undefined
+              ? '暂无库位'
+              : warehouses.isLoading
+                ? '仓库加载中…'
+                : '还没有仓库'
+          }
           emptyDescription={
-            warehouseId === undefined
-              ? '选择仓库后浏览、搜索或批量创建库位。'
-              : '可单个新建或按货架批量创建。'
+            warehouseId !== undefined
+              ? '可单个新建或按货架批量创建。'
+              : warehouses.isLoading
+                ? '正在读取仓库列表。'
+                : '先到「仓库设置」创建仓库，再回来维护库位。'
           }
           onRow={(record) => ({
             onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
