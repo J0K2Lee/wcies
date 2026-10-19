@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsOptional, IsUUID } from 'class-validator';
 import { QuickShipShipmentDto } from '../../shipment/dto/shipment.dto';
+import { ORDER_LIST_SORT_FIELDS, OrderListSortField } from '../../order/enums/order.constants';
 
 /** Query of `POST /orders/:id/shipping-label` (2026-09-18 fulfillment flow). */
 export class FetchShippingLabelQueryDto {
@@ -131,6 +132,19 @@ export class BatchShippingLabelRequestDto {
   })
   @IsOptional()
   refresh?: boolean;
+
+  @ApiPropertyOptional({
+    enum: ORDER_LIST_SORT_FIELDS,
+    description: '订单列表当前排序字段（决定合并 PDF 的面单顺序，与列表一致；缺省=下单时间新→旧）',
+  })
+  @IsOptional()
+  @IsIn(ORDER_LIST_SORT_FIELDS)
+  sortBy?: OrderListSortField;
+
+  @ApiPropertyOptional({ enum: ['asc', 'desc'], description: '排序方向（与列表一致）' })
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  sortOrder?: 'asc' | 'desc';
 }
 
 /** One order's outcome of `POST /orders/batch-shipping-label`. */

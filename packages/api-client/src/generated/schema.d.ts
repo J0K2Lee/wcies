@@ -6751,6 +6751,16 @@ export interface components {
             orderIds: string[];
             /** @description true = 忽略已存档面单，逐单向平台重新取（平台面单接口限流，默认复用本地存档） */
             refresh?: boolean;
+            /**
+             * @description 订单列表当前排序字段（决定合并 PDF 的面单顺序，与列表一致；缺省=下单时间新→旧）
+             * @enum {string}
+             */
+            sortBy?: "orderedAt" | "skuCode" | "shipmentDeadline";
+            /**
+             * @description 排序方向（与列表一致）
+             * @enum {string}
+             */
+            sortOrder?: "asc" | "desc";
         };
         QuickShipShipmentDto: {
             shipmentId: string;

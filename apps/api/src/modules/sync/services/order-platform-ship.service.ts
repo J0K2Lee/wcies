@@ -7,6 +7,7 @@ import {
 } from '@wcies/platform-contracts';
 import { OperatorContext, OperationLogService } from '../../operation-log/operation-log.service';
 import { OrderService } from '../../order/services/order.service';
+import { OrderListSortField } from '../../order/enums/order.constants';
 import { ExceptionService } from '../../exception/services/exception.service';
 import { ShippingLabelService } from '../../shipment/services/shipping-label.service';
 import { mergePdfs } from '../../shipment/services/pdf-merge';
@@ -224,12 +225,27 @@ export class OrderPlatformShipService {
    */
   async fetchShippingLabelBatch(
     orderIds: string[],
-    options: { refresh: boolean },
+    options: {
+      refresh: boolean;
+      /** 订单列表当前排序（决定 PDF 装订顺序，与列表一致）。 */
+      sortBy?: OrderListSortField;
+      sortOrder?: 'asc' | 'desc';
+    },
     operator: OperatorContext,
   ): Promise<BatchShippingLabelResult> {
     const results: BatchShippingLabelItem[] = [];
     const labelIds: string[] = [];
-    for (const orderId of new Set(orderIds)) {
+    // 打印顺序 = 列表当前排序（2026-10-19 用户要求）。服务端按同一排序口径
+    // 重排后逐单取面单，合并 PDF 的页序即与列表一致；查不到的 id 追加在末尾，
+    // 仍按原来的逐笔失败路径报错。
+    const unique = [...new Set(orderIds)];
+    const ordered = await this.orderService.findIdsInListOrder(
+      unique,
+      options.sortBy,
+      options.sortOrder,
+    );
+    const found = new Set(ordered);
+    for (const orderId of [...ordered, ...unique.filter((id) => !found.has(id))]) {
       // 先读一次订单拿单号（失败结果也要有可读标识）；读不到由 catch 处理。
       let orderNo: string | null = null;
       try {

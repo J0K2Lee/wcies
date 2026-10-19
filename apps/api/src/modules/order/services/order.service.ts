@@ -11,6 +11,7 @@ import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { OrderEntity } from '../entities/order.entity';
 import { OrderItemEntity } from '../entities/order-item.entity';
 import { OrderRepository, OrderListFilters } from '../repositories/order.repository';
+import { OrderListSortField } from '../enums/order.constants';
 import { OrderItemRepository } from '../repositories/order-item.repository';
 import { OrderStatusHistoryRepository } from '../repositories/order-status-history.repository';
 import { PlatformStatusHistoryRepository } from '../repositories/platform-status-history.repository';
@@ -859,6 +860,18 @@ export class OrderService {
         statusChanged || deadlineChanged || rawChanged || stageChanged || fulfillmentModeChanged,
       cancelled,
     };
+  }
+
+  /**
+   * 这批订单在订单列表当前排序下的顺序（2026-10-19 批量打印面单：装订顺序
+   * 与列表一致）。只返回存在的订单；调用方补上查不到的 id 以便逐笔报错。
+   */
+  async findIdsInListOrder(
+    ids: readonly string[],
+    sortBy: OrderListSortField | undefined,
+    sortOrder: 'asc' | 'desc' | undefined,
+  ): Promise<string[]> {
+    return this.orderRepo.findIdsInListOrder(ids, sortBy, sortOrder);
   }
 
   // --------------------------------------------------------------------------

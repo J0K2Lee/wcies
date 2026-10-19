@@ -86,6 +86,8 @@ function makeService(adapter: object, order = ORDER) {
   const orderService = {
     getOrderOrThrow: vi.fn(async () => order),
     applySyncedPlatformFacts: vi.fn(async () => ({ ...order, platformTrackingNo: 'OZ75001234' })),
+    // 批量打单按列表排序重排 id（2026-10-19）；默认原样返回。
+    findIdsInListOrder: vi.fn(async (ids: readonly string[]) => [...ids]),
   };
   const exceptionService = {
     resolveByReference: vi.fn(async () => undefined),
@@ -304,6 +306,32 @@ describe('OrderPlatformShipService.fetchShippingLabelBatch (2026-10-17 批量打
     expect(result.results[1]?.code).toBe('PLATFORM_LABEL_NOT_READY');
     // 失败单也带可读订单号（先读了一次订单）。
     expect(orderService.getOrderOrThrow).toHaveBeenCalledTimes(2);
+    // 取面单前先按列表排序重排（去重后的 id）。
+    expect(orderService.findIdsInListOrder).toHaveBeenCalledWith(
+      ['o1', 'o2'],
+      undefined,
+      undefined,
+    );
+  });
+
+  it('按列表当前排序确定面单顺序（合并页序与列表一致）', async () => {
+    const { service, orderService } = makeService(new PreparableAdapter());
+    // 列表排序把 o2 排在 o1 前面。
+    orderService.findIdsInListOrder.mockResolvedValue(['o2', 'o1']);
+    const single = vi.spyOn(service, 'fetchShippingLabel').mockResolvedValue({
+      id: 'label-1',
+      signedUrl: 'https://s3/l.pdf',
+      fileName: 'l.pdf',
+    } as ShippingLabelDto);
+
+    await service.fetchShippingLabelBatch(
+      ['o1', 'o2'],
+      { refresh: false, sortBy: 'skuCode', sortOrder: 'asc' },
+      OPERATOR,
+    );
+
+    expect(orderService.findIdsInListOrder).toHaveBeenCalledWith(['o1', 'o2'], 'skuCode', 'asc');
+    expect(single.mock.calls.map((call) => call[0])).toEqual(['o2', 'o1']);
   });
 
   it('把成功面单合并成一个 PDF，并保留 OZON 面单原纸张尺寸', async () => {

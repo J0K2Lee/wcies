@@ -103,6 +103,29 @@ export function orderSortOf(
   }
 }
 
+/**
+ * 列表排序的**纯 SQL** 形式（2026-10-19 批量打印面单按列表顺序装订）。
+ *
+ * 与 `orderSortOf` 同一口径，但用于无分页 / 无 TypeORM 别名解析的原始查询：
+ * `orderSortOf` 的 SKU 键用的是 SELECT 别名（只在 listWithAggregates 里存在），
+ * 这里必须用子查询原文并写成 snake_case 列名。
+ */
+export function orderBySqlOf(
+  sortBy: OrderListSortField | undefined,
+  sortOrder: 'asc' | 'desc' | undefined,
+): string {
+  const direction = sortOrder === 'asc' ? 'ASC' : 'DESC';
+  const urgent = 'o.is_urgent DESC';
+  switch (sortBy) {
+    case 'skuCode':
+      return `${urgent}, ${MIN_SKU_CODE_SQL} ${direction} NULLS LAST, o.ordered_at DESC, o.id ASC`;
+    case 'shipmentDeadline':
+      return `${urgent}, o.shipment_deadline ${direction} NULLS LAST, o.ordered_at DESC, o.id ASC`;
+    default:
+      return `${urgent}, o.ordered_at ${direction}, o.id ASC`;
+  }
+}
+
 /** Data access for order headers (queries + inserts + status patches only). */
 @Injectable()
 export class OrderRepository {
@@ -125,6 +148,28 @@ export class OrderRepository {
 
   async findById(id: string): Promise<OrderEntity | null> {
     return this.dataSource.getRepository(OrderEntity).findOneBy({ id });
+  }
+
+  /**
+   * 这批订单在**订单列表当前排序**下的顺序（2026-10-19 批量打印面单：
+   * PDF 装订顺序必须与列表一致）。只返回存在的订单；查不到的 id 由调用方
+   * 自行补上，以便逐笔报错。
+   */
+  async findIdsInListOrder(
+    ids: readonly string[],
+    sortBy: OrderListSortField | undefined,
+    sortOrder: 'asc' | 'desc' | undefined,
+  ): Promise<string[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+    const rows = await this.dataSource.query<Array<{ id: string }>>(
+      `SELECT o.id FROM orders o
+        WHERE o.id = ANY($1::uuid[])
+        ORDER BY ${orderBySqlOf(sortBy, sortOrder)}`,
+      [[...ids]],
+    );
+    return rows.map((row) => row.id);
   }
 
   /**

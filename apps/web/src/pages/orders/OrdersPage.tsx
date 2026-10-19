@@ -1642,7 +1642,12 @@ export function OrdersPage() {
           signedUrl: string | null;
           fileName: string | null;
         }>;
-      }>('/api/v1/orders/batch-shipping-label', { orderIds }),
+      }>('/api/v1/orders/batch-shipping-label', {
+        orderIds,
+        // 面单装订顺序必须与列表一致（用户指示 2026-10-19）。
+        sortBy: sessionSort.sortBy,
+        sortOrder: sessionSort.sortOrder,
+      }),
     onSuccess: (result, vars) => {
       const printable = result.results.filter(
         (item): item is typeof item & { signedUrl: string } => item.ok && item.signedUrl !== null,

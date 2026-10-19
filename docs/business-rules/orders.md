@@ -1060,7 +1060,7 @@ createShipmentsFromOrder（仅 PICKED 行，1 发货单 = 1 仓）
 | 批量生成拣货单 | `POST /picking-tasks/auto-create`（请求体带 `orderIds`） | 勾选订单的 RESERVED 行**按仓合并**生成拣货任务（2026-10-15 语义修正）：同一仓库合并为一个任务（合并拣货，`picking_task_items` 行保留各自订单引用，任务内订单取消只摘除该订单行）；省略 `orderIds` 仍是旧的按店铺自动选取（同样合并）；跳过/幂等规则不变 |
 | 批量获取运单号 | `POST /orders/batch-prepare-shipment` | 逐单执行 ① 的全部平台/幂等/事实回写逻辑；仍是真实平台写操作 |
 | 批量发货 | `POST /orders/batch-ship` | 逐单执行 ④（含按订单 advisory lock）；库存仍只走 `shipShipment` |
-| 批量打印面单 | `POST /orders/batch-shipping-label` | 逐单执行 ③（默认复用本地已存档面单，`refresh=true` 才重新打平台）；**串行**以尊重平台面单接口限流；成功面单在**服务端合并成一个 PDF** 返回（`mergedPdfBase64`），每页保留平台原纸张尺寸 |
+| 批量打印面单 | `POST /orders/batch-shipping-label` | 逐单执行 ③（默认复用本地已存档面单，`refresh=true` 才重新打平台）；**串行**以尊重平台面单接口限流；成功面单在**服务端合并成一个 PDF** 返回（`mergedPdfBase64`），每页保留平台原纸张尺寸；**页序 = 订单列表当前排序**（含加急置顶；请求带 `sortBy`/`sortOrder`） |
 | 批量外部履约 | `POST /orders/batch-mark-external-fulfillment` | 逐单执行 Sprint 9 T6 的标记外部履约（同一 reason 记入每单的状态历史与操作日志）；不产生任何库存流水 |
 
 规则不变，只是编排：**逐单执行、单笔失败只记录结果不拖垮整批**（§36/§43），

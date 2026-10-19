@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DataSource, EntityManager } from 'typeorm';
 import { OrderEntity } from '../entities/order.entity';
-import { OrderRepository, orderSortOf } from './order.repository';
+import { OrderRepository, orderBySqlOf, orderSortOf } from './order.repository';
 
 describe('OrderRepository.updatePlatformFacts - fulfillmentMode', () => {
   function build() {
@@ -93,5 +93,25 @@ describe('orderSortOf (2026-10-14 列表排序白名单；2026-10-16 加急置�
       { expression: 'o.orderedAt', direction: 'DESC' },
       { expression: 'o.id', direction: 'ASC' },
     ]);
+  });
+});
+
+describe('orderBySqlOf (2026-10-19 批量打印面单：装订顺序与列表一致)', () => {
+  it('默认按下单时间，且加急恒定置顶', () => {
+    expect(orderBySqlOf(undefined, undefined)).toBe(
+      'o.is_urgent DESC, o.ordered_at DESC, o.id ASC',
+    );
+    expect(orderBySqlOf('orderedAt', 'asc')).toBe('o.is_urgent DESC, o.ordered_at ASC, o.id ASC');
+  });
+
+  it('SKU / 发货时限键用子查询原文 + NULLS LAST（与 orderSortOf 同语义）', () => {
+    const sku = orderBySqlOf('skuCode', 'asc');
+    expect(sku.startsWith('o.is_urgent DESC, (SELECT MIN(sk.sku_code)')).toBe(true);
+    expect(sku).toContain('ASC NULLS LAST, o.ordered_at DESC, o.id ASC');
+
+    const deadline = orderBySqlOf('shipmentDeadline', 'asc');
+    expect(deadline).toBe(
+      'o.is_urgent DESC, o.shipment_deadline ASC NULLS LAST, o.ordered_at DESC, o.id ASC',
+    );
   });
 });

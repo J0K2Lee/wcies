@@ -66,7 +66,11 @@ export class OrderFulfillmentController {
     return ok<BatchShippingLabelResultDto>(
       await this.platformShipService.fetchShippingLabelBatch(
         request.orderIds,
-        { refresh: request.refresh === true },
+        {
+          refresh: request.refresh === true,
+          sortBy: request.sortBy,
+          sortOrder: request.sortOrder,
+        },
         operator,
       ),
     );
