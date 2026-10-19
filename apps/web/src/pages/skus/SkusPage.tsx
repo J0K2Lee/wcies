@@ -278,6 +278,10 @@ export function SkusPage() {
     listingCount: number;
   } | null>(null);
   const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
+  // 弹窗打开时锁定目标 SKU：提交时不能读实时 drawerId——抽屉一旦被关掉
+  // （Esc/遮罩/其它选中动作）drawerId 变 null，会 POST /skus//barcodes 得到
+  // 404「Cannot POST」（2026-10-17 用户录入 69 码报错的实际原因）。
+  const [barcodeTargetSkuId, setBarcodeTargetSkuId] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [listingCreateOpen, setListingCreateOpen] = useState(false);
   // 映射平台商品 (rail quick action): snapshot the SKU to bind — the rail
@@ -458,8 +462,12 @@ export function SkusPage() {
   });
 
   const addBarcodeMutation = useMutation({
-    mutationFn: (values: { barcode: string; barcodeType: string }) =>
-      apiPost('/api/v1/skus/{skuId}/barcodes', values, { skuId: drawerId ?? '' }),
+    mutationFn: (values: { barcode: string; barcodeType: string }) => {
+      if (barcodeTargetSkuId === null) {
+        throw new Error('未选择商品，请重新打开商品详情后再添加条码');
+      }
+      return apiPost('/api/v1/skus/{skuId}/barcodes', values, { skuId: barcodeTargetSkuId });
+    },
     onSuccess: () => {
       void message.success('条码已添加');
       setBarcodeModalOpen(false);
@@ -1228,7 +1236,11 @@ export function SkusPage() {
 
       <Drawer
         open={drawerId !== null}
-        onClose={() => setDrawerId(null)}
+        onClose={() => {
+          // 抽屉关闭时一并收起条码弹窗，避免弹窗悬空、目标 SKU 丢失。
+          setDrawerId(null);
+          setBarcodeModalOpen(false);
+        }}
         size={760}
         title={
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -1338,7 +1350,10 @@ export function SkusPage() {
                   <div style={{ display: 'flex', gap: 8 }}>
                     <Button
                       type="primary"
-                      onClick={() => setBarcodeModalOpen(true)}
+                      onClick={() => {
+                        setBarcodeTargetSkuId(drawerId);
+                        setBarcodeModalOpen(true);
+                      }}
                       disabled={drawerId === null}
                     >
                       添加条码
