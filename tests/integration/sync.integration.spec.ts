@@ -148,14 +148,17 @@ function startMockOzon(): Promise<Server> {
         send(200, { items });
         return;
       }
-      if (url === '/v3/posting/fbs/list') {
+      // v4 list (2026-10-20): 顶层 {has_next, cursor, postings} + 游标分页。
+      if (url === '/v4/posting/fbs/list') {
         script.listCalls += 1;
         if (script.failMode === 'failSecondListCall' && script.listCalls >= 2) {
           send(500, { code: 500, message: 'page 2 transport failure (scripted)' });
           return;
         }
         const filter = (parsed['filter'] as { since?: string; to?: string } | undefined) ?? {};
-        const offset = Number(parsed['offset'] ?? 0);
+        const rawCursor: unknown = parsed['cursor'];
+        const cursor = typeof rawCursor === 'string' ? rawCursor : '';
+        const offset = cursor.startsWith('it-offset:') ? Number(cursor.slice(10)) : 0;
         const limit = Number(parsed['limit'] ?? 200);
         const since = filter.since ?? '1970-01-01T00:00:00Z';
         const to = filter.to ?? '2999-01-01T00:00:00Z';
@@ -167,11 +170,11 @@ function startMockOzon(): Promise<Server> {
         // scripted page-2 failure is actually reached (real postings are far
         // below the page size).
         const forceNext = script.failMode === 'failSecondListCall' && script.listCalls === 1;
+        const hasNext = forceNext || offset + page.length < matched.length;
         send(200, {
-          result: {
-            has_next: forceNext || offset + page.length < matched.length,
-            postings: page,
-          },
+          has_next: hasNext,
+          cursor: hasNext ? `it-offset:${offset + page.length}` : '',
+          postings: page,
         });
         return;
       }

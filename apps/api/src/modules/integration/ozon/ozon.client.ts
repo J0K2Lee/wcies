@@ -149,20 +149,24 @@ export class OzonClient {
     });
   }
 
+  /**
+   * FBS posting list — **v4** (2026-10-20)：v3 的同一方法对本账号持续返回
+   * 429（`code 8 / remaining 0`，双店复现，间隔 4s 与 20s 连打 33 次全失败），
+   * 而 v4 正常（200，remaining 49）。v4 为游标分页，请求不再接受 dir/offset
+   * （传了也被忽略，默认按 in_process_at 升序），响应在顶层。
+   */
   async fbsPostingList(
     auth: OzonAuth,
     storeId: string,
-    input: { since: string; to: string; offset: number; limit: number },
+    input: { since: string; to: string; limit: number; cursor?: string },
   ): Promise<OzonFbsPostingListResponse> {
     return this.request<OzonFbsPostingListResponse>(auth, {
-      endpoint: '/v3/posting/fbs/list',
+      endpoint: '/v4/posting/fbs/list',
       storeId,
       body: {
-        dir: 'ASC',
         filter: { since: input.since, to: input.to },
-        offset: input.offset,
         limit: input.limit,
-        with: {},
+        ...(input.cursor !== undefined && input.cursor !== '' ? { cursor: input.cursor } : {}),
       },
     });
   }

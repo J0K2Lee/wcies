@@ -40,9 +40,15 @@ import {
   OzonOrderWindowCursor,
 } from './types/cursors';
 
-/** Page sizes (spec: /v3/product/list limit <= 1000; postings <= 1000). */
+/**
+ * Page sizes.
+ * - /v3/product/list: limit ≤ 1000.
+ * - /v4/posting/fbs/list: limit **≤ 100**（实测 2026-10-20：200 会被
+ *   `PLATFORM_API_ERROR: invalid PostingFbsListRequest.Limit: value must be
+ *   inside range (0, 100]` 拒绝；v3 曾允许更大值）。
+ */
 const LISTING_PAGE_SIZE = 200;
-const ORDER_PAGE_SIZE = 200;
+const ORDER_PAGE_SIZE = 100;
 /** Page size for /v2/returns/rfbs/list (dual-axis T5). */
 const RETURN_PAGE_SIZE = 200;
 /** Batch size for /v3/product/info/list detail enrichment (conservative). */
@@ -149,17 +155,28 @@ export class OzonAdapter implements PlatformAdapter {
     const response = await this.client.fbsPostingList(auth, context.storeId, {
       since: windowCursor.since,
       to: windowCursor.to,
-      offset: windowCursor.offset,
       limit: ORDER_PAGE_SIZE,
+      cursor: windowCursor.cursor,
     });
-    const result = response.result;
-    if (typeof result?.has_next !== 'boolean' || !Array.isArray(result?.postings)) {
+    // v4 响应在顶层（无 result 包裹）。
+    if (typeof response?.has_next !== 'boolean' || !Array.isArray(response?.postings)) {
       throw malformedPostingListResponse(context.storeId);
     }
-    const items = result.postings.map(mapPostingToOrder);
-    const hasMore = result.has_next;
+    const items = response.postings.map(mapPostingToOrder);
+    const hasMore = response.has_next;
     const nextCursor: unknown = hasMore
-      ? ({ ...windowCursor, offset: windowCursor.offset + result.postings.length } as const)
+      ? // 游标分页（2026-10-20）：把 v4 返回的不透明游标原样带回。空游标却
+        // 声称还有下一页 = 畸形响应，必须报错而不是原地重读（防死循环）。
+        typeof response.cursor === 'string' && response.cursor !== ''
+        ? ({
+            kind: 'OZON_ORDER_WINDOW',
+            since: windowCursor.since,
+            to: windowCursor.to,
+            cursor: response.cursor,
+          } as const)
+        : (() => {
+            throw malformedPostingListCursor(context.storeId);
+          })()
       : // Window complete: the resume marker opens the NEXT window at the
         // next run, overlapped by 60s (idempotent ingest absorbs re-reads).
         ({ kind: 'OZON_ORDER_RESUME', windowEnd: windowCursor.to } as const);
@@ -343,7 +360,6 @@ function normalizeWindowCursor(cursor: unknown): OzonOrderWindowCursor {
     kind: 'OZON_ORDER_WINDOW',
     since: since.toISOString(),
     to: to.toISOString(),
-    offset: 0,
   };
 }
 
@@ -354,11 +370,10 @@ function malformedInfoResponse(storeId: string): Error {
   return new OzonBadShape(storeId, '/v3/product/info/list', 'result.items missing');
 }
 function malformedPostingListResponse(storeId: string): Error {
-  return new OzonBadShape(
-    storeId,
-    '/v3/posting/fbs/list',
-    'result.has_next / result.postings missing',
-  );
+  return new OzonBadShape(storeId, '/v4/posting/fbs/list', 'has_next / postings missing');
+}
+function malformedPostingListCursor(storeId: string): Error {
+  return new OzonBadShape(storeId, '/v4/posting/fbs/list', 'has_next=true but cursor is empty');
 }
 function malformedPostingGetResponse(storeId: string, postingNumber: string): Error {
   return new OzonBadShape(

@@ -19,7 +19,11 @@ export interface OzonOrderWindowCursor {
   readonly kind: 'OZON_ORDER_WINDOW';
   readonly since: string;
   readonly to: string;
-  readonly offset: number;
+  /**
+   * v4 游标分页（2026-10-20）：OZON 不透明游标，首页缺省。旧版本这里存的是
+   * offset —— 旧游标仍会被接受（offset 被忽略），窗口从头重扫，摄取幂等。
+   */
+  readonly cursor?: string;
 }
 
 /** Stored between runs: the end of the last fully-processed window. */
@@ -38,13 +42,14 @@ export function isOzonListingCursor(value: unknown): value is OzonListingCursor 
 }
 
 export function isOzonOrderWindowCursor(value: unknown): value is OzonOrderWindowCursor {
+  const cursor = (value as { cursor?: unknown } | null)?.cursor;
   return (
     typeof value === 'object' &&
     value !== null &&
     (value as { kind?: unknown }).kind === 'OZON_ORDER_WINDOW' &&
     typeof (value as { since?: unknown }).since === 'string' &&
     typeof (value as { to?: unknown }).to === 'string' &&
-    typeof (value as { offset?: unknown }).offset === 'number'
+    (cursor === undefined || typeof cursor === 'string')
   );
 }
 

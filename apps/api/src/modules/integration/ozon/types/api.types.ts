@@ -130,11 +130,19 @@ export interface OzonFbsPostingAnalyticsData {
   readonly [key: string]: unknown;
 }
 
+/**
+ * POST /v4/posting/fbs/list (2026-10-20 迁移)：v3 的 list 方法已对本账号持续
+ * 返回 429（实测，双店复现），v4 正常。v4 是**游标分页**且响应在顶层——
+ * 不再有 `result` 包裹：
+ *   request  { filter: { since, to }, limit, cursor? }
+ *   response { has_next, cursor, postings }
+ * posting 字段与 v3 一致（products / analytics_data 均保留）。
+ */
 export interface OzonFbsPostingListResponse {
-  readonly result: {
-    readonly has_next: boolean;
-    readonly postings: readonly OzonFbsPosting[];
-  };
+  readonly has_next: boolean;
+  /** 下一页游标（不透明）；has_next=false 时为空串。 */
+  readonly cursor: string;
+  readonly postings: readonly OzonFbsPosting[];
 }
 
 // ---------------------------------------------------------------------------

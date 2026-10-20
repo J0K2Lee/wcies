@@ -118,7 +118,24 @@ function makeOzonHarness(): AdapterContractHarness {
       // Default routing: which endpoint a scripted body belongs to is
       // decided by the shape of the body itself.
       const endpoint = endpointOf(body);
-      routes.set(endpoint, { endpoint, status, body, headers });
+      // 共享契约套件用的是平台中立夹具（result.{has_next,postings}）；
+      // OZON 的 v4 list 是顶层 + 游标分页（2026-10-20），这里做一次翻译。
+      const wireBody =
+        endpoint === '/v4/posting/fbs/list' &&
+        typeof body === 'object' &&
+        body !== null &&
+        'result' in body
+          ? (() => {
+              const result = (body as { result: { has_next?: boolean; postings?: unknown[] } })
+                .result;
+              return {
+                has_next: result.has_next === true,
+                cursor: result.has_next === true ? 'contract-cursor' : '',
+                postings: result.postings ?? [],
+              };
+            })()
+          : body;
+      routes.set(endpoint, { endpoint, status, body: wireBody, headers });
     },
     calls: () => callCount,
     shipmentFulfillment: {
@@ -160,7 +177,7 @@ function endpointOf(body: unknown): string {
   if (typeof body === 'object' && body !== null && 'result' in body) {
     const result = (body as { result: Record<string, unknown> }).result;
     if ('postings' in result) {
-      return '/v3/posting/fbs/list';
+      return '/v4/posting/fbs/list';
     }
     if ('last_id' in result) {
       return '/v3/product/list';

@@ -100,24 +100,42 @@ v4 仍是尺寸重量唯一来源。
 
 ## 3. 订单 API 能力（已实现）
 
-### POST /v3/posting/fbs/list
+### POST /v4/posting/fbs/list（2026-10-20 迁移）
+
+> **v3 已不可用（实测 2026-10-20）**：`POST /v3/posting/fbs/list` 对本账号持续返回
+> `429 {"code":8,"message":"You have reached request rate limit per second"}`，
+> `ratelimit-remaining: 0`、`retry-after: 0`；两个店铺（不同 Client-Id）一致，
+> 间隔 4 秒的单次调用、20 秒内连打 33 次**全部失败**。同一凭据的
+> `POST /v3/posting/fbs/get` 与 `/v3/product/list` 均 200（`remaining: 49`）。
+> 换任何请求体/时间窗都一样 → 不是限流频率问题，而是该方法已下线；**v4 正常**。
 
 Request：
 
 ```json
 {
-  "dir": "ASC",
   "filter": { "since": "ISO-UTC", "to": "ISO-UTC" },
-  "offset": 0, "limit": 200,
-  "with": {}
+  "limit": 200,
+  "cursor": "（可选，上一页返回的不透明游标）"
 }
 ```
 
-Response：`{result:{has_next: boolean, postings:[...]}}`。
+Response（顶层，无 `result` 包裹）：
 
-- **必须**携带 `filter.since/to`（UTC，格式 `YYYY-MM-DDTHH:mm:ssZ`）；窗口大小上限官方文档未给出硬限制（**未验证**，WCIES 初始 7 天，此后增量）。
-- 分页：`offset` 递增 + `has_next`；页内最大 1000。
+```json
+{ "has_next": true, "cursor": "opaque", "postings": [ ... ] }
+```
+
+- **必须**携带 `filter.since/to`（UTC）；`dir` / `offset` / `with` 传了会被忽略，
+  默认按 `in_process_at` 升序。
+- **`limit` 上限 100**（实测 2026-10-20：v4 对 200 返回
+  `Request validation error: invalid PostingFbsListRequest.Limit: value must be
+  inside range (0, 100]`；v3 时代允许更大值）。适配器 `ORDER_PAGE_SIZE = 100`。
+- 分页：把上一页的 `cursor` 原样传回；`has_next=false` 时 `cursor` 为空串。
+  **`has_next=true` 但 cursor 为空 = 畸形响应**，适配器直接报错（防原地重读死循环）。
+- posting 字段与 v3 一致（`products`、`analytics_data`、`delivering_date` 均保留）。
 - `in_process_at` = 订单开始处理时间（订单创建时刻），是窗口过滤字段。
+- 旧游标（`OZON_ORDER_WINDOW.offset`）仍被接受：`offset` 被忽略、窗口从头重扫，
+  摄取幂等不会重复建单。
 
 ### POST /v3/posting/fbs/get（Webhook 目标回读）
 
@@ -209,6 +227,10 @@ posting/fbs/list` 的请求过滤器存在，`changed_state_date` 只在 webhook
   - **按店铺隔离**的最小请求间隔（`OZON_MIN_REQUEST_INTERVAL_MS`，默认 110ms ≈ 9 req/s/store）；店铺 A 触发限流不影响店铺 B。
   - HTTP 429 → `PLATFORM_RATE_LIMITED`，尊重 `Retry-After`（秒数或 HTTP-date），指数退避上限 60s。
 - 结论：当前 110ms 间隔在真实环境安全；后续如批量拉取可关注 `ratelimit-remaining` 逼近 0 的情况。
+- **2026-10-20 重要观察**：`/v3/posting/fbs/list` 的 429 **不是**频率问题（见 §3：
+  间隔 4 秒、20 秒 33 次全失败，而 `get`/`product` 正常）——该方法已下线，已迁移到
+  `/v4/posting/fbs/list`。教训：**"限流"错误码不能当作调用太快的结论**，需用同凭据
+  的其他方法与不同节奏的调用做对照，并优先怀疑方法版本下线。
 
 ## 5. 重试与错误归一化
 

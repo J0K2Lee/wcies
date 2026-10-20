@@ -116,15 +116,15 @@ beforeAll(async () => {
         send(200, { result: { last_id: 'last', items: [] } });
         return;
       }
-      if (url === '/v3/posting/fbs/list') {
+      // v4 list（2026-10-20）：顶层响应 + 游标分页。
+      if (url === '/v4/posting/fbs/list') {
         const filter = (parsed['filter'] as { since?: string; to?: string } | undefined) ?? {};
         const since = filter.since ?? '1970-01-01T00:00:00Z';
         const to = filter.to ?? '2999-01-01T00:00:00Z';
         send(200, {
-          result: {
-            has_next: false,
-            postings: postings.filter((p) => p.in_process_at >= since && p.in_process_at <= to),
-          },
+          has_next: false,
+          cursor: '',
+          postings: postings.filter((p) => p.in_process_at >= since && p.in_process_at <= to),
         });
         return;
       }
