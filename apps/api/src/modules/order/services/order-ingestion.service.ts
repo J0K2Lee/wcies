@@ -614,6 +614,124 @@ export class OrderIngestionService {
     return { scanned: candidates.length, repaired, reserved };
   }
 
+  /**
+   * 兜底收敛（2026-10-20）：订单同步末尾对「仍未映射」的行做有界扫描，把
+   * 现在已经能解析的行修好。
+   *
+   * 为什么需要：变体级收敛只挂在映射写入上（新建/绑定/启用链接），而这些
+   * 写入可能发生在订单行已失败之后很久——历史遗留行、或任何未来新增的写入
+   * 路径漏掉收敛时，订单会一直停在映射异常，只能人工逐单重试。此处逐个调用
+   * 同一套 resolve + retryFailedMappingItem，未解析的行保持 FAILED（一次
+   * 索引查询的成本），已解析的行自动转 MAPPED 并占用库存/关异常。
+   *
+   * 批量上限固定且最旧优先，单店每轮成本可控；任何单行失败只记日志。
+   */
+  async convergeStaleMappingFailures(
+    storeId: string,
+    operator: OperatorContext,
+    limit = 40,
+  ): Promise<{ scanned: number; repaired: number; reserved: number; restored: number }> {
+    const candidates = await this.itemRepo.findFailedMappingItemIds(storeId, limit);
+    let repaired = 0;
+    let reserved = 0;
+    for (const itemId of candidates) {
+      try {
+        const item = await this.itemRepo.findById(itemId);
+        const order = item === null ? null : await this.orderRepo.findById(item.orderId);
+        if (item === null || order === null || order.erpStatus === 'CANCELLED') {
+          continue;
+        }
+        const outcome = await this.retryFailedMappingItem(order, item, operator, {
+          allocate:
+            item.fulfillmentStatus === 'BACKORDERED' || item.fulfillmentStatus === 'PENDING',
+        });
+        if (outcome.resolved) {
+          repaired += 1;
+          if (outcome.reserved) {
+            reserved += 1;
+          }
+        }
+      } catch (error: unknown) {
+        this.logger.warn(
+          `stale mapping-repair sweep failed for item ${itemId}: ${String(error)}`,
+          'OrderIngestionService',
+        );
+      }
+    }
+    const restored = await this.restoreReleasedExceptionOrders(storeId, operator, limit);
+    if (repaired > 0 || restored > 0) {
+      this.logger.log('stale mapping-repair sweep converged order lines', {
+        module: 'order',
+        storeId,
+        scanned: candidates.length,
+        repaired,
+        reserved,
+        restored,
+      });
+    }
+    return { scanned: candidates.length, repaired, reserved, restored };
+  }
+
+  /**
+   * 已释放行的异常收口与误判恢复（2026-10-20）：行已 RELEASED /
+   * EXTERNAL_FULFILLED 时未映射/缺货都没有可执行的待办，异常必须关闭；
+   * 订单若是被旧规则翻回 EXCEPTION，重算会按历史回到真实持有态（多为
+   * SHIPPED）。不修复这些订单就要等 24h 的平台事实刷新窗口，期间已发货
+   * 订单一直显示「异常」。
+   */
+  private async restoreReleasedExceptionOrders(
+    storeId: string,
+    operator: OperatorContext,
+    limit: number,
+  ): Promise<number> {
+    let restored = 0;
+    const candidates = await this.orderRepo.findOrdersWithReleasedLineExceptions(storeId, limit);
+    for (const candidate of candidates) {
+      try {
+        await this.resolveReleasedLineExceptions(candidate.id);
+        if (candidate.erpStatus !== 'EXCEPTION') {
+          continue;
+        }
+        const next = await this.statusService.recomputeOrderStatus(
+          candidate.id,
+          operator,
+          '未映射行已释放，恢复订单真实状态',
+        );
+        if (next !== 'EXCEPTION') {
+          restored += 1;
+        }
+      } catch (error: unknown) {
+        this.logger.warn(
+          `stale exception-order restore failed for order ${candidate.id}: ${String(error)}`,
+          'OrderIngestionService',
+        );
+      }
+    }
+    return restored;
+  }
+
+  private async resolveReleasedLineExceptions(orderId: string): Promise<void> {
+    const items = await this.itemRepo.findByOrderId(orderId);
+    const released = items.filter(
+      (item) =>
+        item.fulfillmentStatus === 'RELEASED' || item.fulfillmentStatus === 'EXTERNAL_FULFILLED',
+    );
+    if (released.length === 0) {
+      return;
+    }
+    await this.dataSource.transaction(async (runner) => {
+      for (const item of released) {
+        for (const exceptionType of ['ORDER_OUT_OF_STOCK', 'ORDER_SKU_MAPPING_FAILED'] as const) {
+          await this.exceptionService.resolveByReferenceInTx(runner, {
+            exceptionType,
+            referenceType: 'ORDER_ITEM',
+            referenceId: item.id,
+          });
+        }
+      }
+    });
+  }
+
   /** Retry entry shared with OrderService.retryAllocation (task §24). */
   async allocateMappedItem(
     order: OrderEntity,

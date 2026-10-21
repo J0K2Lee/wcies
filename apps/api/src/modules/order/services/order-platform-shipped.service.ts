@@ -5,7 +5,7 @@ import { ExceptionService } from '../../exception/services/exception.service';
 import { OrderEntity } from '../entities/order.entity';
 import { OrderItemEntity } from '../entities/order-item.entity';
 import { OrderItemRepository } from '../repositories/order-item.repository';
-import { OrderStatusService } from './order-status.service';
+import { OrderStatusService, isBlockingMappingFailure } from './order-status.service';
 import { ErpOrderStatus } from '../enums/order.constants';
 
 export interface PlatformShippedOutcome {
@@ -87,8 +87,10 @@ export class OrderPlatformShippedService {
       });
     });
 
-    if (items.some((item: OrderItemEntity) => item.mappingStatus === 'FAILED')) {
+    if (items.some(isBlockingMappingFailure)) {
       // 未映射异常是唯一被允许的阻塞：rollup 会把订单落到 EXCEPTION。
+      // 已 RELEASED / EXTERNAL_FULFILLED 的 FAILED 行不再阻塞（2026-10-20）：
+      // 平台已事实发货，未映射不再可执行，不能把订单翻回 EXCEPTION。
       const erpStatus = await this.statusService.recomputeOrderStatus(
         order.id,
         operator,

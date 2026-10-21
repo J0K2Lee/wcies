@@ -330,6 +330,29 @@ export interface PlatformAdapter {
   ): Promise<PaginatedResult<PlatformListingRaw>>;
 
   /**
+   * Optional read-only targeted listing lookup by order-line identifiers
+   * (2026-10-20, on-demand backfill for orders whose listing was created on
+   * the platform after the last listing walk).
+   *
+   * One logical lookup: the adapter picks the identifier it can query by and
+   * MUST NOT walk the full listing set. Returns null when the platform has no
+   * such variant (deleted / never existed). Platforms without a targeted read
+   * omit the method - callers treat that as "unsupported" and offer the local
+   * fallback.
+   *
+   * Result is a platform FACT only: it is upserted as an UNMAPPED variant and
+   * never assigns an internal SKU (decision 0016).
+   */
+  fetchListingVariant?(
+    context: StoreContext,
+    identifiers: {
+      readonly platformSkuId?: string | null;
+      readonly offerId?: string | null;
+      readonly platformProductId?: string | null;
+    },
+  ): Promise<PlatformListingRaw | null>;
+
+  /**
    * Fetch one page of platform orders. Without a cursor this starts a
    * catch-up window; adapters may also accept targeted cursors (e.g.
    * specific posting numbers from a webhook) - see adapter option types.
@@ -388,4 +411,29 @@ export interface PlatformAdapter {
     context: StoreContext,
     order: { platformOrderId: string },
   ): Promise<PlatformLabelFile | null>;
+
+  /**
+   * Optional READ (批量取面单, 用户指示 2026-10-21): fetch the labels of ONE
+   * chunk of orders in a single platform call (OZON `package-label` accepts a
+   * posting_number array). Callers chunk to the platform's documented limit.
+   *
+   * Contract: the returned array contains ONLY the orders whose label is
+   * available; an id missing from the result means "not ready yet" (never an
+   * error). Real platform failures throw, exactly like `fetchShippingLabel`.
+   *
+   * The caller must verify that the returned files can be attributed to the
+   * requested orders (OZON returns one combined PDF - page order is the
+   * request order) and fall back to per-order calls when it cannot: the batch
+   * path is an optimization, never a correctness dependency (AGENTS.md §88).
+   */
+  fetchShippingLabels?(
+    context: StoreContext,
+    platformOrderIds: readonly string[],
+  ): Promise<readonly PlatformOrderLabelFile[]>;
+}
+
+/** One order's label inside a batched label response. */
+export interface PlatformOrderLabelFile {
+  readonly platformOrderId: string;
+  readonly file: PlatformLabelFile;
 }

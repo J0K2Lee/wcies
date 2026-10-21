@@ -67,6 +67,34 @@ export const appConfig = registerAs('app', () => {
      */
     orderStateFallbackHours: Number.parseFloat(process.env.ORDER_STATE_FALLBACK_HOURS ?? '24'),
     /**
+     * 面单后台任务（用户指示 2026-10-21）：
+     *
+     * - prefetch*：组包成功后延迟预取归档。OZON 只在 posting 进入
+     *   awaiting_deliver 后提供面单，且文档建议组包后 45–60 秒再取；
+     *   未就绪时按指数退避重试（组包确认是异步的）。
+     * - batchFetchChunk：批量取单的每批订单数（OZON 文档称 ≤20）。
+     * - purge*：终态订单（完成/取消）的面单字节清理扫描。清理对用户不可见，
+     *   所以默认 6 小时一次；每轮按游标循环若干批以排空积压。
+     */
+    label: {
+      prefetchEnabled: (process.env.LABEL_PREFETCH_ENABLED ?? 'true') === 'true',
+      prefetchDelayMs: Number.parseInt(process.env.LABEL_PREFETCH_DELAY_MS ?? '60000', 10),
+      prefetchMaxAttempts: Number.parseInt(process.env.LABEL_PREFETCH_MAX_ATTEMPTS ?? '6', 10),
+      prefetchFromSync: (process.env.LABEL_PREFETCH_FROM_SYNC ?? 'true') === 'true',
+      batchFetchChunk: Number.parseInt(process.env.LABEL_BATCH_FETCH_CHUNK ?? '20', 10),
+      purgeSweepIntervalSeconds: Number.parseInt(
+        process.env.LABEL_PURGE_SWEEP_INTERVAL_SECONDS ?? '21600',
+        10,
+      ),
+      purgeBatchSize: Number.parseInt(process.env.LABEL_PURGE_BATCH_SIZE ?? '200', 10),
+      purgeMaxBatchesPerRun: Number.parseInt(
+        process.env.LABEL_PURGE_MAX_BATCHES_PER_RUN ?? '10',
+        10,
+      ),
+      purgeMaxRunMs: Number.parseInt(process.env.LABEL_PURGE_MAX_RUN_MS ?? '60000', 10),
+      purgeGraceMinutes: Number.parseInt(process.env.LABEL_PURGE_GRACE_MINUTES ?? '0', 10),
+    },
+    /**
      * Transactional email (user management verification mail, Feishu SMTP).
      * All fields OPTIONAL at boot: when host/user/password are not fully
      * configured the email features fail with EMAIL_NOT_CONFIGURED instead

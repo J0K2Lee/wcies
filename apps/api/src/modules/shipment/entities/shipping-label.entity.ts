@@ -68,6 +68,14 @@ export class ShippingLabelEntity {
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;
 
+  /**
+   * 对象字节已被清理的时间（用户指示 2026-10-21）。行保留为审计事实，但
+   * `purged_at IS NOT NULL` 的行不参与任何读取/打印，也不能再被复用。
+   * 清理只发生在订单终态（CANCELLED 或 SHIPPED+DELIVERED）。
+   */
+  @Column({ type: 'timestamptz', name: 'purged_at', nullable: true })
+  purgedAt!: Date | null;
+
   @ManyToOne(() => ShipmentEntity)
   @JoinColumn({ name: 'shipment_id' })
   shipment?: ShipmentEntity;

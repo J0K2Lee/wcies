@@ -30,6 +30,10 @@ import {
   PurchaseBatchDeleteRequestDto,
   PurchaseBatchDeleteResultDto,
 } from '../dto/purchase-batch-delete.dto';
+import {
+  PurchaseBatchConfirmRequestDto,
+  PurchaseBatchConfirmResultDto,
+} from '../dto/purchase-batch-confirm.dto';
 import { PurchaseReceiptService } from '../services/purchase-receipt.service';
 
 @ApiTags('purchase-receipts')
@@ -70,6 +74,20 @@ export class PurchaseReceiptController {
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true; data: PurchaseBatchDeleteResultDto }> {
     return ok(await this.receiptService.deleteBatch(request.ids, operator));
+  }
+
+  // 批量路由必须先于 :id/confirm 声明，避免静态段被当成参数。
+  @Post('batch-confirm')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '批量收货（逐笔整单事务；单笔失败隔离，已确认单幂等重放）',
+  })
+  @ApiOkEnvelope(PurchaseBatchConfirmResultDto)
+  async confirmBatch(
+    @Body() request: PurchaseBatchConfirmRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: PurchaseBatchConfirmResultDto }> {
+    return ok(await this.receiptService.confirmBatch(request.ids, operator));
   }
 
   @Post('from-po/batch')

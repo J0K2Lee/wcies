@@ -101,7 +101,12 @@ describe('OrderService.applySyncedPlatformFacts - fulfillmentMode', () => {
         { ...facts, fulfillmentMode: 'RFBS' },
         OPERATOR,
       );
-      expect(result).toEqual({ applied: true, changed: true, cancelled: false });
+      expect(result).toEqual({
+        applied: true,
+        changed: true,
+        cancelled: false,
+        trackingNumberAssigned: false,
+      });
       expect(orderRepo.updatePlatformFacts).toHaveBeenCalledWith(expect.anything(), 'order-1', {
         platformStatus: facts.platformStatus,
         shipmentDeadline: null,
@@ -155,7 +160,12 @@ describe('OrderService.applySyncedPlatformFacts - fulfillmentMode', () => {
         },
         OPERATOR,
       );
-      expect(result).toEqual({ applied: true, changed: true, cancelled: false });
+      expect(result).toEqual({
+        applied: true,
+        changed: true,
+        cancelled: false,
+        trackingNumberAssigned: false,
+      });
       expect(platformShipped.apply).toHaveBeenCalledWith(
         expect.objectContaining({ id: 'order-1' }),
         OPERATOR,

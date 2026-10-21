@@ -424,6 +424,18 @@ export class ListingRepository {
     return this.mappingRepository.findOneBy({ listingId, platformSkuId, status: 'ACTIVE' });
   }
 
+  /**
+   * Dedup for seller-SKU-keyed variant rows (2026-10-20，订单事实兜底建链）：
+   * Yandex 等平台的订单行只带 offerId（= sellerSku），没有 marketSku，
+   * 无法按 platform_sku_id 去重；同一链接内 sellerSku 唯一，可按它对齐。
+   */
+  async findActiveMappingByListingAndSellerSku(
+    listingId: string,
+    sellerSku: string,
+  ): Promise<PlatformListingSkuEntity | null> {
+    return this.mappingRepository.findOneBy({ listingId, sellerSku, status: 'ACTIVE' });
+  }
+
   async findMappingByListingAndSku(
     listingId: string,
     skuId: string,
@@ -615,6 +627,49 @@ export class ListingRepository {
     }
     qb.andWhere(`(${conditions.join(' OR ')})`).orderBy(priorityCase as string, 'ASC');
     return qb.getOne();
+  }
+
+  /**
+   * Store-scoped lookup of an UNMAPPED variant by order-line identifiers
+   * (2026-10-20 按需补链接的「本地优先」检查）：同一店铺可能有多条链接
+   * 引用同一变体，命中任意一条即可继续映射流程，无需再打平台接口。
+   * Offer id 不参与（decision 0016）。
+   */
+  async findUnmappedVariantByStoreAndIdentifiers(
+    storeId: string,
+    input: { platformSkuId?: string | null; sellerSku?: string | null },
+  ): Promise<{ listingId: string; variantId: string } | null> {
+    const qb = this.mappingRepository
+      .createQueryBuilder('pls')
+      .innerJoin('platform_listings', 'listing', 'listing.id = pls.listing_id')
+      .select(['pls.id AS variant_id', 'pls.listing_id AS listing_id'])
+      .where('listing.store_id = :storeId', { storeId })
+      .andWhere("listing.status = 'ACTIVE'")
+      .andWhere("pls.status = 'ACTIVE'")
+      .andWhere('pls.sku_id IS NULL')
+      .andWhere("pls.mapping_status = 'UNMAPPED'");
+    const conditions: string[] = [];
+    const platformSkuId = input.platformSkuId?.trim();
+    if (platformSkuId !== undefined && platformSkuId !== '') {
+      conditions.push('pls.platform_sku_id = :platformSkuId');
+      qb.setParameter('platformSkuId', platformSkuId);
+    }
+    const sellerSku = input.sellerSku?.trim();
+    if (sellerSku !== undefined && sellerSku !== '') {
+      conditions.push('pls.seller_sku = :sellerSku');
+      qb.setParameter('sellerSku', sellerSku);
+    }
+    if (conditions.length === 0) {
+      return null;
+    }
+    const row = await qb
+      .andWhere(`(${conditions.join(' OR ')})`)
+      .orderBy('pls.created_at', 'ASC')
+      .limit(1)
+      .getRawOne<{ variant_id: string; listing_id: string }>();
+    return row === undefined
+      ? null
+      : { variantId: String(row.variant_id), listingId: String(row.listing_id) };
   }
 
   // ---- Resolver ----

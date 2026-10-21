@@ -22,6 +22,7 @@ import { SyncModule } from '../modules/sync/sync.module';
       { name: QUEUE_NAMES.categoryTree },
       { name: QUEUE_NAMES.enrichment },
       { name: QUEUE_NAMES.media },
+      { name: QUEUE_NAMES.label },
     ),
     ImportModule,
     NotificationModule,

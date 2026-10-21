@@ -32,3 +32,22 @@ export class PlatformMalformedResponseError extends PlatformApiError {
     super({ ...detail, code: 'PLATFORM_BAD_RESPONSE' });
   }
 }
+
+/**
+ * A batched platform read returned something that cannot be attributed to the
+ * requested items - e.g. OZON returns ONE combined label PDF for several
+ * postings and the page count does not match the posting count.
+ *
+ * NOT a business failure: the caller must fall back to per-item reads. A plain
+ * Error on purpose - it never surfaces to the operator and must not reach the
+ * exception center.
+ */
+export class PlatformBatchShapeError extends Error {
+  constructor(
+    message: string,
+    readonly details: Record<string, unknown> = {},
+  ) {
+    super(message);
+    this.name = 'PlatformBatchShapeError';
+  }
+}

@@ -1,4 +1,5 @@
 import { Module, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { BullModule, InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -55,6 +56,10 @@ import {
   SyncSchedulerProcessor,
   WebhookProcessor,
 } from './processors/webhook-scheduler.processors';
+import { LabelPrefetchService } from './services/label-prefetch.service';
+import { ShippingLabelPurgeService } from './services/shipping-label-purge.service';
+import { LabelProcessor } from './processors/label.processor';
+import { LABEL_JOB } from './services/label-prefetch.service';
 
 /**
  * Sync engine (Sprint 5 task §10): LISTING_SYNC + ORDER_SYNC, per-store
@@ -70,6 +75,7 @@ import {
       { name: QUEUE_NAMES.scheduler },
       { name: QUEUE_NAMES.categoryTree },
       { name: QUEUE_NAMES.enrichment },
+      { name: QUEUE_NAMES.label },
     ),
     IntegrationModule,
     OzonModule,
@@ -120,11 +126,18 @@ import {
     ProductEnrichmentSyncProcessor,
     WebhookProcessor,
     SyncSchedulerProcessor,
+    LabelPrefetchService,
+    ShippingLabelPurgeService,
+    LabelProcessor,
   ],
   exports: [SyncJobService, SyncDispatchService, SyncContextService],
 })
 export class SyncModule implements OnModuleInit {
-  constructor(@InjectQueue(QUEUE_NAMES.scheduler) private readonly schedulerQueue: Queue) {}
+  constructor(
+    @InjectQueue(QUEUE_NAMES.scheduler) private readonly schedulerQueue: Queue,
+    @InjectQueue(QUEUE_NAMES.label) private readonly labelQueue: Queue,
+    private readonly config: ConfigService,
+  ) {}
 
   /**
    * Registers the sync scheduler tick (every 30s). Lives HERE, not only in
@@ -144,6 +157,21 @@ export class SyncModule implements OnModuleInit {
       {
         repeat: { every: 30_000 },
         jobId: 'sync-scheduler-tick',
+        removeOnComplete: { count: 4 },
+        removeOnFail: { count: 10 },
+      },
+    );
+
+    // 终态面单清理（2026-10-21）：默认 6 小时一次。与上面的 tick 同理，
+    // 注册在模块初始化里以便 API / worker 双进程都能触发；BullMQ 按 jobId
+    // 去重，两个进程同时启动不会产生重复的 repeatable 定义。
+    const everySeconds = this.config.get<number>('app.label.purgeSweepIntervalSeconds') ?? 21_600;
+    await this.labelQueue.add(
+      LABEL_JOB.purgeSweep,
+      {},
+      {
+        repeat: { every: everySeconds * 1000 },
+        jobId: 'label-purge-sweep',
         removeOnComplete: { count: 4 },
         removeOnFail: { count: 10 },
       },

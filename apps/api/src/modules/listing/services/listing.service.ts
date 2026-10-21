@@ -268,6 +268,17 @@ export class ListingService {
       changes: { status: { from: listing.status, to: status } },
       operator,
     });
+    // 启用链接会让此前「链接非 ACTIVE 而不可解析」的订单行重新可解析
+    // （resolver 只认 ACTIVE listing + ACTIVE MAPPED mapping）：逐个已映射
+    // 变体收敛，否则这些行会一直停在映射异常，直到人工重试（2026-10-20）。
+    if (status === 'ACTIVE' && listing.status !== 'ACTIVE') {
+      const mapped = (await this.repository.listMappingsByListingId(id)).filter(
+        (row) => row.mapping.mappingStatus === 'MAPPED' && row.mapping.status === 'ACTIVE',
+      );
+      for (const row of mapped) {
+        await this.retryOrderLinesAfterMappingRepair(row.mapping.id, operator);
+      }
+    }
     return this.getDetail(id);
   }
 
@@ -297,6 +308,10 @@ export class ListingService {
   ): Promise<ListingSkuResponseDto> {
     await this.findListingOrThrow(listingId);
     const mapping = await this.addMappingInternal(listingId, dto, operator);
+    // 手工新增映射同样要把「映射已落库」传播到已摄入的订单行（2026-10-20）：
+    // 此前只有 mapUnmappedSku（绑定已同步的 UNMAPPED 变体）会收敛，走
+    // POST /listings/:id/skus 新建的映射不会，订单行只能靠人工重试。
+    await this.retryOrderLinesAfterMappingRepair(mapping.id, operator);
     const sku = await this.skuService.getEntityById(dto.skuId);
     return this.mappingToResponse({
       mapping,
@@ -543,6 +558,12 @@ export class ListingService {
       rawData: Record<string, unknown>;
     }>;
     rawData: Record<string, unknown>;
+    /**
+     * 仅订单事实兜底建链（2026-10-20）使用：允许在没有 platformSkuId 的
+     * 情况下按 sellerSku 建/对齐变体行（Yandex 订单行只带 offerId）。
+     * 全量 listing sync 不开此开关——平台 walk 永远有 platformSkuId。
+     */
+    allowSellerSkuKeyed?: boolean;
   }): Promise<'CREATED' | 'UPDATED'> {
     const store = await this.storeService.getEntityById(input.storeId);
     if (store === null) {
@@ -575,16 +596,27 @@ export class ListingService {
     }
 
     for (const sku of input.skus) {
-      if (sku.platformSkuId === null) {
+      const sellerSkuKeyed =
+        input.allowSellerSkuKeyed === true &&
+        sku.platformSkuId === null &&
+        typeof sku.sellerSku === 'string' &&
+        sku.sellerSku.trim() !== '';
+      if (sku.platformSkuId === null && !sellerSkuKeyed) {
         // Cannot dedup safely without a platform SKU id - store in rawData
         // of the listing only. OZON always provides one; other platforms
         // get their own upsert rules when integrated.
         continue;
       }
-      const existingMapping = await this.repository.findActiveMappingByListingAndPlatformSkuId(
-        listing.id,
-        sku.platformSkuId,
-      );
+      const existingMapping =
+        sku.platformSkuId !== null
+          ? await this.repository.findActiveMappingByListingAndPlatformSkuId(
+              listing.id,
+              sku.platformSkuId,
+            )
+          : await this.repository.findActiveMappingByListingAndSellerSku(
+              listing.id,
+              sku.sellerSku as string,
+            );
       if (existingMapping !== null) {
         // Platform fact refresh only - human mapping is untouchable (§19).
         await this.repository.updateMapping(existingMapping.id, {
@@ -698,9 +730,13 @@ export class ListingService {
         },
         operator,
       });
+      // Excel 导入绑定已同步变体后同样收敛订单行（2026-10-20：此前导入是
+      // 唯一不收敛的映射写入路径，批量建档后旧订单行仍停在映射异常）。
+      await this.retryOrderLinesAfterMappingRepair(synced.id, operator);
       return { created: false };
     }
-    await this.addMappingInternal(input.listingId, input, operator);
+    const created = await this.addMappingInternal(input.listingId, input, operator);
+    await this.retryOrderLinesAfterMappingRepair(created.id, operator);
     return { created: true };
   }
 

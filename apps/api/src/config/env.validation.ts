@@ -53,6 +53,21 @@ export const envValidationSchema = Joi.object({
   // Fractional hours allowed (integration tests use short windows).
   ORDER_STATE_FALLBACK_HOURS: Joi.number().min(0.001).default(24),
 
+  // 面单后台任务（2026-10-21）：预取归档 + 终态清理。
+  // 预取默认开启；DELAY 对应 OZON「组包后 45–60 秒再取面单」的建议。
+  LABEL_PREFETCH_ENABLED: Joi.boolean().truthy('true').falsy('false').default(true),
+  LABEL_PREFETCH_DELAY_MS: Joi.number().integer().min(0).default(60000),
+  LABEL_PREFETCH_MAX_ATTEMPTS: Joi.number().integer().min(1).default(6),
+  LABEL_PREFETCH_FROM_SYNC: Joi.boolean().truthy('true').falsy('false').default(true),
+  LABEL_BATCH_FETCH_CHUNK: Joi.number().integer().min(1).default(20),
+  // 清理是后台、用户不可见的维护任务，时效要求极低：默认 6 小时一次。
+  // 单轮按游标循环若干批（默认 10 × 200 行），60 秒预算用于排空积压。
+  LABEL_PURGE_SWEEP_INTERVAL_SECONDS: Joi.number().integer().min(30).default(21600),
+  LABEL_PURGE_BATCH_SIZE: Joi.number().integer().min(1).default(200),
+  LABEL_PURGE_MAX_BATCHES_PER_RUN: Joi.number().integer().min(1).default(10),
+  LABEL_PURGE_MAX_RUN_MS: Joi.number().integer().min(1000).default(60000),
+  LABEL_PURGE_GRACE_MINUTES: Joi.number().integer().min(0).default(0),
+
   // Optional Feishu webhook (Sprint 4): absent = FEISHU channel stays a
   // provider boundary only; never guessed (task §49).
   FEISHU_WEBHOOK_URL: Joi.string()

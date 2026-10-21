@@ -6,6 +6,7 @@ import { ObjectStorageService } from '../../../infrastructure/storage/object-sto
 import { OrderService } from '../../order/services/order.service';
 import { ShipmentRepository } from '../repositories/shipment.repository';
 import { PackageRepository } from '../repositories/package.repository';
+import { ShippingLabelPurgeCandidate, ShippingLabelPurgeCursor } from '../shipping-label.types';
 import { ShippingLabelRepository } from '../repositories/shipping-label.repository';
 import { PackageNotFoundError, ShippingLabelInvalidError } from '../errors/shipment.errors';
 import { ShippingLabelSource } from '../enums/shipment.constants';
@@ -127,6 +128,55 @@ export class ShippingLabelService {
       throw new ShippingLabelInvalidError('面单不存在', { labelId });
     }
     return this.objectStorage.download(label.objectKey);
+  }
+
+  /**
+   * 面单清理候选（后台扫描，用户指示 2026-10-21）：只返回订单已终态
+   * （CANCELLED 或 SHIPPED+DELIVERED）且字节尚未清理的行，按创建时间升序。
+   */
+  async findPurgeCandidates(options: {
+    limit: number;
+    graceMinutes: number;
+    after?: ShippingLabelPurgeCursor | null;
+  }): Promise<ShippingLabelPurgeCandidate[]> {
+    return this.labelRepo.findPurgeCandidates(options);
+  }
+
+  /**
+   * 清理一张面单的图像字节：先删对象，再置 `purged_at`。
+   *
+   * 顺序不可颠倒——对象删除失败时不置标记，下一轮重试；对象已不存在视为
+   * 已删。行本身永久保留（审计事实），但从此对所有读取路径不可见。
+   */
+  async purgeLabel(
+    candidate: Pick<ShippingLabelPurgeCandidate, 'id' | 'objectKey' | 'fileName'>,
+    operator: OperatorContext,
+  ): Promise<boolean> {
+    try {
+      await this.objectStorage.delete(candidate.objectKey);
+    } catch (error: unknown) {
+      if (!isMissingObjectError(error)) {
+        throw error;
+      }
+    }
+    const purgedAt = new Date();
+    const marked = await this.labelRepo.markPurged(candidate.id, purgedAt);
+    if (!marked) {
+      // Another sweep won the race; the object is already gone and logged.
+      return false;
+    }
+    await this.operationLog.record({
+      entityType: 'SHIPPING_LABEL',
+      entityId: candidate.id,
+      entityCode: candidate.fileName,
+      action: 'PURGE',
+      changes: {
+        purgedAt: { from: null, to: purgedAt.toISOString() },
+        objectKey: { from: candidate.objectKey, to: null },
+      },
+      operator,
+    });
+    return true;
   }
 
   /** Reuses the newest stored order label of a source, if any (no re-fetch). */
@@ -252,4 +302,26 @@ function extensionOf(mimeType: string): string {
 function sanitizeFileName(name: string, extension: string): string {
   const trimmed = name.trim().slice(0, 200);
   return trimmed === '' ? `label.${extension}` : trimmed;
+}
+
+/**
+ * Object already absent (S3 `NoSuchKey` / MinIO 404). For the purge sweep this
+ * is the desired end state, not a failure - the metadata row still gets marked
+ * so it never re-enters the candidate set.
+ */
+function isMissingObjectError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const name = 'name' in error ? String(error.name) : '';
+  if (name === 'NoSuchKey' || name === 'NotFound') {
+    return true;
+  }
+  if ('$metadata' in error) {
+    const metadata: unknown = error.$metadata;
+    if (typeof metadata === 'object' && metadata !== null && 'httpStatusCode' in metadata) {
+      return Number(metadata.httpStatusCode) === 404;
+    }
+  }
+  return false;
 }

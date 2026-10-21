@@ -95,6 +95,28 @@ export class OrderItemRepository {
     return rows.map((row) => ({ itemId: String(row.item_id), orderId: String(row.order_id) }));
   }
 
+  /**
+   * 兜底收敛的候选行（2026-10-20）：本店铺所有仍未映射、且订单未终结的行。
+   * 变体级收敛只在「映射写入」时触发，历史遗留行（映射建立早于该功能）或
+   * 任何遗漏的写入路径只能靠人工逐单重试；订单同步末尾用这个候选集做有界
+   * 兜底扫描，把已可解析的行自动收敛。最旧优先，长期积压也能轮到。
+   */
+  async findFailedMappingItemIds(storeId: string, limit: number): Promise<string[]> {
+    const rows = await this.dataSource.query<Array<{ item_id: string }>>(
+      `SELECT i.id AS item_id
+         FROM order_items i
+         JOIN orders o ON o.id = i.order_id
+        WHERE i.mapping_status = 'FAILED'
+          AND o.store_id = $1::uuid
+          AND o.erp_status <> 'CANCELLED'
+          AND i.fulfillment_status <> 'SHIPPED'
+        ORDER BY i.created_at ASC
+        LIMIT $2`,
+      [storeId, limit],
+    );
+    return rows.map((row) => String(row.item_id));
+  }
+
   /** Items with resolved sku codes for detail views (no N+1). */
   async findByOrderIdWithSku(orderId: string): Promise<
     Array<{

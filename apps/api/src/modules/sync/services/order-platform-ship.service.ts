@@ -1,20 +1,25 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   PlatformAdapter,
+  PlatformOrderLabelFile,
   PlatformOrderRaw,
   PlatformShipmentPreparation,
   StoreContext,
 } from '@wcies/platform-contracts';
 import { OperatorContext, OperationLogService } from '../../operation-log/operation-log.service';
 import { OrderService } from '../../order/services/order.service';
+import { isOrderLabelPrintBlocked } from '../../order/services/order-status.service';
 import { OrderListSortField } from '../../order/enums/order.constants';
 import { ExceptionService } from '../../exception/services/exception.service';
 import { ShippingLabelService } from '../../shipment/services/shipping-label.service';
-import { mergePdfs } from '../../shipment/services/pdf-merge';
+import { mergePdfs } from '../../../common/pdf/document';
 import { ShippingLabelDto } from '../../shipment/dto/shipment.dto';
 import { PlatformCapabilityUnsupportedError } from '../../integration/integration.errors';
+import { PlatformApiError, PlatformBatchShapeError } from '../../integration/platform-error';
 import { DomainError } from '../../../common/errors/domain.error';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
+import { LabelPrefetchService } from './label-prefetch.service';
 import { SyncContextService } from './sync-context.service';
 
 /** Outcome of the platform 组包 step, as reported back to the order page. */
@@ -67,17 +72,42 @@ export interface BatchShippingLabelItem {
   message: string | null;
   signedUrl: string | null;
   fileName: string | null;
+  /** true = 直接用本地存档，本次没有调用平台（2026-10-21）。 */
+  fromArchive: boolean;
 }
 
 export interface BatchShippingLabelResult {
   total: number;
   succeeded: number;
   failed: number;
+  /** 因订单已终态（完成/取消）被拒绝的单数（2026-10-21）。 */
+  notPrintable: number;
   /** 成功面单合并成的单个 PDF（base64）；合并失败或全部失败时为 null。 */
   mergedPdfBase64: string | null;
   /** 合并 PDF 的总页数（每张面单通常 1 页）。 */
   mergedPageCount: number;
   results: BatchShippingLabelItem[];
+}
+
+/** The order facts this service needs; structurally satisfied by OrderEntity. */
+interface OrderForLabel {
+  id: string;
+  orderNo: string;
+  storeId: string;
+  platformOrderId: string;
+  platformTrackingNo: string | null;
+  erpStatus: string;
+  platformStage: string | null;
+}
+
+/** One order awaiting a platform label, keyed by the caller's order id. */
+interface LabelFetchNeed {
+  /**
+   * 入参里的订单 id（与实体 id 相同）。用它作为结果键，保证返回顺序与入参
+   * 完全一致，也避免把实体字段当作身份来源。
+   */
+  orderId: string;
+  order: OrderForLabel;
 }
 
 /**
@@ -102,6 +132,8 @@ export class OrderPlatformShipService {
     private readonly labelService: ShippingLabelService,
     private readonly operationLog: OperationLogService,
     private readonly logger: AppLoggerService,
+    private readonly config: ConfigService,
+    private readonly labelPrefetch: LabelPrefetchService,
   ) {}
 
   /**
@@ -112,6 +144,7 @@ export class OrderPlatformShipService {
   async prepareShipment(
     orderId: string,
     operator: OperatorContext,
+    options: { enqueuePrefetch?: boolean } = {},
   ): Promise<PrepareShipmentResult> {
     const order = await this.orderService.getOrderOrThrow(orderId);
     const { adapter, context } = await this.resolveStore(order.storeId);
@@ -170,7 +203,7 @@ export class OrderPlatformShipService {
       operator,
     });
 
-    return {
+    const prepared: PrepareShipmentResult = {
       orderId: order.id,
       orderNo: order.orderNo,
       platformCode: adapter.platformCode,
@@ -180,6 +213,33 @@ export class OrderPlatformShipService {
       assemblyPending: result.assemblyPending === true,
       platformWritePerformed: !result.alreadyPrepared && result.assemblyPending !== true,
     };
+    if (options.enqueuePrefetch !== false) {
+      await this.scheduleLabelPrefetch(order, prepared);
+    }
+    return prepared;
+  }
+
+  /**
+   * 组包成功后预取面单（用户指示 2026-10-21，A 方案）。
+   *
+   * 组包是面单的**唯一**可用前置：OZON 只在 posting 进入 awaiting_deliver
+   * 后提供面单，且文档建议组包后 45–60 秒再取。因此这里只入队一个延迟任务，
+   * 绝不等待平台——组包接口的响应时间不受影响；任务未就绪时按退避重试。
+   *
+   * 不满足「已有运单号 / 异步组包中」的订单不入队：连运单号都没有时平台
+   * 必然没有面单，入队只会制造无意义的平台调用（用户明确要求减少访问）。
+   */
+  private async scheduleLabelPrefetch(
+    order: OrderForLabel,
+    result: PrepareShipmentResult,
+  ): Promise<void> {
+    const needsLabel = result.assemblyPending || result.trackingNumber !== null;
+    if (!needsLabel) {
+      return;
+    }
+    // 已组包过（本次没有平台写）说明面单可能早就绪，立即预取。
+    const delayMs = result.alreadyPrepared ? 0 : this.labelPrefetch.delayMs();
+    await this.labelPrefetch.enqueueForOrder(order.id, { delayMs });
   }
 
   /**
@@ -192,9 +252,12 @@ export class OrderPlatformShipService {
     operator: OperatorContext,
   ): Promise<BatchPrepareShipmentResult> {
     const results: BatchPrepareShipmentItem[] = [];
+    // 批量路径不逐单预取：50 单组包会变成 50 次平台面单调用，批量取单（B）
+    // 才能把它们压成每 20 单一次。这里只收集，循环结束后按块入队。
+    const prefetchOrderIds: string[] = [];
     for (const orderId of new Set(orderIds)) {
       try {
-        const result = await this.prepareShipment(orderId, operator);
+        const result = await this.prepareShipment(orderId, operator, { enqueuePrefetch: false });
         results.push({
           orderId,
           orderNo: result.orderNo,
@@ -206,21 +269,31 @@ export class OrderPlatformShipService {
           alreadyPrepared: result.alreadyPrepared,
           assemblyPending: result.assemblyPending,
         });
+        if (result.assemblyPending || result.trackingNumber !== null) {
+          prefetchOrderIds.push(orderId);
+        }
       } catch (error: unknown) {
         results.push(this.batchFailureOf(orderId, error));
       }
     }
+    await this.labelPrefetch.enqueueBatch(prefetchOrderIds, {
+      delayMs: this.labelPrefetch.delayMs(),
+    });
     const failed = results.filter((item) => !item.ok).length;
     return { total: results.length, succeeded: results.length - failed, failed, results };
   }
 
   /**
-   * 批量打单（用户指示 2026-10-17）：逐单顺序取面单（**串行**，尊重平台面单
-   * 接口限流），单笔失败不影响其余。默认复用本地已存档面单，不重复打平台。
+   * 批量打单（用户指示 2026-10-17；2026-10-21 起改为「批量取单」）：
+   *
+   * - 默认复用本地已存档面单，只有缺面单的订单才访问平台；
+   * - 缺面单的订单按店铺分组、每 ≤20 单一次平台调用（OZON 上限），
+   *   返回形状不可用时逐单降级；
+   * - 终态订单（完成/取消）不再取单，逐单返回 ORDER_LABEL_NOT_PRINTABLE；
+   * - 单笔失败不影响其余（AGENTS §36）。
    *
    * 成功面单在服务端**合并成一个 PDF**（`mergedPdfBase64`）：平台面单自带纸张
-   * 尺寸（OZON 实测 57.9×40mm），只有交给浏览器原生 PDF 查看器打印才能保持
-   * 原尺寸；嵌进 HTML 打印页会被缩放成 A4（2026-10-17 用户实测报错）。
+   * 尺寸，只有交给浏览器原生 PDF 查看器打印才能保持原尺寸。
    * 每单的 `signedUrl` 仍随结果返回，供单张补打/排查。
    */
   async fetchShippingLabelBatch(
@@ -233,11 +306,8 @@ export class OrderPlatformShipService {
     },
     operator: OperatorContext,
   ): Promise<BatchShippingLabelResult> {
-    const results: BatchShippingLabelItem[] = [];
-    const labelIds: string[] = [];
-    // 打印顺序 = 列表当前排序（2026-10-19 用户要求）。服务端按同一排序口径
-    // 重排后逐单取面单，合并 PDF 的页序即与列表一致；查不到的 id 追加在末尾，
-    // 仍按原来的逐笔失败路径报错。
+    // 打印顺序 = 列表当前排序（2026-10-19 用户要求）。查不到的 id 追加在末尾，
+    // 仍走逐笔失败路径。
     const unique = [...new Set(orderIds)];
     const ordered = await this.orderService.findIdsInListOrder(
       unique,
@@ -245,44 +315,17 @@ export class OrderPlatformShipService {
       options.sortOrder,
     );
     const found = new Set(ordered);
-    for (const orderId of [...ordered, ...unique.filter((id) => !found.has(id))]) {
-      // 先读一次订单拿单号（失败结果也要有可读标识）；读不到由 catch 处理。
-      let orderNo: string | null = null;
-      try {
-        const order = await this.orderService.getOrderOrThrow(orderId);
-        orderNo = order.orderNo;
-        const label = await this.fetchShippingLabel(orderId, options, operator);
-        labelIds.push(label.id);
-        results.push({
-          orderId,
-          orderNo,
-          ok: true,
-          code: null,
-          message: null,
-          signedUrl: label.signedUrl,
-          fileName: label.fileName,
-        });
-      } catch (error: unknown) {
-        results.push({
-          orderId,
-          orderNo,
-          ok: false,
-          code: error instanceof DomainError ? error.code : 'ORDER_SHIPPING_LABEL_FAILED',
-          message: error instanceof Error ? error.message : String(error),
-          signedUrl: null,
-          fileName: null,
-        });
-      }
-    }
+    const input = [...ordered, ...unique.filter((id) => !found.has(id))];
+
+    const { items, labelIds } = await this.ensureLabelsArchived(input, operator, {
+      refresh: options.refresh,
+    });
 
     let mergedPdfBase64: string | null = null;
     let mergedPageCount = 0;
     if (labelIds.length > 0) {
       try {
-        const buffers: Buffer[] = [];
-        for (const labelId of labelIds) {
-          buffers.push(await this.labelService.bytesOfLabel(labelId));
-        }
+        const buffers = await this.downloadLabels(labelIds);
         const merged = await mergePdfs(buffers);
         mergedPdfBase64 = Buffer.from(merged.bytes).toString('base64');
         mergedPageCount = merged.pageCount;
@@ -295,29 +338,277 @@ export class OrderPlatformShipService {
       }
     }
 
-    const failed = results.filter((item) => !item.ok).length;
+    const failed = items.filter((item) => !item.ok).length;
     return {
-      total: results.length,
-      succeeded: results.length - failed,
+      total: items.length,
+      succeeded: items.length - failed,
       failed,
+      notPrintable: items.filter((item) => item.code === ORDER_LABEL_NOT_PRINTABLE).length,
       mergedPdfBase64,
       mergedPageCount,
-      results,
+      results: items,
     };
   }
 
-  private batchFailureOf(orderId: string, error: unknown): BatchPrepareShipmentItem {
+  /**
+   * 确保这些订单的平台面单已归档（预取任务与批量打印共用的单点，
+   * 用户指示 2026-10-21）。返回逐单结果与「可合并的面单 id」（顺序同输入）。
+   *
+   * 终态禁打、存档复用、批量取单 + 逐单降级都在这里，调用方不需要各自
+   * 再判一遍——预取任务、批量打印、单张打印行为因此完全一致。
+   */
+  async ensureLabelsArchived(
+    orderIds: readonly string[],
+    operator: OperatorContext,
+    options: { refresh: boolean } = { refresh: false },
+  ): Promise<{ items: BatchShippingLabelItem[]; labelIds: string[] }> {
+    const unique = [...new Set(orderIds)];
+    const outcomes = new Map<string, BatchShippingLabelItem>();
+    const labelIds = new Map<string, string>();
+    const needs: LabelFetchNeed[] = [];
+
+    for (const orderId of unique) {
+      let order: OrderForLabel;
+      try {
+        order = await this.orderService.getOrderOrThrow(orderId);
+      } catch (error: unknown) {
+        outcomes.set(orderId, this.labelFailure(orderId, null, error));
+        continue;
+      }
+
+      if (isOrderLabelPrintBlocked(order)) {
+        outcomes.set(orderId, {
+          orderId,
+          orderNo: order.orderNo,
+          ok: false,
+          code: ORDER_LABEL_NOT_PRINTABLE,
+          message: '订单已完成或已取消，不再支持打印面单',
+          signedUrl: null,
+          fileName: null,
+          fromArchive: false,
+        });
+        continue;
+      }
+
+      if (!options.refresh) {
+        const stored = await this.labelService.findLatestOrderLabel(order.id, 'PLATFORM_API');
+        if (stored !== null) {
+          outcomes.set(orderId, {
+            orderId,
+            orderNo: order.orderNo,
+            ok: true,
+            code: null,
+            message: null,
+            signedUrl: stored.signedUrl,
+            fileName: stored.fileName,
+            fromArchive: true,
+          });
+          labelIds.set(orderId, stored.id);
+          continue;
+        }
+      }
+      needs.push({ orderId, order });
+    }
+
+    for (const group of groupByStore(needs)) {
+      let store: { adapter: PlatformAdapter; context: StoreContext };
+      try {
+        store = await this.resolveStore(group.storeId);
+      } catch (error: unknown) {
+        for (const need of group.needs) {
+          outcomes.set(need.orderId, this.labelFailure(need.orderId, need.order.orderNo, error));
+        }
+        continue;
+      }
+      const chunkSize = Math.max(1, this.config.get<number>('app.label.batchFetchChunk') ?? 20);
+      for (let index = 0; index < group.needs.length; index += chunkSize) {
+        await this.fetchLabelChunk(
+          group.needs.slice(index, index + chunkSize),
+          store,
+          options,
+          outcomes,
+          labelIds,
+          operator,
+        );
+      }
+    }
+
+    const items = unique.map(
+      (orderId) =>
+        outcomes.get(orderId) ?? this.labelFailure(orderId, null, new Error('面单结果缺失')),
+    );
+    const orderedLabelIds = unique
+      .map((orderId) => labelIds.get(orderId))
+      .filter((id): id is string => id !== undefined);
+    return { items, labelIds: orderedLabelIds };
+  }
+
+  /** 一批评级：优先批量能力，失败/形状不符时逐单降级。 */
+  private async fetchLabelChunk(
+    needs: readonly LabelFetchNeed[],
+    store: { adapter: PlatformAdapter; context: StoreContext },
+    options: { refresh: boolean },
+    outcomes: Map<string, BatchShippingLabelItem>,
+    labelIds: Map<string, string>,
+    operator: OperatorContext,
+  ): Promise<void> {
+    // Bind to the adapter: a detached prototype method runs with
+    // `this === undefined` (2026-10-09 production 500 regression class).
+    const batchFetch =
+      typeof store.adapter.fetchShippingLabels === 'function'
+        ? store.adapter.fetchShippingLabels.bind(store.adapter)
+        : null;
+    if (batchFetch === null) {
+      await this.fetchLabelsOneByOne(needs, options, outcomes, labelIds, operator);
+      return;
+    }
+
+    let files: readonly PlatformOrderLabelFile[];
+    try {
+      files = await batchFetch(
+        store.context,
+        needs.map((need) => need.order.platformOrderId),
+      );
+    } catch (error: unknown) {
+      if (isLabelBatchFallbackWorthy(error)) {
+        this.logger.warn(
+          `batched label fetch unusable (${needs.length} orders), falling back to per-order: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          'OrderPlatformShipService',
+        );
+        await this.fetchLabelsOneByOne(needs, options, outcomes, labelIds, operator);
+        return;
+      }
+      for (const need of needs) {
+        outcomes.set(need.orderId, this.labelFailure(need.orderId, need.order.orderNo, error));
+      }
+      return;
+    }
+
+    const byPlatformId = new Map(files.map((entry) => [entry.platformOrderId, entry.file]));
+    for (const need of needs) {
+      const file = byPlatformId.get(need.order.platformOrderId);
+      if (file === undefined) {
+        // 批量接口只返回已就绪的单；缺的视为「未就绪」，与单张路径同码。
+        outcomes.set(need.orderId, {
+          orderId: need.orderId,
+          orderNo: need.order.orderNo,
+          ok: false,
+          code: 'PLATFORM_LABEL_NOT_READY',
+          message: '平台尚未生成该订单的面单，稍后再试',
+          signedUrl: null,
+          fileName: null,
+          fromArchive: false,
+        });
+        continue;
+      }
+      outcomes.set(need.orderId, await this.archiveLabel(need, file, operator, labelIds));
+    }
+  }
+
+  private async fetchLabelsOneByOne(
+    needs: readonly LabelFetchNeed[],
+    options: { refresh: boolean },
+    outcomes: Map<string, BatchShippingLabelItem>,
+    labelIds: Map<string, string>,
+    operator: OperatorContext,
+  ): Promise<void> {
+    for (const need of needs) {
+      try {
+        const label = await this.fetchShippingLabel(need.orderId, options, operator);
+        outcomes.set(need.orderId, {
+          orderId: need.orderId,
+          orderNo: need.order.orderNo,
+          ok: true,
+          code: null,
+          message: null,
+          signedUrl: label.signedUrl,
+          fileName: label.fileName,
+          fromArchive: false,
+        });
+        labelIds.set(need.orderId, label.id);
+      } catch (error: unknown) {
+        outcomes.set(need.orderId, this.labelFailure(need.orderId, need.order.orderNo, error));
+      }
+    }
+  }
+
+  private async archiveLabel(
+    need: LabelFetchNeed,
+    file: { fileName: string; mimeType: string; bytes: Uint8Array },
+    operator: OperatorContext,
+    labelIds: Map<string, string>,
+  ): Promise<BatchShippingLabelItem> {
+    try {
+      const label = await this.labelService.createPlatformLabelForOrder(
+        {
+          orderId: need.orderId,
+          fileName: file.fileName,
+          mimeType: file.mimeType,
+          buffer: Buffer.from(file.bytes),
+          externalLabelId: need.order.platformOrderId,
+        },
+        operator,
+      );
+      labelIds.set(need.orderId, label.id);
+      this.logger.log(
+        `platform label archived order=${need.order.orderNo} via=batch bytes=${file.bytes.byteLength}`,
+        'OrderPlatformShipService',
+      );
+      return {
+        orderId: need.orderId,
+        orderNo: need.order.orderNo,
+        ok: true,
+        code: null,
+        message: null,
+        signedUrl: label.signedUrl,
+        fileName: label.fileName,
+        fromArchive: false,
+      };
+    } catch (error: unknown) {
+      return this.labelFailure(need.orderId, need.order.orderNo, error);
+    }
+  }
+
+  private labelFailure(
+    orderId: string,
+    orderNo: string | null,
+    error: unknown,
+  ): BatchShippingLabelItem {
     return {
       orderId,
-      orderNo: null,
+      orderNo,
       ok: false,
-      code: error instanceof DomainError ? error.code : 'ORDER_PLATFORM_SHIP_FAILED',
+      code: error instanceof DomainError ? error.code : 'ORDER_SHIPPING_LABEL_FAILED',
       message: error instanceof Error ? error.message : String(error),
-      trackingNumber: null,
-      platformStatus: null,
-      alreadyPrepared: false,
-      assemblyPending: false,
+      signedUrl: null,
+      fileName: null,
+      fromArchive: false,
     };
+  }
+
+  /** 有界并发读取面单字节（合并前），避免 50 张串行下载。 */
+  private async downloadLabels(labelIds: readonly string[]): Promise<Buffer[]> {
+    const buffers: Array<Buffer | undefined> = new Array<Buffer | undefined>(labelIds.length);
+    let next = 0;
+    const workerCount = Math.min(5, labelIds.length);
+    const workers = Array.from({ length: workerCount }, async () => {
+      for (;;) {
+        const index = next;
+        next += 1;
+        if (index >= labelIds.length) {
+          return;
+        }
+        const labelId = labelIds[index];
+        if (labelId === undefined) {
+          return;
+        }
+        buffers[index] = await this.labelService.bytesOfLabel(labelId);
+      }
+    });
+    await Promise.all(workers);
+    return buffers.filter((buffer): buffer is Buffer => buffer !== undefined);
   }
 
   /**
@@ -325,6 +616,9 @@ export class OrderPlatformShipService {
    * bucket and returns a signed URL for the browser to print. Reuses the
    * stored copy unless `refresh` is set, so repeated clicks do not re-hit the
    * platform (its label API is rate-limited and all-or-nothing per request).
+   *
+   * 终态订单（完成/取消）一律拒绝——即使本地还留着未清理的存档（用户指示
+   * 2026-10-21）。这是禁打的唯一服务端入口。
    */
   async fetchShippingLabel(
     orderId: string,
@@ -332,6 +626,14 @@ export class OrderPlatformShipService {
     operator: OperatorContext,
   ): Promise<ShippingLabelDto> {
     const order = await this.orderService.getOrderOrThrow(orderId);
+    if (isOrderLabelPrintBlocked(order)) {
+      throw new OrderLabelNotPrintableError({
+        orderId: order.id,
+        orderNo: order.orderNo,
+        erpStatus: order.erpStatus,
+        platformStage: order.platformStage,
+      });
+    }
 
     if (!options.refresh) {
       const stored = await this.labelService.findLatestOrderLabel(order.id, 'PLATFORM_API');
@@ -339,7 +641,13 @@ export class OrderPlatformShipService {
         return stored;
       }
     }
+    return this.fetchAndArchiveLabel(order, operator);
+  }
 
+  private async fetchAndArchiveLabel(
+    order: OrderForLabel,
+    operator: OperatorContext,
+  ): Promise<ShippingLabelDto> {
     const { adapter, context } = await this.resolveStore(order.storeId);
     const fetchLabel = requireCapability(adapter, 'fetchShippingLabel', '平台面单下载');
     const file = await fetchLabel(context, { platformOrderId: order.platformOrderId });
@@ -365,6 +673,20 @@ export class OrderPlatformShipService {
       'OrderPlatformShipService',
     );
     return label;
+  }
+
+  private batchFailureOf(orderId: string, error: unknown): BatchPrepareShipmentItem {
+    return {
+      orderId,
+      orderNo: null,
+      ok: false,
+      code: error instanceof DomainError ? error.code : 'ORDER_PLATFORM_SHIP_FAILED',
+      message: error instanceof Error ? error.message : String(error),
+      trackingNumber: null,
+      platformStatus: null,
+      alreadyPrepared: false,
+      assemblyPending: false,
+    };
   }
 
   /** Order-scoped labels already archived (no platform call). */
@@ -488,4 +810,63 @@ export class PlatformLabelNotReadyError extends DomainError {
       ...details,
     });
   }
+}
+
+/** Stable code of the terminal-order print refusal (完成/取消后禁打). */
+const ORDER_LABEL_NOT_PRINTABLE = 'ORDER_LABEL_NOT_PRINTABLE';
+
+/**
+ * 订单已完成或已取消，不再支持打印面单（用户指示 2026-10-21）。
+ * 面单字节可能在后台清理之前仍存在，但终态禁打与清理无关——它由订单状态
+ * 直接决定，立即可靠。
+ */
+export class OrderLabelNotPrintableError extends DomainError {
+  readonly code = ORDER_LABEL_NOT_PRINTABLE;
+  readonly httpStatus = 409;
+
+  constructor(details: {
+    orderId: string;
+    orderNo: string;
+    erpStatus: string;
+    platformStage: string | null;
+  }) {
+    super('订单已完成或已取消，不再支持打印面单', { ...details });
+  }
+}
+
+/** 按店铺分组（适配器/凭证是店铺级的）。 */
+function groupByStore(
+  needs: readonly LabelFetchNeed[],
+): Array<{ storeId: string; needs: LabelFetchNeed[] }> {
+  const groups = new Map<string, LabelFetchNeed[]>();
+  for (const need of needs) {
+    const existing = groups.get(need.order.storeId);
+    if (existing === undefined) {
+      groups.set(need.order.storeId, [need]);
+    } else {
+      existing.push(need);
+    }
+  }
+  return [...groups.entries()].map(([storeId, groupNeeds]) => ({
+    storeId,
+    needs: groupNeeds,
+  }));
+}
+
+/**
+ * 批量取单是否应降级为逐单：
+ * - 返回形状无法与订单一一对应（`PlatformBatchShapeError`）；
+ * - 平台以 4xx 拒绝（OZON 批量接口「一个单不可取则整批不成」，逐单才能
+ *   把坏单隔离出来）。
+ * 5xx / 鉴权 / 网络错误不降级：逐单重试只会把同一个失败放大 20 倍。
+ */
+function isLabelBatchFallbackWorthy(error: unknown): boolean {
+  if (error instanceof PlatformBatchShapeError) {
+    return true;
+  }
+  if (error instanceof PlatformApiError) {
+    const status = error.platformError.httpStatus;
+    return typeof status === 'number' && status >= 400 && status < 500;
+  }
+  return false;
 }

@@ -418,6 +418,39 @@ export class OrderRepository {
     return entities.map((order) => ({ id: order.id, platformOrderId: order.platformOrderId }));
   }
 
+  /**
+   * 已释放行仍挂着 OPEN 行级异常的订单（2026-10-20 修复的自愈候选）：
+   * RELEASED / EXTERNAL_FULFILLED 的行不再需要内部履约，映射/缺货异常
+   * 已无待办可执行，必须关闭；若订单 ERP 状态仍是被旧规则翻回的
+   * EXCEPTION，调用方随后重算 rollup 恢复真实持有态（多为 SHIPPED）。
+   * 最旧优先、有界；异常关闭后该订单自然离开候选集。
+   */
+  async findOrdersWithReleasedLineExceptions(
+    storeId: string,
+    limit: number,
+  ): Promise<Array<{ id: string; erpStatus: string }>> {
+    const rows = await this.dataSource.query<Array<{ id: string; erp_status: string }>>(
+      `SELECT o.id, o.erp_status
+         FROM orders o
+        WHERE o.store_id = $1::uuid
+          AND EXISTS (
+                SELECT 1
+                  FROM order_items i
+                  JOIN system_exceptions e
+                    ON e.reference_type = 'ORDER_ITEM'
+                   AND e.reference_id = i.id
+                   AND e.status = 'OPEN'
+                   AND e.exception_type IN ('ORDER_SKU_MAPPING_FAILED', 'ORDER_OUT_OF_STOCK')
+                 WHERE i.order_id = o.id
+                   AND i.fulfillment_status IN ('RELEASED', 'EXTERNAL_FULFILLED')
+              )
+        ORDER BY o.updated_at ASC
+        LIMIT $2`,
+      [storeId, limit],
+    );
+    return rows.map((row) => ({ id: String(row.id), erpStatus: String(row.erp_status) }));
+  }
+
   /** Paged list with aggregated row counts + open exceptions (no N+1, task §61/§90). */
   async listWithAggregates(
     filters: OrderListFilters,

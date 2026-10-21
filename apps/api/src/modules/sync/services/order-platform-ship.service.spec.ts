@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { ConfigService } from '@nestjs/config';
 import { PDFDocument } from 'pdf-lib';
 import { StoreContext } from '@wcies/platform-contracts';
 import { OperatorContext, OperationLogService } from '../../operation-log/operation-log.service';
@@ -9,10 +10,13 @@ import { ShippingLabelDto } from '../../shipment/dto/shipment.dto';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { SyncContextService } from './sync-context.service';
 import {
+  OrderLabelNotPrintableError,
   OrderPlatformShipService,
   PlatformLabelNotReadyError,
 } from './order-platform-ship.service';
 import { PlatformCapabilityUnsupportedError } from '../../integration/integration.errors';
+import { PlatformBatchShapeError } from '../../integration/platform-error';
+import { LabelPrefetchService } from './label-prefetch.service';
 
 /**
  * OrderPlatformShipService unit tests.
@@ -39,6 +43,8 @@ const ORDER = {
   platformOrderId: '56089221-0064-1',
   platformStatus: 'awaiting_packaging',
   platformTrackingNo: null as string | null,
+  erpStatus: 'READY_TO_PICK',
+  platformStage: 'AWAITING_SHIPMENT' as string | null,
 };
 
 /** Real prototype methods (not arrow properties) so `this` binding matters. */
@@ -84,7 +90,7 @@ function makeService(adapter: object, order = ORDER) {
     buildStoreContext: vi.fn(async () => CONTEXT),
   };
   const orderService = {
-    getOrderOrThrow: vi.fn(async () => order),
+    getOrderOrThrow: vi.fn(async (_id: string) => order),
     applySyncedPlatformFacts: vi.fn(async () => ({ ...order, platformTrackingNo: 'OZ75001234' })),
     // 批量打单按列表排序重排 id（2026-10-19）；默认原样返回。
     findIdsInListOrder: vi.fn(async (ids: readonly string[]) => [...ids]),
@@ -107,6 +113,15 @@ function makeService(adapter: object, order = ORDER) {
   };
   const operationLog = { record: vi.fn(async () => undefined) };
   const logger = { log: vi.fn(), warn: vi.fn() };
+  const config = {
+    get: vi.fn((key: string) => (key === 'app.label.batchFetchChunk' ? 20 : undefined)),
+  };
+  const labelPrefetch = {
+    delayMs: vi.fn(() => 60_000),
+    enqueueForOrder: vi.fn(async () => undefined),
+    enqueueBatch: vi.fn(async () => undefined),
+    enqueueFromSync: vi.fn(async () => undefined),
+  };
   const service = new OrderPlatformShipService(
     syncContext as unknown as SyncContextService,
     orderService as unknown as OrderService,
@@ -114,8 +129,18 @@ function makeService(adapter: object, order = ORDER) {
     labelService as unknown as ShippingLabelService,
     operationLog as unknown as OperationLogService,
     logger as unknown as AppLoggerService,
+    config as unknown as ConfigService,
+    labelPrefetch as unknown as LabelPrefetchService,
   );
-  return { service, orderService, exceptionService, labelService, operationLog, syncContext };
+  return {
+    service,
+    orderService,
+    exceptionService,
+    labelService,
+    operationLog,
+    syncContext,
+    labelPrefetch,
+  };
 }
 
 describe('OrderPlatformShipService.prepareShipment', () => {
@@ -355,5 +380,216 @@ describe('OrderPlatformShipService.fetchShippingLabelBatch (2026-10-17 批量打
     const { width, height } = merged.getPage(0).getSize();
     expect(((width / 72) * 25.4).toFixed(1)).toBe('57.9');
     expect(((height / 72) * 25.4).toFixed(1)).toBe('40.0');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-10-21：终态禁打 / 批量取单 / 组包后预取
+// ---------------------------------------------------------------------------
+
+/** Adapter exposing the batched label capability (one call for the chunk). */
+class BatchLabelAdapter {
+  readonly platformCode = 'OZON' as const;
+  readonly batchCalls: string[][] = [];
+
+  async fetchShippingLabel(): Promise<{
+    fileName: string;
+    mimeType: string;
+    bytes: Uint8Array;
+  }> {
+    return { fileName: 'single.pdf', mimeType: 'application/pdf', bytes: new Uint8Array([1]) };
+  }
+
+  async fetchShippingLabels(
+    _context: unknown,
+    platformOrderIds: readonly string[],
+  ): Promise<
+    Array<{
+      platformOrderId: string;
+      file: { fileName: string; mimeType: string; bytes: Uint8Array };
+    }>
+  > {
+    this.batchCalls.push([...platformOrderIds]);
+    return platformOrderIds.map((platformOrderId) => ({
+      platformOrderId,
+      file: {
+        fileName: `${platformOrderId}.pdf`,
+        mimeType: 'application/pdf',
+        bytes: new Uint8Array([1, 2]),
+      },
+    }));
+  }
+}
+
+function orderById(id: string, overrides: Record<string, unknown> = {}) {
+  return { ...ORDER, id, platformOrderId: `posting-${id}`, ...overrides };
+}
+
+describe('OrderPlatformShipService 终态禁打 (2026-10-21)', () => {
+  it.each([
+    ['CANCELLED', 'AWAITING_SHIPMENT'],
+    ['SHIPPED', 'DELIVERED'],
+  ])('erp=%s + stage=%s 拒绝打单，且不读存档/不调平台', async (erpStatus, platformStage) => {
+    const { service, labelService, syncContext } = makeService(new PreparableAdapter(), {
+      ...ORDER,
+      erpStatus,
+      platformStage,
+    });
+
+    await expect(
+      service.fetchShippingLabel('order-1', { refresh: false }, OPERATOR),
+    ).rejects.toBeInstanceOf(OrderLabelNotPrintableError);
+
+    expect(labelService.findLatestOrderLabel).not.toHaveBeenCalled();
+    expect(syncContext.resolveSyncableStore).not.toHaveBeenCalled();
+  });
+
+  it('平台已妥投但 ERP 未 SHIPPED 的背离单仍然可以打单', async () => {
+    const { service, labelService } = makeService(new PreparableAdapter(), {
+      ...ORDER,
+      erpStatus: 'READY_TO_PICK',
+      platformStage: 'DELIVERED',
+    });
+
+    await service.fetchShippingLabel('order-1', { refresh: false }, OPERATOR);
+
+    expect(labelService.createPlatformLabelForOrder).toHaveBeenCalled();
+  });
+});
+
+describe('OrderPlatformShipService 批量取单 (2026-10-21)', () => {
+  it('同一批订单只调用一次平台的批量面单能力', async () => {
+    const adapter = new BatchLabelAdapter();
+    const { service, orderService, labelService } = makeService(adapter);
+    orderService.getOrderOrThrow.mockImplementation(async (id: string) => orderById(id));
+
+    const result = await service.fetchShippingLabelBatch(
+      ['o1', 'o2'],
+      { refresh: false },
+      OPERATOR,
+    );
+
+    expect(adapter.batchCalls).toEqual([['posting-o1', 'posting-o2']]);
+    expect(labelService.createPlatformLabelForOrder).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({ total: 2, succeeded: 2, failed: 0, notPrintable: 0 });
+    expect(result.results.every((item) => item.ok && item.fromArchive === false)).toBe(true);
+  });
+
+  it('批量返回形状不可用 → 逐单降级，仍成功', async () => {
+    class ShapeFailAdapter extends BatchLabelAdapter {
+      override async fetchShippingLabels(): Promise<never> {
+        throw new PlatformBatchShapeError('page count mismatch');
+      }
+    }
+    const { service, orderService } = makeService(new ShapeFailAdapter());
+    orderService.getOrderOrThrow.mockImplementation(async (id: string) => orderById(id));
+    const single = vi.spyOn(service, 'fetchShippingLabel').mockResolvedValue({
+      id: 'label-1',
+      signedUrl: 'https://s3/l.pdf',
+      fileName: 'l.pdf',
+    } as ShippingLabelDto);
+
+    const result = await service.fetchShippingLabelBatch(
+      ['o1', 'o2'],
+      { refresh: false },
+      OPERATOR,
+    );
+
+    expect(single).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({ succeeded: 2, failed: 0 });
+  });
+
+  it('终态订单被跳过并计入 notPrintable，其余照常取单', async () => {
+    const { service, orderService, labelService } = makeService(new BatchLabelAdapter());
+    orderService.getOrderOrThrow.mockImplementation(async (id: string) =>
+      id === 'o1'
+        ? orderById(id, { erpStatus: 'CANCELLED', platformStage: 'AWAITING_SHIPMENT' })
+        : orderById(id),
+    );
+    const single = vi.spyOn(service, 'fetchShippingLabel').mockResolvedValue({
+      id: 'label-1',
+      signedUrl: 'https://s3/l.pdf',
+      fileName: 'l.pdf',
+    } as ShippingLabelDto);
+
+    const result = await service.fetchShippingLabelBatch(
+      ['o1', 'o2'],
+      { refresh: false },
+      OPERATOR,
+    );
+
+    expect(result.results[0]).toMatchObject({
+      orderId: 'o1',
+      ok: false,
+      code: 'ORDER_LABEL_NOT_PRINTABLE',
+    });
+    expect(result.notPrintable).toBe(1);
+    expect(result.succeeded).toBe(1);
+    // 终态单不落存档、不调平台；o2 由批量能力取到。
+    expect(labelService.createPlatformLabelForOrder).toHaveBeenCalledTimes(1);
+    expect(single).not.toHaveBeenCalled();
+  });
+
+  it('存档复用：不再访问平台且标记 fromArchive', async () => {
+    const adapter = new BatchLabelAdapter();
+    const { service, orderService, labelService } = makeService(adapter);
+    orderService.getOrderOrThrow.mockImplementation(async (id: string) => orderById(id));
+    labelService.findLatestOrderLabel.mockResolvedValue({
+      id: 'archived-1',
+      signedUrl: 'https://s3/archived.pdf',
+      fileName: 'archived.pdf',
+    } as ShippingLabelDto);
+
+    const result = await service.fetchShippingLabelBatch(
+      ['o1', 'o2'],
+      { refresh: false },
+      OPERATOR,
+    );
+
+    expect(adapter.batchCalls).toEqual([]);
+    expect(result.results.every((item) => item.ok && item.fromArchive)).toBe(true);
+  });
+});
+
+describe('OrderPlatformShipService 组包后预取 (2026-10-21)', () => {
+  it('单笔组包成功 → 入队延迟预取', async () => {
+    const { service, labelPrefetch } = makeService(new PreparableAdapter());
+
+    await service.prepareShipment('order-1', OPERATOR);
+
+    expect(labelPrefetch.enqueueForOrder).toHaveBeenCalledWith('order-1', {
+      delayMs: 60_000,
+    });
+  });
+
+  it('没有运单号且非异步组包 → 不预取（避免无意义的平台调用）', async () => {
+    class NotAssembledAdapter {
+      readonly platformCode = 'OZON' as const;
+      async prepareShipment() {
+        return {
+          platformOrderId: ORDER.platformOrderId,
+          trackingNumber: null,
+          platformStatus: 'awaiting_packaging',
+          alreadyPrepared: false,
+          assemblyPending: false,
+        };
+      }
+    }
+    const { service, labelPrefetch } = makeService(new NotAssembledAdapter());
+
+    await service.prepareShipment('order-1', OPERATOR);
+
+    expect(labelPrefetch.enqueueForOrder).not.toHaveBeenCalled();
+  });
+
+  it('批量组包只入队一个批次 job，不逐单入队', async () => {
+    const { service, labelPrefetch } = makeService(new PreparableAdapter());
+
+    await service.prepareShipmentBatch(['o1', 'o2'], OPERATOR);
+
+    expect(labelPrefetch.enqueueForOrder).not.toHaveBeenCalled();
+    expect(labelPrefetch.enqueueBatch).toHaveBeenCalledWith(['o1', 'o2'], {
+      delayMs: 60_000,
+    });
   });
 });

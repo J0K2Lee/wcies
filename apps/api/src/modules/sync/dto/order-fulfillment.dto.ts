@@ -167,12 +167,21 @@ export class BatchShippingLabelItemDto {
   signedUrl!: string | null;
   @ApiProperty({ nullable: true, type: String, description: '面单文件名（成功时）' })
   fileName!: string | null;
+  @ApiProperty({
+    description: 'true = 直接复用本地存档，本次未调用平台（2026-10-21 预取后通常为 true）',
+  })
+  fromArchive!: boolean;
 }
 
 export class BatchShippingLabelResultDto {
   @ApiProperty() total!: number;
   @ApiProperty() succeeded!: number;
   @ApiProperty() failed!: number;
+  @ApiProperty({
+    description:
+      '因订单已终态（完成/取消）被拒绝的单数；这些单不再取面单，也不进合并 PDF（2026-10-21）',
+  })
+  notPrintable!: number;
   @ApiProperty({
     nullable: true,
     type: String,

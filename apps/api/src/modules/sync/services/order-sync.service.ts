@@ -15,6 +15,7 @@ import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import { ListingService } from '../../listing/services/listing.service';
 import { extractYandexOfferImageUrl } from '../../integration/yandex/yandex.mapper';
+import { LabelPrefetchService } from './label-prefetch.service';
 
 const SYSTEM_OPERATOR: OperatorContext = { userId: null, username: 'sync-engine' };
 
@@ -24,6 +25,12 @@ const SYSTEM_OPERATOR: OperatorContext = { userId: null, username: 'sync-engine'
  * first (they carry the most deadline pressure).
  */
 const PLATFORM_REFRESH_BATCH = 100;
+
+/**
+ * Pass-3 兜底收敛每轮重试的未映射订单行上限（2026-10-20）。每行一次
+ * store-scoped resolver 查询；最旧优先，积压会在后续轮次继续轮到。
+ */
+const STALE_MAPPING_SWEEP_BATCH = 40;
 
 export interface OrderSyncOutcome {
   status: 'SUCCESS' | 'PARTIAL' | 'FAILED';
@@ -69,6 +76,7 @@ export class OrderSyncService {
     private readonly cursorRepo: SyncCursorRepository,
     private readonly failureAlert: SyncFailureAlertService,
     private readonly logger: AppLoggerService,
+    private readonly labelPrefetch: LabelPrefetchService,
   ) {}
 
   async execute(syncJob: SyncJobEntity): Promise<void> {
@@ -237,6 +245,11 @@ export class OrderSyncService {
       successCount += refreshed.updated;
       skippedCount += refreshed.unchanged;
       failedCount += refreshed.failed;
+      // Pass 3（2026-10-20 兜底收敛）：映射可能在订单行失败之后才建立
+      // （历史遗留、Excel 导入、重新启用链接）。变体级收敛只在映射写入时
+      // 触发，这里每轮对仍未映射的行做有界重试，把已可解析的行自愈。
+      // 纯附加：任何失败只记日志，不改变同步结果与游标。
+      await this.convergeStaleMappings(store.id);
       // Domain-level ingest failures (malformed line etc.) mark PARTIAL: the
       // platform FACT was delivered, remaining orders processed; cursor
       // advances so one bad order can never wedge the store (task §22).
@@ -304,6 +317,10 @@ export class OrderSyncService {
           this.toFactsInput(storeId, order, syncSource, options),
           SYSTEM_OPERATOR,
         );
+        // 运单号首次出现 = 平台刚完成组包，面单此时才有（2026-10-21）。
+        if (facts.trackingNumberAssigned) {
+          await this.labelPrefetch.enqueueFromSync(result.orderId);
+        }
         return facts.changed ? 'UPDATED' : 'DUPLICATE';
       }
       if (order.platformCancelled === true) {
@@ -331,6 +348,23 @@ export class OrderSyncService {
         return 'FAILED';
       }
       throw error;
+    }
+  }
+
+  /** Pass 3 兜底收敛：失败只记日志，绝不影响同步结果。 */
+  private async convergeStaleMappings(storeId: string): Promise<void> {
+    try {
+      await this.ingestionService.convergeStaleMappingFailures(
+        storeId,
+        SYSTEM_OPERATOR,
+        STALE_MAPPING_SWEEP_BATCH,
+      );
+    } catch (error: unknown) {
+      this.logger.warn('stale mapping-repair sweep failed', {
+        module: 'sync',
+        storeId,
+        code: errorCodeOf(error),
+      });
     }
   }
 
@@ -372,6 +406,9 @@ export class OrderSyncService {
             this.toFactsInput(storeId, raw, 'POLLING'),
             SYSTEM_OPERATOR,
           );
+          if (facts.trackingNumberAssigned) {
+            await this.labelPrefetch.enqueueFromSync(candidate.id);
+          }
           if (facts.changed) {
             updated += 1;
           } else {

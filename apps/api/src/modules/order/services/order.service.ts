@@ -657,7 +657,7 @@ export class OrderService {
     // a platform-cancelled BACKORDERED order must not keep nagging for stock
     // that will never be purchased for it (Sprint 9 T1, orders.md §8).
     await this.resolveDeadlineException(order.id);
-    await this.resolveStockExceptions(items);
+    await this.resolveClosedLineExceptions(items);
     await this.operationLog.record({
       entityType: 'ORDER',
       entityId: order.id,
@@ -723,7 +723,7 @@ export class OrderService {
     if (order === null) {
       // Concurrent window pass just created it, or it was deleted - nothing
       // to update; the next encounter handles it.
-      return { applied: false, changed: false, cancelled: false };
+      return { applied: false, changed: false, cancelled: false, trackingNumberAssigned: false };
     }
 
     const oldStatus = order.platformStatus ?? null;
@@ -870,6 +870,8 @@ export class OrderService {
       changed:
         statusChanged || deadlineChanged || rawChanged || stageChanged || fulfillmentModeChanged,
       cancelled,
+      // 平台首次给出运单号：调用方据此补一次面单预取（2026-10-21，A 方案）。
+      trackingNumberAssigned: trackingNoChanged && newTrackingNo !== null,
     };
   }
 
@@ -1010,7 +1012,7 @@ export class OrderService {
       `标记外部履约：${trimmedReason}`,
     );
     await this.resolveDeadlineException(orderId);
-    await this.resolveStockExceptions(items);
+    await this.resolveClosedLineExceptions(items);
     await this.operationLog.record({
       entityType: 'ORDER',
       entityId: order.id,
@@ -1240,18 +1242,23 @@ export class OrderService {
   }
 
   /**
-   * Closes the OPEN ORDER_OUT_OF_STOCK exceptions of the given lines: an
-   * order that will never ship (cancelled / externally fulfilled) must stop
-   * asking for stock (Sprint 9 T1/T6). No-op when none are open.
+   * Closes the OPEN line-level exceptions that stop mattering once an order
+   * will never be fulfilled internally (cancelled / externally fulfilled):
+   * ORDER_OUT_OF_STOCK (no one will buy stock for it, Sprint 9 T1/T6) and
+   * ORDER_SKU_MAPPING_FAILED (the line is closed, so an unmapped variant is
+   * no longer actionable — leaving it open re-raised EXCEPTION on orders that
+   * were already shipped externally, 2026-10-20). No-op when none are open.
    */
-  private async resolveStockExceptions(items: OrderItemEntity[]): Promise<void> {
+  private async resolveClosedLineExceptions(items: OrderItemEntity[]): Promise<void> {
     await this.dataSource.transaction(async (runner) => {
       for (const item of items) {
-        await this.exceptionService.resolveByReferenceInTx(runner, {
-          exceptionType: 'ORDER_OUT_OF_STOCK',
-          referenceType: 'ORDER_ITEM',
-          referenceId: item.id,
-        });
+        for (const exceptionType of ['ORDER_OUT_OF_STOCK', 'ORDER_SKU_MAPPING_FAILED'] as const) {
+          await this.exceptionService.resolveByReferenceInTx(runner, {
+            exceptionType,
+            referenceType: 'ORDER_ITEM',
+            referenceId: item.id,
+          });
+        }
       }
     });
   }
@@ -1373,6 +1380,12 @@ export interface OrderPlatformFactsResult {
   changed: boolean;
   /** True when this call propagated a platform cancellation. */
   cancelled: boolean;
+  /**
+   * True when the platform waybill number was first observed in this call.
+   * Used by the sync layer to schedule the label prefetch (2026-10-21) -
+   * platform labels only exist after 组包 assigns a waybill.
+   */
+  trackingNumberAssigned: boolean;
 }
 
 function sameInstant(a: Date | string | null, b: Date | string | null): boolean {

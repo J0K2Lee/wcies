@@ -17,6 +17,8 @@ import { OperationLogService } from '../../operation-log/operation-log.service';
 import {
   PurchaseOrderNotFoundError,
   PurchaseReceiptDuplicateDraftError,
+  PurchaseReceiptInvalidStateError,
+  PurchaseReceiptNotFoundError,
   PurchaseReceiptWarehouseMissingError,
 } from '../errors/purchase-errors';
 
@@ -445,5 +447,60 @@ describe('confirm over-receipt guard (决策 0021)', () => {
       eventType: 'RECEIVE',
     });
     expect(emittedAfterCommit).toBe(true);
+  });
+});
+
+describe('confirmBatch 批量收货 (用户需求 2026-10-20)', () => {
+  it('逐笔确认：id 去重、失败隔离并保留单号、幂等重放单独标记', async () => {
+    const { service, repository } = setup(buildPo({}));
+    repository.findById.mockImplementation(async (id: string) => ({
+      id,
+      receiptNo: `PR-${id}`,
+      status: id === 'replayed' ? 'RECEIVED' : 'DRAFT',
+    }));
+    const confirm = vi.spyOn(service, 'confirm').mockImplementation(async (id: string) => {
+      if (id === 'bad') {
+        throw new PurchaseReceiptInvalidStateError('收货单状态 CANCELLED 不能确认', {
+          receiptNo: 'PR-bad',
+        });
+      }
+      return {
+        id,
+        receiptNo: `PR-${id}`,
+        idempotentReplay: id === 'replayed',
+      } as unknown as Awaited<ReturnType<PurchaseReceiptService['confirm']>>;
+    });
+
+    const result = await service.confirmBatch(['ok', 'bad', 'ok', 'replayed'], operator);
+
+    // 重复 id 只执行一次；三张单各自独立，失败不拖垮其余。
+    expect(confirm).toHaveBeenCalledTimes(3);
+    expect(result).toMatchObject({ total: 3, succeeded: 2, failed: 1 });
+    expect(result.results.find((item) => item.id === 'bad')).toMatchObject({
+      ok: false,
+      code: 'PR-bad',
+      errorCode: 'PURCHASE_RECEIPT_INVALID_STATE',
+    });
+    expect(result.results.find((item) => item.id === 'replayed')).toMatchObject({
+      ok: true,
+      idempotentReplay: true,
+    });
+  });
+
+  it('未知单号记为失败（不发确认、不抛整批）', async () => {
+    const { service, repository } = setup(buildPo({}));
+    repository.findById.mockResolvedValue(null);
+    const confirm = vi
+      .spyOn(service, 'confirm')
+      .mockRejectedValue(new PurchaseReceiptNotFoundError('missing'));
+
+    const result = await service.confirmBatch(['missing'], operator);
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(result.results[0]).toMatchObject({
+      ok: false,
+      code: null,
+      errorCode: 'PURCHASE_RECEIPT_NOT_FOUND',
+    });
   });
 });

@@ -1,5 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { PlatformLabelFile, PlatformShipmentPreparation } from '@wcies/platform-contracts';
+import {
+  PlatformLabelFile,
+  PlatformOrderLabelFile,
+  PlatformShipmentPreparation,
+} from '@wcies/platform-contracts';
+import { splitPdfPages } from '../../../common/pdf/document';
 import { parseOzonAuth } from './ozon-auth';
 import { OzonClient, OzonRawResponse } from './ozon.client';
 import {
@@ -8,7 +13,7 @@ import {
   OzonPostingProduct,
   OzonShipPackage,
 } from './types/api.types';
-import { PlatformApiError } from '../platform-error';
+import { PlatformApiError, PlatformBatchShapeError } from '../platform-error';
 import { DomainError } from '../../../common/errors/domain.error';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { isOzonPostingCancelled } from './ozon.mapper';
@@ -178,6 +183,88 @@ export class OzonShipmentService {
       throw error;
     }
     return decodeLabelResponse(response, postingNumber);
+  }
+
+  /**
+   * 批量取面单（用户指示 2026-10-21）：`/v2/posting/fbs/package-label` 接受
+   * `posting_number` 数组（文档上限 20 单，一次全成或全败）。
+   *
+   * 平台对多单返回**一个** PDF，页面顺序即请求顺序；因此只有页数恰好等于
+   * 单数时才能一页对一单。页数不匹配（或返回的不是可解析的 PDF，例如 ZIP）
+   * 时抛 `OzonLabelBatchShapeError`，由调用方降级为逐单请求——批量只是提速，
+   * 不承担正确性（AGENTS.md §88）。
+   */
+  async fetchShippingLabels(
+    context: { storeId: string; credential: Readonly<Record<string, unknown>> },
+    platformOrderIds: readonly string[],
+  ): Promise<readonly PlatformOrderLabelFile[]> {
+    const ids = [...new Set(platformOrderIds.filter((id) => id !== ''))];
+    if (ids.length === 0) {
+      return [];
+    }
+    const auth = parseOzonAuth(context.credential, context.storeId);
+    if (ids.length === 1) {
+      const first = ids[0];
+      const file =
+        first === undefined
+          ? null
+          : await this.fetchShippingLabel(context, { platformOrderId: first });
+      return file === null || first === undefined ? [] : [{ platformOrderId: first, file }];
+    }
+
+    let response: OzonRawResponse;
+    try {
+      response = await this.client.packageLabel(auth, context.storeId, ids);
+    } catch (error: unknown) {
+      if (error instanceof PlatformApiError && isLabelNotReady(error.message)) {
+        return [];
+      }
+      throw error;
+    }
+
+    const combined = decodeLabelResponse(response, ids[0] ?? 'batch');
+    if (combined === null) {
+      return [];
+    }
+
+    let pages: Uint8Array[];
+    try {
+      pages = await splitPdfPages(combined.bytes);
+    } catch (error: unknown) {
+      throw new PlatformBatchShapeError(
+        `OZON 批量面单返回无法解析为 PDF：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { requested: ids.length, pages: null },
+      );
+    }
+    if (pages.length !== ids.length) {
+      throw new PlatformBatchShapeError(
+        `OZON 批量面单返回页数（${pages.length}）与请求订单数（${ids.length}）不一致`,
+        { requested: ids.length, pages: pages.length },
+      );
+    }
+
+    const files: PlatformOrderLabelFile[] = [];
+    for (let index = 0; index < ids.length; index += 1) {
+      const platformOrderId = ids[index];
+      const bytes = pages[index];
+      if (platformOrderId === undefined || bytes === undefined) {
+        throw new PlatformBatchShapeError('OZON 批量面单无法与订单一一对应', {
+          requested: ids.length,
+          pages: pages.length,
+        });
+      }
+      files.push({
+        platformOrderId,
+        file: {
+          fileName: `ozon-label-${platformOrderId}.pdf`,
+          mimeType: 'application/pdf',
+          bytes,
+        },
+      });
+    }
+    return files;
   }
 
   // -----------------------------------------------------------------------
@@ -383,6 +470,12 @@ function isLabelNotReady(message: string): boolean {
 function isAlreadyShipped(message: string): boolean {
   return message.includes('POSTING_ALREADY_SHIPPED') || message.includes('HAS_INCORRECT_STATUS');
 }
+
+/**
+ * 批量面单的返回无法安全地一页对一单（页数不符 / 返回的不是可解析 PDF）。
+ * 这不是业务失败——调用方应当降级为逐单请求，因此它刻意不是 DomainError
+ * （不进入统一错误码体系，也不面向用户展示）。
+ */
 
 /** OZON order cannot be prepared in its current platform state. */
 export class OzonOrderNotReadyError extends DomainError {

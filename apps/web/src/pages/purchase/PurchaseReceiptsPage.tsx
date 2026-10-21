@@ -526,6 +526,91 @@ export function PurchaseReceiptsPage() {
     });
   }, [modal, selectedReceiptIds, batchDeleteMutation]);
 
+  // ---- 批量收货（用户需求 2026-10-20）：逐笔复用单笔确认，失败隔离 ----
+  // 每张单仍是独立事务：库存入账 / 超收校验 / 采购单已收累加 / 成本更新全部
+  // 走单笔规则；已被他人确认的单幂等重放，不重复入账。
+  const confirmableReceiptRows = useMemo(
+    () => selectedReceiptRows.filter((row) => row.status === 'DRAFT'),
+    [selectedReceiptRows],
+  );
+
+  const batchConfirmMutation = useMutation({
+    mutationFn: (ids: string[]) =>
+      apiPost<{
+        total: number;
+        succeeded: number;
+        failed: number;
+        results: Array<{
+          id: string;
+          code: string | null;
+          ok: boolean;
+          errorCode: string | null;
+          message: string | null;
+          idempotentReplay: boolean;
+        }>;
+      }>('/api/v1/purchase-receipts/batch-confirm', { ids }),
+    onSuccess: (result) => {
+      const succeeded = result.results.filter((item) => item.ok);
+      for (const item of succeeded) {
+        applyConfirmedToCaches(item.id);
+      }
+      const replayed = succeeded.filter((item) => item.idempotentReplay).length;
+      const failures = result.results.filter((item) => !item.ok);
+      notification.open({
+        type: result.failed > 0 ? 'warning' : 'success',
+        title: `批量收货：成功 ${result.succeeded} / 失败 ${result.failed}（共 ${result.total}）`,
+        description:
+          replayed === 0 && failures.length === 0 ? undefined : (
+            <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+              {replayed > 0 ? (
+                <div>{replayed} 张此前已确认，本次为幂等重放（未重复入账）。</div>
+              ) : null}
+              {failures.map((item) => (
+                <div key={item.id}>
+                  {item.code ?? selectedReceiptsById.get(item.id)?.receiptNo ?? item.id}：
+                  {item.message ?? item.errorCode ?? '未知错误'}
+                </div>
+              ))}
+            </div>
+          ),
+        duration: result.failed > 0 ? 0 : 6,
+      });
+      const done = new Set(succeeded.map((item) => item.id));
+      if (done.size > 0) {
+        handleReceiptSelectionChange(
+          selectedReceiptIds.filter((id) => !done.has(id)),
+          selectedReceiptRows.filter((row) => !done.has(row.id)),
+        );
+      }
+      invalidate();
+    },
+    onError: (error: Error) => void message.error(`批量收货失败：${error.message}`),
+  });
+
+  const requestBatchConfirm = useCallback(() => {
+    const ids = confirmableReceiptRows.map((row) => row.id);
+    if (ids.length === 0) {
+      void message.warning('勾选的收货单中没有待收货（草稿）单据');
+      return;
+    }
+    if (ids.length > 200) {
+      void message.error('单次最多确认 200 张收货单，请分批操作');
+      return;
+    }
+    const skipped = selectedReceiptIds.length - ids.length;
+    modal.confirm({
+      title: `确认收货勾选的 ${ids.length} 张草稿？`,
+      content:
+        '每张单整单入账（库存 / 采购单已收数量 / 成本），单笔失败会保留并提示原因。' +
+        (skipped > 0 ? `另有 ${skipped} 张已收货或已取消的勾选单会被跳过。` : ''),
+      okText: '确认收货',
+      cancelText: '返回',
+      onOk: () => {
+        batchConfirmMutation.mutate(ids);
+      },
+    });
+  }, [confirmableReceiptRows, selectedReceiptIds.length, modal, message, batchConfirmMutation]);
+
   const fromPoMutation = useMutation({
     // 表单字段整体作为 values 传入时含 poId，但 poId 只属于路径参数——
     // 请求体里多带会被后端白名单校验拒绝（property poId should not exist，
@@ -1221,6 +1306,25 @@ export function PurchaseReceiptsPage() {
         actions={
           selectedReceiptIds.length > 0 ? (
             <>
+              <Tooltip
+                title={
+                  confirmableReceiptRows.length === 0 ? '勾选的单据里没有待收货（草稿）' : undefined
+                }
+              >
+                <span>
+                  <Button
+                    type="primary"
+                    loading={batchConfirmMutation.isPending}
+                    disabled={confirmableReceiptRows.length === 0}
+                    onClick={requestBatchConfirm}
+                  >
+                    批量收货
+                    {confirmableReceiptRows.length > 0
+                      ? `（${confirmableReceiptRows.length}）`
+                      : ''}
+                  </Button>
+                </span>
+              </Tooltip>
               <Button danger loading={batchDeleteMutation.isPending} onClick={requestBatchDelete}>
                 批量删除
               </Button>

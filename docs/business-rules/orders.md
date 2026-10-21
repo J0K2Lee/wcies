@@ -232,6 +232,62 @@ FAILED
    MAPPED，映射异常已关闭，订单汇总状态**同样重算**（分配错误照常返回调用方）
    ——修复映射的事实必须反映到订单状态，操作员可随时再次「重新尝试分配」。
 
+### B2. 映射修复后的批量收敛（2026-10-20）
+
+映射已经建好、订单行却仍停在 FAILED + `ORDER_SKU_MAPPING_FAILED`，需要人工
+逐单「重试映射」——根因是收敛只挂在部分映射写入路径上。契约是：**任何让
+「store + 平台变体」从不可解析变为可解析的写操作，都必须收敛该变体下已摄入
+的 FAILED 行**（`ListingService.retryOrderLinesAfterMappingRepair` →
+`OrderIngestionService.retryFailedMappingForVariant`，幂等，跳过 CANCELLED 订单，
+只对 BACKORDERED / PENDING 行分配库存）：
+
+1. 绑定已同步的 UNMAPPED 变体（`mapUnmappedSku`）——原有路径。
+2. 变体映射写入（含 Excel 导入的新建与绑定分支、手工
+   `POST /listings/:id/skus`）——2026-10-20 补齐。此前只有路径 1 收敛，
+   走接口/导入建好的映射不触发批量修复。
+3. 链接从 INACTIVE 重新启用为 ACTIVE——解析要求 `listing.status='ACTIVE'`
+   且 `pls.status='ACTIVE'`，重新启用同样让历史行可解析，必须收敛。
+4. 兜底：每次店铺订单同步额外跑一次有界扫描（每店每轮 40 条最老 FAILED 行，
+   截止已 `SHIPPED` 的行，跳过 CANCELLED 订单），覆盖历史遗留与上述路径之外的
+   写入方式。同一轮还会：
+   - 关闭已释放行（`RELEASED` / `EXTERNAL_FULFILLED`）上仍 OPEN 的行级
+     `ORDER_OUT_OF_STOCK` / `ORDER_SKU_MAPPING_FAILED` 异常——释放后没有可执行
+     的待办；
+   - 对被旧规则误判为 `EXCEPTION` 的订单重算 rollup，恢复到真实状态
+     （见汇总规则第 2 条），不必等 24h 平台事实刷新窗口。
+   失败只记 warn，绝不影响同步任务结果（§36）。
+
+订单进入终态（取消 / 标记外部履约）时，行级 `ORDER_OUT_OF_STOCK` 与
+`ORDER_SKU_MAPPING_FAILED` 异常一并关闭——已释放的订单行不再有可执行的待办。
+
+### B3. 本地链接镜像缺失时的按需补链接（2026-10-20）
+
+映射弹窗（快速建档 / SKU映射）只查**本地**未映射变体。平台侧新上架、而
+listing sync 尚未 walk 到的商品会让两个按钮都无路可走（真实样本
+ORD00000410：ON-002 的 listing sync 自 2026-10-05 起未再运行）。
+
+`POST /listings/ensure-variant`（`ListingVariantBackfillService`）按用户决策
+分两级：
+
+1. **`source=PLATFORM`（主路径，C）**：用订单行自带的 `platformSkuId`
+   （没有时退 `offerId`）对平台做**一次**定向读取，把平台事实落成 UNMAPPED
+   变体并返回 listingId。本地已有变体时零平台调用；查不到的标识做 10 分钟
+   负缓存；平台接口失败**不**缓存（下次点击会重试）。已实现平台：OZON
+   `/v3/product/info/list`（sku / offer_id 入参均已验证）；适配器未实现
+   `fetchListingVariant` 的平台返回 `UNSUPPORTED`。
+2. **`source=ORDER_FACTS`（兜底，B）**：平台不支持 / 读取失败 / 查不到时，
+   运营确认后用订单事实（`platformProductId` + `platformSkuId`/`sellerSku`）
+   在本地补建链接与 UNMAPPED 变体，零平台调用；`raw_data.source =
+   'ORDER_FACTS'` 便于追溯，后续 listing sync 按平台事实校正。
+
+两条路径都**只补链接/变体，绝不替人决定内部 SKU**（决策 0016 / §54）。
+兜底的已知边界：OZON 订单行只带 sku（catalog product_id 未知），补建的链接
+以订单的 `platformProductId` 为键，与后续全量 listing sync 建立的正式链接
+可能是两条记录——优先用平台定向读取，兜底只用于解除卡死。
+
+批量补镜像仍可通过店铺设置 `listingSyncEnabled` +
+`LISTING_SYNC_INTERVAL_SECONDS` 开启（默认关闭，Sprint 9 决策 2），三者不冲突。
+
 ---
 
 # 6. OrderItem 库存履约状态
@@ -291,14 +347,25 @@ EXTERNAL_FULFILLED 行不属于内部可履约行（与 RELEASED 同样被 rollu
 任一订单行履约状态变化后，按以下优先级重算订单状态：
 
 1. `CANCELLED` 为终态，取消后不再重算。
-2. 无任何可履约行（全部 mapping FAILED）→ `EXCEPTION`。
-   无任何可履约行且**已无** mapping FAILED 行（全部 EXTERNAL_FULFILLED / RELEASED，
-   典型：FBP 行映射修复后转 EXTERNAL_FULFILLED）时：当前态为 `EXCEPTION` 的
-   回落 `NEW`（其成立前提「存在 FAILED 行」已消失，不得保留陈旧异常），其余
-   当前态保持不变（已 SHIPPED 保持 SHIPPED、外部履约单停在 NEW 等平台事件——
-   列表侧这类单归入「外部履约」阶段，不再混入「待处理」）。
-   2026-10-16 修复：陈旧的 EXCEPTION 此前被无条件 `return current` 保留，导致
-   FBP 订单补齐映射后永久卡异常（真实样本 ORD00000207）。
+2. 无任何可履约行时：
+   - 存在**仍待内部履约**的 mapping FAILED 行（`fulfillment_status` 不是
+     `RELEASED` / `EXTERNAL_FULFILLED`）→ `EXCEPTION`。
+   - 无此类 FAILED 行时：当前态为 `EXCEPTION` 的**恢复到历史中最近一次非
+     `EXCEPTION` 的状态**（其成立前提「存在待履约的 FAILED 行」已消失，不得
+     保留陈旧异常），其余当前态保持不变（已 SHIPPED 保持 SHIPPED、外部履约单
+     停在 NEW 等平台事件——列表侧这类单归入「外部履约」阶段，不再混入「待处理」）。
+     典型：从未发过货的 FBP 单修好映射 → 历史上一态是 `NEW`，回 `NEW`；被平台
+     事实置 `SHIPPED` 后又误判回异常的单 → 回 `SHIPPED`，不会掉进「待处理」
+     （2026-10-20 补充；此前一律回落 `NEW`）。
+   - 2026-10-16 修复：陈旧的 EXCEPTION 此前被无条件 `return current` 保留，导致
+     FBP 订单补齐映射后永久卡异常（真实样本 ORD00000207）。
+   - 2026-10-20 修复：**已被释放的 FAILED 行不再阻塞**。此前只要存在 FAILED 行
+     就判 `EXCEPTION`，而「标记外部履约」会把行置 `RELEASED` 却保留 FAILED 映射；
+     于是已按平台事实 `SHIPPED` 的订单在下一次 rollup 被翻回 `EXCEPTION`（状态
+     倒退），必须人工修完映射才回到 `SHIPPED`（真实样本 ORD00000065：待处理 →
+     异常 → 已发货 → 异常 → 已发货）。行已释放即该行不再需要内部履约，未映射
+     不再可执行，不得用它判异常。**未释放的 FAILED 行仍然阻塞**，映射异常不会
+     被静默忽略。
 3. 存在未完成拣货的拣货任务行（订单行进入 CREATED/IN_PROGRESS 的 PickingTask 且未全部拣完）→ `PICKING`。
 4. 全部可履约行（mapping != FAILED 且 fulfillment != RELEASED）均为 SHIPPED → `SHIPPED`。
 5. 存在 SHIPPED 行但并非全部 → `PARTIALLY_SHIPPED`。
@@ -1101,7 +1168,7 @@ createShipmentsFromOrder（仅 PICKED 行，1 发货单 = 1 仓）
 | 批量生成拣货单 | `POST /picking-tasks/auto-create`（请求体带 `orderIds`） | 勾选订单的 RESERVED 行**按仓合并**生成拣货任务（2026-10-15 语义修正）：同一仓库合并为一个任务（合并拣货，`picking_task_items` 行保留各自订单引用，任务内订单取消只摘除该订单行）；省略 `orderIds` 仍是旧的按店铺自动选取（同样合并）；跳过/幂等规则不变 |
 | 批量获取运单号 | `POST /orders/batch-prepare-shipment` | 逐单执行 ① 的全部平台/幂等/事实回写逻辑；仍是真实平台写操作 |
 | 批量发货 | `POST /orders/batch-ship` | 逐单执行 ④（含按订单 advisory lock）；库存仍只走 `shipShipment` |
-| 批量打印面单 | `POST /orders/batch-shipping-label` | 逐单执行 ③（默认复用本地已存档面单，`refresh=true` 才重新打平台）；**串行**以尊重平台面单接口限流；成功面单在**服务端合并成一个 PDF** 返回（`mergedPdfBase64`），每页保留平台原纸张尺寸；**页序 = 订单列表当前排序**（含加急置顶；请求带 `sortBy`/`sortOrder`） |
+| 批量打印面单 | `POST /orders/batch-shipping-label` | 逐单执行 ③（默认复用本地已存档面单，`refresh=true` 才重新打平台）；缺面单的订单**按店铺分组、每 ≤20 单一次平台调用**，返回形状不可用时逐单降级；终态订单跳过并计入 `notPrintable`；成功面单在**服务端合并成一个 PDF** 返回（`mergedPdfBase64`），每页保留平台原纸张尺寸；**页序 = 订单列表当前排序**（含加急置顶；请求带 `sortBy`/`sortOrder`） |
 | 批量外部履约 | `POST /orders/batch-mark-external-fulfillment` | 逐单执行 Sprint 9 T6 的标记外部履约（同一 reason 记入每单的状态历史与操作日志）；不产生任何库存流水 |
 
 规则不变，只是编排：**逐单执行、单笔失败只记录结果不拖垮整批**（§36/§43），
@@ -1116,6 +1183,60 @@ RESERVED / PICKED 行的订单逐单拒绝并说明原因。
 （2026-10-17 用户实测报错）。因此后端把成功面单合并成一个 PDF（`pdf-lib`，
 `copyPages` 保留每页 MediaBox），前端以 Blob URL 在该窗口打开；合并失败时
 逐单结果仍返回签名 URL，可单张补打。
+
+## 面单归档、预取与清理（2026-10-21）
+
+### 预取（组包后后台归档）
+
+- **触发点**：`POST /orders/:id/prepare-shipment`（以及批量版）成功之后。
+  组包是面单可用的**唯一**前置条件（平台只在 `awaiting_deliver` 提供面单）。
+- **延迟**：默认 60 秒（OZON 文档建议组包后 45–60 秒再取），异步组包
+  （`assemblyPending`）由任务按指数退避重试（默认 6 次）。
+- **批量组包只入队「批次任务」**（每 ≤20 单一块），不逐单入队——否则 50 单
+  组包会变成 50 次平台调用。
+- **补触发**：同步 / Webhook 首次观察到平台运单号时补一次（可配置关闭）。
+- 没有运单号且非异步组包的订单**不预取**（避免无意义的平台访问）。
+- 预取是**尽力而为**：入队失败只记日志，绝不影响组包响应；失败不写异常中心，
+  用户点「打单」仍走按需路径并看到真实错误。
+- 打印命中存档时返回 `fromArchive=true`，不访问平台。
+
+### 批量取单
+
+- 未存档的订单按店铺分组，每 `LABEL_BATCH_FETCH_CHUNK`（默认 20，OZON 文档
+  上限）单一次平台调用。
+- 平台返回的批量面单只有**页数恰好等于单数**时才能一页对一单；页数不符或
+  无法解析时必须降级为逐单请求（不猜测平台分页规则）。
+- 平台以 4xx 拒绝（批量接口「一单不可取则整批不成」）时同样逐单降级，把坏单
+  隔离出来；5xx / 鉴权 / 网络错误不降级（逐单重试只会放大同一个失败）。
+
+### 终态禁打
+
+订单进入以下终态后**不再支持打印面单**（服务端 409
+`ORDER_LABEL_NOT_PRINTABLE`，前端隐藏入口）：
+
+- `CANCELLED`；
+- 「已完成」= `erp_status = 'SHIPPED'` **且** `platform_stage = 'DELIVERED'`
+  （列表的 COMPLETED 口径，§17a）。
+
+**注意**：平台已妥投但 ERP 尚未 `SHIPPED` 的背离单**不**禁打——它们仍可能需要
+面单。批量打印对终态订单逐单返回该错误码并计入 `notPrintable`，其余照常打印
+（§36：不因个别订单让整批失败）。
+
+### 清理
+
+- 终态订单的面单**图像字节**被清理；`shipping_labels` 行永久保留为审计事实
+  （谁、何时、为哪单存过面单、对象键是什么），并以 `purged_at` 标记。
+- 其余运单号 / 订单事实（`orders`、`shipments`、`packages`）**不受影响**——
+  清理的是图像，不是运单号。
+- 执行方式：后台扫描（默认 6 小时一次，`LABEL_PURGE_SWEEP_INTERVAL_SECONDS`），
+  按 `(created_at, id)` keyset 游标每轮循环若干批（默认 10×200 行、60 秒预算）
+  直到排空或达到上限。为什么不挂在状态迁移上：终态判定在 order 模块（面单属于
+  shipment，反向依赖会破坏模块方向）；COMPLETED 是派生口径、没有单一变更事件；
+  S3 删除不是事务性的。扫描天然覆盖手工取消、平台取消与历史积压。
+- 清理对用户不可见（禁打由状态判断，**立即生效**，不依赖清理是否跑过），因此
+  时效要求极低；宽限期 `LABEL_PURGE_GRACE_MINUTES` 默认 0。
+- 扫描顺序为「先删对象、后置标记」：对象删除失败不置标记，下一轮重试；对象已
+  不存在视为已删。
 
 ## 异常
 

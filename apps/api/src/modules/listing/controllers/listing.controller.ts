@@ -24,6 +24,8 @@ import { OperatorContext } from '../../operation-log/operation-log.service';
 import {
   AddListingSkuRequestDto,
   CreateListingRequestDto,
+  EnsureListingVariantRequestDto,
+  EnsureListingVariantResponseDto,
   ListingDetailDto,
   ListingMappingStatsDto,
   ListingOnboardContextDto,
@@ -44,6 +46,7 @@ import { ListingService } from '../services/listing.service';
 import { ListingResolverService } from '../services/listing-resolver.service';
 import { ListingOnboardingService } from '../services/listing-onboarding.service';
 import { ListingExportService } from '../services/listing-export.service';
+import { ListingVariantBackfillService } from '../services/listing-variant-backfill.service';
 
 /** Mapping row enriched with store/listing context (SKU drawer, task §91). */
 export class SkuMappingRowDto extends ListingSkuResponseDto {
@@ -67,6 +70,7 @@ export class ListingController {
     private readonly resolverService: ListingResolverService,
     private readonly onboardingService: ListingOnboardingService,
     private readonly exportService: ListingExportService,
+    private readonly backfillService: ListingVariantBackfillService,
   ) {}
 
   @Get()
@@ -87,6 +91,31 @@ export class ListingController {
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true; data: ListingDetailDto }> {
     return ok(await this.listingService.create(dto, operator));
+  }
+
+  @Post('ensure-variant')
+  @ApiOperation({
+    summary:
+      '订单行按需补链接（2026-10-20）：本地缺失时定向读平台变体（一次调用），或按订单事实本地补建',
+  })
+  @ApiOkEnvelope(EnsureListingVariantResponseDto)
+  async ensureVariant(
+    @Body() dto: EnsureListingVariantRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: EnsureListingVariantResponseDto }> {
+    return ok(
+      await this.backfillService.ensure(
+        {
+          storeId: dto.storeId,
+          platformProductId: dto.platformProductId ?? null,
+          platformSkuId: dto.platformSkuId ?? null,
+          offerId: dto.offerId ?? null,
+          sellerSku: dto.sellerSku ?? null,
+          source: dto.source ?? 'PLATFORM',
+        },
+        operator,
+      ),
+    );
   }
 
   @Get('resolve')

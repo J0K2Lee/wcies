@@ -133,6 +133,7 @@ interface OrderItem {
   /** Derived procurement state (purchase.md §3.5); NULL for unmapped lines. */
   procurementState: string | null;
   /** Platform identifiers of the line; present even when mapping FAILED. */
+  platformProductId: string | null;
   platformSkuId: string | null;
   offerId: string | null;
   sellerSku: string | null;
@@ -603,6 +604,20 @@ function platformDivergent(platformStatus: string | null, erpStatus: string): bo
   return erpStatus !== 'SHIPPED' && erpStatus !== 'CANCELLED';
 }
 
+/**
+ * 订单是否已到「不再打面单」的终态（用户指示 2026-10-21）。
+ *
+ * 与后端 `isOrderLabelPrintBlocked` 同口径：CANCELLED，或
+ * SHIPPED + platform_stage DELIVERED（列表的「已完成」）。
+ * 平台已妥投但 ERP 尚未 SHIPPED 的背离单**不**禁打。
+ */
+function isLabelPrintBlocked(order: { erpStatus: string; platformStage: string | null }): boolean {
+  return (
+    order.erpStatus === 'CANCELLED' ||
+    (order.erpStatus === 'SHIPPED' && order.platformStage === 'DELIVERED')
+  );
+}
+
 /** 强匹配标识：订单解析只认 platform_sku_id（决策 0016），其次 seller_sku /
  *  offer_id——与映射工作台 keyword 搜索的字段一一对应。 */
 function mappingSearchKeyword(item: {
@@ -611,6 +626,38 @@ function mappingSearchKeyword(item: {
   offerId: string | null;
 }): string | null {
   return item.platformSkuId ?? item.sellerSku ?? item.offerId;
+}
+
+/** 订单行按需补链接的响应（2026-10-20，C 主 B 兜底）。 */
+interface EnsureVariantOutcome {
+  resolved: boolean;
+  listingId: string | null;
+  variantId: string | null;
+  source: 'LOCAL' | 'PLATFORM' | 'ORDER_FACTS' | null;
+  reason: 'NOT_FOUND' | 'UNSUPPORTED' | 'MISSING_IDENTIFIERS' | 'REFRESH_FAILED' | null;
+}
+
+/**
+ * 平台取不到变体时的兜底确认：用订单事实在本地补建链接。文案区分三种
+ * 失败原因，运营明确知道这是一次本地补建（而非平台回读成功）。
+ */
+function confirmOrderFactsBackfill(reason: EnsureVariantOutcome['reason']): Promise<boolean> {
+  const detail =
+    reason === 'UNSUPPORTED'
+      ? '当前平台不支持按标识定向读取商品。'
+      : reason === 'REFRESH_FAILED'
+        ? '读取平台商品信息失败。'
+        : '平台上查不到该变体（可能已删除或标识已变更）。';
+  return new Promise((resolve) => {
+    Modal.confirm({
+      title: '未能从平台取回该商品变体',
+      content: `${detail}可以用订单里已有的平台标识在本地补建商品链接，随后继续映射；补建的数据会由下次商品同步按平台事实校正。`,
+      okText: '用订单信息补建',
+      cancelText: '取消',
+      onOk: () => resolve(true),
+      onCancel: () => resolve(false),
+    });
+  });
 }
 
 /**
@@ -1804,6 +1851,8 @@ export function OrdersPage() {
         total: number;
         succeeded: number;
         failed: number;
+        /** 终态（完成/取消）被拒绝的单数（2026-10-21）。 */
+        notPrintable: number;
         mergedPdfBase64: string | null;
         mergedPageCount: number;
         results: Array<{
@@ -1814,6 +1863,8 @@ export function OrdersPage() {
           message: string | null;
           signedUrl: string | null;
           fileName: string | null;
+          /** true = 本次直接用本地存档，没有访问平台。 */
+          fromArchive: boolean;
         }>;
       }>('/api/v1/orders/batch-shipping-label', {
         orderIds,
@@ -1829,7 +1880,12 @@ export function OrdersPage() {
         vars.printWindow.close();
         notification.warning({
           type: 'warning',
-          title: printable.length === 0 ? '没有可打印的面单' : '面单合并失败，请逐张打印',
+          title:
+            printable.length === 0
+              ? result.notPrintable > 0 && result.notPrintable === result.total
+                ? '所选订单均已完成或已取消，不再支持打印面单'
+                : '没有可打印的面单'
+              : '面单合并失败，请逐张打印',
           description: (
             <div style={{ maxHeight: 260, overflowY: 'auto' }}>
               {result.results.map((item) => (
@@ -1852,7 +1908,9 @@ export function OrdersPage() {
       askPrintConfirmation(printable.map((item) => item.orderId));
       notification.open({
         type: result.failed > 0 ? 'warning' : 'success',
-        title: `批量打印面单：已合并 ${result.mergedPageCount} 页（成功 ${result.succeeded} / 共 ${result.total} 单）`,
+        title: `批量打印面单：已合并 ${result.mergedPageCount} 页（成功 ${result.succeeded} / 共 ${result.total} 单）${
+          result.notPrintable > 0 ? `，跳过 ${result.notPrintable} 单（完成/取消）` : ''
+        }`,
         description:
           result.failed === 0 ? undefined : (
             <div style={{ maxHeight: 260, overflowY: 'auto' }}>
@@ -1878,16 +1936,52 @@ export function OrdersPage() {
     },
   });
 
+  /**
+   * 批量打印前的准入过滤（用户指示 2026-10-21）：终态订单（完成/取消）不再
+   * 支持打印面单。跨页选中的行可能不在本地缓存里，这类 id 交给后端用同一份
+   * 口径判定（后端逐单返回 ORDER_LABEL_NOT_PRINTABLE）。
+   */
+  const labelEligibleOrderIds = useMemo(
+    () =>
+      selectedOrderIds.filter((id) => {
+        const row = selectedOrdersById.get(id);
+        return row === undefined || !isLabelPrintBlocked(row);
+      }),
+    [selectedOrderIds, selectedOrdersById],
+  );
+  const labelSkippedCount = selectedOrderIds.length - labelEligibleOrderIds.length;
+
   const confirmBatchPrintLabels = () => {
     if (selectedOrderIds.length === 0) {
       return;
     }
+    if (labelEligibleOrderIds.length === 0) {
+      void message.warning('所选订单均已完成或已取消，不再支持打印面单');
+      return;
+    }
+    // 打印窗口必须在点击的同步栈里打开（否则被浏览器拦截）。因此先开窗，
+    // 需要用户确认时取消则关掉它。
     const printWindow = openShippingLabelPrintWindow();
     if (printWindow === null) {
       void message.warning('浏览器拦截了打印窗口，请允许本站弹窗后重试');
       return;
     }
-    batchLabelMutation.mutate({ orderIds: selectedOrderIds, printWindow });
+    if (labelSkippedCount > 0) {
+      modal.confirm({
+        title: '部分订单不再支持打印面单',
+        content: `所选 ${selectedOrderIds.length} 单中有 ${labelSkippedCount} 单已完成或已取消，将被跳过。继续打印其余 ${labelEligibleOrderIds.length} 单？`,
+        okText: '继续打印',
+        cancelText: '返回',
+        onOk: () => {
+          batchLabelMutation.mutate({ orderIds: labelEligibleOrderIds, printWindow });
+        },
+        onCancel: () => {
+          printWindow.close();
+        },
+      });
+      return;
+    }
+    batchLabelMutation.mutate({ orderIds: labelEligibleOrderIds, printWindow });
   };
 
   // ---- 批量外部履约（用户指示 2026-10-14）：同一原因逐单关账 ----
@@ -2038,34 +2132,85 @@ export function OrdersPage() {
     [viewSettings.expandedColumns],
   );
 
-  /** 快速建档：按订单行标识反查商品链接（storeId 来自列表行，单击选中即有）。 */
-  const openQuickOnboard = useCallback(
-    (item: OrderItem, storeId: string) => {
+  /**
+   * 本地镜像缺失时的按需补链接（2026-10-20 用户决策：C 为主、B 兜底）。
+   * 先用订单行自带的标识定向读一次平台变体；平台不支持/接口失败/查不到时
+   * 由运营确认后用订单事实本地补建链接。两条路径都只补「链接 + UNMAPPED
+   * 变体」，内部 SKU 仍由映射/建档流程决定。
+   */
+  const ensureVariantListing = useCallback(
+    async (item: OrderItem, storeId: string): Promise<string | null> => {
+      const base = {
+        storeId,
+        platformProductId: item.platformProductId ?? undefined,
+        platformSkuId: item.platformSkuId ?? undefined,
+        offerId: item.offerId ?? undefined,
+        sellerSku: item.sellerSku ?? undefined,
+      };
+      const result = await apiPost<EnsureVariantOutcome>('/api/v1/listings/ensure-variant', {
+        ...base,
+        source: 'PLATFORM',
+      });
+      if (result.resolved && result.listingId !== null) {
+        return result.listingId;
+      }
+      if (result.reason === 'MISSING_IDENTIFIERS') {
+        void message.warning('该订单行缺少可建链的平台标识（商品 ID + SKU/卖家 SKU）');
+        return null;
+      }
+      if (!(await confirmOrderFactsBackfill(result.reason))) {
+        return null;
+      }
+      const fallback = await apiPost<EnsureVariantOutcome>('/api/v1/listings/ensure-variant', {
+        ...base,
+        source: 'ORDER_FACTS',
+      });
+      if (fallback.resolved && fallback.listingId !== null) {
+        return fallback.listingId;
+      }
+      void message.warning('按订单信息补建链接失败：缺少商品 ID 或变体标识');
+      return null;
+    },
+    [message],
+  );
+
+  /** 快速建档/SKU映射共用的反查：本地未映射变体 → 按需补链接。 */
+  const resolveListingForItem = useCallback(
+    async (item: OrderItem, storeId: string): Promise<string | null> => {
       const keyword = mappingSearchKeyword(item);
       if (keyword === null || keyword.trim() === '') {
         void message.warning(
           '该订单行没有任何平台 SKU 标识（platformSkuId / sellerSku / offerId），无法定位',
         );
-        return;
+        return null;
       }
-      setOnboardLookupPending(true);
-      apiGet<Array<{ id: string }>>('/api/v1/listings', {
+      const local = await apiGet<Array<{ id: string }>>('/api/v1/listings', {
         storeId,
         keyword: keyword.trim(),
         mappingState: 'UNMAPPED',
         page: 1,
         pageSize: 5,
-      })
-        .then((result) => {
-          const listing = result.data[0];
-          if (listing === undefined) {
-            void message.warning(
-              '未在本店铺找到该平台标识对应的未映射商品链接：请确认该变体已同步到本地',
-            );
+      });
+      const listing = local.data[0];
+      if (listing !== undefined) {
+        return listing.id;
+      }
+      return ensureVariantListing(item, storeId);
+    },
+    [ensureVariantListing, message],
+  );
+
+  /** 快速建档：按订单行标识反查商品链接（storeId 来自列表行，单击选中即有）。 */
+  const openQuickOnboard = useCallback(
+    (item: OrderItem, storeId: string) => {
+      setOnboardLookupPending(true);
+      resolveListingForItem(item, storeId)
+        .then((listingId) => {
+          if (listingId === null) {
             return;
           }
           setQuickOnboard({
-            listingId: listing.id,
+            listingId,
             match: {
               platformSkuId: item.platformSkuId,
               offerId: item.offerId,
@@ -2077,7 +2222,7 @@ export function OrdersPage() {
         .catch((error: Error) => void message.error(`定位商品链接失败：${error.message}`))
         .finally(() => setOnboardLookupPending(false));
     },
-    [message],
+    [message, resolveListingForItem],
   );
 
   // ---- SKU映射（用户指示 2026-10-14）：未映射订单行 → 绑定已有内部 SKU ----
@@ -2092,31 +2237,14 @@ export function OrdersPage() {
 
   const openVariantMap = useCallback(
     (item: OrderItem, storeId: string) => {
-      const keyword = mappingSearchKeyword(item);
-      if (keyword === null || keyword.trim() === '') {
-        void message.warning(
-          '该订单行没有任何平台 SKU 标识（platformSkuId / sellerSku / offerId），无法定位',
-        );
-        return;
-      }
       setVariantMapLookupPending(true);
-      apiGet<Array<{ id: string }>>('/api/v1/listings', {
-        storeId,
-        keyword: keyword.trim(),
-        mappingState: 'UNMAPPED',
-        page: 1,
-        pageSize: 5,
-      })
-        .then((result) => {
-          const listing = result.data[0];
-          if (listing === undefined) {
-            void message.warning(
-              '未在本店铺找到该平台标识对应的未映射商品链接：请确认该变体已同步到本地，或用「快速建档」新建',
-            );
+      resolveListingForItem(item, storeId)
+        .then((listingId) => {
+          if (listingId === null) {
             return;
           }
           setVariantMap({
-            listingId: listing.id,
+            listingId,
             match: {
               platformSkuId: item.platformSkuId,
               offerId: item.offerId,
@@ -2128,7 +2256,7 @@ export function OrdersPage() {
         .catch((error: Error) => void message.error(`定位商品链接失败：${error.message}`))
         .finally(() => setVariantMapLookupPending(false));
     },
-    [message],
+    [message, resolveListingForItem],
   );
 
   /**
@@ -2415,9 +2543,12 @@ export function OrdersPage() {
       selectedRow.erpStatus !== 'SHIPPED' &&
       selectedRow.erpStatus !== 'CANCELLED';
     // 平台面单要有平台运单号才打得出来（OZON 仅在组包后分配运单号）；
-    // 已存档面单也保留入口，方便重复打印。
+    // 已存档面单也保留入口，方便重复打印。终态订单（完成/取消）一律不给入口
+    // （用户指示 2026-10-21；后端同样拦截）。
+    const labelPrintBlocked = isLabelPrintBlocked(selectedRow);
     const canPrintLabel =
       (railDetail?.platformCapabilities.fetchShippingLabel ?? false) &&
+      !labelPrintBlocked &&
       (selectedRow.platformTrackingNo !== null || orderLabels.length > 0);
     const canQuickShip = selectedRow.erpStatus === 'PICKED';
     // Risk section: mapping failed (red) takes priority over backordered (orange).
@@ -2519,6 +2650,14 @@ export function OrdersPage() {
           >
             {orderLabels.length === 0 ? '打单（取平台面单）' : '打单（用已存档面单）'}
           </Button>
+        )}
+        {/* 终态订单：按钮消失，用一行说明为什么（2026-10-21）。 */}
+        {labelPrintBlocked && (
+          <RailHint>
+            {selectedRow.erpStatus === 'CANCELLED'
+              ? '订单已取消，面单已作废，不再支持打印。'
+              : '订单已完成，面单已归档清理，不再支持打印。'}
+          </RailHint>
         )}
         {/* 快速建档已从订单级操作区移除（用户指示 2026-10-14）：一个订单可能
             含多个 SKU，订单级按钮只能处理第一行、语义不清；建档入口收敛到
@@ -3602,13 +3741,23 @@ export function OrdersPage() {
               >
                 批量获取运单号
               </Button>
-              <Button
-                loading={batchLabelMutation.isPending}
-                disabled={anyBatchPending}
-                onClick={confirmBatchPrintLabels}
+              <Tooltip
+                title={
+                  labelEligibleOrderIds.length === 0
+                    ? '所选订单均已完成或已取消，不再支持打印面单'
+                    : labelSkippedCount > 0
+                      ? `${labelSkippedCount} 单已完成/取消，将被跳过`
+                      : undefined
+                }
               >
-                批量打印面单
-              </Button>
+                <Button
+                  loading={batchLabelMutation.isPending}
+                  disabled={anyBatchPending || labelEligibleOrderIds.length === 0}
+                  onClick={confirmBatchPrintLabels}
+                >
+                  批量打印面单
+                </Button>
+              </Tooltip>
               <Button
                 danger
                 loading={batchShipMutation.isPending}

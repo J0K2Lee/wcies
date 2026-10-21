@@ -68,6 +68,12 @@ Request：`{offer_id: string[]}`（也接受 `product_id[]` / `sku[]`）；Respo
 用于补充 `name`（标题）与 `sku`（OZON SKU id）。每批 100（保守值；官方上限未在本规范中找到明确数字，**未验证**）。
 实测：按 offer_id 精确匹配，1324 个 offer 全部返回；offer_id 含 CJK/特殊字符可正常匹配。
 
+- **订单行按需补链接（2026-10-20）**：同一端点用于定向读取单个变体——优先用
+  posting 的 `sku[]`（不可变），无 sku 时才用 `offer_id[]`，一次点击最多一次调用。
+  响应仍是顶层 `items`（无 `result` 包裹）。注意 `id` 是 catalog `product_id`，
+  与 posting 的 `sku` 是不同命名空间（本地 2775 条 listing 实测 0 冲突），因此
+  补建时以 `id` 作为 listing 键、以 `sku` 作为变体键。
+
 #### 未映射订单行图片（T5，验证日期 2026-09-17）
 
 - 依据本地英文规范 `v3GetProductInfoListResponseItem`：`primary_image: string[]`、`images: string[]`。
@@ -699,6 +705,14 @@ master-data.md §7）。平台仓库分类与履约模式对应：
 `Content-Type` 判定——JSON 信封则 base64 解码，其余按 PDF 字节直通。两种都接，
 因此**规范矛盾不影响上线**，但仍需真实测一次确认实际形态（见下）。
 
+**批量取单（2026-10-21）**：`OzonShipmentService.fetchShippingLabels` 把多个
+posting 放进**一次**请求（调用方按 20 单切块），平台返回**一个** PDF。实现假定
+「一页 = 一单、页序 = 请求顺序」，因此只有 `页数 === 单数` 时才拆页归档；页数
+不符或返回不可解析（例如 ZIP）时抛 `PlatformBatchShapeError`，由 sync 层降级为
+逐单请求。平台以 4xx 拒绝（全或无）同样降级逐单，把不可取的 posting 隔离出来。
+**该「一页一单」假设仍待真实两单验证**（见 T0 第 4 项）——它只影响提速，
+不影响正确性。
+
 ### 待 T0 实测（拿到用户授权后逐项回填）
 
 1. ~~`/v4/posting/fbs/ship` 真实请求/响应~~ ✅ 2026-10-09 已测（见上：受理正常、
@@ -707,6 +721,8 @@ master-data.md §7）。平台仓库分类与履约模式对应：
    已实测，失败态未遇到；
 3. `integration_type_flow = aggregator`（rFBS，本店 146/183 单）是否同样走本端点组包；
 4. `/v2/posting/fbs/package-label` 真实响应体是 PDF 字节还是 JSON base64；
+   以及**两单一次请求**的返回是否为「每单一页、页序=请求顺序」（批量取单的
+   拆页假设，2026-10-21 新增）；
 5. `available_actions` 在真实 `/v3/posting/fbs/get` 响应中是否出现、取值集合。
 
 ## 10. 已知限制 / 坑

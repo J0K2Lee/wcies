@@ -169,6 +169,24 @@ describe('OrderPlatformShippedService.apply', () => {
     );
   });
 
+  it('已释放的 FAILED 行不再把已发货订单判回 EXCEPTION（2026-10-20，ORD00000065）', async () => {
+    // 「标记外部履约」会把行置 RELEASED 却保留 FAILED 映射。旧判定只看
+    // mappingStatus，于是每次同步再遇事实发货都把订单翻回 EXCEPTION。
+    const { service, statusService } = build([
+      makeItem({ fulfillmentStatus: 'RELEASED', mappingStatus: 'FAILED' }),
+    ]);
+
+    const outcome = await service.apply(
+      makeOrder({ erpStatus: 'SHIPPED' }),
+      OPERATOR,
+      '平台已事实发货',
+    );
+
+    expect(outcome).toEqual({ shipped: true, erpStatus: 'SHIPPED' });
+    expect(statusService.recomputeOrderStatus).not.toHaveBeenCalled();
+    expect(statusService.transition).not.toHaveBeenCalled();
+  });
+
   it('never transitions a CANCELLED order', async () => {
     const { service, statusService } = build([makeItem({ fulfillmentStatus: 'BACKORDERED' })]);
 

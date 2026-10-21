@@ -32,6 +32,10 @@ import {
   PurchaseBatchDeleteResultDto,
 } from '../dto/purchase-batch-delete.dto';
 import {
+  PurchaseBatchConfirmItemResultDto,
+  PurchaseBatchConfirmResultDto,
+} from '../dto/purchase-batch-confirm.dto';
+import {
   PurchaseReceiptRepository,
   PurchaseReceiptListFilters,
 } from '../repositories/purchase-receipt.repository';
@@ -440,6 +444,46 @@ export class PurchaseReceiptService {
           ok: false,
           errorCode: error instanceof DomainError ? error.code : 'PURCHASE_RECEIPT_DELETE_FAILED',
           message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    const failed = results.filter((item) => !item.ok).length;
+    return { total: results.length, succeeded: results.length - failed, failed, results };
+  }
+
+  /**
+   * 批量收货（用户需求 2026-10-20）：逐笔复用 `confirm()`，不另写库存逻辑。
+   *
+   * 每张单仍是**独立事务**（整单入账或整单回滚），超收校验、采购单已收数量
+   * 累加、移动平均成本、提交后库存事件广播全部沿用单笔规则。单笔失败只记录
+   * 结果、不拖垮整批（与批量删除/批量外部履约同约定，AGENTS §36）；已确认的
+   * 单据由 `confirm()` 幂等重放并标记 `idempotentReplay`，绝不重复入账。
+   */
+  async confirmBatch(
+    ids: string[],
+    operator: OperatorContext,
+  ): Promise<PurchaseBatchConfirmResultDto> {
+    const results: PurchaseBatchConfirmItemResultDto[] = [];
+    for (const id of new Set(ids)) {
+      const receipt = await this.repository.findById(id);
+      try {
+        const outcome = await this.confirm(id, operator);
+        results.push({
+          id,
+          code: outcome.receiptNo ?? receipt?.receiptNo ?? null,
+          ok: true,
+          errorCode: null,
+          message: null,
+          idempotentReplay: outcome.idempotentReplay === true,
+        });
+      } catch (error: unknown) {
+        results.push({
+          id,
+          code: receipt?.receiptNo ?? null,
+          ok: false,
+          errorCode: error instanceof DomainError ? error.code : 'PURCHASE_RECEIPT_CONFIRM_FAILED',
+          message: error instanceof Error ? error.message : String(error),
+          idempotentReplay: false,
         });
       }
     }

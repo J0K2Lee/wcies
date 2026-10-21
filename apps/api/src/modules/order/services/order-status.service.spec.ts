@@ -67,6 +67,7 @@ function buildService(input: {
   order: OrderEntity;
   items: OrderItemEntity[];
   activePickingItems?: number;
+  lastStatusOtherThanException?: string | null;
 }) {
   const transaction = vi
     .fn()
@@ -80,7 +81,10 @@ function buildService(input: {
     findByOrderId: vi.fn().mockResolvedValue(input.items),
   } as unknown as OrderItemRepository;
   const insert = vi.fn().mockResolvedValue(undefined);
-  const historyRepo = { insert } as unknown as OrderStatusHistoryRepository;
+  const historyRepo = {
+    insert,
+    findLastStatusOtherThan: vi.fn().mockResolvedValue(input.lastStatusOtherThanException ?? null),
+  } as unknown as OrderStatusHistoryRepository;
   const countActivePickingItems = vi.fn().mockResolvedValue(input.activePickingItems ?? 0);
   const pickingState = { countActivePickingItems } as unknown as OrderPickingStatePort;
   const service = new OrderStatusService(
@@ -197,6 +201,50 @@ describe('OrderStatusService rollup (orders.md §7)', () => {
     await expect(
       service.recomputeOrderStatus('order-1', { userId: null, username: 't' }, 'r'),
     ).resolves.toBe('READY_TO_PICK');
+  });
+
+  it('FAILED 行已被释放（外部履约/取消）不再把已发货订单翻回 EXCEPTION（2026-10-20）', async () => {
+    // 现实来源 ORD00000065：行从未映射（FAILED），运营用「标记外部履约」
+    // 把订单按平台事实置 SHIPPED，行随之 RELEASED。此后任何一次 rollup
+    // 重算都被旧规则按「存在 FAILED 行」判回 EXCEPTION —— 状态倒退。
+    const released = buildService({
+      order: makeOrder('SHIPPED'),
+      items: [makeItem('RELEASED', 'FAILED')],
+    });
+    await expect(
+      released.service.recomputeOrderStatus('order-1', { userId: null, username: 't' }, 'r'),
+    ).resolves.toBe('SHIPPED');
+
+    const external = buildService({
+      order: makeOrder('SHIPPED'),
+      items: [makeItem('EXTERNAL_FULFILLED', 'FAILED')],
+    });
+    await expect(
+      external.service.recomputeOrderStatus('order-1', { userId: null, username: 't' }, 'r'),
+    ).resolves.toBe('SHIPPED');
+  });
+
+  it('未释放的 FAILED 行仍然阻塞（映射异常不能被静默忽略）', async () => {
+    const { service } = buildService({
+      order: makeOrder('NEW'),
+      items: [makeItem('PENDING', 'FAILED')],
+    });
+    await expect(
+      service.recomputeOrderStatus('order-1', { userId: null, username: 't' }, 'r'),
+    ).resolves.toBe('EXCEPTION');
+  });
+
+  it('EXCEPTION 前提消失时恢复到历史中的真实状态（SHIPPED），而不是 NEW', async () => {
+    // 已被 2026-10-20 旧规则误判回 EXCEPTION 的订单，在映射修复/同步再遇时
+    // 必须回到 SHIPPED；回落 NEW 会把已发货订单塞回「待处理」。
+    const { service } = buildService({
+      order: makeOrder('EXCEPTION'),
+      items: [makeItem('RELEASED', 'MAPPED')],
+      lastStatusOtherThanException: 'SHIPPED',
+    });
+    await expect(
+      service.recomputeOrderStatus('order-1', { userId: null, username: 't' }, 'r'),
+    ).resolves.toBe('SHIPPED');
   });
 
   it('CANCELLED is sticky - no recompute, no history', async () => {

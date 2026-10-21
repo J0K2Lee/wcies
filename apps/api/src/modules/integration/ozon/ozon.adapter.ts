@@ -5,6 +5,7 @@ import {
   PlatformCredentialContext,
   PlatformLabelFile,
   PlatformListingRaw,
+  PlatformOrderLabelFile,
   PlatformOrderRaw,
   PlatformReturnRaw,
   PlatformShipmentPreparation,
@@ -24,6 +25,7 @@ import { mapProductImages } from './ozon-product-image.mapper';
 import {
   OzonProductAttributesResponse,
   OzonProductInfoItem,
+  OzonProductInfoListResponse,
   OzonProductListItem,
   OzonRfbsReturn,
 } from './types/api.types';
@@ -137,6 +139,63 @@ export class OzonAdapter implements PlatformAdapter {
       ? { kind: 'OZON_LISTING', lastId: result.last_id }
       : null;
     return { items, nextCursor, hasMore };
+  }
+
+  /**
+   * 定向读取单个变体（2026-10-20，订单行按需补链接）：订单行已带平台标识，
+   * 只补「本地镜像缺这一条」，不做全量遍历。
+   *
+   * /v3/product/info/list 支持 offer_id 与 sku 两种入参（图片富化自
+   * 2026-09-17 起在生产用 sku 入参，已验证）。优先用不可变的 sku；没有 sku
+   * 时才退回 offer_id。一次点击最多一次平台调用。
+   */
+  async fetchListingVariant(
+    context: StoreContext,
+    identifiers: {
+      platformSkuId?: string | null;
+      offerId?: string | null;
+      platformProductId?: string | null;
+    },
+  ): Promise<PlatformListingRaw | null> {
+    const auth = parseAuth(context.credential, context.storeId);
+    const skuRaw = identifiers.platformSkuId?.trim() ?? '';
+    const sku =
+      /^[1-9]\d*$/.test(skuRaw) && Number.isSafeInteger(Number(skuRaw)) ? Number(skuRaw) : null;
+    const offerRaw = identifiers.offerId?.trim() ?? '';
+
+    let response: OzonProductInfoListResponse;
+    if (sku !== null) {
+      response = await this.client.productInfoList(auth, context.storeId, [], [sku]);
+    } else if (offerRaw !== '') {
+      response = await this.client.productInfoList(auth, context.storeId, [offerRaw]);
+    } else {
+      return null;
+    }
+    if (
+      !Array.isArray(response?.items) ||
+      response.items.some(
+        (info: unknown) => typeof (info as OzonProductInfoItem | null)?.id !== 'number',
+      )
+    ) {
+      throw malformedInfoResponse(context.storeId);
+    }
+    // Array.isArray 把 readonly 数组收窄成 any[]，与 fetchProductInfos 一样
+    // 用显式谓词过滤回真实类型（AGENTS §63：不让 any 往下游流）。
+    const infos = response.items.filter(
+      (info: unknown): info is OzonProductInfoItem =>
+        typeof (info as OzonProductInfoItem | null)?.id === 'number',
+    );
+    const info = infos[0];
+    if (info === undefined) {
+      return null;
+    }
+    const offerId =
+      typeof info.offer_id === 'string' && info.offer_id !== '' ? info.offer_id : offerRaw;
+    if (offerId === '') {
+      // 没有 offer_id 就无法建立可对账的变体行（映射台账按它对齐平台）。
+      return null;
+    }
+    return mapProductToListing({ product_id: info.id, offer_id: offerId }, info);
   }
 
   async fetchOrders(
@@ -270,6 +329,20 @@ export class OzonAdapter implements PlatformAdapter {
     return this.shipmentService.fetchShippingLabel(
       { storeId: context.storeId, credential: context.credential },
       order,
+    );
+  }
+
+  /**
+   * Batched label read (用户指示 2026-10-21): one platform call for a chunk of
+   * postings. Caller chunks to the documented 20-posting limit.
+   */
+  async fetchShippingLabels(
+    context: StoreContext,
+    platformOrderIds: readonly string[],
+  ): Promise<readonly PlatformOrderLabelFile[]> {
+    return this.shipmentService.fetchShippingLabels(
+      { storeId: context.storeId, credential: context.credential },
+      platformOrderIds,
     );
   }
 

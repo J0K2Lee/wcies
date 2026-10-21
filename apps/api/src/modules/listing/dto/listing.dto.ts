@@ -630,3 +630,63 @@ export class CategoryImportRequestDto {
   @IsUUID()
   platformId!: string;
 }
+
+/**
+ * 订单行按需补链接（2026-10-20）：映射弹窗本地查不到变体时的兜底。
+ * source=PLATFORM 定向读取平台（一次调用）；source=ORDER_FACTS 用订单
+ * 自带标识本地补建（零平台调用）。
+ */
+export class EnsureListingVariantRequestDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  storeId!: string;
+
+  @ApiPropertyOptional({ example: '6040898074', maxLength: 255 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  platformProductId?: string;
+
+  @ApiPropertyOptional({ example: '6040898074', maxLength: 255 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  platformSkuId?: string;
+
+  @ApiPropertyOptional({ example: 'KASIER标配【4.4mm插头】', maxLength: 255 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  offerId?: string;
+
+  @ApiPropertyOptional({ example: 'ART-001', maxLength: 255 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  sellerSku?: string;
+
+  @ApiPropertyOptional({ enum: ['PLATFORM', 'ORDER_FACTS'], default: 'PLATFORM' })
+  @IsOptional()
+  @IsIn(['PLATFORM', 'ORDER_FACTS'])
+  source?: 'PLATFORM' | 'ORDER_FACTS';
+}
+
+export class EnsureListingVariantResponseDto {
+  @ApiProperty({ example: true })
+  resolved!: boolean;
+
+  @ApiProperty({ format: 'uuid', nullable: true })
+  listingId!: string | null;
+
+  @ApiProperty({ format: 'uuid', nullable: true })
+  variantId!: string | null;
+
+  @ApiProperty({ enum: ['LOCAL', 'PLATFORM', 'ORDER_FACTS'], nullable: true })
+  source!: 'LOCAL' | 'PLATFORM' | 'ORDER_FACTS' | null;
+
+  @ApiProperty({
+    enum: ['NOT_FOUND', 'UNSUPPORTED', 'MISSING_IDENTIFIERS', 'REFRESH_FAILED'],
+    nullable: true,
+  })
+  reason!: 'NOT_FOUND' | 'UNSUPPORTED' | 'MISSING_IDENTIFIERS' | 'REFRESH_FAILED' | null;
+}
