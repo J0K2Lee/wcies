@@ -217,27 +217,6 @@ export class OrderRepository {
   }
 
   /**
-   * Orders owning a MAPPED 缺货 line that no live purchase order covers
-   * (待采购 view, purchase.md §3.5；口径见 orders.md §5——含 MAPPED+PENDING
-   * 卡行，否则「订单头缺货、待采购却看不到」）。`coveredOrderItemIds` comes
-   * from the purchase module's port; this repo owns the order-line facts.
-   */
-  async findOrderIdsWithUncoveredBackorderedLines(
-    coveredOrderItemIds: readonly string[],
-  ): Promise<string[]> {
-    const rows = await this.dataSource.query<Array<{ order_id: string }>>(
-      `SELECT DISTINCT i.order_id
-       FROM order_items i
-       WHERE i.fulfillment_status IN ('BACKORDERED', 'PENDING')
-         AND i.mapping_status = 'MAPPED'
-         AND i.sku_id IS NOT NULL
-         ${coveredOrderItemIds.length > 0 ? 'AND i.id != ALL($1::uuid[])' : ''}`,
-      coveredOrderItemIds.length > 0 ? [[...coveredOrderItemIds]] : [],
-    );
-    return rows.map((row) => row.order_id);
-  }
-
-  /**
    * 加急标记写入（用户指示 2026-10-16，ADR 0022）。只改 is_urgent /
    * urgent_marked_at，从不碰 erp_status（AGENTS.md §38）。取消加急时
    * 传入原有的 urgentMarkedAt 保留最后标记时间。

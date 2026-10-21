@@ -124,7 +124,8 @@ BACKORDERED（不再停留 PENDING）；历史卡行由 Migration 20260917_007 �
 2. 成功：行转 RESERVED、关闭该行 OPEN `ORDER_OUT_OF_STOCK` 异常、重算 rollup。
 3. 失败（仍不足）：保持缺货，不重复刷异常。
 4. 失败自吞：重分配失败不得影响库存主流程（AGENTS.md §10）。
-5. 人工重试（含「已到货」批量重试）继续走 `POST /orders/items/:itemId/retry-allocation`。
+5. 人工重试（单行）继续走 `POST /orders/items/:itemId/retry-allocation`。
+   列表级的「已到货 → 重新分配」批量入口随「已到货」状态一起移除（决策 0023）。
 6. **事件必须在库存事务提交之后广播**（2026-10-17 修复）：监听器用独立连接读
    余额，事务内广播时**本次新建**的余额行对它不可见，会被误判为库存不足——
    表现为「收货后没有自动分配、手动重试才成功」（真实样本 ORD00000219 /
@@ -846,12 +847,20 @@ Sprint 4 在此基础上增加三个原子业务命令（显式 QueryRunner + In
 
 ---
 
-# 17. 订单行采购状态（Sprint 7，派生）
+# 17. 订单行采购覆盖（2026-10-21 决策 0023，派生）
 
-订单行响应携带派生字段 `procurementState ∈ {NOT_ORDERED, ORDERED, ARRIVED}`，
-由采购单明细实时派生，**不落库**（AGENTS.md §13）。派生规则、防重复采购与
-「待采购」筛选语义见 `docs/business-rules/purchase.md` §3.5（单一事实源，
-本文档不重复定义）。未映射 SKU 的行该字段为 NULL。
+订单行响应携带派生字段（均**不落库**，AGENTS.md §13）：
+
+| 字段 | 含义 |
+|---|---|
+| `procurementCoverage` | `COVERED` / `SHORT` / `null`（未映射行或店铺无绑定仓） |
+| `procurementGapQty` | 该 SKU 在该仓的剩余缺口数量（仅 `SHORT` 有值） |
+| `procurementInTransitQty` | 该 SKU 在该仓的在途未收采购总量 |
+| `procurementWarehouseId` | 缺口计算所用的仓（订单店铺绑定仓） |
+
+采购不再挂订单行：需求、在途、缺口与逐行覆盖全部按 `SKU × 目标仓` 现算，
+完整定义见 `docs/business-rules/purchase.md` §3.5（单一事实源，本文档不重复定义）。
+**「已到货」（`ARRIVED`）状态已整体移除。**
 
 ---
 
@@ -917,7 +926,7 @@ ERP 状态与平台物流阶段是两条轴（§1/§38）：ERP 状态保持「�
 
 | chip | 查询 `goodsState` | 判定 |
 |---|---|---|
-| 已采购 | `PURCHASED` | 存在**缺货行**且该行派生采购状态 = `ORDERED`（已下单未收完；**不含 `ARRIVED`**，用户指示 2026-10-19）。由采购模块端口提供行 id，订单仓储只做行事实过滤 |
+| 已采购 | `PURCHASED` | 存在**缺货行**且该行 `procurementCoverage = COVERED`（缺口已被该 SKU 在该仓的在途采购覆盖，决策 0023）。由采购模块端口提供行 id，订单仓储只做行事实过滤 |
 | 待拣货 | `TO_PICK` | 存在行 `fulfillment_status='RESERVED'` |
 | 已打单 | `LABEL_PRINTED` | `label_printed_at IS NOT NULL` 且 `erp_status NOT IN ('SHIPPED','CANCELLED')`（已打印未发货） |
 | 拣货中 | `PICKING` | `erp_status='PICKING'`（该状态由「存在未完成拣货任务」汇总产生，§7） |
@@ -934,15 +943,18 @@ ERP 状态与平台物流阶段是两条轴（§1/§38）：ERP 状态保持「�
 
 ## 行内标记（非筛选）
 
-`缺货 N`、`已采购 N`、`已到货 N`、`映射失败 N`。已采购/已到货取缺货行的
-派生采购状态（`ORDERED` / `ARRIVED`，purchase.md §3.5），与行内徽标同源；
-**已到货 = 采购已收货但该行仍未占到库存**（用户指示 2026-10-19）。
+`缺货 N`、`已采购 N`、`映射失败 N`。已采购取缺货行中 `procurementCoverage =
+COVERED` 的行数（purchase.md §3.5），与行内徽标同源。列表响应字段
+`backorderedCoveredCount` / `backorderedShortCount`。
 
-**采购状态的展示口径（2026-10-19）**：只在行**仍缺货**（`BACKORDERED`/`PENDING`）
-时显示「待采购 / 已采购 / 已到货」；行一旦分配成功（已占用/已拣/已出库/外部履约/
-已释放）就不再显示采购状态，右栏的「创建采购单 / 去收货」入口也一并隐藏。
+**「已到货」已移除（2026-10-21 决策 0023）**：货到仓后库存增加事件直接触发自动
+分配，缺货行当场变成已占用，不会停在"已到货但仍缺货"的中间态；因此列表里不再有
+「已到货 N」与「重新分配 N」按钮。
+
+**采购状态的展示口径（2026-10-19，口径不变）**：只在行**仍缺货**
+（`BACKORDERED`/`PENDING`）时显示采购覆盖；行一旦分配成功（已占用/已拣/已出库/
+外部履约/已释放）就不再显示，右栏的「创建采购单」入口也一并隐藏。
 派生值本身不删除——行回到缺货时会自然重新出现。
-列表响应字段 `backorderedOrderedCount` / `backorderedArrivedCount`。
 
 **口径统一（2026-10-15 修复）**：`缺货 N` 计数、已采购/已到货的取行、待采购
 筛选的行集，全部与 §5「缺货口径」及订单 rollup 同源——`mapping_status='MAPPED'`
@@ -952,16 +964,19 @@ ERP 状态与平台物流阶段是两条轴（§1/§38）：ERP 状态保持「�
 商品列却无缺货徽标、右栏「风险」不渲染、行内也无「重新尝试分配」——整条行级
 链路隐身。三处口径现已与筛选/rollup 对齐。
 
-## 订单行采购入口（订单页右栏操作区，2026-10-16）
+## 订单行采购入口（订单页右栏操作区，2026-10-21 决策 0023）
 
-按行的派生采购状态（purchase.md §3.5）给出互斥入口：
+按行的派生覆盖给出口径：
 
-- `NOT_ORDERED` → **创建采购单**（复用登记采购弹窗，purchase.md §3.4 防重复）；
-- `ORDERED`（已生成有效采购单）→ **去收货**：`POST /purchase-receipts/from-order-item/:orderItemId`
-  从该行关联的有效采购单生成收货草稿（仓库：采购单意向 → 店铺绑定仓兜底；默认库位
-  purchase.md §4.1.1），成功后跳收货单页并打开该草稿（`?receipt=<id>`）。不再显示
-  「创建采购单」，避免对已采购行重复登记；
-- `ARRIVED`（采购已全部到货）→ 无采购动作，仅提示。
+- `SHORT` → **创建采购单**：弹窗预填当前缺口数量，目标仓取该行的
+  `procurementWarehouseId`，请求带 `purpose=REPLENISH`，由后端做缺口守卫
+  （purchase.md §3.4）；数量超过缺口或缺口已被覆盖都会被拒绝；
+- `COVERED` → 按钮禁用，提示"该 SKU 在该仓的缺口已被在途采购覆盖，无需重复采购"；
+- 行已分配（非缺货）→ 无采购入口。
+
+**「去收货」入口下线**：收货不再由订单行发起。收货单只能从采购单生成
+（`POST /purchase-receipts/from-po/:poId` / 批量），且收货仓恒为采购单目标仓
+（purchase.md §4.1.0）。
 
 ---
 

@@ -1,4 +1,7 @@
-import { ProcurementState } from '../../purchase/enums/purchase.constants';
+import {
+  OrderItemProcurementCoverage,
+  ProcurementCoverageState,
+} from '../../purchase/services/procurement-coverage.service';
 
 /**
  * Read surface the order module needs from the purchase module (Sprint 7
@@ -6,31 +9,27 @@ import { ProcurementState } from '../../purchase/enums/purchase.constants';
  * token; both modules use forwardRef (same pattern as ORDER_PICKING_STATE_PORT)
  * because purchase also consumes order public services. The order module
  * must never import purchase repositories (AGENTS.md §9).
+ *
+ * 2026-10-21：采购以「SKU + 仓」为单位，订单行只表达需求与覆盖。旧的
+ * NOT_ORDERED/ORDERED/ARRIVED（按采购单链接派生）已退役。
  */
 export const ORDER_PROCUREMENT_PORT = Symbol('ORDER_PROCUREMENT_PORT');
 
+export type { OrderItemProcurementCoverage, ProcurementCoverageState };
+
 export interface OrderProcurementPort {
   /**
-   * Derived procurement state per order line (purchase.md §3.5): NOT_ORDERED
-   * when no live PO item is linked, ORDERED while received < ordered,
-   * ARRIVED once received >= ordered. Lines absent from the map default to
-   * NOT_ORDERED.
+   * 行级采购覆盖（衍生）：COVERED = 该行被在途采购按优先级覆盖；
+   * SHORT = 未覆盖（缺口 > 0）；不在 map 中的行 = 采购覆盖不适用
+   * （已分配/终态/未映射/店铺无绑定仓）。
    */
-  getProcurementStatesByOrderItemIds(
+  getCoverageByOrderItemIds(
     orderItemIds: readonly string[],
-  ): Promise<Record<string, ProcurementState>>;
+  ): Promise<Record<string, OrderItemProcurementCoverage>>;
 
-  /**
-   * Order-line ids currently linked to a NON-cancelled purchase order. The
-   * order list uses this to power the 待采购 filter (BACKORDERED + MAPPED
-   * lines NOT in this list).
-   */
-  listActiveOrderItemIds(): Promise<readonly string[]>;
+  /** 被在途覆盖的订单行 id（「已采购」筛选）。 */
+  listCoveredItemIds(): Promise<readonly string[]>;
 
-  /**
-   * 采购状态为 ORDERED 的订单行 id（2026-10-19「已采购」筛选）：
-   * 有未取消采购明细且 `SUM(received) < SUM(ordered)`。**不含 ARRIVED**
-   * （用户明确：已到货不算"已采购"筛选）。
-   */
-  listOrderedOrderItemIds(): Promise<readonly string[]>;
+  /** 未被覆盖的缺货行 id（「缺货 / 待采购」筛选）。 */
+  listShortItemIds(): Promise<readonly string[]>;
 }

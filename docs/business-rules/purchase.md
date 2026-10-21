@@ -42,12 +42,13 @@
 ## 3.1 数据要素
 
 ```text
-po_no           业务编号 PO%06d（集中式序号表，作用域 purchase_order）
-supplier_id     供应商（可空）
-source_note     货源说明（可空，一次性网购）
-status          状态机（见 3.2）
-ordered_at      下单（采购）时间；创建时可人工指定，缺省为创建时刻
-expected_at     预计到货（可空，人工填）
+po_no                  业务编号 PO%06d（集中式序号表，作用域 purchase_order）
+receiving_warehouse_id 目标仓（必填，2026-10-21 决策 0023）：货送到哪个仓
+supplier_id            供应商（可空）
+source_note            货源说明（可空，一次性网购）
+status                 状态机（见 3.2）
+ordered_at             下单（采购）时间；创建时可人工指定，缺省为创建时刻
+expected_at            预计到货（可空，人工填）
 remark / created_by / created_at / updated_at
 ```
 
@@ -56,12 +57,16 @@ remark / created_by / created_at / updated_at
 ```text
 po_id           所属采购单
 sku_id          内部 SKU（必填）
-order_item_id   为哪张订单行采购（可空 → 备货采购）
 quantity        采购数量 numeric(18,3)
 unit_cost       单位成本 numeric(18,4)（可空）
 received_quantity  已收货数量（默认 0，只由收货确认累加）
 remark
 ```
+
+`order_item_id` 列保留（历史数据仍可查/回显，AGENTS §99 不删列），但
+**2026-10-21 起不再写入、不再参与任何判定**：采购不再挂订单行，补货语义
+改为「为某 SKU 在某仓补缺口」，归属由 SKU × 目标仓 + 分配优先级实时派生
+（见 §3.5）。
 
 ## 3.2 状态机
 
@@ -86,69 +91,90 @@ ORDERED → PARTIALLY_RECEIVED → RECEIVED
 1. 整单创建在**一个事务**内（表头 + 全部明细），`po_no` 服务端生成。
 2. 仅 `ORDERED` 状态可修改（表头字段与明细数量）；已收货的单不可改数量
    （`PURCHASE_ORDER_INVALID_STATE`）。
-3. 明细 `sku_id` 必须是已存在的内部 SKU；`order_item_id` 可空（备货采购）。
+3. 明细 `sku_id` 必须是已存在的内部 SKU。
 4. `quantity` 必须为正数（最多 3 位小数）。
 5. 创建时可人工指定 `ordered_at`（采购时间），缺省为创建时刻。
-6. 创建时可同时传入可选收货参数 `receipt`：仓库 `warehouseId` 必填，默认库位
-   `defaultBinId` 可选；不传则原行为不变。系统在创建采购单的**同一事务**内，按全部
-   明细的未收数量生成一张关联 `DRAFT` 收货单，逐行预填 `sku / quantity / unit_cost /
-   purchase_order_item_id`，继承供应商与货源，语义与既有 `generateFromPo` 一致；备注为
-   `从采购单 {poNo} 创建时自动生成`。仓库不存在则返回 `WAREHOUSE_NOT_FOUND`，整单不落库；
-   草稿创建失败则采购单与草稿整体回滚，并分别记录成功创建的单据日志。
+6. **目标仓必填（2026-10-21，决策 0023）**：`receiving_warehouse_id` 必填，
+   必须是已存在的仓库（否则 `WAREHOUSE_NOT_FOUND`，整单不落库）。采购单一旦
+   有未取消的收货记录就不能再改目标仓（库存事实落在原仓）。
+   目标仓决定三件事：收货单在哪个仓入库、缺口在哪算、渠道库存补给哪个仓。
+7. **用途（purpose）**：
+   - `STOCK`（默认）：采购单页备货，不校验缺口，同 SKU 可多张并存。
+   - `REPLENISH`：订单页按缺口补货，创建时做缺口校验（见 §3.5）。
+8. 创建时可同时传入可选收货参数 `receipt`：只含默认库位 `defaultBinId`（可选），
+   传 `{}` 即"同时生成收货草稿"。系统在创建采购单的**同一事务**内，按全部明细的
+   未收数量生成一张关联 `DRAFT` 收货单，逐行预填 `sku / quantity / unit_cost /
+   purchase_order_item_id`，继承供应商与货源，语义与既有 `generateFromPo` 一致；
+   备注为 `从采购单 {poNo} 创建时自动生成`。草稿仓库恒为采购单目标仓；草稿创建
+   失败则采购单与草稿整体回滚，并分别记录成功创建的单据日志。
    **自动生成的只是独立草稿，不入账库存、不更新成本；仍可独立编辑，确认收货仍走 §4.3。**
-   本节第 5、6 条规则来源：用户 2026-09-17 人工测试建议。
    库位预填规则见 §4.1.1（决策 0021）：未显式传 `defaultBinId` 时逐 SKU 解析默认库位。
-7. **收货仓库意向回显（2026-09-28，ERP 建议#4）**：创建时传入的 `receipt.warehouseId`
-   同时落到采购单头 `purchase_orders.receiving_warehouse_id`（可空，创建后不可改）。
-   它只是"选过哪个仓库"的意向回显——库存事实仍在收货单上（decision 0013 不变）。
-   用途：① PO 详情展示收货仓库；② 收货页「从采购单生成」入口在请求未显式指定
-   `warehouseId` 时缺省使用该意向仓库；③ 历史数据由迁移按"该 PO 名下所有收货单仓库
-   唯一"回填，冲突/无收货单的 PO 保持 NULL（迁移日志输出计数，不静默猜测）。
-8. **批量生成收货单（2026-10-13，采购单页多选）**：`POST /purchase-receipts/from-po/batch`
-   接受 `{ items: [{ poId, warehouseId? }] }`（单批 ≤50），逐单复用 `generateFromPo`
-   的全部规则（仓库解析：请求 > PO 意向；未收数量预填；只建 DRAFT 不碰库存），
+   规则来源：用户 2026-09-17 人工测试建议。
+9. **批量生成收货单（2026-10-13，采购单页多选）**：`POST /purchase-receipts/from-po/batch`
+   接受 `{ items: [{ poId }] }`（单批 ≤50），逐单复用 `generateFromPo` 的全部规则
+   （收货仓 = 采购单目标仓；未收数量预填；只建 DRAFT 不碰库存），
    **单笔失败只记录结果、不拖垮整批**；返回逐单草稿号/失败明细。
-9. **防重复草稿（2026-10-15，决策 0021）**：`generateFromPo`（含批量与 PO 创建时
-   同步生成）在生成前检查该采购单是否已有**未取消**的收货单——已有 `DRAFT` 时拒绝并
-   返回 `PURCHASE_RECEIPT_DUPLICATE_DRAFT`（409，消息含已有 `PR` 号），引导操作者编辑
-   确认那张草稿；已有 `RECEIVED` 而无 `DRAFT` 时允许（分批到货）；已取消的草稿不计入。
-   原因：两张按同一未收数量预填的草稿先后确认会累加超量，撞 DB CHECK 报不可读的 500。
-10. **订单行「去收货」（2026-10-16，用户需求）**：`POST /purchase-receipts/from-order-item/:orderItemId`
-    ——订单页已采购行（派生采购状态 `ORDERED`）一键收货入口。从该行关联的**有效采购单**
-    （非取消，最新一张）生成收货草稿，规则完全复用 `generateFromPo`（未收数量预填、
-    默认库位 §4.1.1、防重复草稿）。仓库来源：**采购单收货仓库意向优先，否则用该订单
-    店铺的默认作业仓**（`WarehousePlatformBindingService.resolveDefaultWarehouseId`，与
-    订单分配同一规则）；两者皆无 → `PURCHASE_RECEIPT_WAREHOUSE_MISSING`。该行无有效
-    采购单 → `PURCHASE_ORDER_LINE_NOT_ORDERED`（409，引导先登记采购）。生成后前端跳
-    收货单页并打开该草稿（`?receipt=<id>`）。
+10. **防重复草稿（2026-10-15，决策 0021）**：`generateFromPo`（含批量与 PO 创建时
+    同步生成）在生成前检查该采购单是否已有**未取消**的收货单——已有 `DRAFT` 时拒绝并
+    返回 `PURCHASE_RECEIPT_DUPLICATE_DRAFT`（409，消息含已有 `PR` 号），引导操作者编辑
+    确认那张草稿；已有 `RECEIVED` 而无 `DRAFT` 时允许（分批到货）；已取消的草稿不计入。
+    原因：两张按同一未收数量预填的草稿先后确认会累加超量，撞 DB CHECK 报不可读的 500。
 
-## 3.4 防重复采购（后端强制）
+## 3.4 防重复采购（SKU × 仓 缺口守卫，2026-10-21 决策 0023）
 
-为某订单行（`order_item_id`）创建采购明细时，若该行已存在**未取消采购单**的
-明细，拒绝：
+补货采购（`purpose = REPLENISH`）在创建事务内按 `(sku_id, receiving_warehouse_id)`
+重算缺口，并加 **PostgreSQL advisory lock**（键 `po-gap:<skuId>:<warehouseId>`）
+串行化同一缺口上的并发登记，锁内复查后：
+
+| 条件 | 结果 |
+|---|---|
+| `缺口 = 0`（在途已覆盖全部需求） | 拒绝 `PURCHASE_SKU_GAP_COVERED`（409），消息给出需求/在途数量 |
+| `本次数量 > 缺口` | 拒绝 `PURCHASE_ORDER_INVALID_STATE`（409），消息给出缺口 |
+| `0 < 本次数量 ≤ 缺口` | 通过 |
+
+备货采购（`purpose = STOCK`，采购单页发起）不受此限制：同一 SKU 允许多张备货单。
+
+> 取代原「同一订单行重复登记」守卫（`PURCHASE_ORDER_ITEM_ALREADY_ORDERED`）。
+> 原守卫的语义是"一张订单行只允许买一次"，但它无法回答"另一张更早的订单行
+> 抢走了这次采购"——那正是用户 2026-10-21 提出的场景。新守卫以缺口为单位，
+> 天然覆盖重复下单，且不再依赖订单行链接。
+
+## 3.5 订单行采购覆盖（派生，不落库）
+
+`order_items` 不存采购字段，采购单也不挂订单行。覆盖关系完全由 SQL 现算
+（AGENTS.md §13：派生值不得成为第二事实源）。
 
 ```text
-错误码：PURCHASE_ORDER_ITEM_ALREADY_ORDERED（409）
-消息：该订单行已于 <时间> 登记采购（<PO号>）
+需求(SKU, 仓) = 该仓服务店铺下，该 SKU 未分配行（BACKORDERED ∪ PENDING，
+                MAPPED，订单非 CANCELLED/SHIPPED）的数量之和
+在途(SKU, 仓) = 该 SKU + 该目标仓所有未取消采购单的 max(quantity − received, 0) 之和
+缺口          = max(0, 需求 − 在途)
 ```
 
-未关联订单行的备货明细不受此限制（同一 SKU 允许多张备货采购单）。
+**覆盖分配**：在途数量按分配优先级逐行切分，累计量 ≤ 在途即该行 `COVERED`：
 
-## 3.5 订单行采购状态（派生，不落库）
+```text
+is_urgent DESC → platform.priority ASC → shipment_deadline ASC NULLS LAST → item.created_at ASC
+```
 
-`order_items` 不存采购字段。订单行采购状态由采购明细实时派生（AGENTS.md §13）：
+（与 ADR 0022 的库存分配优先级一致：加急 > 平台 > 时限 > 先后。）
 
-| 派生状态 | 判定 | 界面 |
+**行归属仓**：与订单分配同一规则——该订单店铺 `ACTIVE` 绑定中 `priority` 最小、
+非 FBO 优先的那一个（`warehouse_platform_bindings`）。
+
+| 派生覆盖 | 判定 | 界面 |
 |---|---|---|
-| `NOT_ORDERED`（待采购） | 无关联的未取消采购明细 | 红色 + 「登记采购」入口 |
-| `ORDERED`（已采购） | 有关联明细且 `received_quantity < quantity` | 蓝色 + PO 号 / 预计到货 |
-| `ARRIVED`（已到货） | 有关联明细且 `received_quantity >= quantity` | 绿色 + 待入库/已入库 |
+| `COVERED`（已采购） | 该行累计需求 ≤ 该 SKU×仓 在途 | 蓝色「已采购」徽标（仅在缺货行显示） |
+| `SHORT`（仍缺） | 该行累计需求 > 在途 | 显示「缺口 N」+「登记采购」入口 |
 
-- 派生服务由 purchase 模块提供只读查询；order 模块经端口（`ORDER_PROCUREMENT_PORT`）组装，
-  不得 import purchase 的 Repository（AGENTS.md §9）。
-- 未映射 SKU 的订单行（`skuId = NULL`）派生状态为 NULL（无意义）。
-- 「待采购」视图 = 订单列表筛选：存在（`MAPPED` 且 `BACKORDERED` 且派生状态
-  `NOT_ORDERED`）的订单行。
+- 派生服务由 purchase 模块提供只读查询；order 模块经端口
+  （`ORDER_PROCUREMENT_PORT`）组装，不得 import purchase 的 Repository（AGENTS.md §9）。
+- 未映射 SKU 的订单行（`skuId = NULL`）、店铺无绑定仓的行 → 覆盖为 NULL。
+- **不再有「已到货」**：货一到仓，库存增加事件触发自动分配，缺货行直接变成已占用，
+  行随之离开缺货集合。到货不会停在某个中间状态等待人工「重新分配」。
+- 订单列表筛选口径：
+  - 「已采购」= 存在 `COVERED` 的缺货行；
+  - 「待采购」视图（`pendingProcurement=true`）= 存在 `SHORT` 的缺货行。
 
 ---
 
@@ -181,6 +207,20 @@ remark
 ```
 
 支持**分批到货**：一张采购单可对应多张收货单，`received_quantity` 逐张累加。
+
+## 4.1.0 收货仓 = 采购单目标仓（2026-10-21，决策 0023）
+
+从采购单生成收货单（`generateFromPo` / 批量 / 创建采购单时同步生成）时：
+
+1. 收货单 `warehouse_id` **恒等于**采购单的 `receiving_warehouse_id`；
+2. 请求若显式传了不同的仓库 → 拒绝 `PURCHASE_RECEIPT_WAREHOUSE_MISMATCH`（422），
+   不生成草稿；
+3. 前端不再询问仓库，只显示目标仓供确认。
+
+原因：缺口是按 `SKU × 仓` 计算的。货记到 A 仓而缺货发生在 B 仓，账面上"在途已
+覆盖"，实际却发不出货——这个闭环必须由收货仓强制对齐来保证。
+
+直接收货（无来源采购单、手工录入明细）仍可自由选择仓库，它不参与缺口覆盖。
 
 ## 4.1.1 收货默认库位（2026-10-15，决策 0021）
 
@@ -354,15 +394,18 @@ Operation Log
 | `SUPPLIER_IN_USE` | 供应商被采购/收货单引用，不可删除 |
 | `PURCHASE_ORDER_NOT_FOUND` | 采购单不存在 |
 | `PURCHASE_ORDER_INVALID_STATE` | 采购单状态不允许该操作（改数量/取消） |
-| `PURCHASE_ORDER_ITEM_ALREADY_ORDERED` | 同一订单行重复登记采购（防重复采购） |
+| `PURCHASE_SKU_GAP_COVERED` | 补货采购时该 SKU 在该仓已无缺口（在途已覆盖全部需求，2026-10-21 决策 0023） |
 | `PURCHASE_RECEIPT_NOT_FOUND` | 收货单不存在 |
 | `PURCHASE_RECEIPT_INVALID_STATE` | 收货单状态不允许该操作 |
 | `PURCHASE_RECEIPT_EMPTY` | 收货单无明细不可确认 |
 | `PURCHASE_RECEIPT_DUPLICATE_DRAFT` | 采购单已有未取消的收货草稿，拒绝重复生成（决策 0021） |
 | `PURCHASE_RECEIPT_EXCEEDS_ORDERED` | 本次收货数量超出采购未收数量（决策 0021） |
-| `PURCHASE_RECEIPT_WAREHOUSE_MISSING` | 从采购单生成收货单时请求与 PO 意向均未指定仓库（ERP 建议#4）；订单行「去收货」时 PO 意向与店铺绑定仓皆无同样适用 |
-| `PURCHASE_ORDER_LINE_NOT_ORDERED` | 订单行「去收货」但该行无有效采购单（状态过期/PO 已取消），引导先登记采购（2026-10-16） |
-| `WAREHOUSE_NOT_FOUND` | 收货仓库不存在（含创建采购单时可选自动生成草稿） |
+| `PURCHASE_RECEIPT_WAREHOUSE_MISMATCH` | 收货单请求的仓库与采购单目标仓不一致（2026-10-21 决策 0023） |
+| `WAREHOUSE_NOT_FOUND` | 采购单目标仓 / 收货仓库不存在 |
+
+> 已废弃：`PURCHASE_ORDER_ITEM_ALREADY_ORDERED`（被 `PURCHASE_SKU_GAP_COVERED` 取代）、
+> `PURCHASE_RECEIPT_WAREHOUSE_MISSING`、`PURCHASE_ORDER_LINE_NOT_ORDERED`
+> （后两者随「订单行去收货」入口一起下线，2026-10-21）。
 
 统一错误信封（AGENTS.md §66）。
 

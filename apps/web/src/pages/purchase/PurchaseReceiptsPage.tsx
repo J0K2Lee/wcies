@@ -210,7 +210,7 @@ export function PurchaseReceiptsPage() {
   const [items, setItems] = useState<EditorItem[]>([]);
   const [editing, setEditing] = useState<ReceiptDetail | null>(null);
   const [form] = Form.useForm<{ warehouseId: string; sourceNote?: string; remark?: string }>();
-  const [fromPoForm] = Form.useForm<{ poId: string; warehouseId: string }>();
+  const [fromPoForm] = Form.useForm<{ poId: string }>();
   const watchedWarehouseId = Form.useWatch('warehouseId', form);
 
   const tabFilter = RECEIPT_STATUS_TAB_FILTERS[statusTab];
@@ -230,9 +230,7 @@ export function PurchaseReceiptsPage() {
   >('/api/v1/warehouses', { page: 1, pageSize: 100 }, ['warehouses-for-receipt']);
 
   const openPos = useApiQuery<
-    Envelope<
-      Array<{ id: string; poNo: string; status: string; receivingWarehouseId: string | null }>
-    >
+    Envelope<Array<{ id: string; poNo: string; status: string; receivingWarehouseId: string }>>
   >('/api/v1/purchase-orders', { page: 1, pageSize: 100 }, ['pos-for-receipt']);
 
   // One cached detail query shared by the rail (edit entry) and the drawer,
@@ -615,20 +613,16 @@ export function PurchaseReceiptsPage() {
     // 表单字段整体作为 values 传入时含 poId，但 poId 只属于路径参数——
     // 请求体里多带会被后端白名单校验拒绝（property poId should not exist，
     // 2026-09-18 修复）。这里剥掉表单标识字段，只提交 DTO 接受的字段。
-    mutationFn: ({
-      poId,
-      values,
-    }: {
-      poId: string;
-      values: { poId: string; warehouseId: string };
-    }) => {
-      const { poId: _formPoId, ...body } = values;
-      return apiPost<{ id: string; receiptNo: string }>(
+    // 收货仓恒为采购单目标仓（2026-10-21 决策 0023）：请求体不再带 warehouseId，
+    // 前端也不再询问，避免货落到别的仓、缺口却留在原仓。
+    mutationFn: ({ poId }: { poId: string; values: { poId: string } }) =>
+      apiPost<{ id: string; receiptNo: string }>(
         '/api/v1/purchase-receipts/from-po/{poId}',
-        body,
-        { poId },
-      );
-    },
+        {},
+        {
+          poId,
+        },
+      ),
     onSuccess: (result) => {
       void message.success(`已从采购单生成收货单 ${result.receiptNo}（草稿）`);
       setFromPoOpen(false);
@@ -1269,23 +1263,10 @@ export function PurchaseReceiptsPage() {
               options={(openPos.data?.data ?? [])
                 .filter((po) => po.status === 'ORDERED' || po.status === 'PARTIALLY_RECEIVED')
                 .map((po) => ({ value: po.id, label: `${po.poNo}（${po.status}）` }))}
-              onChange={(value: string) => {
-                // 收货仓库自动预填（ERP 建议#4）：PO 创建时选过的仓库直接带出，
-                // 仍可手动改。
-                const po = (openPos.data?.data ?? []).find((row) => row.id === value);
-                fromPoForm.setFieldValue('warehouseId', po?.receivingWarehouseId ?? undefined);
-              }}
             />
           </Form.Item>
-          <Form.Item
-            name="warehouseId"
-            label="收货仓库"
-            rules={[{ required: true, message: '请选择仓库' }]}
-          >
-            <Select options={warehouseOptions} placeholder="选择仓库" />
-          </Form.Item>
           <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
-            将按采购明细的未收数量预填草稿；生成后可在草稿中扫码调整、选库位再确认。
+            将按该采购单的目标仓与未收数量预填草稿；生成后可在草稿中扫码调整、选库位再确认。
           </span>
         </Form>
       </Modal>

@@ -97,10 +97,10 @@ interface OrderListItem {
   itemsCount: number;
   reservedCount: number;
   backorderedCount: number;
-  /** Backordered lines whose live purchase order is registered (dual-axis §2.3). */
-  backorderedOrderedCount: number;
-  /** Backordered lines whose purchase already fully arrived (dual-axis §2.3). */
-  backorderedArrivedCount: number;
+  /** 缺货行中缺口已被在途采购覆盖的行数（决策 0023）。 */
+  backorderedCoveredCount: number;
+  /** 缺货行中仍无在途覆盖（可继续采购）的行数（决策 0023）。 */
+  backorderedShortCount: number;
   pickedCount: number;
   mappingFailedCount: number;
   openExceptionsCount: number;
@@ -130,8 +130,17 @@ interface OrderItem {
   imageSource: 'INTERNAL' | 'PLATFORM' | null;
   fulfillmentStatus: string;
   mappingStatus: string;
-  /** Derived procurement state (purchase.md §3.5); NULL for unmapped lines. */
-  procurementState: string | null;
+  /**
+   * 缺口覆盖（purchase.md §3.5 派生，决策 0023）；未映射行为 null。
+   * COVERED = 该 SKU 在该仓的在途采购已覆盖到此行；SHORT = 仍缺。
+   */
+  procurementCoverage: 'COVERED' | 'SHORT' | null;
+  /** 该 SKU 在该仓的剩余缺口数量（仅 SHORT 有值）。 */
+  procurementGapQty: string | null;
+  /** 该 SKU 在该仓的在途未收采购总量。 */
+  procurementInTransitQty: string | null;
+  /** 缺口计算所用的仓（订单店铺绑定仓）。 */
+  procurementWarehouseId: string | null;
   /** Platform identifiers of the line; present even when mapping FAILED. */
   platformProductId: string | null;
   platformSkuId: string | null;
@@ -257,7 +266,7 @@ const GOODS_STATE_CHIPS: Array<{
     key: 'PURCHASED',
     label: '已采购',
     flow: true,
-    tooltip: '存在缺货行且该行采购状态为「已采购」（已下单未收完；已到货不计）',
+    tooltip: '存在缺货行，且其缺口已被该 SKU 在该仓的在途采购覆盖',
   },
   {
     key: 'TO_PICK',
@@ -310,10 +319,13 @@ const GOODS_STATE_CHIPS: Array<{
   },
 ];
 
+/**
+ * 采购覆盖徽标（2026-10-21 决策 0023）：只标「已采购」= 该 SKU 在该仓的在途
+ * 采购已按分配优先级覆盖到这一行。SHORT 不再单独增加红徽标——它和「缺货」
+ * 几乎总是同时出现，缺口数量在右侧栏与采购弹窗里给出。
+ */
 const PROCUREMENT_META: Record<string, { tone: 'danger' | 'info' | 'success'; label: string }> = {
-  NOT_ORDERED: { tone: 'danger', label: '待采购' },
-  ORDERED: { tone: 'info', label: '已采购' },
-  ARRIVED: { tone: 'success', label: '已到货' },
+  COVERED: { tone: 'info', label: '已采购' },
 };
 
 // ---------------------------------------------------------------------------
@@ -856,8 +868,8 @@ function ExpandedItemBlock({
   const unallocated =
     item.fulfillmentStatus === 'BACKORDERED' || item.fulfillmentStatus === 'PENDING';
   const procurement =
-    unallocated && (item.procurementState === 'ORDERED' || item.procurementState === 'ARRIVED')
-      ? (PROCUREMENT_META[item.procurementState] ?? null)
+    unallocated && item.procurementCoverage === 'COVERED'
+      ? (PROCUREMENT_META[item.procurementCoverage] ?? null)
       : null;
   // 键盘可达（2026-10-17 体检 P2-9）：Enter / 空格 = 点击。
   const interaction = rowInteractionProps({
@@ -959,9 +971,9 @@ function ExpandedItemBlock({
                 tone={procurement.tone}
                 label={procurement.label}
                 hint={
-                  item.procurementState === 'ARRIVED'
-                    ? '该行采购已到货，可在「商品」列点「重新分配」'
-                    : '该行已登记采购，采购未到货'
+                  item.procurementInTransitQty === null
+                    ? '该 SKU 在该仓的在途采购已覆盖这一行'
+                    : `该 SKU 在该仓在途未收 ${Number(item.procurementInTransitQty)}，已覆盖这一行`
                 }
                 showDot={false}
               />
@@ -1090,8 +1102,6 @@ export function OrdersPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   /** 展开区被点中的订单行（侧边栏切换到 SKU 信息视图，用户指示 2026-09-17）。 */
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
-  const [arrivedRetryId, setArrivedRetryId] = useState<string | null>(null);
-  const arrivedRetryLock = useRef(false);
   const [fulfillmentModeFilter, setFulfillmentModeFilter] = useState<string | undefined>();
   // 视图设置（用户指示 2026-09-17）：localStorage 持久化。
   const [viewSettings, setViewSettings] = useState<OrdersViewSettings>(loadViewSettings);
@@ -1497,101 +1507,6 @@ export function OrdersPage() {
     },
     onError: (error: Error) => message.error(`发货失败：${error.message}`),
   });
-
-  // Reuse the existing detail query and its exact key; never retry from list counts.
-  const retryArrivedItems = async (orderId: string) => {
-    try {
-      const queryKey = ['order-detail', orderId];
-      await queryClient.refetchQueries({ queryKey, exact: true }, { throwOnError: true });
-      const current = queryClient.getQueryData<Envelope<OrderDetail>>(queryKey)?.data;
-      if (current === undefined || current.id !== orderId) {
-        message.error('订单明细不可用，请重新展开订单后重试');
-        return;
-      }
-      const items = current.items.filter(
-        (item) => item.fulfillmentStatus === 'BACKORDERED' && item.procurementState === 'ARRIVED',
-      );
-      let succeeded = 0;
-      let backordered = 0;
-      const failures: Array<{ id: string; label: string; message: string }> = [];
-      for (const item of items) {
-        try {
-          const result = await apiPost<{ reserved: boolean; fulfillmentStatus: string }>(
-            '/api/v1/orders/items/{itemId}/retry-allocation',
-            {},
-            { itemId: item.id },
-          );
-          if (result.reserved) {
-            succeeded += 1;
-          } else if (result.fulfillmentStatus === 'BACKORDERED') {
-            backordered += 1;
-          } else {
-            failures.push({
-              id: item.id,
-              label: `第 ${item.lineNo} 行`,
-              message: '未完成分配，请刷新明细核实当前状态',
-            });
-          }
-        } catch (error: unknown) {
-          failures.push({
-            id: item.id,
-            label: `第 ${item.lineNo} 行（${item.skuCode || item.offerId || item.id}）`,
-            message: error instanceof Error ? error.message : '请求失败，请稍后重试',
-          });
-        }
-      }
-      notification.open({
-        type: failures.length > 0 ? 'error' : backordered > 0 ? 'warning' : 'success',
-        title: `成功 ${succeeded} / 仍缺货 ${backordered} / 失败 ${failures.length}`,
-        description: (
-          <div style={{ maxHeight: 300, overflowY: 'auto' }}>
-            <div>
-              订单 {current.platformOrderId}
-              {items.length === 0 ? '：当前没有已到货的缺货行，无需重试' : ''}
-            </div>
-            {failures.map((failure) => (
-              <div key={failure.id}>
-                {failure.label}：{failure.message}
-              </div>
-            ))}
-          </div>
-        ),
-        duration: failures.length > 0 ? 0 : 6,
-      });
-    } catch (error: unknown) {
-      message.error(`加载订单明细失败：${error instanceof Error ? error.message : '请稍后重试'}`);
-    } finally {
-      await Promise.all(
-        ['orders', 'orders-count', 'order-detail', 'exceptions'].map((key) =>
-          queryClient.invalidateQueries({ queryKey: [key] }),
-        ),
-      );
-    }
-  };
-
-  const confirmArrivedRetry = (row: OrderListItem) => {
-    if (arrivedRetryLock.current || retryMutation.isPending) {
-      return;
-    }
-    arrivedRetryLock.current = true;
-    setArrivedRetryId(row.id);
-    const dialog = modal.confirm({
-      title: '重新尝试分配',
-      content: `该订单有 ${row.backorderedArrivedCount} 行货已到货，对其缺货行重新尝试分配？`,
-      okText: '重新分配',
-      cancelText: '取消',
-      maskClosable: false,
-      keyboard: false,
-      onOk: async () => {
-        dialog.update({ cancelButtonProps: { disabled: true }, closable: false });
-        await retryArrivedItems(row.id);
-      },
-      afterClose: () => {
-        arrivedRetryLock.current = false;
-        setArrivedRetryId(null);
-      },
-    });
-  };
 
   // ---- 快速建档（就地复用 SKU映射 的建档弹窗，不再跳转工作台） ----
   // 订单行只有平台标识：先在当前店铺反查所在商品链接（kw 命中变体级标识），
@@ -2055,15 +1970,21 @@ export function OrdersPage() {
     setBatchExternalOpen(true);
   };
 
+  /**
+   * 补货采购（2026-10-21 决策 0023）：按 SKU×仓 缺口下单，不再挂订单行。
+   * 目标仓 = 该行缺口计算所用的仓（订单店铺绑定仓），由后端在做缺口校验时复核；
+   * purpose=REPLENISH 让后端拒绝「缺口已被在途覆盖」或「数量超过缺口」的登记。
+   */
   const registerPurchaseMutation = useMutation({
     mutationFn: (values: { sourceNote?: string; quantity: number; unitCost?: number }) => {
       const item = registerItem as OrderItem;
       return apiPost<{ poNo: string }>('/api/v1/purchase-orders', {
         sourceNote: values.sourceNote,
+        receivingWarehouseId: item.procurementWarehouseId,
+        purpose: 'REPLENISH',
         items: [
           {
             skuId: item.skuId,
-            orderItemId: item.id,
             quantity: String(values.quantity),
             ...(values.unitCost !== undefined && values.unitCost !== null
               ? { unitCost: String(values.unitCost) }
@@ -2079,29 +2000,6 @@ export function OrdersPage() {
       void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
     },
     onError: (error: Error) => message.error(`登记失败：${error.message}`),
-  });
-
-  /**
-   * 去收货（2026-10-16 用户需求）：已采购行（派生状态 ORDERED）直接跳到收货
-   * 流程——后端从该行关联的有效采购单生成收货草稿（收货仓库：采购单意向 →
-   * 店铺绑定仓兜底；默认库位按决策 0021），前端生成后跳收货单页并打开该草稿。
-   * 幂等/防重复草稿由后端保证（已有草稿会 409 提示去编辑那张）。
-   */
-  const createReceiptFromItemMutation = useMutation({
-    mutationFn: (orderItemId: string) =>
-      apiPost<{ id: string; receiptNo: string }>(
-        '/api/v1/purchase-receipts/from-order-item/{orderItemId}',
-        {},
-        { orderItemId },
-      ),
-    onSuccess: (result) => {
-      message.success(`已生成收货单 ${result.receiptNo}（草稿），正在打开…`);
-      void queryClient.invalidateQueries({ queryKey: ['orders'] });
-      void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
-      void queryClient.invalidateQueries({ queryKey: ['purchase-receipts'] });
-      void navigate(`/purchase-receipts?receipt=${result.id}`);
-    },
-    onError: (error: Error) => message.error(`去收货失败：${error.message}`),
   });
 
   const list = query.data?.data ?? [];
@@ -2329,9 +2227,11 @@ export function OrdersPage() {
         selectedItem.fulfillmentStatus === 'BACKORDERED' ||
         selectedItem.fulfillmentStatus === 'PENDING';
       const procurementMeta =
-        !skuUnallocated || selectedItem.procurementState === null
+        !skuUnallocated || selectedItem.procurementCoverage === null
           ? null
-          : (PROCUREMENT_META[selectedItem.procurementState] ?? null);
+          : (PROCUREMENT_META[selectedItem.procurementCoverage] ?? null);
+      const procurementGap =
+        selectedItem.procurementGapQty === null ? null : Number(selectedItem.procurementGapQty);
       return {
         defaultCollapsed: true,
         header: (
@@ -2370,6 +2270,15 @@ export function OrdersPage() {
                       railDetail?.currency,
                     )}`}
                   />
+                  {skuUnallocated && selectedItem.procurementInTransitQty !== null && (
+                    <ContextMetric
+                      label="在途采购"
+                      value={Number(selectedItem.procurementInTransitQty)}
+                    />
+                  )}
+                  {skuUnallocated && procurementGap !== null && procurementGap > 0 && (
+                    <ContextMetric label="缺口" value={procurementGap} />
+                  )}
                   {procurementMeta !== null && (
                     <ContextMetric
                       label="采购状态"
@@ -2398,40 +2307,29 @@ export function OrdersPage() {
               )}
             </ContextSection>
             <ContextAction>
-              {skuUnallocated && selectedItem.procurementState === 'ORDERED' ? (
-                // 已采购且有进行中采购单：不再允许重复登记，给「去收货」——
-                // 从该行的采购单直接生成收货草稿（2026-10-16 用户需求）。
-                <Button
-                  block
-                  type="primary"
-                  loading={createReceiptFromItemMutation.isPending}
-                  onClick={() => createReceiptFromItemMutation.mutate(selectedItem.id)}
-                >
-                  去收货
-                </Button>
-              ) : skuUnallocated ? (
+              {skuUnallocated ? (
+                // 补货采购（2026-10-21 决策 0023）：按 SKU×仓 缺口采购，不再挂订单行。
+                // 缺口已被在途覆盖时禁止重复下单，并说明覆盖它的在途数量。
                 <Button
                   block
                   type="primary"
                   disabled={
-                    selectedItem.skuId === null || selectedItem.procurementState === 'ARRIVED'
+                    selectedItem.skuId === null || selectedItem.procurementCoverage === 'COVERED'
                   }
                   onClick={() => setRegisterItem(selectedItem)}
                 >
                   创建采购单
                 </Button>
               ) : null}
-              {skuUnallocated &&
-                selectedItem.skuId !== null &&
-                selectedItem.procurementState !== null && (
-                  <RailHint>
-                    {selectedItem.procurementState === 'NOT_ORDERED'
-                      ? '为该订单行登记采购；同一订单行重复登记会被系统拒绝。'
-                      : selectedItem.procurementState === 'ORDERED'
-                        ? '该行已登记采购；点「去收货」从对应采购单生成收货单（预填默认库位）。'
-                        : '该行采购已全部到货，无需重复登记。'}
-                  </RailHint>
-                )}
+              {skuUnallocated && selectedItem.skuId !== null && (
+                <RailHint>
+                  {selectedItem.procurementCoverage === 'COVERED'
+                    ? '该 SKU 在该仓的缺口已被在途采购覆盖，无需重复采购。'
+                    : `按 SKU×仓 补缺口：当前缺口 ${
+                        procurementGap === null ? '—' : procurementGap
+                      }，采购数量不得超过缺口。`}
+                </RailHint>
+              )}
               <Button
                 block
                 style={{ marginTop: 8 }}
@@ -2873,7 +2771,6 @@ export function OrdersPage() {
     railDetail,
     retryMutation.isPending,
     createPickingMutation.isPending,
-    createReceiptFromItemMutation.isPending,
     prepareShipmentMutation.isPending,
     shippingLabelMutation.isPending,
     quickShipMutation.isPending,
@@ -2987,10 +2884,10 @@ export function OrdersPage() {
     },
     {
       title: '采购状态',
-      dataIndex: 'procurementState',
-      key: 'procurementState',
-      width: 150,
-      render: (value: string | null, row: OrderItem) => {
+      dataIndex: 'procurementCoverage',
+      key: 'procurementCoverage',
+      width: 170,
+      render: (value: 'COVERED' | 'SHORT' | null, row: OrderItem) => {
         // 仅缺货行显示（用户指示 2026-10-19）：已分配库存后采购状态无意义。
         if (
           value === null ||
@@ -2998,13 +2895,26 @@ export function OrdersPage() {
         ) {
           return '—';
         }
-        const meta = PROCUREMENT_META[value] ?? { tone: 'neutral' as const, label: value };
-        const registerable =
-          value === 'NOT_ORDERED' && row.fulfillmentStatus === 'BACKORDERED' && row.skuId !== null;
+        if (value === 'COVERED') {
+          const meta = PROCUREMENT_META.COVERED;
+          return (
+            <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+              <StatusBadge
+                tone={meta?.tone ?? 'info'}
+                label={meta?.label ?? '已采购'}
+                hint="该 SKU 在该仓的在途采购已覆盖这一行"
+                showDot={false}
+              />
+            </span>
+          );
+        }
+        // SHORT：缺口仍有，可继续采购；直接给出缺口数量，避免再去右栏查。
         return (
           <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-            <StatusBadge tone={meta.tone} label={meta.label} hint={value} showDot={false} />
-            {registerable && (
+            <span style={{ fontSize: 12.5, color: colors.textSecondary }}>
+              缺口 {row.procurementGapQty === null ? '—' : Number(row.procurementGapQty)}
+            </span>
+            {row.skuId !== null && (
               <Button
                 size="small"
                 type="primary"
@@ -3169,7 +3079,7 @@ export function OrdersPage() {
         }
         const distribution = [
           row.backorderedCount > 0 ? `缺货 ${row.backorderedCount}` : null,
-          row.backorderedOrderedCount > 0 ? `已采购 ${row.backorderedOrderedCount}` : null,
+          row.backorderedCoveredCount > 0 ? `已采购 ${row.backorderedCoveredCount}` : null,
           row.reservedCount > 0 ? `已占用 ${row.reservedCount}` : null,
         ].filter((part): part is string => part !== null);
         return (
@@ -3184,33 +3094,6 @@ export function OrdersPage() {
             style={{ minWidth: 0 }}
           >
             <div>{row.itemsCount} 行</div>
-
-            {row.backorderedArrivedCount > 0 && (
-              <div style={{ marginTop: 4 }}>
-                {railDetail?.id === row.id && detailQuery.isSuccess ? (
-                  <Button
-                    size="small"
-                    loading={arrivedRetryId === row.id}
-                    disabled={arrivedRetryId !== null || retryMutation.isPending}
-                    style={{ color: colors.success }}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      confirmArrivedRetry(row);
-                    }}
-                    onDoubleClick={(event) => event.stopPropagation()}
-                  >
-                    重新分配 {row.backorderedArrivedCount}
-                  </Button>
-                ) : (
-                  <span
-                    title="请先展开订单加载明细，再点击重新分配"
-                    style={{ fontSize: 12, color: colors.success }}
-                  >
-                    已到货 {row.backorderedArrivedCount}
-                  </span>
-                )}
-              </div>
-            )}
           </div>
         );
       },
@@ -4118,7 +4001,7 @@ export function OrdersPage() {
       </Drawer>
 
       <Modal
-        title={`登记采购：${registerItem?.skuCode ?? ''} ×${registerItem ? Number(registerItem.quantity) : ''}`}
+        title={`补货采购：${registerItem?.skuCode ?? ''}`}
         open={registerItem !== null}
         onCancel={() => setRegisterItem(null)}
         onOk={() => {
@@ -4137,7 +4020,15 @@ export function OrdersPage() {
           form={registerForm}
           layout="vertical"
           preserve={false}
-          initialValues={{ quantity: registerItem === null ? 1 : Number(registerItem.quantity) }}
+          initialValues={{
+            // 默认买满当前缺口（用户口径：缺口 = 需求 − 在该仓的在途未收）。
+            quantity:
+              registerItem?.procurementGapQty !== null &&
+              registerItem?.procurementGapQty !== undefined &&
+              Number(registerItem.procurementGapQty) > 0
+                ? Number(registerItem.procurementGapQty)
+                : 1,
+          }}
         >
           <span
             style={{
@@ -4147,12 +4038,14 @@ export function OrdersPage() {
               marginBottom: 12,
             }}
           >
-            将为订单行 {registerItem?.id.slice(0, 8)}… 登记采购；同一订单行重复登记会被系统拒绝。
+            按「SKU × 目标仓」补缺口：数量不得超过当前缺口，缺口已被在途采购覆盖时会被系统拒绝。
+            本次采购不绑定具体订单行——到货后由库存分配按优先级自动消化缺货行。
           </span>
           <Form.Item
             name="quantity"
             label="采购数量"
             rules={[{ required: true, message: '请输入采购数量' }]}
+            extra="默认填当前缺口；超过缺口会被拒绝。"
           >
             <InputNumber min={1} style={{ width: '100%' }} />
           </Form.Item>

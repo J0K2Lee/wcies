@@ -47,13 +47,34 @@ export class PurchaseOrderInvalidStateError extends DomainError {
   }
 }
 
-/** Same order line registered for purchase twice (purchase.md §3.4). */
-export class PurchaseOrderItemAlreadyOrderedError extends DomainError {
-  readonly code = 'PURCHASE_ORDER_ITEM_ALREADY_ORDERED';
+/**
+ * 补货采购时该 SKU 在该仓已无缺口（2026-10-21）：在途未收数量已经覆盖全部
+ * 未分配需求。防止同一缺口被重复下单；备货采购（STOCK）不受此限制。
+ */
+export class PurchaseSkuGapCoveredError extends DomainError {
+  readonly code = 'PURCHASE_SKU_GAP_COVERED';
   readonly httpStatus = 409;
 
-  constructor(poNo: string, orderedAt: Date) {
-    super(`该订单行已于 ${orderedAt.toISOString()} 登记采购（${poNo}）`, { poNo });
+  constructor(details: {
+    skuId: string;
+    warehouseId: string;
+    demandQty: string;
+    inTransitQty: string;
+  }) {
+    super(
+      `该 SKU 在该仓的在途采购已覆盖全部缺货（需求 ${details.demandQty}，在途 ${details.inTransitQty}），无需重复采购`,
+      { ...details },
+    );
+  }
+}
+
+/** 收货仓必须与采购单目标仓一致（2026-10-21）。 */
+export class PurchaseReceiptWarehouseMismatchError extends DomainError {
+  readonly code = 'PURCHASE_RECEIPT_WAREHOUSE_MISMATCH';
+  readonly httpStatus = 422;
+
+  constructor(details: { poNo: string; expectedWarehouseId: string; actualWarehouseId: string }) {
+    super(`采购单 ${details.poNo} 的目标仓与收货仓不一致，请在该目标仓收货`, { ...details });
   }
 }
 
@@ -83,35 +104,6 @@ export class PurchaseReceiptEmptyError extends DomainError {
 
   constructor(receiptId: string) {
     super('收货单没有任何明细，不能确认收货', { receiptId });
-  }
-}
-
-/**
- * 从采购单生成收货单时既没有显式指定仓库、PO 上也没有收货仓库意向
- * （2026-09-28，ERP 建议#4：PO 创建时选过的仓库应被缺省使用）。
- */
-export class PurchaseReceiptWarehouseMissingError extends DomainError {
-  readonly code = 'PURCHASE_RECEIPT_WAREHOUSE_MISSING';
-  readonly httpStatus = 422;
-
-  constructor(poNo: string) {
-    super(`采购单 ${poNo} 未指定收货仓库，请先选择收货仓库`, { poNo });
-  }
-}
-
-/**
- * 订单行「去收货」时该行没有关联的有效采购单（2026-10-16）。
- *
- * 「去收货」只在订单行已有进行中采购（派生采购状态 ORDERED）时可用；若该行
- * 实际无 live PO（状态过期/PO 被取消），明确报错引导先登记采购，不落到「生成
- * 空收货单」或其它不可读错误。
- */
-export class OrderLineNotOrderedError extends DomainError {
-  readonly code = 'PURCHASE_ORDER_LINE_NOT_ORDERED';
-  readonly httpStatus = 409;
-
-  constructor(orderItemId: string) {
-    super('该订单行没有进行中的采购单，无法收货；请先登记采购', { orderItemId });
   }
 }
 

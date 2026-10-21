@@ -29,7 +29,7 @@ function buildDetail(
       interceptionPort: { listByOrderId: vi.fn().mockResolvedValue([]) },
       pickingState: { listTasksForOrder: vi.fn().mockResolvedValue([]) },
       exceptionService: { listByReference: vi.fn().mockResolvedValue([]) },
-      procurementPort: { getProcurementStatesByOrderItemIds: vi.fn().mockResolvedValue({}) },
+      procurementPort: { getCoverageByOrderItemIds: vi.fn().mockResolvedValue({}) },
       skuImageService: { listBySku },
     },
   );

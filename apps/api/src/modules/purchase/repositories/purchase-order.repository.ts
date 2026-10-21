@@ -3,7 +3,6 @@ import { DataSource, EntityManager } from 'typeorm';
 import { rawStr } from '../../../common/utils/raw';
 import { PurchaseOrderEntity } from '../entities/purchase-order.entity';
 import { PurchaseOrderItemEntity } from '../entities/purchase-order-item.entity';
-import { ProcurementState } from '../enums/purchase.constants';
 
 export interface PurchaseOrderListFilters {
   keyword?: string;
@@ -93,72 +92,6 @@ export class PurchaseOrderRepository {
     await manager.query(`DELETE FROM purchase_orders WHERE id = $1`, [poId]);
   }
 
-  /**
-   * The live (non-cancelled) purchase item linked to an order line, if any.
-   * Anti-duplicate-ordering relies on this staying consistent with the
-   * creation transaction (purchase.md §3.4/§9).
-   */
-  async findActiveItemByOrderItemId(
-    orderItemId: string,
-    excludePoId?: string,
-  ): Promise<{ item: PurchaseOrderItemEntity; order: PurchaseOrderEntity } | null> {
-    const rows = await this.dataSource.query<
-      Array<{
-        item_id: string;
-        po_no: string;
-        ordered_at: Date;
-        quantity: string;
-        received_quantity: string;
-      }>
-    >(
-      `SELECT i.id AS item_id, po.po_no, po.ordered_at, i.quantity, i.received_quantity
-       FROM purchase_order_items i
-       JOIN purchase_orders po ON po.id = i.po_id
-       WHERE i.order_item_id = $1 AND po.status <> 'CANCELLED'
-         AND ($2::uuid IS NULL OR po.id <> $2::uuid)
-       ORDER BY po.ordered_at DESC
-       LIMIT 1`,
-      [orderItemId, excludePoId ?? null],
-    );
-    const row = rows[0];
-    if (row === undefined) {
-      return null;
-    }
-    return {
-      item: {
-        id: row.item_id,
-        poId: '',
-        skuId: '',
-        orderItemId,
-        quantity: row.quantity,
-        unitCost: null,
-        receivedQuantity: row.received_quantity,
-        remark: null,
-        createdAt: new Date(row.ordered_at),
-        updatedAt: new Date(row.ordered_at),
-      },
-      order: { poNo: row.po_no, orderedAt: new Date(row.ordered_at) } as PurchaseOrderEntity,
-    };
-  }
-
-  /**
-   * Live (non-cancelled) PO header owning the given order line, newest first.
-   * Powers the order rail's「去收货」entry (2026-10-16): an order line's
-   * receipt is generated from its linked PO.
-   */
-  async findActivePoIdByOrderItemId(orderItemId: string): Promise<string | null> {
-    const rows = await this.dataSource.query<Array<{ po_id: string }>>(
-      `SELECT po.id AS po_id
-         FROM purchase_order_items i
-         JOIN purchase_orders po ON po.id = i.po_id
-        WHERE i.order_item_id = $1 AND po.status <> 'CANCELLED'
-        ORDER BY po.ordered_at DESC
-        LIMIT 1`,
-      [orderItemId],
-    );
-    return rows[0]?.po_id ?? null;
-  }
-
   /** Header + items in ONE transaction (purchase.md §3.3). */
   async insertWithItems(
     manager: EntityManager,
@@ -171,7 +104,7 @@ export class PurchaseOrderRepository {
       expectedAt: Date | null;
       remark: string | null;
       createdBy: string | null;
-      receivingWarehouseId: string | null;
+      receivingWarehouseId: string;
     },
     items: Array<{
       skuId: string;
@@ -380,58 +313,6 @@ export class PurchaseOrderRepository {
       skuName: row.sku_name,
       orderNo: row.order_no,
     }));
-  }
-
-  /**
-   * Derived procurement states for order lines (purchase.md §3.5): sums the
-   * linked non-cancelled items; ARRIVED once received >= ordered.
-   */
-  async getProcurementStatesByOrderItemIds(
-    orderItemIds: readonly string[],
-  ): Promise<Record<string, ProcurementState>> {
-    if (orderItemIds.length === 0) {
-      return {};
-    }
-    const rows = await this.dataSource.query<
-      Array<{ order_item_id: string; total_qty: string; received_qty: string }>
-    >(
-      `SELECT i.order_item_id, SUM(i.quantity)::text AS total_qty, SUM(i.received_quantity)::text AS received_qty
-       FROM purchase_order_items i
-       JOIN purchase_orders po ON po.id = i.po_id
-       WHERE po.status <> 'CANCELLED' AND i.order_item_id = ANY($1::uuid[])
-       GROUP BY i.order_item_id`,
-      [orderItemIds as string[]],
-    );
-    const states: Record<string, ProcurementState> = {};
-    for (const row of rows) {
-      states[row.order_item_id] =
-        Number(row.received_qty) >= Number(row.total_qty) ? 'ARRIVED' : 'ORDERED';
-    }
-    return states;
-  }
-
-  /** 采购状态为 ORDERED 的订单行（未收完；不含 ARRIVED），「已采购」筛选用。 */
-  async listOrderedOrderItemIds(): Promise<string[]> {
-    const rows = await this.dataSource.query<Array<{ order_item_id: string }>>(
-      `SELECT i.order_item_id
-         FROM purchase_order_items i
-         JOIN purchase_orders po ON po.id = i.po_id
-        WHERE po.status <> 'CANCELLED' AND i.order_item_id IS NOT NULL
-        GROUP BY i.order_item_id
-       HAVING SUM(i.received_quantity) < SUM(i.quantity)`,
-    );
-    return rows.map((row) => row.order_item_id);
-  }
-
-  /** Order-line ids currently linked to a non-cancelled PO (order list filter). */
-  async listActiveOrderItemIds(): Promise<string[]> {
-    const rows = await this.dataSource.query<Array<{ order_item_id: string }>>(
-      `SELECT DISTINCT i.order_item_id
-       FROM purchase_order_items i
-       JOIN purchase_orders po ON po.id = i.po_id
-       WHERE po.status <> 'CANCELLED' AND i.order_item_id IS NOT NULL`,
-    );
-    return rows.map((row) => row.order_item_id);
   }
 
   /** Recomputes a PO's status from its items' received quantities (T4 calls this). */

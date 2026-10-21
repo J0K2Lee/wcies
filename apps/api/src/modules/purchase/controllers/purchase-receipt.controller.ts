@@ -115,19 +115,6 @@ export class PurchaseReceiptController {
     return ok(await this.receiptService.generateFromPo(poId, dto, operator));
   }
 
-  @Post('from-order-item/:orderItemId')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: '订单行「去收货」：从该行关联的有效采购单生成收货草稿（店铺绑定仓自动定）',
-  })
-  @ApiOkEnvelope(PurchaseReceiptDetailDto)
-  async generateFromOrderItem(
-    @Param('orderItemId') orderItemId: string,
-    @CurrentOperator() operator: OperatorContext,
-  ): Promise<{ success: true; data: PurchaseReceiptDetailDto }> {
-    return ok(await this.receiptService.generateFromOrderItem(orderItemId, operator));
-  }
-
   @Get(':id')
   @ApiOperation({ summary: '收货单详情（确认前预览即此数据）' })
   @ApiOkEnvelope(PurchaseReceiptDetailDto)

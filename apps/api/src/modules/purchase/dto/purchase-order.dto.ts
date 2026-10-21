@@ -14,7 +14,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
-import { PROCUREMENT_STATES, PURCHASE_ORDER_STATUSES } from '../enums/purchase.constants';
+import { PURCHASE_ORDER_STATUSES } from '../enums/purchase.constants';
 
 const POSITIVE_QTY_PATTERN = /^\d{1,15}(\.\d{1,3})?$/;
 const COST_PATTERN = /^\d{1,14}(\.\d{1,4})?$/;
@@ -25,10 +25,6 @@ const asQuantityString = ({ value }: { value: unknown }): string | undefined =>
 
 export class PurchaseOrderItemInputDto {
   @ApiProperty() @IsUUID() skuId!: string;
-  @ApiPropertyOptional({ description: '为哪张订单行采购（可空 = 备货采购）' })
-  @IsOptional()
-  @IsUUID()
-  orderItemId?: string;
   @ApiProperty({ example: '2' })
   @Transform(asQuantityString)
   @Matches(POSITIVE_QTY_PATTERN, { message: '数量必须为正数（最多3位小数）' })
@@ -42,14 +38,25 @@ export class PurchaseOrderItemInputDto {
 }
 
 export class ReceivingOptionDto {
-  @ApiProperty({ description: '收货仓库' }) @IsUUID() warehouseId!: string;
-  @ApiPropertyOptional({ description: '默认收货库位' })
+  @ApiPropertyOptional({ description: '默认收货库位（必须属于采购单目标仓）' })
   @IsOptional()
   @IsUUID()
   defaultBinId?: string;
 }
 
 export class CreatePurchaseOrderRequestDto {
+  @ApiProperty({ description: '收货仓库（采购单的目标仓，必填）', format: 'uuid' })
+  @IsUUID()
+  receivingWarehouseId!: string;
+  @ApiPropertyOptional({
+    enum: ['REPLENISH', 'STOCK'],
+    default: 'STOCK',
+    description:
+      'REPLENISH = 订单页按缺口补货（校验缺口并限购）；STOCK = 采购单页备货（不校验缺口）',
+  })
+  @IsOptional()
+  @IsIn(['REPLENISH', 'STOCK'])
+  purpose?: 'REPLENISH' | 'STOCK';
   @ApiPropertyOptional({
     type: String,
     format: 'date-time',
@@ -96,6 +103,13 @@ export class UpdatePurchaseOrderRequestDto {
   @IsDateString()
   expectedAt?: Date;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) remark?: string;
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: '收货仓库（仅在采购单尚无收货记录时可改）',
+  })
+  @IsOptional()
+  @IsUUID()
+  receivingWarehouseId?: string;
   @ApiPropertyOptional({
     type: [PurchaseOrderItemInputDto],
     description: '整体替换明细（仅 ORDERED 状态）',
@@ -212,9 +226,4 @@ export class PurchaseOrderListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsDateString()
   orderedTo?: Date;
-}
-
-/** Reused by the order module's derived procurement state (purchase.md §3.5). */
-export class ProcurementStateDto {
-  @ApiProperty({ enum: PROCUREMENT_STATES }) state!: string;
 }

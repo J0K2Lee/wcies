@@ -58,7 +58,8 @@ import { OrderController } from './controllers/order.controller';
     ProductModule,
     forwardRef(() => PickingModule),
     forwardRef(() => InterceptionModule),
-    forwardRef(() => PurchaseModule),
+    // 采购覆盖派生（2026-10-21）：采购不再反向依赖订单，无循环，可直接 import。
+    PurchaseModule,
   ],
   controllers: [OrderController],
   providers: [

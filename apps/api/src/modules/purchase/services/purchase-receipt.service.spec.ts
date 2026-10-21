@@ -8,8 +8,6 @@ import { SupplierService } from './supplier.service';
 import { SkuService } from '../../product/services/sku.service';
 import { WarehouseService } from '../../warehouse/services/warehouse.service';
 import { WarehouseBinService } from '../../warehouse/services/warehouse-bin.service';
-import { WarehousePlatformBindingService } from '../../warehouse/services/warehouse-platform-binding.service';
-import { OrderService } from '../../order/services/order.service';
 import { InventoryService } from '../../inventory/services/inventory.service';
 import { InventoryQueryService } from '../../inventory/services/inventory-query.service';
 import { BusinessCodeService } from '../../../infrastructure/business-code/business-code.service';
@@ -19,13 +17,13 @@ import {
   PurchaseReceiptDuplicateDraftError,
   PurchaseReceiptInvalidStateError,
   PurchaseReceiptNotFoundError,
-  PurchaseReceiptWarehouseMissingError,
+  PurchaseReceiptWarehouseMismatchError,
 } from '../errors/purchase-errors';
 
 const operator = { userId: null, username: 'tester' };
 const manager = {} as EntityManager;
 
-function buildPo(overrides: Partial<{ receivingWarehouseId: string | null; status: string }>) {
+function buildPo(overrides: Partial<{ receivingWarehouseId: string; status: string }>) {
   return {
     id: 'po-1',
     poNo: 'PO000001',
@@ -36,19 +34,13 @@ function buildPo(overrides: Partial<{ receivingWarehouseId: string | null; statu
     expectedAt: null,
     remark: null,
     createdBy: null,
-    receivingWarehouseId: overrides.receivingWarehouseId ?? null,
+    receivingWarehouseId: overrides.receivingWarehouseId ?? 'wh-1',
     createdAt: new Date(),
     updatedAt: new Date(),
   };
 }
 
-function setup(
-  po: ReturnType<typeof buildPo>,
-  extras?: {
-    activePoId?: string | null;
-    storeDefaultWarehouseId?: string | null;
-  },
-) {
+function setup(po: ReturnType<typeof buildPo>) {
   const receipt = {
     id: 'receipt-1',
     receiptNo: 'PR000001',
@@ -64,9 +56,6 @@ function setup(
   };
   const poRepository = {
     findById: vi.fn().mockResolvedValue(po),
-    findActivePoIdByOrderItemId: vi
-      .fn()
-      .mockResolvedValue(extras?.activePoId === undefined ? po.id : extras.activePoId),
     findItemsWithRefs: vi.fn().mockResolvedValue([
       {
         item: {
@@ -101,12 +90,6 @@ function setup(
     { getEntityById: vi.fn().mockResolvedValue({}) } as unknown as SkuService,
     warehouse as unknown as WarehouseService,
     binService as unknown as WarehouseBinService,
-    {
-      resolveDefaultWarehouseId: vi.fn().mockResolvedValue(extras?.storeDefaultWarehouseId ?? null),
-    } as unknown as WarehousePlatformBindingService,
-    {
-      getItemFulfillment: vi.fn().mockResolvedValue({ storeId: 'store-1' }),
-    } as unknown as OrderService,
     {} as unknown as InventoryService,
     inventoryQuery as unknown as InventoryQueryService,
     codes as unknown as BusinessCodeService,
@@ -115,17 +98,8 @@ function setup(
   return { service, repository, poRepository, warehouse, binService, inventoryQuery, log };
 }
 
-describe('generateFromPo warehouse resolution (ERP 建议#4)', () => {
-  it('uses the explicit request warehouse when given', async () => {
-    const ctx = setup(buildPo({ receivingWarehouseId: 'wh-po' }));
-    await ctx.service.generateFromPo('po-1', { warehouseId: 'wh-req' }, operator);
-    expect(ctx.warehouse.getEntityById).toHaveBeenCalledWith('wh-req');
-    expect(ctx.repository.insertWithItems.mock.calls[0]?.[1]).toMatchObject({
-      warehouseId: 'wh-req',
-    });
-  });
-
-  it('falls back to the PO receiving-warehouse intent when request omits it', async () => {
+describe('generateFromPo 收货仓 = 采购单目标仓（决策 0023）', () => {
+  it('请求未指定仓库时使用采购单目标仓', async () => {
     const ctx = setup(buildPo({ receivingWarehouseId: 'wh-po' }));
     await ctx.service.generateFromPo('po-1', {}, operator);
     expect(ctx.warehouse.getEntityById).toHaveBeenCalledWith('wh-po');
@@ -134,49 +108,19 @@ describe('generateFromPo warehouse resolution (ERP 建议#4)', () => {
     });
   });
 
-  it('rejects with a domain error when neither request nor PO carries a warehouse', async () => {
-    const ctx = setup(buildPo({ receivingWarehouseId: null }));
-    await expect(ctx.service.generateFromPo('po-1', {}, operator)).rejects.toBeInstanceOf(
-      PurchaseReceiptWarehouseMissingError,
-    );
-    expect(ctx.repository.insertWithItems).not.toHaveBeenCalled();
-  });
-});
-
-describe('generateFromOrderItem 订单行「去收货」(2026-10-16)', () => {
-  it('PO 有收货仓库意向时直接用其仓库', async () => {
+  it('请求仓库与目标仓一致时放行', async () => {
     const ctx = setup(buildPo({ receivingWarehouseId: 'wh-po' }));
-    await ctx.service.generateFromOrderItem('item-1', operator);
-    expect(ctx.warehouse.getEntityById).toHaveBeenCalledWith('wh-po');
+    await ctx.service.generateFromPo('po-1', { warehouseId: 'wh-po' }, operator);
     expect(ctx.repository.insertWithItems.mock.calls[0]?.[1]).toMatchObject({
       warehouseId: 'wh-po',
     });
   });
 
-  it('PO 无收货仓库意向时回退店铺绑定仓（用户拍板）', async () => {
-    const ctx = setup(buildPo({ receivingWarehouseId: null }), {
-      storeDefaultWarehouseId: 'wh-store',
-    });
-    await ctx.service.generateFromOrderItem('item-1', operator);
-    expect(ctx.warehouse.getEntityById).toHaveBeenCalledWith('wh-store');
-    expect(ctx.repository.insertWithItems.mock.calls[0]?.[1]).toMatchObject({
-      warehouseId: 'wh-store',
-    });
-  });
-
-  it('无有效采购单时报 ORDER_LINE_NOT_ORDERED，不生成草稿', async () => {
-    const ctx = setup(buildPo({}), { activePoId: null });
-    await expect(ctx.service.generateFromOrderItem('item-1', operator)).rejects.toMatchObject({
-      code: 'PURCHASE_ORDER_LINE_NOT_ORDERED',
-    });
-    expect(ctx.repository.insertWithItems).not.toHaveBeenCalled();
-  });
-
-  it('PO 意向与店铺绑定仓皆无时报 WAREHOUSE_MISSING', async () => {
-    const ctx = setup(buildPo({ receivingWarehouseId: null }), { storeDefaultWarehouseId: null });
-    await expect(ctx.service.generateFromOrderItem('item-1', operator)).rejects.toBeInstanceOf(
-      PurchaseReceiptWarehouseMissingError,
-    );
+  it('请求仓库与目标仓不一致时拒绝，不生成草稿', async () => {
+    const ctx = setup(buildPo({ receivingWarehouseId: 'wh-po' }));
+    await expect(
+      ctx.service.generateFromPo('po-1', { warehouseId: 'wh-other' }, operator),
+    ).rejects.toBeInstanceOf(PurchaseReceiptWarehouseMismatchError);
     expect(ctx.repository.insertWithItems).not.toHaveBeenCalled();
   });
 });
@@ -187,7 +131,7 @@ describe('generateFromPosBatch (2026-10-13 采购单页多选批量)', () => {
     const single = vi
       .spyOn(ctx.service, 'generateFromPo')
       .mockResolvedValueOnce({ id: 'r-1', receiptNo: 'PR000001' } as never)
-      .mockRejectedValueOnce(new PurchaseReceiptWarehouseMissingError('PO000002'));
+      .mockRejectedValueOnce(new PurchaseReceiptDuplicateDraftError('PO000002', 'PR000002'));
     vi.mocked(ctx.poRepository.findById)
       .mockResolvedValueOnce({ id: 'po-1', poNo: 'PO000001' })
       .mockResolvedValueOnce({ id: 'po-2', poNo: 'PO000002' });
@@ -208,7 +152,7 @@ describe('generateFromPosBatch (2026-10-13 采购单页多选批量)', () => {
     expect(result.results[1]).toMatchObject({
       poNo: 'PO000002',
       ok: false,
-      code: 'PURCHASE_RECEIPT_WAREHOUSE_MISSING',
+      code: 'PURCHASE_RECEIPT_DUPLICATE_DRAFT',
     });
   });
 
@@ -366,10 +310,6 @@ describe('confirm over-receipt guard (决策 0021)', () => {
       {} as unknown as SkuService,
       { getEntityById: vi.fn().mockResolvedValue({ id: 'wh-1' }) } as unknown as WarehouseService,
       {} as unknown as WarehouseBinService,
-      {
-        resolveDefaultWarehouseId: vi.fn().mockResolvedValue(null),
-      } as unknown as WarehousePlatformBindingService,
-      { getItemFulfillment: vi.fn() } as unknown as OrderService,
       inventoryService as unknown as InventoryService,
       {} as unknown as InventoryQueryService,
       {} as unknown as BusinessCodeService,

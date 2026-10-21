@@ -1,7 +1,6 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { OperationLogModule } from '../operation-log/operation-log.module';
-import { OrderModule } from '../order/order.module';
 import { ProductModule } from '../product/product.module';
 import { WarehouseModule } from '../warehouse/warehouse.module';
 import { InventoryModule } from '../inventory/inventory.module';
@@ -16,6 +15,7 @@ import { PurchaseReceiptRepository } from './repositories/purchase-receipt.repos
 import { SupplierService } from './services/supplier.service';
 import { PurchaseOrderService } from './services/purchase-order.service';
 import { PurchaseReceiptService } from './services/purchase-receipt.service';
+import { ProcurementCoverageService } from './services/procurement-coverage.service';
 import { SupplierController } from './controllers/supplier.controller';
 import { PurchaseOrderController } from './controllers/purchase-order.controller';
 import { PurchaseReceiptController } from './controllers/purchase-receipt.controller';
@@ -28,9 +28,9 @@ import { ORDER_PROCUREMENT_PORT } from '../order/ports/order-procurement.port';
  * (receiveStockInTx) - never a direct inventory_balances write.
  * BusinessCodeService arrives via the global BusinessCodeModule.
  *
- * forwardRef pairing with OrderModule (same pattern as Picking/Interception):
- * purchase consumes order public services while the order module consumes
- * the ORDER_PROCUREMENT_PORT implemented here.
+ * 采购不再反向依赖订单（2026-10-21）：采购按 SKU×仓补缺口，不再挂在订单行上，
+ * 因此没有 purchase → order 的引用。订单模块单向消费本模块提供的
+ * ORDER_PROCUREMENT_PORT（覆盖派生结果），不再需要 forwardRef。
  */
 @Module({
   imports: [
@@ -45,7 +45,6 @@ import { ORDER_PROCUREMENT_PORT } from '../order/ports/order-procurement.port';
     WarehouseModule,
     InventoryModule,
     OperationLogModule,
-    forwardRef(() => OrderModule),
   ],
   controllers: [SupplierController, PurchaseOrderController, PurchaseReceiptController],
   providers: [
@@ -55,6 +54,7 @@ import { ORDER_PROCUREMENT_PORT } from '../order/ports/order-procurement.port';
     PurchaseOrderRepository,
     PurchaseReceiptService,
     PurchaseReceiptRepository,
+    ProcurementCoverageService,
     { provide: ORDER_PROCUREMENT_PORT, useExisting: PurchaseOrderService },
   ],
   exports: [SupplierService, PurchaseOrderService, PurchaseReceiptService, ORDER_PROCUREMENT_PORT],

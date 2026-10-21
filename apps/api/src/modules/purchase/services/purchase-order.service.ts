@@ -13,14 +13,12 @@ import {
 import { BusinessCodeService } from '../../../infrastructure/business-code/business-code.service';
 import { SkuService } from '../../product/services/sku.service';
 import { SkuNotFoundError } from '../../product/errors/sku-errors';
-import { OrderService } from '../../order/services/order.service';
 import { formatQty, parseQty } from '../../../common/utils/quantity';
 import { PurchaseOrderEntity } from '../entities/purchase-order.entity';
-import { ProcurementState } from '../enums/purchase.constants';
 import {
   PurchaseOrderInvalidStateError,
-  PurchaseOrderItemAlreadyOrderedError,
   PurchaseOrderNotFoundError,
+  PurchaseSkuGapCoveredError,
   SupplierNotFoundError,
 } from '../errors/purchase-errors';
 import {
@@ -30,12 +28,15 @@ import {
 import { SupplierService } from './supplier.service';
 import { PurchaseReceiptService } from './purchase-receipt.service';
 import {
+  OrderItemProcurementCoverage,
+  ProcurementCoverageService,
+} from './procurement-coverage.service';
+import {
   CreatePurchaseOrderRequestDto,
   PurchaseOrderDetailDto,
   PurchaseOrderItemInputDto,
   PurchaseOrderListItemDto,
   PurchaseOrderListQueryDto,
-  ReceivingOptionDto,
   UpdatePurchaseOrderRequestDto,
 } from '../dto/purchase-order.dto';
 import { offsetOf } from '../../../common/dto/pagination.dto';
@@ -59,12 +60,12 @@ export class PurchaseOrderService {
     private readonly repository: PurchaseOrderRepository,
     private readonly supplierService: SupplierService,
     private readonly skuService: SkuService,
-    private readonly orderService: OrderService,
     private readonly businessCode: BusinessCodeService,
     private readonly operationLog: OperationLogService,
     private readonly receiptRepository: PurchaseReceiptRepository,
     private readonly warehouseService: WarehouseService,
     private readonly receiptService: PurchaseReceiptService,
+    private readonly coverageService: ProcurementCoverageService,
   ) {}
 
   // --------------------------------------------------------------------------
@@ -78,11 +79,9 @@ export class PurchaseOrderService {
     await this.assertHeaderRefs(dto.supplierId);
     await this.assertItemsValid(dto.items);
 
-    if (
-      dto.receipt &&
-      (await this.warehouseService.getEntityById(dto.receipt.warehouseId)) === null
-    ) {
-      throw new WarehouseNotFoundError(dto.receipt.warehouseId);
+    // 目标仓（2026-10-21）：采购单必填收货仓库；收货/库位/覆盖都以它为准。
+    if ((await this.warehouseService.getEntityById(dto.receivingWarehouseId)) === null) {
+      throw new WarehouseNotFoundError(dto.receivingWarehouseId);
     }
 
     // 默认收货库位（决策 0021）：与 generateFromPo 同源——逐 SKU 取现存货位，
@@ -91,7 +90,7 @@ export class PurchaseOrderService {
     const receiptBins = new Map<string, string | null>();
     if (dto.receipt) {
       const resolved = await this.receiptService.resolveDefaultReceiptBins(
-        dto.receipt.warehouseId,
+        dto.receivingWarehouseId,
         dto.receipt.defaultBinId,
         dto.items.map((item) => item.skuId),
         operator,
@@ -102,18 +101,12 @@ export class PurchaseOrderService {
     }
 
     const { created, receipt } = await this.dataSource.transaction(async (manager) => {
-      // Anti-duplicate guard INSIDE the creation flow (purchase.md §3.4):
-      // a live PO item linked to the same order line refuses this create.
-      for (const item of dto.items) {
-        if (item.orderItemId === undefined) {
-          continue;
-        }
-        const existing = await this.repository.findActiveItemByOrderItemId(item.orderItemId);
-        if (existing !== null) {
-          throw new PurchaseOrderItemAlreadyOrderedError(
-            existing.order.poNo,
-            new Date(existing.order.orderedAt),
-          );
+      // 补货采购（订单页发起）：按 SKU×仓 缺口守卫，而不是按订单行链接。
+      // 同一 (sku, warehouse) 的并发创建用 advisory lock 串行化，锁内重算缺口，
+      // 避免两人同时各买一份（2026-10-21）。
+      if ((dto.purpose ?? 'STOCK') === 'REPLENISH') {
+        for (const item of dto.items) {
+          await this.assertReplenishGap(manager, item, dto.receivingWarehouseId);
         }
       }
       const poNo = await this.businessCode.nextPurchaseOrderNo();
@@ -128,19 +121,18 @@ export class PurchaseOrderService {
           expectedAt: dto.expectedAt ?? null,
           remark: dto.remark ?? null,
           createdBy: operator.userId,
-          // 收货仓库意向回显（ERP 建议#4）：与收货草稿同源同值。
-          receivingWarehouseId: dto.receipt?.warehouseId ?? null,
+          receivingWarehouseId: dto.receivingWarehouseId,
         },
         dto.items.map((item) => ({
           skuId: item.skuId,
-          orderItemId: item.orderItemId ?? null,
+          orderItemId: null,
           quantity: formatQty(parseQty(item.quantity)),
           unitCost: item.unitCost ?? null,
           remark: item.remark ?? null,
         })),
       );
       const receipt = dto.receipt
-        ? await this.createReceiptDraft(manager, created, dto.receipt, receiptBins, operator)
+        ? await this.createReceiptDraft(manager, created, receiptBins, operator)
         : null;
       return { created, receipt };
     });
@@ -193,6 +185,19 @@ export class PurchaseOrderService {
     if (dto.items !== undefined) {
       await this.assertItemsValid(dto.items);
     }
+    if (dto.receivingWarehouseId !== undefined) {
+      if ((await this.warehouseService.getEntityById(dto.receivingWarehouseId)) === null) {
+        throw new WarehouseNotFoundError(dto.receivingWarehouseId);
+      }
+      // 已发生收货的采购单不允许改目标仓（库存事实已经落在原仓）。
+      const receipts = await this.receiptRepository.findActiveByPurchaseOrderId(id);
+      if (receipts.some((row) => row.status !== 'CANCELLED')) {
+        throw new PurchaseOrderInvalidStateError('采购单已发生收货，不能修改目标仓', {
+          poNo: existing.poNo,
+          receivingWarehouseId: existing.receivingWarehouseId,
+        });
+      }
+    }
 
     const before = this.snapshot(existing);
     await this.dataSource.transaction(async (manager) => {
@@ -201,30 +206,21 @@ export class PurchaseOrderService {
       if (dto.sourceNote !== undefined) patch.sourceNote = dto.sourceNote?.trim() || null;
       if (dto.expectedAt !== undefined) patch.expectedAt = dto.expectedAt ?? null;
       if (dto.remark !== undefined) patch.remark = dto.remark ?? null;
+      if (dto.receivingWarehouseId !== undefined) {
+        patch.receivingWarehouseId = dto.receivingWarehouseId;
+      }
       if (Object.keys(patch).length > 0) {
         await this.repository.updateHeader(manager, id, patch);
       }
       if (dto.items !== undefined) {
-        // Re-run the duplicate guard against OTHER POs (own items are being
-        // replaced, so they must not collide with themselves).
-        for (const item of dto.items) {
-          if (item.orderItemId === undefined) {
-            continue;
-          }
-          const collision = await this.repository.findActiveItemByOrderItemId(item.orderItemId, id);
-          if (collision !== null) {
-            throw new PurchaseOrderItemAlreadyOrderedError(
-              collision.order.poNo,
-              new Date(collision.order.orderedAt),
-            );
-          }
-        }
+        // 2026-10-21：采购不再挂订单行，旧的「同一订单行重复登记」守卫已移除；
+        // 补采购的准入由 SKU×仓 缺口在创建时判定。
         await this.repository.replaceItems(
           manager,
           id,
           dto.items.map((item) => ({
             skuId: item.skuId,
-            orderItemId: item.orderItemId ?? null,
+            orderItemId: null,
             quantity: formatQty(parseQty(item.quantity)),
             unitCost: item.unitCost ?? null,
             remark: item.remark ?? null,
@@ -451,26 +447,21 @@ export class PurchaseOrderService {
   }
 
   // --------------------------------------------------------------------------
-  // Order-module port (purchase.md §3.5): derived procurement state
+  // Order-module port (2026-10-21): SKU×仓 采购覆盖（不再按订单行链接）
   // --------------------------------------------------------------------------
 
-  async getProcurementStatesByOrderItemIds(
+  async getCoverageByOrderItemIds(
     orderItemIds: readonly string[],
-  ): Promise<Record<string, ProcurementState>> {
-    const states = await this.repository.getProcurementStatesByOrderItemIds(orderItemIds);
-    const result: Record<string, ProcurementState> = {};
-    for (const id of orderItemIds) {
-      result[id] = states[id] ?? 'NOT_ORDERED';
-    }
-    return result;
+  ): Promise<Record<string, OrderItemProcurementCoverage>> {
+    return this.coverageService.getCoverageByOrderItemIds(orderItemIds);
   }
 
-  async listOrderedOrderItemIds(): Promise<string[]> {
-    return this.repository.listOrderedOrderItemIds();
+  async listCoveredItemIds(): Promise<string[]> {
+    return this.coverageService.listCoveredItemIds();
   }
 
-  async listActiveOrderItemIds(): Promise<string[]> {
-    return this.repository.listActiveOrderItemIds();
+  async listShortItemIds(): Promise<string[]> {
+    return this.coverageService.listShortItemIds();
   }
 
   // --------------------------------------------------------------------------
@@ -534,7 +525,6 @@ export class PurchaseOrderService {
   private async createReceiptDraft(
     manager: EntityManager,
     po: PurchaseOrderEntity,
-    option: ReceivingOptionDto,
     binsBySku: Map<string, string | null>,
     operator: OperatorContext,
   ): Promise<PurchaseReceiptEntity> {
@@ -548,7 +538,7 @@ export class PurchaseOrderService {
         purchaseOrderId: po.id,
         supplierId: po.supplierId,
         sourceNote: po.sourceNote,
-        warehouseId: option.warehouseId,
+        warehouseId: po.receivingWarehouseId,
         status: 'DRAFT',
         remark: `从采购单 ${po.poNo} 创建时自动生成`,
         createdBy: operator.userId,
@@ -579,11 +569,35 @@ export class PurchaseOrderService {
       if ((await this.skuService.getEntityById(item.skuId)) === null) {
         throw new SkuNotFoundError(item.skuId);
       }
-      if (item.orderItemId !== undefined) {
-        // Existence + shape check through the order module's public API
-        // (never the order repositories, AGENTS.md §9).
-        await this.orderService.getItemFulfillment(item.orderItemId);
-      }
+    }
+  }
+
+  /**
+   * 补货采购（REPLENISH）的准入：按 SKU×仓 缺口判断，不看订单行链接。
+   * 锁内重算，防止并发各买一份；数量不得超过缺口。
+   */
+  private async assertReplenishGap(
+    manager: EntityManager,
+    item: PurchaseOrderItemInputDto,
+    warehouseId: string,
+  ): Promise<void> {
+    await manager.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [
+      `po-gap:${item.skuId}:${warehouseId}`,
+    ]);
+    const gap = await this.coverageService.getWarehouseGap(item.skuId, warehouseId, manager);
+    if (parseQty(gap.gapQty) <= 0n) {
+      throw new PurchaseSkuGapCoveredError({
+        skuId: item.skuId,
+        warehouseId,
+        demandQty: gap.demandQty,
+        inTransitQty: gap.inTransitQty,
+      });
+    }
+    if (parseQty(item.quantity) > parseQty(gap.gapQty)) {
+      throw new PurchaseOrderInvalidStateError(
+        `补货数量 ${item.quantity} 超过当前缺口 ${gap.gapQty}（需求 ${gap.demandQty} − 在途 ${gap.inTransitQty}）`,
+        { skuId: item.skuId, warehouseId, gapQty: gap.gapQty },
+      );
     }
   }
 
@@ -602,6 +616,7 @@ export class PurchaseOrderService {
       expectedAt: order.expectedAt,
       remark: order.remark,
       status: order.status,
+      receivingWarehouseId: order.receivingWarehouseId,
     };
   }
 }

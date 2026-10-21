@@ -93,7 +93,10 @@ interface PoFormValues {
   sourceNote?: string;
   orderedAt?: string;
   remark?: string;
-  receiptWarehouseId?: string;
+  /** 采购单目标仓（必填，决策 0023）：收货/库位/缺口覆盖都以它为准。 */
+  receivingWarehouseId: string;
+  /** 登记采购的同时生成收货草稿（可选）。 */
+  createReceiptDraft?: boolean;
   items: ItemFormValues[];
 }
 
@@ -183,16 +186,11 @@ export function PurchaseOrdersPage() {
   const [supplierCreateOpen, setSupplierCreateOpen] = useState(false);
   const [createdSupplier, setCreatedSupplier] = useState<SupplierOption | null>(null);
   const formItems = Form.useWatch('items', form) as ItemFormValues[] | undefined;
-  // 生成收货单（需求 2026-10-09）：PO 未指定收货仓库时弹窗补选。
-  const [receiptWarehouseOpen, setReceiptWarehouseOpen] = useState(false);
-  const [receiptWarehouseForm] = Form.useForm<{ warehouseId: string }>();
   // ---- 多选批量生成收货单（用户指示 2026-10-13）：跨分页保留勾选 ----
   const [selectedPoIds, setSelectedPoIds] = useState<string[]>([]);
   const [selectedPosById, setSelectedPosById] = useState<Map<string, PurchaseOrderRow>>(
     () => new Map(),
   );
-  const [batchReceiptOpen, setBatchReceiptOpen] = useState(false);
-  const [batchReceiptForm] = Form.useForm<{ warehouseId: string }>();
   const handlePoSelectionChange = useCallback((keys: Key[], rows: PurchaseOrderRow[]) => {
     const ids = keys.map(String);
     setSelectedPoIds(ids);
@@ -286,9 +284,9 @@ export function PurchaseOrdersPage() {
             ? new Date(values.orderedAt).toISOString()
             : undefined,
         remark: values.remark,
-        ...(values.receiptWarehouseId !== undefined && values.receiptWarehouseId !== ''
-          ? { receipt: { warehouseId: values.receiptWarehouseId } }
-          : {}),
+        receivingWarehouseId: values.receivingWarehouseId,
+        purpose: 'STOCK',
+        ...(values.createReceiptDraft === true ? { receipt: {} } : {}),
         items: values.items.map((item) => ({
           skuId: item.skuId,
           quantity: String(item.quantity),
@@ -298,8 +296,7 @@ export function PurchaseOrdersPage() {
           ...(item.remark !== undefined && item.remark !== '' ? { remark: item.remark } : {}),
         })),
       });
-      const receipt = values.receiptWarehouseId ?? '';
-      if (receipt === '') {
+      if (values.createReceiptDraft !== true) {
         return { po, draftReceiptNo: null, receiptLookupFailed: false };
       }
       // §10: the draft receipt is generated in the same transaction as the
@@ -375,18 +372,16 @@ export function PurchaseOrdersPage() {
 
   // ---- 生成收货单（用户需求 2026-10-09）：从选中的采购单一键生成草稿 ----
   const generateReceiptMutation = useMutation({
-    mutationFn: ({ poId, warehouseId }: { poId: string; warehouseId: string }) =>
+    mutationFn: ({ poId }: { poId: string }) =>
       apiPost<{ id: string; receiptNo: string }>(
         '/api/v1/purchase-receipts/from-po/{poId}',
-        { warehouseId },
+        {},
         { poId },
       ),
     onSuccess: (result) => {
       void message.success(
         `已生成收货单 ${result.receiptNo}（草稿，已预填默认库位）：到收货单页核对后确认入库`,
       );
-      setReceiptWarehouseOpen(false);
-      receiptWarehouseForm.resetFields();
       void queryClient.invalidateQueries({ queryKey: ['purchase-receipts'] });
       void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
     },
@@ -394,39 +389,31 @@ export function PurchaseOrdersPage() {
   });
 
   /**
-   * 生成收货单入口：PO 指定过收货仓库 → 二次确认后直接生成；
-   * 未指定 → 打开弹窗补选仓库（草稿仓库决定入库去向，不能默认猜）。
+   * 生成收货单入口（2026-10-21 决策 0023）：收货仓恒为采购单目标仓，
+   * 前端不再询问仓库，只做一次确认。
    */
   const requestGenerateReceipt = useCallback(
     (row: PurchaseOrderRow) => {
       const warehouseLabel =
         warehouses.data?.data.find((w) => w.id === row.receivingWarehouseId)?.name ??
         row.receivingWarehouseId;
-      if (row.receivingWarehouseId !== null) {
-        modal.confirm({
-          title: `为采购单 ${row.poNo} 生成收货单草稿？`,
-          content: `收货仓库：${warehouseLabel}。按采购明细的未收数量预填草稿；生成后到收货单页确认收货才入库。`,
-          okText: '生成草稿',
-          cancelText: '返回',
-          onOk: () => {
-            generateReceiptMutation.mutate({
-              poId: row.id,
-              warehouseId: row.receivingWarehouseId as string,
-            });
-          },
-        });
-        return;
-      }
-      receiptWarehouseForm.setFieldsValue({ warehouseId: undefined });
-      setReceiptWarehouseOpen(true);
+      modal.confirm({
+        title: `为采购单 ${row.poNo} 生成收货单草稿？`,
+        content: `收货仓库：${warehouseLabel}（采购单目标仓）。按采购明细的未收数量预填草稿；生成后到收货单页确认收货才入库。`,
+        okText: '生成草稿',
+        cancelText: '返回',
+        onOk: () => {
+          generateReceiptMutation.mutate({ poId: row.id });
+        },
+      });
     },
-    [modal, warehouses.data, generateReceiptMutation, receiptWarehouseForm],
+    [modal, warehouses.data, generateReceiptMutation],
   );
 
   // ---- 批量生成收货单（用户指示 2026-10-13）：勾选多个 PO 一次出草稿 ----
   // 后端逐单执行（单笔失败不拖垮整批）；这里只聚合展示每单的草稿号/失败原因。
   const batchGenerateReceiptMutation = useMutation({
-    mutationFn: (items: Array<{ poId: string; warehouseId?: string }>) =>
+    mutationFn: (items: Array<{ poId: string }>) =>
       apiPost<{
         total: number;
         succeeded: number;
@@ -458,34 +445,17 @@ export function PurchaseOrdersPage() {
         ),
         duration: result.failed > 0 ? 0 : 8,
       });
-      setBatchReceiptOpen(false);
-      batchReceiptForm.resetFields();
       void queryClient.invalidateQueries({ queryKey: ['purchase-receipts'] });
       void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
     },
     onError: (error: Error) => void message.error(`批量生成收货单失败：${error.message}`),
   });
 
-  const runBatchGenerateReceipt = useCallback(
-    (fallbackWarehouseId: string | undefined) => {
-      batchGenerateReceiptMutation.mutate(
-        eligibleBatchPos.map((row) => ({
-          poId: row.id,
-          ...(row.receivingWarehouseId !== null
-            ? { warehouseId: row.receivingWarehouseId }
-            : fallbackWarehouseId !== undefined
-              ? { warehouseId: fallbackWarehouseId }
-              : {}),
-        })),
-      );
-    },
-    [batchGenerateReceiptMutation, eligibleBatchPos],
-  );
+  const runBatchGenerateReceipt = useCallback(() => {
+    batchGenerateReceiptMutation.mutate(eligibleBatchPos.map((row) => ({ poId: row.id })));
+  }, [batchGenerateReceiptMutation, eligibleBatchPos]);
 
-  /**
-   * 批量入口：无可生成单提示；勾选单都带收货仓库 → 二次确认；有缺仓库的单
-   * → 弹窗为这些单选一个共用仓库（其余单仍用自己的意向仓库）。
-   */
+  /** 批量入口：收货仓恒为各采购单自己的目标仓，前端只做一次确认。 */
   const requestBatchGenerateReceipt = useCallback(() => {
     if (selectedPoRows.length === 0) {
       return;
@@ -494,30 +464,17 @@ export function PurchaseOrdersPage() {
       void message.warning('勾选的采购单都不是「已下单 / 部分到货」，没有可生成收货单的单');
       return;
     }
-    const missingWarehouse = eligibleBatchPos.filter((row) => row.receivingWarehouseId === null);
-    if (missingWarehouse.length > 0) {
-      batchReceiptForm.setFieldsValue({ warehouseId: undefined });
-      setBatchReceiptOpen(true);
-      return;
-    }
     modal.confirm({
       title: `为勾选的 ${eligibleBatchPos.length} 个采购单生成收货单草稿？`,
       content:
-        '按各采购单的收货仓库与未收数量预填草稿；生成后到收货单页选库位、确认收货才入库。单笔失败不影响其余。',
+        '按各采购单的目标仓与未收数量预填草稿；生成后到收货单页选库位、确认收货才入库。单笔失败不影响其余。',
       okText: '批量生成草稿',
       cancelText: '返回',
       onOk: () => {
-        runBatchGenerateReceipt(undefined);
+        runBatchGenerateReceipt();
       },
     });
-  }, [
-    modal,
-    message,
-    selectedPoRows.length,
-    eligibleBatchPos,
-    batchReceiptForm,
-    runBatchGenerateReceipt,
-  ]);
+  }, [modal, message, selectedPoRows.length, eligibleBatchPos, runBatchGenerateReceipt]);
 
   // ---- 批量删除（用户指示 2026-10-17）：仅删除从未产生库存事实的采购单 ----
   const batchDeleteMutation = useMutation({
@@ -1038,12 +995,12 @@ export function PurchaseOrdersPage() {
             <Input maxLength={2000} />
           </Form.Item>
           <Form.Item
-            name="receiptWarehouseId"
-            label="同时生成收货单草稿（可选）"
-            extra="选择收货仓库后同步生成草稿，确认收货后才入库；清空则仅登记采购单。"
+            name="receivingWarehouseId"
+            label="收货仓库"
+            rules={[{ required: true, message: '请选择收货仓库' }]}
+            extra="货最终送到哪个仓。收货单只能在这个仓收货，缺口覆盖也按这个仓计算。"
           >
             <Select
-              allowClear
               showSearch
               optionFilterProp="label"
               placeholder="选择收货仓库"
@@ -1053,6 +1010,14 @@ export function PurchaseOrdersPage() {
                 label: `${warehouse.warehouseCode} · ${warehouse.name}`,
               }))}
             />
+          </Form.Item>
+          <Form.Item
+            name="createReceiptDraft"
+            label="同时生成收货单草稿"
+            valuePropName="checked"
+            extra="开启后按本次采购数量同步生成草稿（预填默认库位）；确认收货才入库。"
+          >
+            <Switch />
           </Form.Item>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
             <strong>采购明细</strong>
@@ -1142,90 +1107,6 @@ export function PurchaseOrdersPage() {
         onClose={() => setSupplierCreateOpen(false)}
         onCreate={(values) => createSupplierMutation.mutate(values)}
       />
-
-      {/* 生成收货单（需求 2026-10-09）：PO 未指定收货仓库时补选。 */}
-      <Modal
-        title={`为采购单 ${selectedRow?.poNo ?? ''} 生成收货单草稿`}
-        open={receiptWarehouseOpen}
-        onCancel={() => setReceiptWarehouseOpen(false)}
-        onOk={() => {
-          void receiptWarehouseForm
-            .validateFields()
-            .then((values) => {
-              if (selectedRow !== null) {
-                generateReceiptMutation.mutate({
-                  poId: selectedRow.id,
-                  warehouseId: values.warehouseId,
-                });
-              }
-            })
-            .catch(() => undefined);
-        }}
-        okText="生成草稿"
-        cancelText="取消"
-        confirmLoading={generateReceiptMutation.isPending}
-        destroyOnHidden
-      >
-        <Form form={receiptWarehouseForm} layout="vertical" preserve={false}>
-          <Form.Item
-            name="warehouseId"
-            label="收货仓库"
-            rules={[{ required: true, message: '请选择收货仓库' }]}
-            extra="该采购单未指定收货仓库；草稿按采购明细的未收数量预填，确认收货后入库。"
-          >
-            <Select
-              showSearch
-              optionFilterProp="label"
-              placeholder="选择收货仓库"
-              loading={warehouses.isLoading}
-              options={(warehouses.data?.data ?? []).map((warehouse) => ({
-                value: warehouse.id,
-                label: `${warehouse.warehouseCode} · ${warehouse.name}`,
-              }))}
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* 批量生成收货单（用户指示 2026-10-13）：勾选中存在未指定收货仓库的
-          采购单时，为这些单统一补选一个仓库；其余单仍用各自意向仓库。 */}
-      <Modal
-        title={`批量生成收货单：为 ${eligibleBatchPos.filter((row) => row.receivingWarehouseId === null).length} 个未指定仓库的采购单补选收货仓库`}
-        open={batchReceiptOpen}
-        onCancel={() => setBatchReceiptOpen(false)}
-        onOk={() => {
-          void batchReceiptForm
-            .validateFields()
-            .then((values) => {
-              runBatchGenerateReceipt(values.warehouseId);
-            })
-            .catch(() => undefined);
-        }}
-        okText="批量生成草稿"
-        cancelText="取消"
-        confirmLoading={batchGenerateReceiptMutation.isPending}
-        destroyOnHidden
-      >
-        <Form form={batchReceiptForm} layout="vertical" preserve={false}>
-          <Form.Item
-            name="warehouseId"
-            label="收货仓库"
-            rules={[{ required: true, message: '请选择收货仓库' }]}
-            extra="仅应用于未指定收货仓库的勾选采购单；其余单使用各自登记的收货仓库。草稿按未收数量预填，确认收货后入库。"
-          >
-            <Select
-              showSearch
-              optionFilterProp="label"
-              placeholder="选择收货仓库"
-              loading={warehouses.isLoading}
-              options={(warehouses.data?.data ?? []).map((warehouse) => ({
-                value: warehouse.id,
-                label: `${warehouse.warehouseCode} · ${warehouse.name}`,
-              }))}
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
 
       {/* ---- 底部动作浮岛（用户指示 2026-10-17：与订单页同款）----
           分页与批量动作固定在主滚动区底部，必须在页面根节点的流内末尾；

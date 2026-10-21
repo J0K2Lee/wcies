@@ -8,7 +8,7 @@ import { PurchaseOrderRepository } from '../repositories/purchase-order.reposito
 import { PurchaseReceiptRepository } from '../repositories/purchase-receipt.repository';
 import { SupplierService } from './supplier.service';
 import { SkuService } from '../../product/services/sku.service';
-import { OrderService } from '../../order/services/order.service';
+import { ProcurementCoverageService } from './procurement-coverage.service';
 import { WarehouseService } from '../../warehouse/services/warehouse.service';
 import { WarehouseNotFoundError } from '../../warehouse/errors/warehouse-errors';
 import { BusinessCodeService } from '../../../infrastructure/business-code/business-code.service';
@@ -19,7 +19,7 @@ import { CreatePurchaseOrderRequestDto } from '../dto/purchase-order.dto';
 import { PurchaseReceiptService } from './purchase-receipt.service';
 
 const operator = { userId: null, username: 'tester' };
-const manager = {} as EntityManager;
+const manager = { query: vi.fn().mockResolvedValue(undefined) } as unknown as EntityManager;
 const po: PurchaseOrderEntity = {
   id: 'po-1',
   poNo: 'PO000001',
@@ -30,7 +30,7 @@ const po: PurchaseOrderEntity = {
   expectedAt: null,
   remark: null,
   createdBy: null,
-  receivingWarehouseId: null,
+  receivingWarehouseId: 'wh-1',
   createdAt: new Date(),
   updatedAt: new Date(),
 };
@@ -61,6 +61,7 @@ const items: PurchaseOrderItemEntity[] = [
   },
 ];
 const input: CreatePurchaseOrderRequestDto = {
+  receivingWarehouseId: 'wh-1',
   supplierId: po.supplierId!,
   sourceNote: po.sourceNote!,
   items: [
@@ -77,7 +78,6 @@ function setup() {
       .fn()
       .mockResolvedValue(items.map((item) => ({ item, skuCode: '', skuName: '', orderNo: null }))),
     findItemsInTx: vi.fn().mockResolvedValue(items),
-    findActiveItemByOrderItemId: vi.fn().mockResolvedValue(null),
     insertWithItems: vi.fn().mockResolvedValue({ ...po }),
     updateHeader: vi.fn().mockResolvedValue(undefined),
   };
@@ -107,20 +107,31 @@ function setup() {
     nextPurchaseReceiptNo: vi.fn().mockResolvedValue('PR000001'),
   };
   const log = { record: vi.fn().mockResolvedValue(undefined) };
+  const coverage = { getWarehouseGap: vi.fn().mockResolvedValue({ gapQty: '10.000' }) };
   const transaction = vi.fn(async (work: (m: EntityManager) => Promise<unknown>) => work(manager));
   const service = new PurchaseOrderService(
     { transaction } as unknown as DataSource,
     repository as unknown as PurchaseOrderRepository,
     { getEntityById: vi.fn().mockResolvedValue({}) } as unknown as SupplierService,
     { getEntityById: vi.fn().mockResolvedValue({}) } as unknown as SkuService,
-    { getItemFulfillment: vi.fn() } as unknown as OrderService,
     codes as unknown as BusinessCodeService,
     log as unknown as OperationLogService,
     receipts as unknown as PurchaseReceiptRepository,
     warehouse as unknown as WarehouseService,
     receiptService as unknown as PurchaseReceiptService,
+    coverage as unknown as ProcurementCoverageService,
   );
-  return { service, repository, receipts, warehouse, receiptService, codes, log, transaction };
+  return {
+    service,
+    repository,
+    receipts,
+    warehouse,
+    receiptService,
+    coverage,
+    codes,
+    log,
+    transaction,
+  };
 }
 let ctx: ReturnType<typeof setup>;
 beforeEach(() => {
@@ -129,10 +140,7 @@ beforeEach(() => {
 
 describe('purchase order optional receiving draft', () => {
   it('creates a numbered draft with all PO lines and source fields in the same transaction', async () => {
-    await ctx.service.create(
-      { ...input, receipt: { warehouseId: 'wh-1', defaultBinId: 'bin-1' } },
-      operator,
-    );
+    await ctx.service.create({ ...input, receipt: { defaultBinId: 'bin-1' } }, operator);
     expect(ctx.transaction).toHaveBeenCalledTimes(1);
     expect(ctx.repository.insertWithItems.mock.calls[0]?.[0]).toBe(manager);
     expect(ctx.repository.findItemsInTx).toHaveBeenCalledWith(manager, po.id);
@@ -159,7 +167,7 @@ describe('purchase order optional receiving draft', () => {
         remark: null,
       })),
     );
-    // 收货仓库意向与收货草稿同源落库（ERP 建议#4）。
+    // 目标仓是采购单表头字段（决策 0023），收货草稿仓库与它同源。
     expect(ctx.repository.insertWithItems.mock.calls[0]?.[1]).toMatchObject({
       receivingWarehouseId: 'wh-1',
     });
@@ -177,7 +185,7 @@ describe('purchase order optional receiving draft', () => {
   });
 
   it('leaves the bin empty when omitted', async () => {
-    await ctx.service.create({ ...input, receipt: { warehouseId: 'wh-1' } }, operator);
+    await ctx.service.create({ ...input, receipt: {} }, operator);
     expect(ctx.receipts.insertWithItems.mock.calls[0]?.[2]).toEqual(
       expect.arrayContaining([expect.objectContaining({ binId: null })]),
     );
@@ -188,14 +196,13 @@ describe('purchase order optional receiving draft', () => {
     await ctx.service.create(input, operator);
     expect(ctx.receipts.insertWithItems).not.toHaveBeenCalled();
     expect(ctx.codes.nextPurchaseReceiptNo).not.toHaveBeenCalled();
-    expect(ctx.warehouse.getEntityById).not.toHaveBeenCalled();
     const header = ctx.repository.insertWithItems.mock.calls[0]?.[1] as {
       orderedAt: Date;
-      receivingWarehouseId: string | null;
+      receivingWarehouseId: string;
     };
     expect(header.orderedAt.getTime()).toBeGreaterThanOrEqual(before);
     expect(header.orderedAt.getTime()).toBeLessThanOrEqual(Date.now());
-    expect(header.receivingWarehouseId).toBeNull();
+    expect(header.receivingWarehouseId).toBe('wh-1');
     expect(ctx.log.record).toHaveBeenCalledTimes(1);
   });
 
@@ -211,9 +218,9 @@ describe('purchase order optional receiving draft', () => {
 
   it('unknown warehouse rejects before a PO is inserted', async () => {
     ctx.warehouse.getEntityById.mockResolvedValue(null);
-    await expect(
-      ctx.service.create({ ...input, receipt: { warehouseId: 'missing' } }, operator),
-    ).rejects.toBeInstanceOf(WarehouseNotFoundError);
+    await expect(ctx.service.create(input, operator)).rejects.toBeInstanceOf(
+      WarehouseNotFoundError,
+    );
     expect(ctx.repository.insertWithItems).not.toHaveBeenCalled();
     expect(ctx.transaction).not.toHaveBeenCalled();
     expect(ctx.log.record).not.toHaveBeenCalled();
@@ -221,11 +228,51 @@ describe('purchase order optional receiving draft', () => {
 
   it('propagates draft insertion failure out of the transaction without success logs', async () => {
     ctx.receipts.insertWithItems.mockRejectedValue(new Error('insert failed'));
-    await expect(
-      ctx.service.create({ ...input, receipt: { warehouseId: 'wh-1' } }, operator),
-    ).rejects.toThrow('insert failed');
+    await expect(ctx.service.create({ ...input, receipt: {} }, operator)).rejects.toThrow(
+      'insert failed',
+    );
     expect(ctx.transaction).toHaveBeenCalledOnce();
     expect(ctx.log.record).not.toHaveBeenCalled();
+  });
+});
+
+describe('purchase order replenish gap guard (决策 0023)', () => {
+  it('STOCK purpose skips the gap check', async () => {
+    await ctx.service.create(input, operator);
+    expect(ctx.coverage.getWarehouseGap).not.toHaveBeenCalled();
+  });
+
+  it('REPLENISH rejects a line the in-transit stock already covers', async () => {
+    ctx.coverage.getWarehouseGap.mockResolvedValue({
+      demandQty: '2.000',
+      inTransitQty: '2.000',
+      gapQty: '0.000',
+    });
+    await expect(
+      ctx.service.create({ ...input, purpose: 'REPLENISH' }, operator),
+    ).rejects.toMatchObject({ code: 'PURCHASE_SKU_GAP_COVERED' });
+    expect(ctx.repository.insertWithItems).not.toHaveBeenCalled();
+  });
+
+  it('REPLENISH rejects a quantity larger than the remaining gap', async () => {
+    ctx.coverage.getWarehouseGap.mockResolvedValue({
+      demandQty: '5.000',
+      inTransitQty: '0.000',
+      gapQty: '5.000',
+    });
+    await expect(
+      ctx.service.create(
+        { ...input, purpose: 'REPLENISH', items: [{ skuId: 'sku-1', quantity: '6' }] },
+        operator,
+      ),
+    ).rejects.toMatchObject({ code: 'PURCHASE_ORDER_INVALID_STATE' });
+    expect(ctx.repository.insertWithItems).not.toHaveBeenCalled();
+  });
+
+  it('REPLENISH allows a quantity within the gap', async () => {
+    await ctx.service.create({ ...input, purpose: 'REPLENISH' }, operator);
+    expect(ctx.coverage.getWarehouseGap).toHaveBeenCalledTimes(2);
+    expect(ctx.repository.insertWithItems).toHaveBeenCalledOnce();
   });
 });
 
@@ -295,17 +342,25 @@ describe('purchase order cancellation', () => {
 });
 
 describe('purchase create request validation', () => {
-  const valid = { items: [{ skuId: '00000000-0000-4000-8000-000000000001', quantity: '1' }] };
+  const valid = {
+    receivingWarehouseId: '00000000-0000-4000-8000-000000000001',
+    items: [{ skuId: '00000000-0000-4000-8000-000000000001', quantity: '1' }],
+  };
   it.each([
     { orderedAt: 'invalid' },
-    { receipt: {} },
-    { receipt: { warehouseId: 'invalid' } },
-    { receipt: { warehouseId: valid.items[0]!.skuId, defaultBinId: 'invalid' } },
+    { purpose: 'OTHER' },
+    { receipt: { defaultBinId: 'invalid' } },
   ])('rejects malformed optional input %j', async (patch) => {
     const errors = await validate(
       plainToInstance(CreatePurchaseOrderRequestDto, { ...valid, ...patch }),
     );
     expect(errors.length).toBeGreaterThan(0);
+  });
+  it('requires a target warehouse', async () => {
+    const errors = await validate(
+      plainToInstance(CreatePurchaseOrderRequestDto, { items: valid.items }),
+    );
+    expect(errors.some((error) => error.property === 'receivingWarehouseId')).toBe(true);
   });
   it('accepts valid nested receiving options and purchase time', async () => {
     expect(
@@ -313,7 +368,7 @@ describe('purchase create request validation', () => {
         plainToInstance(CreatePurchaseOrderRequestDto, {
           ...valid,
           orderedAt: '2026-09-01T00:00:00Z',
-          receipt: { warehouseId: valid.items[0]!.skuId },
+          receipt: { defaultBinId: valid.items[0]!.skuId },
         }),
       ),
     ).toEqual([]);

@@ -10,8 +10,6 @@ import { WarehouseNotFoundError } from '../../warehouse/errors/warehouse-errors'
 import { InventoryService } from '../../inventory/services/inventory.service';
 import { InventoryQueryService } from '../../inventory/services/inventory-query.service';
 import { WarehouseBinService } from '../../warehouse/services/warehouse-bin.service';
-import { WarehousePlatformBindingService } from '../../warehouse/services/warehouse-platform-binding.service';
-import { OrderService } from '../../order/services/order.service';
 import { formatQty, parseQty } from '../../../common/utils/quantity';
 import { PurchaseOrderEntity } from '../entities/purchase-order.entity';
 import { PurchaseReceiptEntity } from '../entities/purchase-receipt.entity';
@@ -48,8 +46,7 @@ import {
   PurchaseReceiptExceedsOrderedError,
   PurchaseReceiptInvalidStateError,
   PurchaseReceiptNotFoundError,
-  PurchaseReceiptWarehouseMissingError,
-  OrderLineNotOrderedError,
+  PurchaseReceiptWarehouseMismatchError,
   SupplierNotFoundError,
 } from '../errors/purchase-errors';
 import { SupplierService } from './supplier.service';
@@ -74,8 +71,6 @@ export class PurchaseReceiptService {
     private readonly skuService: SkuService,
     private readonly warehouseService: WarehouseService,
     private readonly warehouseBinService: WarehouseBinService,
-    private readonly bindingService: WarehousePlatformBindingService,
-    private readonly orderService: OrderService,
     private readonly inventoryService: InventoryService,
     private readonly inventoryQuery: InventoryQueryService,
     private readonly businessCode: BusinessCodeService,
@@ -163,12 +158,17 @@ export class PurchaseReceiptService {
     if (existingDraft !== undefined) {
       throw new PurchaseReceiptDuplicateDraftError(po.poNo, existingDraft.receiptNo);
     }
-    // 仓库来源（ERP 建议#4）：请求显式指定优先，否则用 PO 上的收货仓库意向；
-    // 两者皆无才是错误（前端会对已选仓库的 PO 自动预填，正常到不了这里）。
-    const warehouseId = dto.warehouseId ?? po.receivingWarehouseId;
-    if (warehouseId === null || warehouseId === undefined) {
-      throw new PurchaseReceiptWarehouseMissingError(po.poNo);
+    // 收货仓 = 采购单目标仓（2026-10-21 决策 0023）。采购单在创建时就必须写明
+    // 送到哪个仓，收货单不允许落到别的仓——否则「SKU×仓缺口」的补货闭环会被
+    // 绕过去（货到了 A 仓，缺货却发生在 B 仓）。
+    if (dto.warehouseId !== undefined && dto.warehouseId !== po.receivingWarehouseId) {
+      throw new PurchaseReceiptWarehouseMismatchError({
+        poNo: po.poNo,
+        expectedWarehouseId: po.receivingWarehouseId,
+        actualWarehouseId: dto.warehouseId,
+      });
     }
+    const warehouseId = po.receivingWarehouseId;
     await this.assertWarehouseExists(warehouseId);
 
     const items = (await this.poRepository.findItemsWithRefs(poId))
@@ -235,44 +235,9 @@ export class PurchaseReceiptService {
   }
 
   /**
-   * 订单行「去收货」一键入口（2026-10-16 用户需求）：从订单行找到其关联的
-   * 有效采购单，直接生成收货草稿（默认库位同 §4.1.1 决策 0021）。
-   *
-   * 收货仓库来源（用户拍板：店铺绑定仓自动定）：
-   *   1. 采购单上的收货仓库意向（receiving_warehouse_id）优先；
-   *   2. 否则用该订单店铺的默认作业仓（WarehousePlatformBindingService，
-   *      与订单分配同一规则）；
-   *   3. 两者皆无 → PurchaseReceiptWarehouseMissingError（引导先选/建绑定仓）。
-   * 生成的草稿再走既有 generateFromPo（含防重复草稿、未收数量预填、默认库位）。
-   */
-  async generateFromOrderItem(
-    orderItemId: string,
-    operator: OperatorContext,
-  ): Promise<PurchaseReceiptDetailDto> {
-    const poId = await this.poRepository.findActivePoIdByOrderItemId(orderItemId);
-    if (poId === null) {
-      throw new OrderLineNotOrderedError(orderItemId);
-    }
-    const po = await this.poRepository.findById(poId);
-    if (po === null) {
-      throw new PurchaseOrderNotFoundError(poId);
-    }
-    let warehouseId = po.receivingWarehouseId;
-    if (warehouseId === null) {
-      // 店铺绑定仓兜底：经 order 模块公开读拿到 storeId（AGENTS.md §9）。
-      const item = await this.orderService.getItemFulfillment(orderItemId);
-      warehouseId = await this.bindingService.resolveDefaultWarehouseId(item.storeId);
-    }
-    if (warehouseId === null) {
-      throw new PurchaseReceiptWarehouseMissingError(po.poNo);
-    }
-    return this.generateFromPo(poId, { warehouseId }, operator);
-  }
-
-  /**
    * 批量生成收货单草稿（采购单页多选, 2026-10-13）：逐单复用 generateFromPo
    * （草稿不碰库存，确认收货才入库），单笔失败只记录结果、不拖垮整批
-   * （AGENTS §36）。仓库解析规则与单笔一致：请求指定 > PO 收货仓库意向。
+   * （AGENTS §36）。仓库固定为各采购单的目标仓（2026-10-21）。
    */
   async generateFromPosBatch(
     dto: GenerateReceiptsFromPosRequestDto,

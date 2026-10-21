@@ -315,13 +315,13 @@ export class OrderListItemDto {
   @ApiProperty({ description: '该单不同 SKU 编码的种类数' })
   skuKindCount!: number;
   @ApiPropertyOptional({
-    description: '缺货行中已登记采购（ORDERED，purchase.md §3.5 派生）的行数（双轴 §2.3）',
+    description: '缺货行中缺口已被在途采购覆盖（COVERED）的行数（2026-10-21 决策 0023）',
   })
-  backorderedOrderedCount!: number;
+  backorderedCoveredCount!: number;
   @ApiPropertyOptional({
-    description: '缺货行中采购已到货（ARRIVED，purchase.md §3.5 派生）的行数（双轴 §2.3）',
+    description: '缺货行中仍无在途采购覆盖（SHORT，仍可继续采购）的行数（2026-10-21 决策 0023）',
   })
-  backorderedArrivedCount!: number;
+  backorderedShortCount!: number;
   @ApiPropertyOptional({
     description: '加急订单（ADR 0022）：列表恒定置顶，缺货到货后优先参与库存分配',
   })
@@ -389,10 +389,29 @@ export class OrderItemDto {
   @ApiProperty({ enum: ORDER_ITEM_MAPPING_STATUSES }) mappingStatus!: string;
   @ApiPropertyOptional({
     nullable: true,
-    enum: ['NOT_ORDERED', 'ORDERED', 'ARRIVED'],
-    description: '派生采购状态（purchase.md §3.5，不落库）；未映射行为 NULL',
+    enum: ['COVERED', 'SHORT'],
+    description:
+      '缺口覆盖状态（purchase.md §3.5 派生，不落库）：COVERED = 该 SKU 在该仓的在途采购已按分配优先级覆盖到此行；SHORT = 仍缺。未映射行为 NULL',
   })
-  procurementState!: string | null;
+  procurementCoverage!: 'COVERED' | 'SHORT' | null;
+  @ApiPropertyOptional({
+    nullable: true,
+    type: String,
+    description: '该 SKU 在该仓的剩余缺口数量（需求 − 在途，已扣除优先级更高的行）；仅 SHORT 有值',
+  })
+  procurementGapQty!: string | null;
+  @ApiPropertyOptional({
+    nullable: true,
+    type: String,
+    description: '该 SKU 在该仓的在途未收采购总量（同 SKU 同仓所有未取消采购单的未收数量之和）',
+  })
+  procurementInTransitQty!: string | null;
+  @ApiPropertyOptional({
+    nullable: true,
+    type: String,
+    description: '缺口计算所用的仓（该店铺绑定仓，与订单分配同源）',
+  })
+  procurementWarehouseId!: string | null;
   @ApiProperty({ nullable: true, type: String }) reservationId!: string | null;
   @ApiProperty({
     nullable: true,

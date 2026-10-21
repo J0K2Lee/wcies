@@ -47,12 +47,12 @@ export class PurchaseOrderEntity {
   createdBy!: string | null;
 
   /**
-   * 收货仓库意向（2026-09-28，ERP 建议#4）：创建时勾选"同时生成收货单草稿"
-   * 所选仓库的回显。库存事实仍在收货单上（decision 0013 不变）——本字段
-   * 只供 PO 详情展示与收货页「从采购单生成」缺省预填，创建后不可改。
+   * 收货仓库 = 采购单目标仓（2026-10-21 起为一等字段，必填）。
+   * 采购以「SKU + 仓」为单位补缺口：收货库位、库存归属、缺货覆盖都以此为准。
+   * 库存事实仍在收货单上（decision 0013 不变）。
    */
-  @Column({ type: 'uuid', name: 'receiving_warehouse_id', nullable: true })
-  receivingWarehouseId!: string | null;
+  @Column({ type: 'uuid', name: 'receiving_warehouse_id', nullable: false })
+  receivingWarehouseId!: string;
 
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;

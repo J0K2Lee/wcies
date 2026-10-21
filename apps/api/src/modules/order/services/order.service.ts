@@ -119,19 +119,18 @@ export class OrderService {
   ): Promise<{ items: OrderListItemDto[]; meta: PageMeta }> {
     let effectiveFilters: OrderListFilters = filters;
     if (filters.pendingProcurement === true) {
-      // 待采购 view (purchase.md §3.5): orders with a MAPPED BACKORDERED line
-      // that no live purchase order covers. The purchase module supplies the
-      // covered line ids through its port; this repo owns the line facts.
-      const activeOrderItemIds = await this.procurementPort.listActiveOrderItemIds();
-      const orderIds =
-        await this.orderRepo.findOrderIdsWithUncoveredBackorderedLines(activeOrderItemIds);
+      // 待采购视角（purchase.md §3.5）：存在缺货行、且其缺口尚未被在途采购覆盖。
+      // 覆盖口径按 SKU×仓的在途数量按分配优先级逐行切分（决策 0023），由采购模块
+      // 端口给出结论；本仓库只负责订单行事实，不跨模块写 SQL（AGENTS.md §9）。
+      const shortItemIds = await this.procurementPort.listShortItemIds();
+      const orderIds = await this.orderRepo.findOrderIdsWithBackorderedLinesIn(shortItemIds);
       effectiveFilters = { ...filters, orderIds };
     }
     if (effectiveFilters.goodsState === 'PURCHASED') {
-      // 已采购（2026-10-19 用户指示）：存在缺货行且该行采购状态 = ORDERED。
-      // **不含 ARRIVED**（已到货不算）。采购事实由采购模块端口提供。
-      const orderedItemIds = await this.procurementPort.listOrderedOrderItemIds();
-      const orderIds = await this.orderRepo.findOrderIdsWithBackorderedLinesIn(orderedItemIds);
+      // 已采购（2026-10-21 决策 0023）：存在缺货行且该行的缺口已被在途采购覆盖。
+      // 不再有「已到货」这一档——到货的货会直接参与分配，缺货行随之消失。
+      const coveredItemIds = await this.procurementPort.listCoveredItemIds();
+      const orderIds = await this.orderRepo.findOrderIdsWithBackorderedLinesIn(coveredItemIds);
       effectiveFilters = { ...effectiveFilters, goodsState: undefined, orderIds };
     }
     const { rows, total } = await this.orderRepo.listWithAggregates(
@@ -140,24 +139,22 @@ export class OrderService {
       (page.page - 1) * page.pageSize,
     );
     // Dual-axis §2.3 in-line markers: for the page's BACKORDERED lines, the
-    // derived procurement states (purchase.md §3.5) come through the port -
-    // one round-trip for the whole page, never per-line queries and never a
+    // derived coverage (purchase.md §3.5) comes through the port - one
+    // round-trip for the whole page, never per-line queries and never a
     // cross-module SQL (AGENTS.md §9).
     const backorderedIdsByOrder = await this.orderRepo.findBackorderedItemIdsByOrderIds(
       rows.map((row) => row.order.id),
     );
     const allBackorderedIds = [...backorderedIdsByOrder.values()].flat();
-    const procurementStates =
-      await this.procurementPort.getProcurementStatesByOrderItemIds(allBackorderedIds);
+    const coverageByItem = await this.procurementPort.getCoverageByOrderItemIds(allBackorderedIds);
     const items: OrderListItemDto[] = rows.map((row) => {
-      let ordered = 0;
-      let arrived = 0;
+      let covered = 0;
+      let short = 0;
       for (const itemId of backorderedIdsByOrder.get(row.order.id) ?? []) {
-        const state = procurementStates[itemId];
-        if (state === 'ORDERED') {
-          ordered += 1;
-        } else if (state === 'ARRIVED') {
-          arrived += 1;
+        if (coverageByItem[itemId]?.coverage === 'COVERED') {
+          covered += 1;
+        } else {
+          short += 1;
         }
       }
       return {
@@ -186,8 +183,8 @@ export class OrderService {
         openExceptionsCount: row.openExceptionsCount,
         firstSkuCode: row.firstSkuCode,
         skuKindCount: row.skuKindCount,
-        backorderedOrderedCount: ordered,
-        backorderedArrivedCount: arrived,
+        backorderedCoveredCount: covered,
+        backorderedShortCount: short,
         isUrgent: row.order.isUrgent,
       };
     });
@@ -283,9 +280,12 @@ export class OrderService {
           imageSource: null as 'INTERNAL' | 'PLATFORM' | null,
           fulfillmentStatus: item.fulfillmentStatus,
           mappingStatus: item.mappingStatus,
-          // Derived procurement state (purchase.md §3.5) - NULL for unmapped
-          // lines where procurement is meaningless.
-          procurementState: null as string | null,
+          // 缺口覆盖（purchase.md §3.5 派生，2026-10-21 决策 0023）——未映射行
+          // 无采购语义，保持 NULL。
+          procurementCoverage: null as 'COVERED' | 'SHORT' | null,
+          procurementGapQty: null as string | null,
+          procurementInTransitQty: null as string | null,
+          procurementWarehouseId: null as string | null,
           reservationId: item.reservationId,
           reservation,
           rawData: item.rawData,
@@ -302,15 +302,19 @@ export class OrderService {
       }),
     );
 
-    // One port round-trip for the whole order keeps the derived procurement
-    // states consistent and avoids per-line queries (purchase.md §3.5).
+    // One port round-trip for the whole order keeps the derived coverage
+    // consistent and avoids per-line queries (purchase.md §3.5).
     const mappedItemIds = items
       .filter(({ item }) => item.skuId !== null)
       .map(({ item }) => item.id);
-    const procurementStates =
-      await this.procurementPort.getProcurementStatesByOrderItemIds(mappedItemIds);
+    const coverageByItem = await this.procurementPort.getCoverageByOrderItemIds(mappedItemIds);
     for (const dto of itemDtos) {
-      dto.procurementState = procurementStates[dto.id] ?? null;
+      const coverage = coverageByItem[dto.id];
+      if (coverage === undefined) continue;
+      dto.procurementCoverage = coverage.coverage;
+      dto.procurementGapQty = coverage.gapQty;
+      dto.procurementInTransitQty = coverage.inTransitQty;
+      dto.procurementWarehouseId = coverage.warehouseId;
     }
 
     // Mapping switches authority to the internal SKU, even if it has no image.
