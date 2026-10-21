@@ -12,6 +12,7 @@ import { OrderService } from '../../order/services/order.service';
 import { isOrderLabelPrintBlocked } from '../../order/services/order-status.service';
 import { OrderListSortField } from '../../order/enums/order.constants';
 import { ExceptionService } from '../../exception/services/exception.service';
+import { ShipmentService } from '../../shipment/services/shipment.service';
 import { ShippingLabelService } from '../../shipment/services/shipping-label.service';
 import { mergePdfs } from '../../../common/pdf/document';
 import { ShippingLabelDto } from '../../shipment/dto/shipment.dto';
@@ -130,6 +131,7 @@ export class OrderPlatformShipService {
     private readonly orderService: OrderService,
     private readonly exceptionService: ExceptionService,
     private readonly labelService: ShippingLabelService,
+    private readonly shipmentService: ShipmentService,
     private readonly operationLog: OperationLogService,
     private readonly logger: AppLoggerService,
     private readonly config: ConfigService,
@@ -171,7 +173,7 @@ export class OrderPlatformShipService {
     // the platform vocabulary (AGENTS.md §31/§33). OrderService alone owns
     // orders.erp_status - nothing here touches it (AGENTS.md §38).
     const fresh = await this.reReadOrder(adapter, context, order.platformOrderId);
-    await this.orderService.applySyncedPlatformFacts(
+    const facts = await this.orderService.applySyncedPlatformFacts(
       {
         storeId: order.storeId,
         platformOrderId: order.platformOrderId,
@@ -186,6 +188,14 @@ export class OrderPlatformShipService {
       },
       operator,
     );
+    // 运单号一旦可读，已建的发货单（快照）需要补齐（2026-10-21）。
+    if (facts.platformTrackingNo !== null) {
+      await this.shipmentService.backfillTrackingForOrder(
+        order.id,
+        facts.platformTrackingNo,
+        operator,
+      );
+    }
 
     await this.operationLog.record({
       entityType: 'ORDER',
@@ -693,6 +703,53 @@ export class OrderPlatformShipService {
   async listShippingLabels(orderId: string): Promise<ShippingLabelDto[]> {
     await this.orderService.getOrderOrThrow(orderId);
     return this.labelService.listByOrder(orderId);
+  }
+
+  /**
+   * 面单归档成功后的定向事实回读（2026-10-21）。
+   *
+   * 面单能取到，本身就说明平台已完成注册——这是这条链路上最可靠、不依赖
+   * webhook 的信号。OZON 的 TYPE_STATE_CHANGED 不推送 awaiting_deliver 这一跳
+   * （全历史 521 条事件实证），而常规回读的兜底是 24 小时，太慢；因此在预取
+   * 归档成功后主动读一次，把 awaiting_deliver + 运单号及时落库，并把运单号
+   * 回填到已建的发货单。
+   *
+   * 只对「运单号仍为空」的订单执行：已有运单号的一律跳过，不产生额外调用。
+   * 返回 true 表示确实发起并应用了一次回读。
+   */
+  async refreshFactsAfterLabel(orderId: string, operator: OperatorContext): Promise<boolean> {
+    const order = await this.orderService.getOrderOrThrow(orderId);
+    if (order.platformTrackingNo !== null) {
+      return false;
+    }
+    const { adapter, context } = await this.resolveStore(order.storeId);
+    const fresh = await this.reReadOrder(adapter, context, order.platformOrderId);
+    if (fresh === null) {
+      return false;
+    }
+    const facts = await this.orderService.applySyncedPlatformFacts(
+      {
+        storeId: order.storeId,
+        platformOrderId: order.platformOrderId,
+        platformStatus: fresh.platformStatus,
+        platformCancelled: fresh.platformCancelled ?? false,
+        platformStage: fresh.platformStage ?? null,
+        platformStageChangedAt: fresh.platformStageChangedAt ?? null,
+        shipmentDeadline: fresh.shipmentDeadline ?? order.shipmentDeadline,
+        platformTrackingNo: fresh.platformTrackingNo ?? null,
+        rawData: fresh.rawData,
+        source: 'POLLING',
+      },
+      operator,
+    );
+    if (facts.platformTrackingNo !== null) {
+      await this.shipmentService.backfillTrackingForOrder(
+        order.id,
+        facts.platformTrackingNo,
+        operator,
+      );
+    }
+    return true;
   }
 
   /**

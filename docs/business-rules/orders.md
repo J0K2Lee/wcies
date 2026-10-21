@@ -463,6 +463,12 @@ ORDER_SYNC 再遇到已存在的订单（窗口重叠再投递，或定向回读
      `platform_facts_checked_at`，批容量 100/轮；
    - 该轮转制同时保证：事实不变的单不会霸占回读预算（饥饿）、停滞单持续
      被观察直至平台终态（webhook 停用时异常仍可自动解决）。
+   - **面单归档后的主动回读（2026-10-21）**：预取任务归档面单成功后，对
+     `platform_tracking_no` 仍为空的订单立即定向回读一次。面单可取 = 平台
+     已完成注册，这是不依赖 webhook 的可靠信号；OZON 的 `TYPE_STATE_CHANGED`
+     不推送 `awaiting_deliver` 这一跳（实测 521 条事件、8 种状态，从未出现
+     `posting_registered`），24h 轮转又太慢。已有运单号的订单跳过，不产生
+     额外平台调用。
    单单失败只计入 failedCount，不拖垮整批。
 3. **幂等**：状态无变化（含 `raw_data` 键序无关比较——PG jsonb 不保留键序）
    时零写入，不产生任何行更新或历史记录。
@@ -1157,6 +1163,12 @@ createShipmentsFromOrder（仅 PICKED 行，1 发货单 = 1 仓）
 - **幂等**：复用已存在的有效发货单；`shipShipment` 重复调用不二次扣减；
   重新发货的报告 `alreadyShipped`。
 - 订单上的平台运单号自动填入发货单 `trackingNumber`（已有值不覆盖）。
+- **运单号回填（2026-10-21）**：发货单的运单号是创建时的快照。同步层每次
+  观察到订单的运单号（组包回写、面单后主动回读、24h 轮转、Webhook 回读）时，
+  调用 `ShipmentService.backfillTrackingForOrder` 把该订单下
+  `tracking_number IS NULL` 的发货单补齐；只填空值，绝不覆盖人工录入。
+  典型场景：组包后平台尚未分配运单号就发货，事后平台回填运单号时发货单
+  自动补齐（迁移 `20261021_003` 已修复存量）。
 
 ## 多选批量入口（2026-10-13，订单页多选）
 

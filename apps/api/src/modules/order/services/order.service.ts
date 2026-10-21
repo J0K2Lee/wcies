@@ -723,7 +723,13 @@ export class OrderService {
     if (order === null) {
       // Concurrent window pass just created it, or it was deleted - nothing
       // to update; the next encounter handles it.
-      return { applied: false, changed: false, cancelled: false, trackingNumberAssigned: false };
+      return {
+        applied: false,
+        changed: false,
+        cancelled: false,
+        trackingNumberAssigned: false,
+        platformTrackingNo: null,
+      };
     }
 
     const oldStatus = order.platformStatus ?? null;
@@ -872,6 +878,8 @@ export class OrderService {
       cancelled,
       // 平台首次给出运单号：调用方据此补一次面单预取（2026-10-21，A 方案）。
       trackingNumberAssigned: trackingNoChanged && newTrackingNo !== null,
+      // 有效值（null-keeps-stored）：调用方据此回填发货单。
+      platformTrackingNo: newTrackingNo ?? order.platformTrackingNo ?? null,
     };
   }
 
@@ -1386,6 +1394,11 @@ export interface OrderPlatformFactsResult {
    * platform labels only exist after 组包 assigns a waybill.
    */
   trackingNumberAssigned: boolean;
+  /**
+   * 本次调用后订单上有效的平台运单号（未观察到变化时为库内已有值）。
+   * 供 sync 层把运单号回填到已建的发货单（发货单是快照，不会自愈）。
+   */
+  platformTrackingNo: string | null;
 }
 
 function sameInstant(a: Date | string | null, b: Date | string | null): boolean {

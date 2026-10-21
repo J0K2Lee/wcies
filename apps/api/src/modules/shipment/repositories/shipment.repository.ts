@@ -29,6 +29,33 @@ export interface ShipmentRowWithRefs {
 export class ShipmentRepository {
   constructor(private readonly dataSource: DataSource) {}
 
+  /**
+   * 平台运单号回填（2026-10-21）：只填空值，绝不覆盖人工录入。
+   * 返回被更新的发货单（供操作日志）。
+   */
+  async fillMissingTracking(
+    orderId: string,
+    trackingNumber: string,
+  ): Promise<Array<{ id: string; shipmentNo: string }>> {
+    // pg 驱动 quirk：UPDATE ... RETURNING 经 TypeORM query() 返回
+    // [rows, rowCount] 二元组（docs/integrations/ozon.md §10 坑 2）。
+    const result: unknown = await this.dataSource.query(
+      `UPDATE shipments
+          SET tracking_number = $2, updated_at = now()
+        WHERE order_id = $1
+          AND tracking_number IS NULL
+        RETURNING id, shipment_no AS "shipmentNo"`,
+      [orderId, trackingNumber],
+    );
+    const rows =
+      Array.isArray(result) && Array.isArray(result[0])
+        ? (result[0] as Array<{ id: string; shipmentNo: string }>)
+        : Array.isArray(result)
+          ? (result as Array<{ id: string; shipmentNo: string }>)
+          : [];
+    return rows;
+  }
+
   /** Business number from the dedicated PG sequence: SHP000001... */
   async nextShipmentNo(manager: EntityManager): Promise<string> {
     const result = await manager.query<Array<{ no: string }>>(

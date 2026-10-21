@@ -106,6 +106,7 @@ describe('OrderService.applySyncedPlatformFacts - fulfillmentMode', () => {
         changed: true,
         cancelled: false,
         trackingNumberAssigned: false,
+        platformTrackingNo: null,
       });
       expect(orderRepo.updatePlatformFacts).toHaveBeenCalledWith(expect.anything(), 'order-1', {
         platformStatus: facts.platformStatus,
@@ -165,6 +166,7 @@ describe('OrderService.applySyncedPlatformFacts - fulfillmentMode', () => {
         changed: true,
         cancelled: false,
         trackingNumberAssigned: false,
+        platformTrackingNo: null,
       });
       expect(platformShipped.apply).toHaveBeenCalledWith(
         expect.objectContaining({ id: 'order-1' }),

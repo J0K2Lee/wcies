@@ -55,8 +55,26 @@ export class LabelProcessor extends WorkerHost {
         item.code !== 'ORDER_LABEL_NOT_PRINTABLE',
     );
 
+    // 面单可取 = 平台已完成注册（2026-10-21）：对仍缺运单号的订单主动回读一次，
+    // 不等 webhook（这一跳平台不推送）也不等 24h 轮转。逐单隔离，失败只记日志。
+    let refreshed = 0;
+    for (const item of items.filter((entry) => entry.ok)) {
+      try {
+        if (await this.platformShip.refreshFactsAfterLabel(item.orderId, SYSTEM_OPERATOR)) {
+          refreshed += 1;
+        }
+      } catch (error: unknown) {
+        this.logger.warn(
+          `post-label fact refresh failed order=${item.orderNo ?? item.orderId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          'LabelProcessor',
+        );
+      }
+    }
+
     this.logger.log(
-      `label prefetch job=${job.id ?? 'n/a'} attempt=${job.attemptsMade + 1} archived=${archived} reused=${reused} notReady=${notReady.length} blocked=${blocked.length} failed=${failed.length}`,
+      `label prefetch job=${job.id ?? 'n/a'} attempt=${job.attemptsMade + 1} archived=${archived} reused=${reused} refreshed=${refreshed} notReady=${notReady.length} blocked=${blocked.length} failed=${failed.length}`,
       'LabelProcessor',
     );
 

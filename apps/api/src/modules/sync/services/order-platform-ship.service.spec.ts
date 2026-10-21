@@ -6,6 +6,7 @@ import { OperatorContext, OperationLogService } from '../../operation-log/operat
 import { OrderService } from '../../order/services/order.service';
 import { ExceptionService } from '../../exception/services/exception.service';
 import { ShippingLabelService } from '../../shipment/services/shipping-label.service';
+import { ShipmentService } from '../../shipment/services/shipment.service';
 import { ShippingLabelDto } from '../../shipment/dto/shipment.dto';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { SyncContextService } from './sync-context.service';
@@ -111,6 +112,9 @@ function makeService(adapter: object, order = ORDER) {
     // 批量打印会读取面单字节做合并；默认给空字节（仅批量用例覆盖为真实 PDF）。
     bytesOfLabel: vi.fn(async () => Buffer.alloc(0)),
   };
+  const shipmentService = {
+    backfillTrackingForOrder: vi.fn(async () => 0),
+  };
   const operationLog = { record: vi.fn(async () => undefined) };
   const logger = { log: vi.fn(), warn: vi.fn() };
   const config = {
@@ -127,6 +131,7 @@ function makeService(adapter: object, order = ORDER) {
     orderService as unknown as OrderService,
     exceptionService as unknown as ExceptionService,
     labelService as unknown as ShippingLabelService,
+    shipmentService as unknown as ShipmentService,
     operationLog as unknown as OperationLogService,
     logger as unknown as AppLoggerService,
     config as unknown as ConfigService,
@@ -137,6 +142,7 @@ function makeService(adapter: object, order = ORDER) {
     orderService,
     exceptionService,
     labelService,
+    shipmentService,
     operationLog,
     syncContext,
     labelPrefetch,
@@ -591,5 +597,75 @@ describe('OrderPlatformShipService 组包后预取 (2026-10-21)', () => {
     expect(labelPrefetch.enqueueBatch).toHaveBeenCalledWith(['o1', 'o2'], {
       delayMs: 60_000,
     });
+  });
+});
+
+describe('OrderPlatformShipService.refreshFactsAfterLabel (2026-10-21)', () => {
+  it('已有运单号 → 不回读、不调平台', async () => {
+    const { service, syncContext, orderService } = makeService(new PreparableAdapter(), {
+      ...ORDER,
+      platformTrackingNo: 'OZ-EXISTING',
+    });
+
+    await expect(service.refreshFactsAfterLabel('order-1', OPERATOR)).resolves.toBe(false);
+
+    expect(syncContext.resolveSyncableStore).not.toHaveBeenCalled();
+    expect(orderService.applySyncedPlatformFacts).not.toHaveBeenCalled();
+  });
+
+  it('运单号仍为空 → 定向回读、落事实并回填发货单', async () => {
+    class ReReadableAdapter extends PreparableAdapter {
+      readonly rereadCalls: string[][] = [];
+      async fetchOrdersByPlatformIds(
+        _context: unknown,
+        ids: readonly string[],
+      ): Promise<Array<Record<string, unknown>>> {
+        this.rereadCalls.push([...ids]);
+        return ids.map((id) => ({
+          platformOrderId: id,
+          platformStatus: 'awaiting_deliver',
+          platformCancelled: false,
+          platformStage: 'AWAITING_SHIPMENT',
+          platformStageChangedAt: null,
+          shipmentDeadline: null,
+          platformTrackingNo: '55934906-0485-1',
+          rawData: {},
+        }));
+      }
+    }
+    const adapter = new ReReadableAdapter();
+    const { service, orderService, shipmentService } = makeService(adapter);
+    orderService.applySyncedPlatformFacts.mockResolvedValue({
+      applied: true,
+      changed: true,
+      cancelled: false,
+      trackingNumberAssigned: true,
+      platformTrackingNo: '55934906-0485-1',
+    } as never);
+
+    await expect(service.refreshFactsAfterLabel('order-1', OPERATOR)).resolves.toBe(true);
+
+    expect(adapter.rereadCalls).toEqual([[ORDER.platformOrderId]]);
+    expect(orderService.applySyncedPlatformFacts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platformStatus: 'awaiting_deliver',
+        platformTrackingNo: '55934906-0485-1',
+        source: 'POLLING',
+      }),
+      OPERATOR,
+    );
+    expect(shipmentService.backfillTrackingForOrder).toHaveBeenCalledWith(
+      'order-1',
+      '55934906-0485-1',
+      OPERATOR,
+    );
+  });
+
+  it('适配器不支持定向回读 → 返回 false 且不写事实', async () => {
+    const { service, orderService } = makeService(new PreparableAdapter());
+
+    await expect(service.refreshFactsAfterLabel('order-1', OPERATOR)).resolves.toBe(false);
+
+    expect(orderService.applySyncedPlatformFacts).not.toHaveBeenCalled();
   });
 });

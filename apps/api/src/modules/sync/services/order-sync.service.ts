@@ -16,6 +16,7 @@ import { OperatorContext } from '../../operation-log/operation-log.service';
 import { ListingService } from '../../listing/services/listing.service';
 import { extractYandexOfferImageUrl } from '../../integration/yandex/yandex.mapper';
 import { LabelPrefetchService } from './label-prefetch.service';
+import { ShipmentService } from '../../shipment/services/shipment.service';
 
 const SYSTEM_OPERATOR: OperatorContext = { userId: null, username: 'sync-engine' };
 
@@ -77,6 +78,7 @@ export class OrderSyncService {
     private readonly failureAlert: SyncFailureAlertService,
     private readonly logger: AppLoggerService,
     private readonly labelPrefetch: LabelPrefetchService,
+    private readonly shipmentService: ShipmentService,
   ) {}
 
   async execute(syncJob: SyncJobEntity): Promise<void> {
@@ -320,6 +322,13 @@ export class OrderSyncService {
         // 运单号首次出现 = 平台刚完成组包，面单此时才有（2026-10-21）。
         if (facts.trackingNumberAssigned) {
           await this.labelPrefetch.enqueueFromSync(result.orderId);
+          if (facts.platformTrackingNo !== null) {
+            await this.shipmentService.backfillTrackingForOrder(
+              result.orderId,
+              facts.platformTrackingNo,
+              SYSTEM_OPERATOR,
+            );
+          }
         }
         return facts.changed ? 'UPDATED' : 'DUPLICATE';
       }
@@ -408,6 +417,13 @@ export class OrderSyncService {
           );
           if (facts.trackingNumberAssigned) {
             await this.labelPrefetch.enqueueFromSync(candidate.id);
+            if (facts.platformTrackingNo !== null) {
+              await this.shipmentService.backfillTrackingForOrder(
+                candidate.id,
+                facts.platformTrackingNo,
+                SYSTEM_OPERATOR,
+              );
+            }
           }
           if (facts.changed) {
             updated += 1;

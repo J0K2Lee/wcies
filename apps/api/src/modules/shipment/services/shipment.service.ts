@@ -255,6 +255,39 @@ export class ShipmentService {
     return shipment;
   }
 
+  /**
+   * 平台运单号回填（2026-10-21）。
+   *
+   * 发货单的运单号是创建时的**快照**（来自订单的 `platform_tracking_no`），
+   * 之后订单在平台侧拿到运单号也不会自动补——例如组包后平台还没回填运单号
+   * 就发货的订单。同步层每次观察到运单号时调用本方法，把这单下发发货单的
+   * 空运单号补齐；只填空值，绝不覆盖人工录入。
+   *
+   * 返回被更新的发货单数（0 = 无需回填）。
+   */
+  async backfillTrackingForOrder(
+    orderId: string,
+    trackingNumber: string,
+    operator: OperatorContext,
+  ): Promise<number> {
+    const trimmed = trackingNumber.trim();
+    if (trimmed === '') {
+      return 0;
+    }
+    const updated = await this.shipmentRepo.fillMissingTracking(orderId, trimmed);
+    for (const row of updated) {
+      await this.operationLog.record({
+        entityType: 'SHIPMENT',
+        entityId: row.id,
+        entityCode: row.shipmentNo,
+        action: 'SYNC_PLATFORM_TRACKING',
+        changes: { trackingNumber: { from: null, to: trimmed } },
+        operator,
+      });
+    }
+    return updated.length;
+  }
+
   // --------------------------------------------------------------------------
   // Manual tracking input (task §28)
   // --------------------------------------------------------------------------

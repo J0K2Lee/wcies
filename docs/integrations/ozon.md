@@ -713,6 +713,14 @@ posting 放进**一次**请求（调用方按 20 单切块），平台返回**�
 **该「一页一单」假设仍待真实两单验证**（见 T0 第 4 项）——它只影响提速，
 不影响正确性。
 
+**状态事件的盲区（2026-10-21 实测）**：`TYPE_STATE_CHANGED` 只推送投递流程
+状态（`transferring_to_delivery` / `awaiting_registration` / `on_way_to_city` /
+`received` / `in_pickup_point` / `delivered` 等 8 种），**从不推送
+`posting_registered` / `posting_awaiting_deliver`**——全历史 521 条事件里一次
+都没有出现。因此「组包完成 → 运单号可读」这一跳只能靠主动回读发现：
+面单归档成功后立即定向回读一次（面单可取 = 平台已注册），并保留 24h 轮转
+兜底。不要指望补订阅或修复回调可用性来解决这一跳（回调 RED 是另一个问题）。
+
 ### 待 T0 实测（拿到用户授权后逐项回填）
 
 1. ~~`/v4/posting/fbs/ship` 真实请求/响应~~ ✅ 2026-10-09 已测（见上：受理正常、
