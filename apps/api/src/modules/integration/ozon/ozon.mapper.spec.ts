@@ -194,6 +194,23 @@ describe('mapPostingToOrder', () => {
     expect(mapPostingToOrder(badPrice).items[0]?.unitPrice).toBeNull();
   });
 
+  it('maps the v4 list price object {amount,currency} (2026-10-21)', () => {
+    // v4 /posting/fbs/list（2026-10-20 迁移）把 price 变成对象，且没有
+    // product.currency_code —— 轮询摄入的订单因此曾丢单价与币种。
+    const v4Product = {
+      offer_id: 'VK87-BLK',
+      sku: 987654321,
+      quantity: 2,
+      price: { amount: '4590.00', currency: 'CNY' },
+    } as OzonPostingProduct;
+    const order = mapPostingToOrder({ ...POSTING, products: [v4Product] });
+
+    expect(order.currency).toBe('CNY');
+    expect(order.items[0]?.unitPrice).toBe('4590.0000');
+    // 原始数据仍然逐字保留（平台对象形态不丢）。
+    expect(order.items[0]?.rawData).toEqual(v4Product);
+  });
+
   it('rejects postings without posting_number / products / dates', () => {
     expect(() => mapPostingToOrder({ ...POSTING, posting_number: '' })).toThrow(OzonMappingError);
     expect(() => mapPostingToOrder({ ...POSTING, products: [] })).toThrow(/no products/);

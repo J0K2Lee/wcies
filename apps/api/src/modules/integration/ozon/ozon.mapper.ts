@@ -343,10 +343,21 @@ export function buildPushAck(startedAt: Date): OzonPushAck {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function firstCurrency(products: readonly { currency_code?: unknown }[]): string | null {
+function firstCurrency(products: readonly OzonPostingProduct[]): string | null {
   for (const product of products) {
     if (typeof product.currency_code === 'string' && product.currency_code !== '') {
       return product.currency_code;
+    }
+    // v4 list 没有 product.currency_code，币种挂在 price.currency 上
+    // （2026-10-21：轮询订单币种为空的实际原因）。
+    const price = product.price;
+    if (
+      typeof price === 'object' &&
+      price !== null &&
+      typeof price.currency === 'string' &&
+      price.currency !== ''
+    ) {
+      return price.currency;
     }
   }
   return null;
@@ -359,11 +370,19 @@ function firstCurrency(products: readonly { currency_code?: unknown }[]): string
  * value becomes NULL - one bad price must neither fail the posting sync
  * (AGENTS.md §49) nor be fabricated as 0 (finance.md §2).
  */
-function parseUnitPriceTolerant(price: string | undefined): string | null {
-  if (typeof price !== 'string') {
+function parseUnitPriceTolerant(price: OzonPostingProduct['price'] | undefined): string | null {
+  // v3 get: "107.000000"; v4 list: {amount: "107", currency: "CNY"}
+  // （2026-10-20 迁移到 v4 列表后，轮询订单单价为空的实际原因）。
+  const raw =
+    typeof price === 'string'
+      ? price
+      : typeof price === 'object' && price !== null && typeof price.amount === 'string'
+        ? price.amount
+        : null;
+  if (raw === null) {
     return null;
   }
-  const trimmed = price.trim();
+  const trimmed = raw.trim();
   if (!/^\d{1,14}(\.\d+)?$/.test(trimmed)) {
     return null;
   }

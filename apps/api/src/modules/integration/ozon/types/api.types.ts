@@ -65,11 +65,22 @@ export interface OzonProductInfoListResponse {
 // POST /v3/posting/fbs/list
 // ---------------------------------------------------------------------------
 
+/**
+ * v4 `/posting/fbs/list` returns the price as an OBJECT, unlike the v3
+ * get/list shape which uses a plain decimal string (verified 2026-10-21 on
+ * polling-ingested orders: items came in with price `{amount, currency}`).
+ */
+export interface OzonPriceAmount {
+  readonly amount?: string;
+  readonly currency?: string;
+}
+
 export interface OzonPostingProduct {
   readonly name?: string;
   /** Seller article. */
   readonly offer_id: string;
-  readonly price?: string;
+  /** v3 get: "107.000000"; v4 list: {amount, currency} (2026-10-20). */
+  readonly price?: string | OzonPriceAmount;
   readonly quantity: number;
   /** Ozon SKU id. */
   readonly sku: number;
