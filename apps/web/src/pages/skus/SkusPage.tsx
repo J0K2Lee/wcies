@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { validate69Barcode } from '@wcies/shared';
 import {
   Alert,
   App,
@@ -283,6 +284,9 @@ export function SkusPage() {
   // 404「Cannot POST」（2026-10-17 用户录入 69 码报错的实际原因）。
   const [barcodeTargetSkuId, setBarcodeTargetSkuId] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  // 编辑弹窗打开时锁定目标 SKU（同 barcodeTargetSkuId 的理由）：右栏入口
+  // 没有打开抽屉，提交时不能读 drawerId。
+  const [editTargetId, setEditTargetId] = useState<string | null>(null);
   const [listingCreateOpen, setListingCreateOpen] = useState(false);
   // 映射平台商品 (rail quick action): snapshot the SKU to bind — the rail
   // selection may change while the modal is open.
@@ -438,6 +442,12 @@ export function SkusPage() {
 
   const updateMutation = useMutation({
     mutationFn: (values: Record<string, unknown>) => {
+      // 编辑入口已从详情抽屉迁到右栏（2026-10-19）：不能再读 drawerId——
+      // 右栏打开编辑时抽屉是关着的，drawerId 为 null 会 PATCH /skus/ 得到
+      // 404（2026-10-21 用户报错的实际原因）。目标 id 在开窗时锁定。
+      if (editTargetId === null) {
+        throw new Error('未选择 SKU，请重新打开编辑弹窗');
+      }
       const { categoryPath, brandId, ...rest } = values;
       const path = categoryPath as string[] | undefined;
       return apiPatch(
@@ -450,7 +460,7 @@ export function SkusPage() {
           categoryId:
             path !== undefined && path.length > 0 ? (path[path.length - 1] ?? null) : null,
         },
-        { id: drawerId ?? '' },
+        { id: editTargetId },
       );
     },
     onSuccess: () => {
@@ -696,16 +706,17 @@ export function SkusPage() {
   // and the PATCH then had to be typed out from scratch.
   const editPrefilledFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!editOpen) {
+    if (!editOpen || editTargetId === null) {
       editPrefilledFor.current = null;
       return;
     }
-    if (sku === undefined || editPrefilledFor.current === sku.id) {
+    // 只接受「属于当前编辑目标」的详情，防止用上一个 SKU 的抽屉缓存覆盖表单。
+    if (sku === undefined || sku.id !== editTargetId || editPrefilledFor.current === sku.id) {
       return;
     }
     editPrefilledFor.current = sku.id;
     editForm.setFieldsValue(editFormValues(sku, leafCategoryOptions));
-  }, [editOpen, sku, editForm, leafCategoryOptions]);
+  }, [editOpen, editTargetId, sku, editForm, leafCategoryOptions]);
   const printBarcodes = useApiQuery<{
     data: Array<{ barcode: string; isPrimary: boolean; barcodeType: string }>;
   }>(
@@ -731,6 +742,19 @@ export function SkusPage() {
   }, [printFor, printBarcode, printBarcodes.data]);
 
   const rows = list.data?.data ?? [];
+
+  // 编辑弹窗展示用的 SKU：优先用抽屉详情（仅当它就是编辑目标），否则回落到
+  // 列表行——右栏入口不打开抽屉，详情数据可能还是上一个 SKU 的残留
+  // （2026-10-21）。
+  const editSku = useMemo(() => {
+    if (editTargetId === null) {
+      return null;
+    }
+    if (sku !== undefined && sku.id === editTargetId) {
+      return sku;
+    }
+    return rows.find((row) => row.id === editTargetId) ?? null;
+  }, [editTargetId, sku, rows]);
 
   // ---- Context rail: quick view of the selected SKU (task §29) ----
   const railContent = useMemo<ContextRailContent>(() => {
@@ -848,6 +872,7 @@ export function SkusPage() {
               block
               style={{ marginTop: 8 }}
               onClick={() => {
+                setEditTargetId(selectedRow.id);
                 editForm.resetFields();
                 editForm.setFieldsValue(editFormValues(selectedRow, leafCategoryOptions));
                 setEditOpen(true);
@@ -887,6 +912,19 @@ export function SkusPage() {
               }}
             >
               打印条码标签
+            </Button>
+            {/* 添加条码（用户指示 2026-10-21）：右栏可直接给当前 SKU 录入条码，
+                不必先打开详情抽屉；抽屉里的原按钮保留。 */}
+            <Button
+              block
+              style={{ marginTop: 8 }}
+              onClick={() => {
+                barcodeForm.resetFields();
+                setBarcodeTargetSkuId(selectedRow.id);
+                setBarcodeModalOpen(true);
+              }}
+            >
+              添加条码
             </Button>
             <Button
               block
@@ -1518,7 +1556,21 @@ export function SkusPage() {
           <Form.Item
             name="barcode"
             label="条码"
-            rules={[{ required: true, message: '请输入条码' }]}
+            extra="69 码按 EAN-13 校验位校验；末位不符会拒绝录入。"
+            rules={[
+              { required: true, message: '请输入条码' },
+              {
+                validator: async (_rule, value: string | undefined) => {
+                  if (value === undefined || value === '') {
+                    return;
+                  }
+                  const result = validate69Barcode(value);
+                  if (!result.ok) {
+                    throw new Error(result.message ?? '条码校验失败');
+                  }
+                },
+              },
+            ]}
           >
             <Input placeholder="69码 / EAN / GTIN" />
           </Form.Item>
@@ -1549,6 +1601,8 @@ export function SkusPage() {
         afterOpenChange={(open) => {
           if (!open) {
             editForm.resetFields();
+            // 关闭即释放目标：下一次打开（可能来自另一行）重新锁定。
+            setEditTargetId(null);
           }
         }}
         onCancel={() => setEditOpen(false)}
@@ -1557,7 +1611,7 @@ export function SkusPage() {
       >
         <Form form={editForm} layout="vertical">
           <Form.Item label="SKU 编码（生成后冻结）">
-            <Input value={sku?.skuCode ?? ''} disabled />
+            <Input value={editSku?.skuCode ?? ''} disabled />
           </Form.Item>
           <Form.Item
             name="nameZh"

@@ -7,7 +7,8 @@ import {
 } from '../constants/barcode.constants';
 
 export class CreateBarcodeRequestDto {
-  @ApiProperty({ example: '6971234567890', maxLength: 255 })
+  // 示例必须是校验位合法的 EAN-13（2026-10-21 起 69 码按校验位校验）。
+  @ApiProperty({ example: '6901234567892', maxLength: 255 })
   @IsString()
   @Length(1, 255)
   barcode!: string;

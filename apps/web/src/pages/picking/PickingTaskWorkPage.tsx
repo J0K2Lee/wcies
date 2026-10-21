@@ -302,10 +302,22 @@ export function PickingTaskWorkPage() {
               </div>
               <div style={{ minWidth: 220, flex: 1 }}>
                 <div style={{ fontSize: 17, fontWeight: 650 }}>{nextItem.skuCode}</div>
-                <div style={{ fontSize: 13.5, color: colors.textSecondary, marginTop: 2 }}>
+                {/* 当前拣货 SKU 名称（用户指示 2026-10-21）：原 13.5px 次要色在
+                    工位屏幕上不够醒目，提升为主文本色 + 20px，与库位号形成主次。 */}
+                <div
+                  style={{
+                    fontSize: 20,
+                    fontWeight: 650,
+                    lineHeight: '26px',
+                    color: colors.textPrimary,
+                    marginTop: 4,
+                  }}
+                >
                   {nextItem.skuName}
                   {nextItem.serialTracking && (
-                    <span style={{ color: colors.warning, marginLeft: 8 }}>SN 商品</span>
+                    <span style={{ color: colors.warning, marginLeft: 8, fontSize: 13 }}>
+                      SN 商品
+                    </span>
                   )}
                 </div>
                 <div style={{ fontSize: 13, color: colors.textTertiary, marginTop: 6 }}>

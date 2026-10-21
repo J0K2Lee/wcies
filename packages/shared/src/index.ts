@@ -37,3 +37,10 @@ export interface ApiErrorResponse {
   };
   requestId: string;
 }
+
+export {
+  ean13CheckDigit,
+  isValidEan13,
+  validate69Barcode,
+  type BarcodeValidationResult,
+} from './barcode.js';

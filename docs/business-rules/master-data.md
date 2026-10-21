@@ -46,6 +46,8 @@
 1. `barcode` 全系统唯一：一个条码永远不能绑定两个内部 SKU；冲突错误码 `SKU_BARCODE_ALREADY_EXISTS`。
 2. 一个 SKU 可有多个条码，最多一个 `is_primary = true`，由数据库 partial unique index（`WHERE is_primary`）保证；切换主条码在事务中先降级旧主条码。
 3. 条码类型：`EAN / GTIN / MANUFACTURER / INTERNAL / OTHER`；69 码归入 EAN/GTIN，不设 CN_69_CODE。
+   - **69 码校验位（2026-10-21，用户要求）**：以 `69` 开头的值按定义是 EAN-13（13 位数字，末位为校验位）。录入时校验：非 13 位 → 422 `SKU_BARCODE_INVALID_EAN13`；13 位但校验位不符 → 同样 422，`details.expectedCheckDigit` 给出正确末位。校验位算法：前 12 位奇数位 ×1、偶数位 ×3 求和，校验位 = `(10 - sum % 10) % 10`。
+   - 校验只作用于 **69 开头**的值；内部 6 位码、厂商码、Code128 等其他格式不经过此规则（不 trim/补零——条码是事实值，静默改写比拒绝更危险）。规则实现在 `packages/shared/src/barcode.ts`，API（`BarcodeService.create`）与 SKU 编辑页添加条码表单共用同一份，避免两处判定漂移。
 4. **内部条码格式**（决策 0019，2026-10-09）：**6 位纯数字** `%06d`，如 `000014`，由 PG sequence `seq_internal_barcode` 取号；宽度是最小宽度，序号溢出（>999999）自然进位。真实 EAN/GTIN 为 8–13 位，6 位内部条码不会在扫码层与之混淆。
    - 历史格式 `WCSKU%08d` / `W%08d` 已由**迁移 `20261009_001` 统一转换**为 6 位（数字部分原样保留，单射转换；冲突即报错中止）。此决策取代 0017 的"不迁移"立场——用户明确要求更正存量数据，旧标签实物重印处理。人工录入的非系统格式 INTERNAL 条码不受影响。
    - 打印载体仍是 Code128（决策 0007）；纯数字可走 Code128 子集 C（每 2 位数字 11 模块），符号宽度比 `W%08d` 再缩短约一半。

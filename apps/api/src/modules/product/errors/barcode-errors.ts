@@ -29,3 +29,18 @@ export class BarcodeTypeInvalidError extends DomainError {
     super(`不支持的条码类型「${barcodeType}」，请选择有效的条码类型。`, { barcodeType });
   }
 }
+
+/**
+ * 69 码（中国 EAN-13）未通过校验位规则（用户指示 2026-10-21）。
+ *
+ * 只拦截以 69 开头的值：13 位数字按 EAN-13 校验位验证，非 13 位直接拒绝；
+ * 其他条码类型（内部码、厂商码等）不经过此规则。
+ */
+export class BarcodeInvalidEan13Error extends DomainError {
+  readonly code = 'SKU_BARCODE_INVALID_EAN13';
+  readonly httpStatus = 422;
+
+  constructor(barcode: string, message: string, expectedCheckDigit: string | null) {
+    super(message, { barcode, expectedCheckDigit });
+  }
+}

@@ -1,8 +1,13 @@
 import { Injectable } from '@nestjs/common';
+import { validate69Barcode } from '@wcies/shared';
 import { EntityManager } from 'typeorm';
 import { OperatorContext, OperationLogService } from '../../operation-log/operation-log.service';
 import { SkuBarcodeEntity } from '../entities/sku-barcode.entity';
-import { BarcodeAlreadyExistsError, BarcodeNotFoundError } from '../errors/barcode-errors';
+import {
+  BarcodeAlreadyExistsError,
+  BarcodeInvalidEan13Error,
+  BarcodeNotFoundError,
+} from '../errors/barcode-errors';
 import { SkuNotFoundError } from '../errors/sku-errors';
 import { SkuRepository } from '../repositories/sku.repository';
 import { SkuBarcodeRepository } from '../repositories/sku-barcode.repository';
@@ -42,6 +47,17 @@ export class BarcodeService {
     dto: CreateBarcodeRequestDto,
     operator: OperatorContext,
   ): Promise<BarcodeResponseDto> {
+    // 69 码（中国 EAN-13）必须通过校验位（用户指示 2026-10-21）。规则只
+    // 作用于 69 开头的值，内部码/厂商码不经过这里。
+    const validation = validate69Barcode(dto.barcode);
+    if (!validation.ok) {
+      throw new BarcodeInvalidEan13Error(
+        dto.barcode,
+        validation.message ?? '69 码校验失败',
+        validation.expectedCheckDigit ?? null,
+      );
+    }
+
     await this.assertSkuExists(skuId);
     const existing = await this.repository.findByBarcode(dto.barcode);
     if (existing !== null) {

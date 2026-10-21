@@ -8,7 +8,8 @@ import { SkuBarcodeRepository } from '../repositories/sku-barcode.repository';
 import { SkuRepository } from '../repositories/sku.repository';
 import { BarcodeService } from './barcode.service';
 
-const BARCODE = '6971234567890';
+// 合法 EAN-13（69 开头，校验位 2）——2026-10-21 起 69 码必须过校验位。
+const BARCODE = '6901234567892';
 const OPERATOR = { userId: null, username: 'test' };
 
 function build() {
@@ -31,6 +32,7 @@ function build() {
   };
   const repository = {
     findByBarcode: vi.fn().mockResolvedValue(barcode),
+    findPrimaryOfSku: vi.fn().mockResolvedValue(null),
     nextInternalBarcode: vi.fn().mockResolvedValue('000001'),
     insertWithPrimaryHandling: vi.fn(),
   };
@@ -160,5 +162,65 @@ describe('Barcode user-facing errors', () => {
       details: { id: 'sku-1' },
     });
     expect(ctx.repository.nextInternalBarcode).not.toHaveBeenCalled();
+  });
+});
+
+describe('BarcodeService 69 码校验（2026-10-21）', () => {
+  it('合法 69 码放行（校验位正确）', async () => {
+    const ctx = build();
+    ctx.repository.findByBarcode.mockResolvedValue(null);
+    ctx.repository.insertWithPrimaryHandling.mockResolvedValue({
+      id: 'barcode-new',
+      skuId: 'sku-1',
+      barcode: '6901234567892',
+      barcodeType: 'EAN',
+      isPrimary: true,
+      status: 'ACTIVE',
+      createdAt: new Date('2026-10-21T00:00:00Z'),
+    });
+
+    await ctx.service.create('sku-1', { barcode: '6901234567892', barcodeType: 'EAN' }, OPERATOR);
+
+    expect(ctx.repository.insertWithPrimaryHandling).toHaveBeenCalled();
+  });
+
+  it('69 码校验位错误 → 422 并给出正确末位', async () => {
+    const ctx = build();
+
+    await expect(
+      ctx.service.create('sku-1', { barcode: '6901234567890', barcodeType: 'EAN' }, OPERATOR),
+    ).rejects.toMatchObject({
+      code: 'SKU_BARCODE_INVALID_EAN13',
+      httpStatus: 422,
+      details: { barcode: '6901234567890', expectedCheckDigit: '2' },
+    });
+    expect(ctx.repository.insertWithPrimaryHandling).not.toHaveBeenCalled();
+    expect(ctx.repository.findByBarcode).not.toHaveBeenCalled();
+  });
+
+  it('69 开头但不是 13 位 → 422', async () => {
+    const ctx = build();
+
+    await expect(
+      ctx.service.create('sku-1', { barcode: '690123456789', barcodeType: 'EAN' }, OPERATOR),
+    ).rejects.toMatchObject({ code: 'SKU_BARCODE_INVALID_EAN13', httpStatus: 422 });
+  });
+
+  it('非 69 开头的条码不套用 EAN-13 规则（内部码/厂商码放行）', async () => {
+    const ctx = build();
+    ctx.repository.findByBarcode.mockResolvedValue(null);
+    ctx.repository.insertWithPrimaryHandling.mockResolvedValue({
+      id: 'barcode-new',
+      skuId: 'sku-1',
+      barcode: '123456',
+      barcodeType: 'INTERNAL',
+      isPrimary: true,
+      status: 'ACTIVE',
+      createdAt: new Date('2026-10-21T00:00:00Z'),
+    });
+
+    await ctx.service.create('sku-1', { barcode: '123456', barcodeType: 'INTERNAL' }, OPERATOR);
+
+    expect(ctx.repository.insertWithPrimaryHandling).toHaveBeenCalled();
   });
 });
