@@ -1027,9 +1027,10 @@ export function SkusPage() {
           value={categoryId === undefined ? undefined : categoryPathOf(categoryOptions, categoryId)}
           onChange={(path) => {
             setPage(1);
-            setCategoryId(
-              path === null || path.length === 0 ? undefined : String(path[path.length - 1]),
-            );
+            // 清空（点 X）时 rc-cascader 传的是 undefined（不是 []/null）；
+            // 旧写法 path.length 会抛错，导致筛选条件永远清不掉（2026-10-21）。
+            const last = Array.isArray(path) && path.length > 0 ? path[path.length - 1] : undefined;
+            setCategoryId(last === undefined ? undefined : String(last));
           }}
         />
         <Select
