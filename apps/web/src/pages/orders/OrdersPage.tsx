@@ -2161,7 +2161,7 @@ export function OrdersPage() {
    * 打开商品链接（ERP 建议#3，用户指示 2026-09-28：只加在商品行侧边栏操作区）。
    * 反查本店铺下订单行对应的商品链接：已映射行按 skuId 精确查，未映射行按
    * 平台标识 keyword 查；命中行优先用人工维护的 listing.url，否则按平台拼
-   * 公开商品页（OZON/WB 规则已核实；Yandex 未核实 → 提示，不猜 URL §88）。
+   * 公开商品页（OZON / WB / Yandex 规则均已核实；Yandex 需要标题拼 slug）。
    */
   const openPlatformProductPage = useCallback(
     (item: OrderItem, storeId: string, platformCode: string) => {
@@ -2183,6 +2183,8 @@ export function OrdersPage() {
           id: string;
           platformCode: string;
           platformProductId: string;
+          /** Yandex 商品页 URL 需要标题拼 slug（2026-10-22）。 */
+          title: string | null;
           url: string | null;
         }>
       >('/api/v1/listings', {
@@ -2198,10 +2200,11 @@ export function OrdersPage() {
             return;
           }
           const url =
-            listing.url ?? buildPlatformProductUrl(listing.platformCode, listing.platformProductId);
+            listing.url ??
+            buildPlatformProductUrl(listing.platformCode, listing.platformProductId, listing.title);
           if (url === null) {
             void message.warning(
-              `暂不支持打开 ${listing.platformCode} 的平台商品页（该平台商品页 URL 规则未核实），可先在商品链接页维护 url`,
+              `无法生成 ${listing.platformCode} 的平台商品页地址（缺少商品标题或该平台 URL 规则未核实），可先在商品链接页维护 url`,
             );
             return;
           }

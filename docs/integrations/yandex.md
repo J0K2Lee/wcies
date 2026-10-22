@@ -65,6 +65,36 @@
   发起零平台 API 调用。代码：`yandex.mapper.extractYandexOfferImageUrl` +
   `OrderSyncService.resolveYandexImages`。
 
+### 5b. 商品页公开 URL（2026-10-22 实测）
+
+买家商品页格式：
+
+```text
+https://market.yandex.ru/card/<slug>/<cardId>[?do-waremd5=...]
+```
+
+- `cardId` = Listing 的 `platform_product_id`（offer-mappings 的 `offer.id`，
+  与订单行里没有该 id —— 订单行只有 `offerId`，需经 listing 反查）。
+- `slug` = 商品标题（`offer.name`）的俄→拉丁转写，只作 SEO。
+  **缺 slug 会 404**（用户实测：`/card/5928234246` → 「Тут ничего нет / 404」），
+  所以必须拼。
+- `do-waremd5` 是配送/归因参数，拼链接时可省略。
+- 转写规则（按真实链接反推，`apps/web/src/utils/platformUrl.ts` 的
+  `buildYandexSlug`）：点号直接删（`1.18L` → `118l`）、`ь` 丢弃、`ъ` → `y`、
+  其余非字母数字折叠成单个 `-`。校验样本：
+  `Термос Stanley 40oz с ручкой из нержавеющей стали 304 большой объем 1.18L для взрослых`
+  → `termos-stanley-40oz-s-ruchkoy-iz-nerzhaveyushchey-stali-304-bolshoy-obyem-118l-dlya-vzroslykh`。
+- 订单页「打开商品链接」优先用 listing 人工维护的 `url`，其次按上述规则拼接；
+  缺标题时返回 null 并提示，不猜（AGENTS §88）。
+
+### 5c. 订单行图片的时序（2026-10-22）
+
+图片只能从 listing（`offer.pictures`）来，所以 **listing 必须先于订单存在**。
+新店铺常见「先摄入订单、后跑 listing 同步」——那批历史订单不会再被订单同步的
+增量窗口捞到，`platform_image_url` 会永久为空。因此 listing 同步完成后
+（`ListingSyncProcessor`）会立即对本店铺做一次订单行图片回补
+（`OrderSyncService.enrichPlatformImages`，异常自吞不影响同步结果）。
+
 ## 6. 其余能力（对齐 OZON 范围的逐项核对）
 
 | OZON 能力 | Yandex 对应物 | 状态 |

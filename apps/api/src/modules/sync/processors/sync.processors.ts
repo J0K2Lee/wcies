@@ -76,6 +76,7 @@ export class ListingSyncProcessor extends WorkerHost {
   constructor(
     private readonly jobRepo: SyncJobRepository,
     private readonly syncService: ListingSyncService,
+    private readonly orderSync: OrderSyncService,
     private readonly logger: AppLoggerService,
   ) {
     super();
@@ -99,6 +100,11 @@ export class ListingSyncProcessor extends WorkerHost {
             return 'missing';
           }
           await this.syncService.execute(syncJob);
+          // 订单行图片的来源是 listing（Yandex offer.pictures 等）：listing 刷新
+          // 后回补本店铺仍未取到图的订单行。新店铺常见「先有订单、后有 listing」，
+          // 而那批历史订单不会再被订单同步的增量窗口捞到（2026-10-22）。
+          // 内部自吞异常，不影响 listing 同步结果。
+          await this.orderSync.enrichPlatformImages(syncJob.storeId);
           return syncJob.id;
         },
       );
