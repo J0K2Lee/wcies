@@ -113,6 +113,15 @@ export class StoreResponseDto {
   @ApiProperty({ type: Object, nullable: true })
   settings!: Record<string, unknown> | null;
 
+  @ApiPropertyOptional({
+    nullable: true,
+    type: String,
+    example: 'https://hook.example.com/api/v1/webhooks/yandex/stores/YX-001',
+    description:
+      '入站 webhook 回调地址（OZON/WB/YANDEX）：平台侧订阅或「API 通知」里要填的地址；PUBLIC_BASE_URL 未配置时为 null',
+  })
+  webhookUrl!: string | null;
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;
 

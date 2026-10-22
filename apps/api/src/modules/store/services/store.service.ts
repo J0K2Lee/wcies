@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PageMeta } from '@wcies/shared';
 import {
   OperationLogService,
@@ -34,6 +35,7 @@ export class StoreService {
     private readonly platformService: PlatformService,
     private readonly businessCode: BusinessCodeService,
     private readonly operationLog: OperationLogService,
+    private readonly config: ConfigService,
   ) {}
 
   async list(
@@ -251,8 +253,27 @@ export class StoreService {
       defaultCurrency: store.defaultCurrency,
       status: store.status,
       settings: store.settings,
+      webhookUrl: this.webhookUrlOf(platformCode, store.storeCode),
       createdAt: store.createdAt,
       updatedAt: store.updatedAt,
     };
+  }
+
+  /**
+   * 入站 webhook 回调地址（2026-10-22，用户要求店铺配置里可见）：
+   * 平台按 `{PUBLIC_BASE_URL}/api/v1/webhooks/{platform}/stores/{storeCode}`
+   * 投递。OZON 由本系统 API 订阅、WB 由本系统创建订阅、Yandex 只能去卖家
+   * 后台「API 通知」手填——三者都需要操作者知道这条地址，所以统一在店铺详情
+   * 返回，前端分平台给说明。
+   */
+  private webhookUrlOf(platformCode: string, storeCode: string): string | null {
+    if (!['OZON', 'WB', 'YANDEX'].includes(platformCode)) {
+      return null;
+    }
+    const base = this.config.get<string>('app.publicBaseUrl')?.replace(/\/+$/, '');
+    if (base === undefined || base === '') {
+      return null;
+    }
+    return `${base}/api/v1/webhooks/${platformCode.toLowerCase()}/stores/${storeCode}`;
   }
 }

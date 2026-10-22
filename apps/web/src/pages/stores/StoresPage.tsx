@@ -73,6 +73,8 @@ interface StoreRow {
   defaultCurrency: string | null;
   status: string;
   settings: Record<string, unknown> | null;
+  /** 入站 webhook 回调地址（后端按 PUBLIC_BASE_URL + 平台 + 店铺编码生成）。 */
+  webhookUrl?: string | null;
   createdAt: string;
   updatedAt: string;
   credentialConfigured: boolean;
@@ -1521,6 +1523,9 @@ function StoreDetailBody({
       </section>
 
       {store.platformCode === 'OZON' && <OzonWebhookSection store={store} />}
+      {(store.platformCode === 'YANDEX' || store.platformCode === 'WB') && (
+        <CabinetWebhookSection store={store} />
+      )}
 
       <section>
         <div
@@ -1699,6 +1704,74 @@ function StoreDetailBody({
         />
       </section>
     </Space>
+  );
+}
+
+/**
+ * Yandex / WB 的 webhook 说明分节（2026-10-22 用户要求：店铺配置里至少要有
+ * 订阅地址与说明）。
+ *
+ * 这两个平台的订阅方式与 OZON 不同，本系统没有「一键订阅」：
+ * - Yandex：只能在卖家后台「设置 → API 和模块 → API 通知」手填地址；
+ * - WB：webhook API 仅对目录云服务开放（docs/integrations/wildberries.md §5b），
+ *   自部署场景以轮询为主，接收端保留待命。
+ * 所以这里只展示回调地址 + 平台侧操作说明，不提供写操作。
+ */
+function CabinetWebhookSection({ store }: { store: StoreRow }) {
+  const { message } = AntdApp.useApp();
+  const url = store.webhookUrl ?? null;
+  const isYandex = store.platformCode === 'YANDEX';
+
+  return (
+    <section>
+      <div style={{ fontSize: 14.5, fontWeight: 600, color: colors.textPrimary, marginBottom: 10 }}>
+        Webhook 订阅
+      </div>
+      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <div>
+          <span style={{ fontSize: 12.5, color: colors.textTertiary }}>回调地址</span>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+            <Typography.Text code copyable={url !== null} style={{ fontSize: 12.5 }}>
+              {url ?? 'PUBLIC_BASE_URL 未配置，无法生成回调地址'}
+            </Typography.Text>
+            {url !== null && (
+              <Button
+                size="small"
+                onClick={() => {
+                  void navigator.clipboard
+                    ?.writeText(url)
+                    .then(() => message.success('回调地址已复制'))
+                    .catch(() => message.error('复制失败，请手动选中复制'));
+                }}
+              >
+                复制
+              </Button>
+            )}
+          </div>
+        </div>
+        {isYandex ? (
+          <div style={{ fontSize: 12.5, color: colors.textSecondary, lineHeight: 1.7 }}>
+            在 Yandex 卖家后台「设置 → API 和模块 → API 通知」里填写上面的地址，
+            事件类型勾选订单创建 / 状态变化 / 取消，范围选本店铺所属柜面。
+            <br />
+            Yandex 的推送不签名，系统靠「来源 IP 白名单 + 报文 campaignId 必须等于本店凭证
+            campaignId」识别来源；<b>订阅错店铺时事件会显示「已拒绝」，订单不受影响</b>
+            （订单仍由 5 分钟轮询同步）。Yandex 实际投递到该地址后追加的
+            <Typography.Text code style={{ fontSize: 12 }}>
+              /notification
+            </Typography.Text>
+            路径，两个路径本系统都接收。
+          </div>
+        ) : (
+          <div style={{ fontSize: 12.5, color: colors.textSecondary, lineHeight: 1.7 }}>
+            WB 的 webhook 订阅接口目前只对已入驻解决方案目录的服务开放（自建系统申请 403），
+            因此本店以 <b>5 分钟轮询</b>为主链路，接收端已实现、待拿到服务令牌后即可启用。
+            若将来可用：在上述地址创建订阅，并把平台返回的 secret 配到本店 WEBHOOK 凭证，
+            推送校验即生效。
+          </div>
+        )}
+      </Space>
+    </section>
   );
 }
 
