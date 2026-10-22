@@ -5,6 +5,7 @@ import {
   mapOrderToOrder,
   mapReturnToReturn,
   mapWebhookPayload,
+  pickShowcaseUrl,
   yxFulfillmentModeOf,
   yxStageOf,
   YandexMappingError,
@@ -125,6 +126,31 @@ describe('mapOfferMappingToListing', () => {
     });
   });
 
+  it('keeps the platform showcase URL as listing.url (2026-10-22 商品链接修复)', () => {
+    const withB2c = mapOfferMappingToListing(
+      {
+        offer: { offerId: 'SKU-A', name: 'Товар' },
+        mapping: { marketSku: 6087881269 },
+        showcaseUrls: [
+          { showcaseType: 'B2B', showcaseUrl: 'https://market.yandex.ru/card/x/1' },
+          {
+            showcaseType: 'B2C',
+            showcaseUrl: 'https://market.yandex.ru/card/slug/5817028070?businessId=193261685',
+          },
+        ],
+      },
+      '1001',
+    );
+    expect(withB2c.url).toBe('https://market.yandex.ru/card/slug/5817028070?businessId=193261685');
+
+    const withoutShowcase = mapOfferMappingToListing(
+      { offer: { offerId: 'SKU-A' }, mapping: { marketSku: 6087881269 } },
+      '1001',
+    );
+    // 绝不拿 marketSku 拼卡片地址：拼出来的链接对部分卡片会 404。
+    expect(withoutShowcase.url).toBeNull();
+  });
+
   it('falls back to offerId identity for unmapped offers', () => {
     const entry: YxOfferMapping = { offer: { offerId: 'SKU-RAW' } };
     const listing = mapOfferMappingToListing(entry, '1001');
@@ -185,6 +211,32 @@ describe('mapOfferMappingToListing', () => {
     };
     const listing = mapOfferMappingToListing(entry, '1001');
     expect(listing.skus[0]?.rawData['product_attributes']).toBeUndefined();
+  });
+});
+
+describe('pickShowcaseUrl', () => {
+  it('prefers the B2C showcase', () => {
+    expect(
+      pickShowcaseUrl([
+        { showcaseType: 'B2B', showcaseUrl: 'https://b2b' },
+        { showcaseType: 'B2C', showcaseUrl: 'https://b2c' },
+      ]),
+    ).toBe('https://b2c');
+  });
+
+  it('falls back to the first usable entry, ignoring blanks', () => {
+    expect(
+      pickShowcaseUrl([
+        { showcaseType: 'B2C', showcaseUrl: '   ' },
+        { showcaseType: 'B2B', showcaseUrl: 'https://b2b' },
+      ]),
+    ).toBe('https://b2b');
+  });
+
+  it('returns null when nothing usable is present', () => {
+    expect(pickShowcaseUrl(undefined)).toBeNull();
+    expect(pickShowcaseUrl([])).toBeNull();
+    expect(pickShowcaseUrl([{ showcaseType: 'B2C' }])).toBeNull();
   });
 });
 

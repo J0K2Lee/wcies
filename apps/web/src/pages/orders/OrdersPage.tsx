@@ -2161,7 +2161,7 @@ export function OrdersPage() {
    * 打开商品链接（ERP 建议#3，用户指示 2026-09-28：只加在商品行侧边栏操作区）。
    * 反查本店铺下订单行对应的商品链接：已映射行按 skuId 精确查，未映射行按
    * 平台标识 keyword 查；命中行优先用人工维护的 listing.url，否则按平台拼
-   * 公开商品页（OZON / WB / Yandex 规则均已核实；Yandex 需要标题拼 slug）。
+   * 公开商品页（OZON / WB 规则已核实；Yandex 用 listing.url，缺失时退回搜索页）。
    */
   const openPlatformProductPage = useCallback(
     (item: OrderItem, storeId: string, platformCode: string) => {

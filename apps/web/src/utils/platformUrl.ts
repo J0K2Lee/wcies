@@ -8,76 +8,30 @@
  *
  * WB 用 nmID（= Listing 的 platform_product_id）。
  *
- * YANDEX（2026-10-22 用户提供真实链接 + 实测）：商品页是
- *   https://market.yandex.ru/card/<slug>/<cardId>
- * 其中 cardId = Listing 的 platform_product_id（offer-mappings 的 offer.id），
- * slug = 商品标题的俄→拉丁转写（只做 SEO，不影响取到商品）。**只有 cardId 的
- * 形式 `card/<cardId>` 会 404**（用户实测截图），所以 slug 必须拼。
- * 例：card/5928234246 → 404；
- *     card/termos-stanley-...-dlya-vzroslykh/5928234246 → 正常商品页。
- * 转写规则按该真实链接反推（ь→丢、ъ→y、点号直接删：1.18L→118l）。
+ * YANDEX **不拼卡片地址**（2026-10-22 实测修正）：公开页
+ * `market.yandex.ru/card/<slug>/<id>` 里的 id 并不等于 Partner API 的
+ * `marketSku`，用 marketSku 拼出来的链接对部分卡片直接 404；slug 本身只是
+ * 占位路径段（填什么都路由，实测 `card/x/<id>` 可打开）。唯一可靠来源是
+ * offer-mappings 的 `showcaseUrls[].showcaseUrl`（listing 同步已存进
+ * `listing.url`）。listing.url 缺失时退回 Market 搜索页（按商品名），
+ * 保证永远可点。
  *
- * listing.url（人工维护）优先级永远高于拼接结果。
+ * listing.url（人工维护 / 平台给的 showcaseUrl）优先级永远高于兜底。
  */
-
-/** 俄文字母 → 拉丁转写（按 Yandex Market 真实商品页 slug 反推，2026-10-22）。 */
-const CYRILLIC_TO_LATIN: Readonly<Record<string, string>> = {
-  а: 'a',
-  б: 'b',
-  в: 'v',
-  г: 'g',
-  д: 'd',
-  е: 'e',
-  ё: 'e',
-  ж: 'zh',
-  з: 'z',
-  и: 'i',
-  й: 'y',
-  к: 'k',
-  л: 'l',
-  м: 'm',
-  н: 'n',
-  о: 'o',
-  п: 'p',
-  р: 'r',
-  с: 's',
-  т: 't',
-  у: 'u',
-  ф: 'f',
-  х: 'kh',
-  ц: 'ts',
-  ч: 'ch',
-  ш: 'sh',
-  щ: 'shch',
-  ъ: 'y',
-  ы: 'y',
-  ь: '',
-  э: 'e',
-  ю: 'yu',
-  я: 'ya',
-};
-
-/**
- * 商品标题 → Yandex 商品页 slug。
- * 点号直接删除（`1.18L` → `118l`，与真实链接一致），其余非字母数字折叠成单个 `-`。
- */
-export function buildYandexSlug(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/\./g, '')
-    .replace(/[^a-z0-9а-яё]+/g, '-')
-    .replace(/[а-яё]/g, (char) => CYRILLIC_TO_LATIN[char] ?? '')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-}
 
 export function buildOzonProductUrl(platformSkuId: string): string {
   return `https://www.ozon.ru/product/${platformSkuId}`;
 }
 
+/** Yandex 没有卡片链接时的兜底：按商品名搜索（永远能打开）。 */
+export function buildYandexSearchUrl(title: string): string | null {
+  const text = title.trim();
+  return text === '' ? null : `https://market.yandex.ru/search?text=${encodeURIComponent(text)}`;
+}
+
 /**
- * `title` 只有 YANDEX 需要（拼 slug）；WB 可省略。
- * 缺标题时返回 null —— 由调用方提示，不猜 URL（AGENTS.md §88）。
+ * `title` 只有 YANDEX 兜底搜索需要；WB 可省略。
+ * 返回 null 表示既没有可拼的地址、也没有可兜底的文本 —— 调用方提示（§88）。
  */
 export function buildPlatformProductUrl(
   platformCode: string,
@@ -88,8 +42,7 @@ export function buildPlatformProductUrl(
     return `https://www.wildberries.ru/catalog/${platformProductId}/detail.aspx`;
   }
   if (platformCode === 'YANDEX') {
-    const slug = title === null || title === undefined ? '' : buildYandexSlug(title);
-    return slug === '' ? null : `https://market.yandex.ru/card/${slug}/${platformProductId}`;
+    return title === null || title === undefined ? null : buildYandexSearchUrl(title);
   }
   return null;
 }

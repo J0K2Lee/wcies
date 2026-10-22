@@ -185,11 +185,35 @@ export function mapOfferMappingToListing(
     // sellerSku once mapped).
     platformProductId: marketSku ?? offerId,
     title: readString(offer.name),
-    url: null,
+    // 买家商品页链接只信平台给的 showcaseUrl（2026-10-22 实测：marketSku 并不
+    // 总是公开页面 id，用它拼出来的链接会 404）。缺失时留 null，前端退回搜索页。
+    url: pickShowcaseUrl(entry.showcaseUrls),
     platformStatus: readString(campaignStatus ?? null) ?? readString(offer.cardStatus ?? null),
     skus: [sku],
     rawData: { ...entry },
   };
+}
+
+/**
+ * `showcaseUrls[]` -> 买家商品页链接。优先 B2C 橱窗，其次第一条有 URL 的；
+ * 没有就返回 null（绝不拿 marketSku 拼，AGENTS §88）。
+ */
+export function pickShowcaseUrl(urls: unknown): string | null {
+  if (!Array.isArray(urls)) {
+    return null;
+  }
+  const entries = urls.filter(
+    (entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null,
+  );
+  const usable = entries.flatMap((entry) => {
+    const url = readString(entry['showcaseUrl'])?.trim();
+    return url === undefined || url === '' ? [] : [{ url, type: entry['showcaseType'] }];
+  });
+  if (usable.length === 0) {
+    return null;
+  }
+  const b2c = usable.find((entry) => entry.type === 'B2C');
+  return (b2c ?? usable[0])?.url ?? null;
 }
 
 // ---------------------------------------------------------------------------

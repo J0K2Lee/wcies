@@ -65,27 +65,29 @@
   发起零平台 API 调用。代码：`yandex.mapper.extractYandexOfferImageUrl` +
   `OrderSyncService.resolveYandexImages`。
 
-### 5b. 商品页公开 URL（2026-10-22 实测）
+### 5b. 商品页公开 URL（2026-10-22 实测修正）
 
-买家商品页格式：
+**唯一可靠来源 = offer-mappings 的 `showcaseUrls[].showcaseUrl`**（官方 OpenAPI
+`GetOfferMappingDTO.showcaseUrls`，`{showcaseType, showcaseUrl}`）。listing 同步把它
+写入 `platform_listings.url`，订单页「打开商品链接」优先用这个值。
+
+格式形如：
 
 ```text
-https://market.yandex.ru/card/<slug>/<cardId>[?do-waremd5=...]
+https://market.yandex.ru/card/slug/5817028070?businessId=193261685
 ```
 
-- `cardId` = Listing 的 `platform_product_id`（offer-mappings 的 `offer.id`，
-  与订单行里没有该 id —— 订单行只有 `offerId`，需经 listing 反查）。
-- `slug` = 商品标题（`offer.name`）的俄→拉丁转写，只作 SEO。
-  **缺 slug 会 404**（用户实测：`/card/5928234246` → 「Тут ничего нет / 404」），
-  所以必须拼。
-- `do-waremd5` 是配送/归因参数，拼链接时可省略。
-- 转写规则（按真实链接反推，`apps/web/src/utils/platformUrl.ts` 的
-  `buildYandexSlug`）：点号直接删（`1.18L` → `118l`）、`ь` 丢弃、`ъ` → `y`、
-  其余非字母数字折叠成单个 `-`。校验样本：
-  `Термос Stanley 40oz с ручкой из нержавеющей стали 304 большой объем 1.18L для взрослых`
-  → `termos-stanley-40oz-s-ruchkoy-iz-nerzhaveyushchey-stali-304-bolshoy-obyem-118l-dlya-vzroslykh`。
-- 订单页「打开商品链接」优先用 listing 人工维护的 `url`，其次按上述规则拼接；
-  缺标题时返回 null 并提示，不猜（AGENTS §88）。
+三点实测结论（都在真实店铺上验证过）：
+
+1. **路径里的 `slug` 是占位段**，填什么都路由（`card/x/<id>` 一样打开），
+   所以不要费劲复刻俄文转写。
+2. **`marketSku` 不是公开页面 id**。曾按「slug + marketSku」拼链接：多数卡片能开，
+   但部分卡片直接 404（实证：`marketSku=6087881269` 的 MCHOSE 卡片，
+   平台给的 showcaseUrl 是 `5817028070`，用 marketSku 拼的地址 404）。
+3. `marketModelId` 同样不可用于拼链接（实测 404）。
+
+因此代码里 **不再拼 Yandex 卡片地址**：`listing.url` 为空时退回 Market 搜索页
+（`search?text=<商品名>`），保证永远可点。缺标题才返回 null 并提示，不猜（§88）。
 
 ### 5c. 订单行图片的时序（2026-10-22）
 

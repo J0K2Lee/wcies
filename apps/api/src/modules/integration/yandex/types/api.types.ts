@@ -77,6 +77,16 @@ export interface YxOfferMapping {
     readonly marketCategoryName?: string;
     readonly [key: string]: unknown;
   };
+  /**
+   * 买家商品页链接（官方 OpenAPI `GetOfferMappingDTO.showcaseUrls`）：
+   * `showcaseType` = B2C/B2B 等，`showcaseUrl` 直接就是 market.yandex.ru 的商品页。
+   * **这是唯一可靠的链接来源**——`marketSku` 并不是公开页面 id（2026-10-22 实测：
+   * 部分卡片用 marketSku 拼出来的 URL 直接 404）。
+   */
+  readonly showcaseUrls?: readonly {
+    readonly showcaseType?: string;
+    readonly showcaseUrl?: string;
+  }[];
 }
 
 export interface YxOfferMappingsResponse {
