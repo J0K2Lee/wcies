@@ -201,6 +201,36 @@ describe('WbAdapter fetchListings cursor', () => {
   });
 });
 
+describe('WbAdapter fetchListings first page (2026-10-22 分页修复)', () => {
+  it('always sends the page limit — otherwise WB returns 10 cards and the walk ends early', async () => {
+    const bodies: unknown[] = [];
+    const fetchImpl = vi.fn(async (_input: string, init?: RequestInit) => {
+      const raw = init?.body;
+      bodies.push(typeof raw === 'string' ? JSON.parse(raw) : null);
+      return jsonResponse(200, {
+        cards: [{ nmID: 1, vendorCode: 'SKU-A', sizes: [{ skus: ['20301'] }] }],
+        cursor: {},
+      });
+    });
+    const client = new WbClient({
+      baseUrls: BASES,
+      timeoutMs: 1000,
+      maxRetries: 0,
+      perStoreMinIntervalMs: 0,
+      statisticsMinIntervalMs: 0,
+      webhooksMinIntervalMs: 0,
+      marketplace4xxPenaltyMs: 0,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleep: async () => undefined,
+    });
+    const adapter = new WbAdapter(client, SHIPMENT_STUB);
+
+    await adapter.fetchListings(CONTEXT);
+
+    expect(bodies[0]).toEqual({ settings: { cursor: { limit: 100 } } });
+  });
+});
+
 function makeStateful(match: (url: string) => boolean, next: () => unknown): Stub {
   const calls: string[] = [];
   const fetchImpl = vi.fn(async (input: string) => {

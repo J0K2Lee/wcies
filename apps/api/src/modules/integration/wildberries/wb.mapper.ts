@@ -373,6 +373,37 @@ export function isWbWebhookSecretValid(
   return timingSafeEqual(provided, expected);
 }
 
+/**
+ * 卡片主图 URL（2026-10-22，订单行补图）：cards/list 的 `photos[]` 是对象数组，
+ * 每项按尺寸给出 CDN 直链（`hq`/`big`/`c516x688`/`c246x328`/`square`/`tm`）。
+ * 取第一张图的列表尺寸（`c516x688` 与订单行缩略图尺寸最接近），逐级回退；
+ * 都不是字符串则视为无图，不猜 CDN 拼址（AGENTS.md §88）。
+ */
+export function extractWbCardImageUrl(rawData: unknown): string | null {
+  if (typeof rawData !== 'object' || rawData === null) {
+    return null;
+  }
+  const photos = (rawData as { photos?: unknown }).photos;
+  if (!Array.isArray(photos) || photos.length === 0) {
+    return null;
+  }
+  const first: unknown = (photos as unknown[])[0];
+  if (typeof first === 'string' && first.trim() !== '') {
+    return first.trim();
+  }
+  if (typeof first !== 'object' || first === null) {
+    return null;
+  }
+  const sizes = first as Record<string, unknown>;
+  for (const key of ['c516x688', 'big', 'square', 'hq', 'c246x328', 'tm']) {
+    const value = sizes[key];
+    if (typeof value === 'string' && value.trim() !== '') {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

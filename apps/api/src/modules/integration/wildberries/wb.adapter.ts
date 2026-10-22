@@ -111,17 +111,17 @@ export class WbAdapter implements PlatformAdapter {
       ? cursor
       : ({ kind: 'WB_LISTING', updatedAt: null, nmId: null } as const);
 
-    // T0 校准（2026-09-18 live）：首页请求就是 {settings: {}}（不带 cursor
-    // 字段，数字型 updatedAt 会 400）；翻页把响应 cursor 原样回传
-    // （updatedAt 为 RFC3339 字符串 + nmID 数字 + limit）。
-    const settings: { cursor?: Record<string, unknown> } = {};
-    if (pageCursor.updatedAt !== null || pageCursor.nmId !== null) {
-      settings.cursor = {
+    // T0 校准（2026-09-18 live）：首页不能带数字型 updatedAt（会 400），但
+    // **limit 必须带**——`{settings:{}}` 时 WB 只回 10 条，而下面的
+    // 「短页即结束」判定会把它当成最后一页，整个店铺只会同步到 10 张卡片
+    // （2026-10-22 实测：WS-001 首页 10 条 / 真实 110 条）。
+    const settings: { cursor: Record<string, unknown> } = {
+      cursor: {
         ...(pageCursor.updatedAt !== null ? { updatedAt: pageCursor.updatedAt } : {}),
         ...(pageCursor.nmId !== null ? { nmID: pageCursor.nmId } : {}),
         limit: LISTING_PAGE_SIZE,
-      };
-    }
+      },
+    };
 
     const response = await this.client.cardsList(auth, context.storeId, { settings });
     // T0 校准：真实响应是顶层 {cards, cursor}——没有 {data} 信封。

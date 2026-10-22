@@ -72,15 +72,30 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 ## 4. 商品卡 / Listing（已验证）
 
 - `POST https://content-api.wildberries.cn/content/v2/get/cards/list`——**T0 校准（2026-09-18 live，与早期文档记录有出入，以此为准）**：
-  - 首页请求就是 `{"settings": {}}`（**不带 cursor 字段**；cursor.updatedAt 是 **RFC3339 时间字符串**，传数字会 `400 Time.UnmarshalJSON`）；翻页把响应 cursor 原样回传：`{"settings":{"cursor":{"updatedAt":"…","nmID":123,"limit":100}}}`；filter/sort 可整体省略；
+  - **首页必须带 `limit`**（2026-10-22 修正）：`{"settings":{"cursor":{"limit":100}}}`。
+    早前按「首页就是 `{"settings": {}}`」实现，WB 那时只回 **10 条**，而适配器的
+    「短页即结束」规则把它当最后一页 —— WS-001 真实 418 张卡片只同步到 10 张，
+    订单行全部找不到商品链接、拿不到图。`cursor.updatedAt` 仍是 **RFC3339 时间字符串**，
+    传数字会 `400 Time.UnmarshalJSON`，所以首页只给 `limit`、不给 updatedAt/nmID；
+    翻页把响应 cursor 原样回传：`{"settings":{"cursor":{"updatedAt":"…","nmID":123,"limit":100}}}`；
+    filter/sort 可整体省略；
   - **响应是顶层 `{cards, cursor}`，没有 `{data, error, errorText}` 信封**（client 的 content 域解封装仅在响应带 `error:true` 键时触发，二者兼容）；
   - `sizes[].skus` 条码是**字符串**数组（如 `"2056942167514"`）；
-  - **limit ≤100/页**；翻页终止：短页（<limit）或 cursor 无前进；响应含 `cursor.total`；**回收站卡片不出现在结果中**。
+  - **limit ≤100/页**；翻页终止：短页（<limit）或 cursor 无前进；响应含 `cursor.total`
+    （注意它是**本页条数**，不是总数）；**回收站卡片不出现在结果中**。
 - `cards[]` 字段：`nmID, imtID, nmUUID, subjectID, subjectName, vendorCode, brand, title, description, photos{big,c246x328,c516x688,square,tm}, video, dimensions{length,width,height,weightBrutto}, characteristics[{id,name,value}], sizes[{chrtID,techSize,skus[]}], tags[], createdAt, updatedAt`。
 - 响应封装：`{data, error(bool), errorText, additionalErrors}`——**HTTP 200 内可能藏业务错误**，client 必须解封装（与 OZON 直接返回数据不同）。
 - 限流：100 req/min、600ms、burst 5。
 - 归档/回收站：`POST /content/v2/get/cards/trash`（cursor trashedAt+nmID；30 天后物理删除）。
 - 商品图 = `photos`（卡内自带，无需 OZON 式二次 image 接口）。
+- **订单行补图（2026-10-22，已实现）**：`Adapter.fetchProductImages` 仍不实现
+  （官方没有按条码取图的端点）。改为纯 DB 反查：订单行 `platform_sku_id`（**条码**，
+  见决策 0016）→ `platform_listing_skus.platform_sku_id` → Listing
+  `raw_data.photos[0]`，按 `c516x688 → big → square → hq → c246x328 → tm` 依次取第一段
+  可用直链（`wb.mapper.extractWbCardImageUrl`），零平台调用。用条码而不是 vendorCode：
+  卖家会改商品货号，条码是平台事实。代码：`OrderSyncService.resolveWbImages`。
+  前置条件同 Yandex —— **listing 必须先于订单存在**；listing 同步完成后会自动回补
+  （`ListingSyncProcessor`）。
 - **dimensions 单位（2026-10-05，经搜索索引核对官方 dev.wildberries.ru changelog/论坛帖）**：
   `length/width/height` 为**毫米**，`weightBrutto` 为**千克**（毛重，如 0.15 = 150g）。
   ⚠ .ru 直连被反爬、本地无 content OpenAPI 副本，未能直接读到官方原文——T0 拿到真实卡片

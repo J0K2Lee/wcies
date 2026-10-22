@@ -875,6 +875,20 @@ export class ListingService {
    * platformSkuId，只能按 seller_sku（=offerId）反查本店铺 Listing，从
    * raw_data 提取商品图。url 优先于 raw_data 解读，同 sellerSku 首行胜出。
    */
+  /** WB 订单行补图：按条码（platform_sku_id）反查 listing 原始卡片。 */
+  async findListingMediaByPlatformSkuIds(
+    storeId: string,
+    platformSkuIds: readonly string[],
+  ): Promise<
+    Array<{
+      platformSkuId: string;
+      listingUrl: string | null;
+      listingRawData: unknown;
+    }>
+  > {
+    return this.repository.findListingMediaByPlatformSkuIds(storeId, platformSkuIds);
+  }
+
   async findListingMediaBySellerSkus(
     storeId: string,
     sellerSkus: readonly string[],

@@ -15,6 +15,7 @@ import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import { ListingService } from '../../listing/services/listing.service';
 import { extractYandexOfferImageUrl } from '../../integration/yandex/yandex.mapper';
+import { extractWbCardImageUrl } from '../../integration/wildberries/wb.mapper';
 import { LabelPrefetchService } from './label-prefetch.service';
 import { ShipmentService } from '../../shipment/services/shipment.service';
 
@@ -127,6 +128,10 @@ export class OrderSyncService {
       let updates: Array<{ orderItemId: string; imageUrl: string }> = [];
       if (platformCode === 'YANDEX') {
         updates = await this.resolveYandexImages(storeId, rows);
+      } else if (platformCode === 'WB') {
+        // WB 没有按条码取图的平台端点（docs/integrations/wildberries.md），
+        // 图片来源同样是 listing 卡片（2026-10-22）。
+        updates = await this.resolveWbImages(storeId, rows);
       } else {
         const ids = [
           ...new Set(rows.flatMap((row) => (row.platformSkuId ? [row.platformSkuId] : []))),
@@ -202,6 +207,37 @@ export class OrderSyncService {
     }
     return rows.flatMap((row) => {
       const imageUrl = row.sellerSku === null ? undefined : imageBySellerSku.get(row.sellerSku);
+      return imageUrl ? [{ orderItemId: row.id, imageUrl }] : [];
+    });
+  }
+
+  /**
+   * WB 订单行补图（2026-10-22）：订单行自带条码（platform_sku_id），卡片
+   * `sizes[].skus[]` 会以同一批条码落成 listing 变体，所以按条码反查最稳
+   * （vendorCode 会被卖家改名）。纯 DB 读取，零平台调用；同一张卡片的多条
+   * 变体共享同一组 photos，先到先得。
+   */
+  private async resolveWbImages(
+    storeId: string,
+    rows: ReadonlyArray<{ id: string; platformSkuId: string | null }>,
+  ): Promise<Array<{ orderItemId: string; imageUrl: string }>> {
+    const skuIds = [
+      ...new Set(rows.flatMap((row) => (row.platformSkuId ? [row.platformSkuId] : []))),
+    ];
+    if (skuIds.length === 0) {
+      return [];
+    }
+    const media = await this.listingService.findListingMediaByPlatformSkuIds(storeId, skuIds);
+    const imageBySkuId = new Map<string, string>();
+    for (const entry of media) {
+      if (imageBySkuId.has(entry.platformSkuId)) continue;
+      const imageUrl = extractWbCardImageUrl(entry.listingRawData);
+      if (imageUrl !== null) {
+        imageBySkuId.set(entry.platformSkuId, imageUrl);
+      }
+    }
+    return rows.flatMap((row) => {
+      const imageUrl = row.platformSkuId === null ? undefined : imageBySkuId.get(row.platformSkuId);
       return imageUrl ? [{ orderItemId: row.id, imageUrl }] : [];
     });
   }

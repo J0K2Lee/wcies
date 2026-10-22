@@ -725,6 +725,52 @@ export class ListingRepository {
    * links (§25) - rows come newest-listing-first and the caller dedupes
    * first-wins.
    */
+  /**
+   * 订单行补图（WB，2026-10-22）：WB 订单行带条码（platform_sku_id），卡片按
+   * `sizes[].skus[]` 落到 listing 变体的 platform_sku_id —— 这是比 seller_sku
+   * 更可靠的键（offerId/vendorCode 可能被卖家改名）。一次查全页，不逐行。
+   */
+  async findListingMediaByPlatformSkuIds(
+    storeId: string,
+    platformSkuIds: readonly string[],
+  ): Promise<
+    Array<{
+      platformSkuId: string;
+      listingUrl: string | null;
+      listingRawData: unknown;
+    }>
+  > {
+    if (platformSkuIds.length === 0) return [];
+    const rows = await this.listingRepository.query<
+      Array<{
+        platform_sku_id: string | null;
+        listing_url: string | null;
+        listing_raw_data: unknown;
+      }>
+    >(
+      `SELECT pls.platform_sku_id, listing.url AS listing_url, listing.raw_data AS listing_raw_data
+       FROM platform_listing_skus pls
+       INNER JOIN platform_listings listing ON listing.id = pls.listing_id
+       WHERE listing.store_id = $1::uuid
+         AND listing.status = 'ACTIVE'
+         AND pls.status = 'ACTIVE'
+         AND pls.platform_sku_id = ANY($2::varchar[])
+       ORDER BY listing.updated_at DESC`,
+      [storeId, [...platformSkuIds]],
+    );
+    return rows.flatMap((row) =>
+      row.platform_sku_id === null
+        ? []
+        : [
+            {
+              platformSkuId: row.platform_sku_id,
+              listingUrl: row.listing_url,
+              listingRawData: row.listing_raw_data,
+            },
+          ],
+    );
+  }
+
   async findListingMediaBySellerSkus(
     storeId: string,
     sellerSkus: readonly string[],

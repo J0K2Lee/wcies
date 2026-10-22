@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  extractWbCardImageUrl,
   isWbTestWebhookEvent,
   isWbWebhookSecretValid,
   mapCardToListing,
@@ -120,6 +121,41 @@ describe('mapCardToListing', () => {
       weight_unit: 'kg',
       weight: 0.65,
     });
+  });
+});
+
+describe('extractWbCardImageUrl (2026-10-22 订单行补图)', () => {
+  it('prefers the c516x688 rendition of the first photo', () => {
+    expect(
+      extractWbCardImageUrl({
+        photos: [
+          {
+            hq: 'https://cdn/1/hq.webp',
+            big: 'https://cdn/1/big.webp',
+            c516x688: 'https://cdn/1/c516x688.webp',
+          },
+        ],
+      }),
+    ).toBe('https://cdn/1/c516x688.webp');
+  });
+
+  it('falls back through the smaller renditions', () => {
+    expect(extractWbCardImageUrl({ photos: [{ tm: 'https://cdn/1/tm.webp' }] })).toBe(
+      'https://cdn/1/tm.webp',
+    );
+  });
+
+  it('accepts a plain string entry', () => {
+    expect(extractWbCardImageUrl({ photos: ['https://cdn/1/flat.webp'] })).toBe(
+      'https://cdn/1/flat.webp',
+    );
+  });
+
+  it('returns null when the card carries no usable photo (never guesses a CDN path)', () => {
+    expect(extractWbCardImageUrl(null)).toBeNull();
+    expect(extractWbCardImageUrl({})).toBeNull();
+    expect(extractWbCardImageUrl({ photos: [] })).toBeNull();
+    expect(extractWbCardImageUrl({ photos: [{ other: 1 }] })).toBeNull();
   });
 });
 
