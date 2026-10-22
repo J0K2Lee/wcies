@@ -81,6 +81,8 @@ export class WebhookIngestService {
         externalEventId: event.externalEventId,
         payload: payload as Record<string, unknown>,
         status: 'REJECTED',
+        errorCode: 'WEBHOOK_SELLER_MISMATCH',
+        errorMessage: `payload seller_id ${claimedSellerId} ≠ 店铺凭证 clientId ${expectedSellerId}`,
       });
       this.logger.warn('ozon webhook rejected: seller_id mismatch', {
         module: 'sync',
@@ -132,6 +134,9 @@ export class WebhookIngestService {
           externalEventId: event.externalEventId,
           payload: payload as Record<string, unknown>,
           status: 'REJECTED',
+          errorCode: 'WEBHOOK_CAMPAIGN_MISMATCH',
+          // campaignId 不是密文（yandex.md §8.3 明确列出可用于自诊断）。
+          errorMessage: `事件 campaignId ${claimedCampaignId} 不属于本店铺（凭证 campaignId ${identity.campaignId}）——请在 Yandex 后台「API 通知」里把订阅改到本店铺`,
         });
         this.logger.warn('yandex webhook rejected: campaignId mismatch', {
           module: 'sync',

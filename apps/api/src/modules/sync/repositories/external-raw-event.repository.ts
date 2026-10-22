@@ -33,6 +33,13 @@ export class ExternalRawEventRepository {
     externalEventId: string | null;
     payload: Record<string, unknown>;
     status: RawEventStatus;
+    /**
+     * 拒绝原因（2026-10-22）：身份不匹配类拒绝必须留下可读原因，否则同步
+     * 中心只显示「已拒绝」无法自诊断（Yandex 事件就因此查不出是 campaignId
+     * 对不上）。内容不得含密文（AGENTS.md §29）。
+     */
+    errorCode?: string | null;
+    errorMessage?: string | null;
   }): Promise<ExternalRawEventEntity | null> {
     const payloadHash = ExternalRawEventRepository.payloadHash(input.payload);
     if (input.externalEventId !== null) {
@@ -46,8 +53,9 @@ export class ExternalRawEventRepository {
     }
     const result = await this.dataSource.query<Array<{ id: string }>>(
       `INSERT INTO external_raw_events
-         (platform, store_id, event_type, external_event_id, payload, payload_hash, status)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
+         (platform, store_id, event_type, external_event_id, payload, payload_hash, status,
+          error_code, error_message)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)
        ON CONFLICT (store_id, payload_hash) DO NOTHING
        RETURNING id`,
       [
@@ -58,6 +66,8 @@ export class ExternalRawEventRepository {
         JSON.stringify(input.payload),
         payloadHash,
         input.status,
+        input.errorCode ?? null,
+        input.errorMessage ?? null,
       ],
     );
     const inserted = result[0];
