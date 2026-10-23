@@ -137,10 +137,37 @@ export function mapOrderToOrder(order: YxOrder): PlatformOrderRaw {
     fulfillmentMode: yxFulfillmentModeOf(order.programType),
     orderedAt,
     shipmentDeadline: parseTolerantDate(order.delivery?.shipment?.shipmentDate),
+    // 平台运单号（2026-10-22）：business-orders 的 delivery.tracks[].trackCode。
+    // 之前只有手工「获取运单号」会读它，轮询/webhook 从不刷新，运单号列长期为空。
+    platformTrackingNo: readYxTrackCode(order),
     currency: null,
     items,
     rawData: { ...order },
   };
+}
+
+/**
+ * 订单的运单号（`delivery.tracks[].trackCode`）。平台分配前为 null——绝不用
+ * 订单号之类的东西顶替（AGENTS.md §88）。
+ */
+export function readYxTrackCode(order: {
+  delivery?: { tracks?: readonly unknown[] };
+}): string | null {
+  const tracks = order.delivery?.tracks;
+  if (!Array.isArray(tracks)) {
+    return null;
+  }
+  for (const raw of tracks) {
+    if (typeof raw !== 'object' || raw === null) {
+      continue;
+    }
+    const track = raw as Record<string, unknown>;
+    const code = readString(track['trackCode'])?.trim();
+    if (code !== undefined && code !== '') {
+      return code;
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

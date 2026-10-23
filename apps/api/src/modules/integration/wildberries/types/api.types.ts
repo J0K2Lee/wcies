@@ -323,3 +323,21 @@ export interface WbV3Sticker {
 export interface WbV3StickersResponse {
   readonly stickers: readonly WbV3Sticker[];
 }
+
+/**
+ * 跨境（CBT）贴纸：与通用贴纸的差别是**返回 PDF**、带生成状态与运单号
+ * （官方 spec `/api/v3/orders/stickers/cross-border`，2026-10-22 真实店铺实测：
+ * 8/8 张面单 status=ready、parcelId 形如 `WBCNRUGUBCJ2000ZAD`）。
+ */
+export interface WbV3CrossBorderSticker {
+  readonly orderId: number;
+  /** `awaitingTrackNumber` = 等承运商回传运单号，面单还没生成。 */
+  readonly status?: string;
+  /** 贴纸上的运单号（平台分配）。 */
+  readonly parcelId?: string;
+  readonly file?: string;
+}
+
+export interface WbV3CrossBorderStickersResponse {
+  readonly stickers: readonly WbV3CrossBorderSticker[];
+}

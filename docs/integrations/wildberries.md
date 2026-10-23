@@ -191,6 +191,7 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 | POST | `/api/v3/orders/status` | **读**状态（body `{orders:[int64]}` ≤1000） |
 | PATCH | `/api/v3/orders/{orderId}/cancel` | 取消组货订单（100 req/min、600ms、burst 20） |
 | POST | `/api/v3/orders/stickers` | **面单贴纸**（≤100/次，`type=svg/zplv/zplh/png`，`width=58/40`，`height=40/30`） |
+| POST | `/api/v3/orders/stickers/cross-border` | **跨境面单（PDF）**（≤100/次，body `{orders:[int64]}`）：返回 `status`（`ready`/`awaitingTrackNumber`）+ **`parcelId`（运单号）** + base64 PDF。仅 `confirm`/`complete` 有贴纸 |
 | POST | `/api/v3/supplies` | **创建供应单**（body `{name}`，返回 `{id:"WB-GI-1234567"}`） |
 | PATCH | `/api/marketplace/v3/supplies/{supplyId}/orders` | **把订单加入供应单**（≤100/次）→ 订单进入 `confirm` |
 | PATCH | `/api/v3/supplies/{supplyId}/deliver` | **供应单转“已交付”** → 全部订单进入 `complete`，供应单关闭 |
@@ -204,6 +205,30 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 鉴权：`HeaderApiKey`（即现有 client 的 Authorization token），与 §1 一致。
 限流（FBS 组货订单/供应单/通行证/自动退回这一组）：**300 req/min、200ms 间隔、burst 20；
 一个 4XX 计 10 次**。沙箱内所有 Marketplace 方法合计 **1 req/s**。
+
+### 9.1a 面单取用（2026-10-22 实测改造）
+
+真实店铺（跨境，仓库「Пекин」）实测：
+
+- **两个贴纸端点都能出单**：通用端点给 PNG（`PNG` 头），跨境端点给 PDF（`%PDF-1.7`）；
+- 跨境端点额外给 `status` 与 `parcelId`（如 `WBCNRUGUBCJ2000ZAD`）——**这是 WB 运单号的唯一来源**
+  （订单列表、statistics 行都不返回运单号）；
+- 8/8 张 `confirm` 单跨境贴纸 `status=ready`；`new` 单两个端点都没有贴纸（不在供应单里）。
+
+因此取单逻辑改为 **跨境优先、通用兜底**：
+
+1. 先调 `/orders/stickers/cross-border`（一次 ≤100 单）；
+2. 条目 `status=ready` → 直接作为面单（PDF），`parcelId` 回填订单 `platform_tracking_no`
+   与已建发货单快照；
+3. `status=awaitingTrackNumber` → 视为「面单未就绪」，**不降级**（通用贴纸属于另一套流程）；
+4. 跨境接口 4xx 或空结果（非跨境电商）→ 降级到通用 PNG 贴纸，并在取单时**转成单页 PDF**
+   （58×40mm），让批量打印的合并链路只处理 PDF。
+
+批量：`fetchShippingLabels` 按 ≤100 单一次请求（适配器自报 `labelBatchLimit=100`），
+只返回已就绪的单；未就绪的不出现在结果里（调用方按「平台尚未生成」处理）。
+
+预取：WB 一入供应单就有贴纸，适配器声明 `labelReadyAfterPrepare=true`，组包成功后
+立即入队预取，不再等「运单号出现」。
 
 ### 9.2 发货状态机：**供应单驱动**，卖家不能单独“发货”一张订单
 

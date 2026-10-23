@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PlatformLabelFile, PlatformShipmentPreparation } from '@wcies/platform-contracts';
 import { parseYxAuth } from './yandex.adapter';
+import { readYxTrackCode } from './yandex.mapper';
 import { YandexClient, YxAuth, YxRawResponse } from './yandex.client';
 import { YxOrder } from './types/api.types';
 import { DomainError } from '../../../common/errors/domain.error';
@@ -69,7 +70,7 @@ export class YandexShipmentService {
     if (outcome === 'PREPARED') {
       return {
         platformOrderId: order.platformOrderId,
-        trackingNumber: readTrackCode(before),
+        trackingNumber: readYxTrackCode(before),
         platformStatus: before.status,
         alreadyPrepared: true,
       };
@@ -103,7 +104,7 @@ export class YandexShipmentService {
     );
     return {
       platformOrderId: order.platformOrderId,
-      trackingNumber: readTrackCode(after),
+      trackingNumber: readYxTrackCode(after),
       platformStatus: after.status ?? STATUS_PROCESSING,
       alreadyPrepared: false,
     };
@@ -179,24 +180,6 @@ function classify(order: YxOrder): PrepareOutcome {
   // Everything else (CANCELLED / PENDING / UNPAID / unknown) is blocked -
   // reported, never guessed (AGENTS.md §88).
   return 'BLOCKED';
-}
-
-/**
- * The order's delivery tracking code when the platform has assigned one
- * (`delivery.tracks[]`); absent while the order is still being prepared.
- */
-function readTrackCode(order: YxOrder): string | null {
-  const tracks = order.delivery?.tracks;
-  if (!Array.isArray(tracks)) {
-    return null;
-  }
-  for (const track of tracks) {
-    const code = (track as Record<string, unknown>)['trackCode'];
-    if (typeof code === 'string' && code.trim() !== '') {
-      return code.trim();
-    }
-  }
-  return null;
 }
 
 /**

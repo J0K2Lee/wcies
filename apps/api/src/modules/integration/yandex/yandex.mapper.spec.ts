@@ -106,6 +106,30 @@ describe('mapOrderToOrder', () => {
   });
 });
 
+describe('mapOrderToOrder tracking (2026-10-22 运单号回填)', () => {
+  const base = {
+    orderId: 12345,
+    status: 'DELIVERY',
+    creationDate: '2026-10-01T10:00:00Z',
+    items: [{ offerId: 'SKU-A', count: 1 }],
+  };
+
+  it('reads delivery.tracks[].trackCode as the platform waybill', () => {
+    const mapped = mapOrderToOrder({
+      ...base,
+      delivery: { tracks: [{ trackCode: 'YX-TRACK-1' }, { trackCode: 'YX-TRACK-2' }] },
+    });
+    expect(mapped.platformTrackingNo).toBe('YX-TRACK-1');
+  });
+
+  it('stays null until the platform assigns one (never fabricates)', () => {
+    expect(mapOrderToOrder({ ...base }).platformTrackingNo).toBeNull();
+    expect(
+      mapOrderToOrder({ ...base, delivery: { tracks: [{ trackCode: '   ' }] } }).platformTrackingNo,
+    ).toBeNull();
+  });
+});
+
 describe('mapOfferMappingToListing', () => {
   it('uses marketSku as platform identity and campaign publish state', () => {
     const entry: YxOfferMapping = {

@@ -89,6 +89,19 @@ https://market.yandex.ru/card/slug/5817028070?businessId=193261685
 因此代码里 **不再拼 Yandex 卡片地址**：`listing.url` 为空时退回 Market 搜索页
 （`search?text=<商品名>`），保证永远可点。缺标题才返回 null 并提示，不猜（§88）。
 
+### 5d. 运单号与面单（2026-10-22）
+
+- **运单号**：business-orders 的 `delivery.tracks[].trackCode`。此前只有手工点
+  「获取运单号」才读一次，轮询/webhook 从不刷新；现在 `mapOrderToOrder` 直接映射到
+  `platformTrackingNo`，每次同步都会收敛（null 不覆盖已有值）。
+- **面单**：`GET /v2/campaigns/{campaignId}/orders/{orderId}/delivery/labels`
+  （A9_HORIZONTALLY 58×40mm PDF）**逐单**，没有同步批量接口。
+- 面单在 `READY_TO_SHIP` 后即可取，适配器声明 `labelReadyAfterPrepare=true`，组包成功
+  即入队预取。
+- 批量能力只有异步报表 `POST /v2/reports/documents/labels/generate`
+  （`{businessId, orderIds[] ≤1000, sortingType}` → 返回报表 id，需轮询状态再下载），
+  **尚未实现**；当前批量打印走逐单取单。
+
 ### 5c. 订单行图片的时序（2026-10-22）
 
 图片只能从 listing（`offer.pictures`）来，所以 **listing 必须先于订单存在**。

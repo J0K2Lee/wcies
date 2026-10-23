@@ -277,6 +277,7 @@ describe('OrderPlatformShipService.prepareShipmentBatch (2026-10-13 订单页多
         alreadyPrepared: false,
         assemblyPending: false,
         platformWritePerformed: true,
+        labelReadyAfterPrepare: false,
       })
       .mockRejectedValueOnce(
         // 构造签名是 (platformCode, capability, reason) —— 只传文案会在 tsc
@@ -296,6 +297,42 @@ describe('OrderPlatformShipService.prepareShipmentBatch (2026-10-13 订单页多
     });
     expect(result.results[1]).toMatchObject({ orderId: 'o2', ok: false, orderNo: null });
     expect(result.results[1]?.code).toBe('PLATFORM_CAPABILITY_UNSUPPORTED');
+  });
+});
+
+describe('OrderPlatformShipService 面单预取门槛（2026-10-22 按平台）', () => {
+  it('WB 一入供应单就预取面单，即使没有运单号', async () => {
+    const wb = {
+      platformCode: 'WB',
+      labelReadyAfterPrepare: true,
+      labelBatchLimit: 100,
+      prepareShipment: async (ctx: StoreContext, order: { platformOrderId: string }) => ({
+        platformOrderId: order.platformOrderId,
+        trackingNumber: null,
+        platformStatus: 'confirm',
+        alreadyPrepared: false,
+      }),
+    };
+    const { service, labelPrefetch } = makeService(wb);
+    const result = await service.prepareShipment('order-1', OPERATOR);
+    expect(result.trackingNumber).toBeNull();
+    expect(result.labelReadyAfterPrepare).toBe(true);
+    expect(labelPrefetch.enqueueForOrder).toHaveBeenCalledWith('order-1', { delayMs: 60_000 });
+  });
+
+  it('OZON 没有运单号、也不在异步组包中时不预取（避免无意义的平台调用）', async () => {
+    const ozon = {
+      platformCode: 'OZON',
+      prepareShipment: async (ctx: StoreContext, order: { platformOrderId: string }) => ({
+        platformOrderId: order.platformOrderId,
+        trackingNumber: null,
+        platformStatus: 'awaiting_packaging',
+        alreadyPrepared: false,
+      }),
+    };
+    const { service, labelPrefetch } = makeService(ozon);
+    await service.prepareShipment('order-1', OPERATOR);
+    expect(labelPrefetch.enqueueForOrder).not.toHaveBeenCalled();
   });
 });
 

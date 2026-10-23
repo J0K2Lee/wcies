@@ -966,6 +966,39 @@ export class OrderService {
     return { orderId: order.id, orderNo: order.orderNo, isUrgent: urgent };
   }
 
+  /**
+   * 记录平台运单号（2026-10-22）。WB 的运单号只能从面单响应拿到（`parcelId`），
+   * 订单列表/统计接口都不返回，所以不走 applySyncedPlatformFacts——那条路径
+   * 需要整组平台事实，会顺带重算时限与异常。这里只补运单号，已有值不覆盖。
+   */
+  async recordPlatformTrackingNo(
+    orderId: string,
+    trackingNumber: string,
+    operator: OperatorContext,
+  ): Promise<boolean> {
+    const trimmed = trackingNumber.trim();
+    if (trimmed === '') {
+      return false;
+    }
+    const order = await this.getOrderOrThrow(orderId);
+    if (order.platformTrackingNo !== null) {
+      return false;
+    }
+    const written = await this.orderRepo.setPlatformTrackingNoIfMissing(order.id, trimmed);
+    if (!written) {
+      return false;
+    }
+    await this.operationLog.record({
+      entityType: 'ORDER',
+      entityId: order.id,
+      entityCode: order.orderNo,
+      action: 'SYNC_PLATFORM_TRACKING',
+      changes: { platformTrackingNo: { from: null, to: trimmed } },
+      operator,
+    });
+    return true;
+  }
+
   // --------------------------------------------------------------------------
   // External fulfillment close-out (Sprint 9 T6)
   // --------------------------------------------------------------------------

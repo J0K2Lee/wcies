@@ -1,8 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { PlatformLabelFile, PlatformShipmentPreparation } from '@wcies/platform-contracts';
+import {
+  PlatformLabelFile,
+  PlatformOrderLabelFile,
+  PlatformShipmentPreparation,
+} from '@wcies/platform-contracts';
 import { parseWbAuthCredential } from './wb.adapter';
 import { WbAuth, WbClient } from './wb.client';
-import { WbV3OrderStatus } from './types/api.types';
+import { WbV3CrossBorderSticker, WbV3OrderStatus } from './types/api.types';
+import { PlatformApiError } from '../platform-error';
+import { pngToPdfPage } from '../../../common/pdf/document';
 import { DomainError } from '../../../common/errors/domain.error';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 
@@ -22,6 +28,9 @@ const SUPPLY_NAME_PREFIX = 'WCIES-';
 /** Sticker request: 58x40 png is WB's thermal-label size. */
 const STICKER_WIDTH = 58;
 const STICKER_HEIGHT = 40;
+
+/** 单次贴纸请求的订单数上限（官方 spec：orders ≤100）。 */
+export const WB_STICKER_BATCH_LIMIT = 100;
 
 /**
  * WB outbound-shipment operations (2026-09-18 order fulfillment flow).
@@ -110,9 +119,14 @@ export class WbShipmentService {
   }
 
   /**
-   * Fetches the order's sticker (面单). Only `confirm` / `complete` orders
-   * have one, so the caller must have prepared the shipment first. Answers as
-   * JSON with a base64 `file`, decoded here into bytes.
+   * 单张面单（2026-10-22 改造）。优先走**跨境贴纸**接口：
+   * - 返回 PDF（批量打印可直接合并，不必再做图片转 PDF）；
+   * - 带生成状态（`awaitingTrackNumber` = 还没好）；
+   * - 带运单号 `parcelId`（订单接口不给，这是 WB 运单号的唯一来源）。
+   *
+   * 跨境接口对非跨境电商不适用（4xx / 空结果）→ 降级到通用 PNG 贴纸
+   * （转成单页 PDF 后返回，保证下游只处理 PDF）。跨境店拿到
+   * `awaitingTrackNumber` 时**不**降级：通用贴纸属于另一套流程，打错更糟。
    */
   async fetchShippingLabel(
     context: { storeId: string; credential: Readonly<Record<string, unknown>> },
@@ -121,29 +135,169 @@ export class WbShipmentService {
     const auth = parseWbAuthCredential(context.credential, context.storeId);
     const orderId = parseWbOrderId(order.platformOrderId);
 
-    const response = await this.client.v3OrderStickers(auth, context.storeId, {
-      orderIds: [orderId],
-      type: 'png',
-      width: STICKER_WIDTH,
-      height: STICKER_HEIGHT,
+    const crossBorder = await this.crossBorderStickers(auth, context.storeId, [orderId]);
+    const sticker = crossBorder?.find((row) => row.orderId === orderId);
+    if (sticker !== undefined) {
+      return this.decodeCrossBorderSticker(sticker, order.platformOrderId);
+    }
+    return this.genericSticker(auth, context.storeId, orderId, order.platformOrderId);
+  }
+
+  /**
+   * 批量面单（2026-10-22）：一次请求 ≤100 单（官方 spec 上限），跨境优先、
+   * 通用贴纸兜底。只返回**已就绪**的单；未就绪的不出现在结果里（调用方按
+   * 「平台尚未生成」处理），与 OZON 批量接口同契约。
+   */
+  async fetchShippingLabels(
+    context: { storeId: string; credential: Readonly<Record<string, unknown>> },
+    platformOrderIds: readonly string[],
+  ): Promise<readonly PlatformOrderLabelFile[]> {
+    if (platformOrderIds.length === 0) {
+      return [];
+    }
+    const auth = parseWbAuthCredential(context.credential, context.storeId);
+    const byId = new Map<number, string>();
+    for (const platformOrderId of platformOrderIds) {
+      byId.set(parseWbOrderId(platformOrderId), platformOrderId);
+    }
+    const orderIds = [...byId.keys()];
+
+    const files = new Map<string, PlatformLabelFile>();
+    const crossBorder = await this.crossBorderStickers(auth, context.storeId, orderIds);
+    const pending: number[] = [];
+    for (const orderId of orderIds) {
+      const platformOrderId = byId.get(orderId) ?? String(orderId);
+      const sticker = crossBorder?.find((row) => row.orderId === orderId);
+      if (sticker === undefined) {
+        pending.push(orderId);
+        continue;
+      }
+      const file = this.decodeCrossBorderSticker(sticker, platformOrderId);
+      if (file !== null) {
+        files.set(platformOrderId, file);
+      }
+      // status=awaitingTrackNumber：跨境单面单未就绪，等下次（不降级）。
+    }
+
+    if (pending.length > 0) {
+      const response = await this.client.v3OrderStickers(auth, context.storeId, {
+        orderIds: pending,
+        type: 'png',
+        width: STICKER_WIDTH,
+        height: STICKER_HEIGHT,
+      });
+      for (const sticker of response.stickers ?? []) {
+        const platformOrderId = byId.get(sticker.orderId);
+        if (platformOrderId === undefined) {
+          continue;
+        }
+        const file = await this.decodeGenericSticker(sticker.file, platformOrderId);
+        if (file !== null) {
+          files.set(platformOrderId, file);
+        }
+      }
+    }
+
+    return platformOrderIds.flatMap((platformOrderId) => {
+      const file = files.get(platformOrderId);
+      return file === undefined ? [] : [{ platformOrderId, file }];
     });
-    const sticker = (response.stickers ?? []).find((row) => row.orderId === orderId);
-    if (sticker === undefined || typeof sticker.file !== 'string' || sticker.file === '') {
-      this.logger.warn(
-        `wb sticker missing store=${context.storeId} order=${orderId}`,
-        'WbShipmentService',
-      );
+  }
+
+  /**
+   * 跨境贴纸。平台不支持（非跨境电商）时返回 null 让调用方降级；空结果同样
+   * 视为「不适用」（跨境店在 confirm/complete 时一定有条目）。
+   */
+  private async crossBorderStickers(
+    auth: WbAuth,
+    storeId: string,
+    orderIds: readonly number[],
+  ): Promise<readonly WbV3CrossBorderSticker[] | null> {
+    if (orderIds.length === 0) {
+      return null;
+    }
+    try {
+      const response = await this.client.v3OrderStickersCrossBorder(auth, storeId, { orderIds });
+      const stickers = response.stickers ?? [];
+      return stickers.length === 0 ? null : stickers;
+    } catch (error: unknown) {
+      if (error instanceof PlatformApiError && isCrossBorderNotApplicable(error)) {
+        this.logger.warn(
+          `wb cross-border stickers unavailable store=${storeId}, falling back to generic`,
+          'WbShipmentService',
+        );
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  private decodeCrossBorderSticker(
+    sticker: WbV3CrossBorderSticker,
+    platformOrderId: string,
+  ): PlatformLabelFile | null {
+    if (sticker.status !== undefined && sticker.status !== 'ready') {
+      return null; // awaitingTrackNumber：等承运商回传运单号
+    }
+    if (typeof sticker.file !== 'string' || sticker.file === '') {
       return null;
     }
     const bytes = Buffer.from(sticker.file, 'base64');
     if (bytes.byteLength === 0) {
       return null;
     }
+    const trackingNumber =
+      typeof sticker.parcelId === 'string' && sticker.parcelId.trim() !== ''
+        ? sticker.parcelId.trim()
+        : null;
     return {
-      fileName: `wb-sticker-${order.platformOrderId}.png`,
-      mimeType: 'image/png',
+      fileName: `wb-label-${platformOrderId}.pdf`,
+      mimeType: 'application/pdf',
       bytes: new Uint8Array(bytes),
+      trackingNumber,
     };
+  }
+
+  /** 通用贴纸只给 PNG：转成单页 PDF，保证下游（合并打印）只处理 PDF。 */
+  private async decodeGenericSticker(
+    file: string | undefined,
+    platformOrderId: string,
+  ): Promise<PlatformLabelFile | null> {
+    if (typeof file !== 'string' || file === '') {
+      return null;
+    }
+    const png = Buffer.from(file, 'base64');
+    if (png.byteLength === 0) {
+      return null;
+    }
+    const pdf = await pngToPdfPage(new Uint8Array(png));
+    return {
+      fileName: `wb-label-${platformOrderId}.pdf`,
+      mimeType: 'application/pdf',
+      bytes: pdf,
+      trackingNumber: null,
+    };
+  }
+
+  /** 单张的通用贴纸路径（非跨境店）。 */
+  private async genericSticker(
+    auth: WbAuth,
+    storeId: string,
+    orderId: number,
+    platformOrderId: string,
+  ): Promise<PlatformLabelFile | null> {
+    const response = await this.client.v3OrderStickers(auth, storeId, {
+      orderIds: [orderId],
+      type: 'png',
+      width: STICKER_WIDTH,
+      height: STICKER_HEIGHT,
+    });
+    const sticker = (response.stickers ?? []).find((row) => row.orderId === orderId);
+    if (sticker === undefined) {
+      this.logger.warn(`wb sticker missing store=${storeId} order=${orderId}`, 'WbShipmentService');
+      return null;
+    }
+    return this.decodeGenericSticker(sticker.file, platformOrderId);
   }
 
   /** Status read; null when the platform answers without our order. */
@@ -171,6 +325,15 @@ export function parseWbOrderId(platformOrderId: string): number {
     });
   }
   return Number(platformOrderId);
+}
+
+/**
+ * 跨境贴纸接口对「非跨境电商」的拒绝：4xx（无该订单 / 不支持该流程）。
+ * 5xx 与鉴权错误必须原样抛出——那说明链路坏了，不能静默换成另一套贴纸。
+ */
+function isCrossBorderNotApplicable(error: PlatformApiError): boolean {
+  const status = error.platformError.httpStatus;
+  return status === 400 || status === 404 || status === 409 || status === 422;
 }
 
 /** WB order cannot enter the supply flow in its current state. */

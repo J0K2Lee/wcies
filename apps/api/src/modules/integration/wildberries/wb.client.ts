@@ -7,6 +7,7 @@ import {
   WbStatsOrderRow,
   WbV3CreateSupplyResponse,
   WbV3OrderStatusesResponse,
+  WbV3CrossBorderStickersResponse,
   WbV3OrdersResponse,
   WbV3StickersResponse,
   WbWebhookCreateResponse,
@@ -262,6 +263,24 @@ export class WbClient {
       storeId,
       method: 'POST',
       query: { type: input.type, width: input.width, height: input.height },
+      body: { orders: [...input.orderIds] },
+    });
+  }
+
+  /**
+   * 跨境贴纸（PDF + 生成状态 + 运单号）。与通用贴纸同一个 `orders` 数组契约，
+   * 单次 ≤100 单。跨境卖家没有这张单时平台会报错，调用方负责降级到通用贴纸。
+   */
+  async v3OrderStickersCrossBorder(
+    auth: WbAuth,
+    storeId: string,
+    input: { orderIds: readonly number[] },
+  ): Promise<WbV3CrossBorderStickersResponse> {
+    return this.request<WbV3CrossBorderStickersResponse>(auth, {
+      domain: 'marketplace',
+      endpoint: '/api/v3/orders/stickers/cross-border',
+      storeId,
+      method: 'POST',
       body: { orders: [...input.orderIds] },
     });
   }

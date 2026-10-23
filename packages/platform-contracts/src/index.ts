@@ -297,6 +297,12 @@ export interface PlatformLabelFile {
   readonly fileName: string;
   readonly mimeType: string;
   readonly bytes: Uint8Array;
+  /**
+   * 取面单时平台一并给出的运单号（WB 跨境贴纸的 `parcelId`）。
+   * 有的平台的运单号只能从这个响应里拿到（订单列表接口不返回），所以由
+   * 面单文件带出来，调用方负责回填订单与发货单（2026-10-22）。
+   */
+  readonly trackingNumber?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +316,19 @@ export interface PlatformLabelFile {
  */
 export interface PlatformAdapter {
   readonly platformCode: PlatformCode;
+
+  /**
+   * 组包/入供应单之后面单**立即**可取（WB / Yandex），不依赖「平台先分配运单号」。
+   * OZON 不声明：它要等 posting 进入 awaiting_deliver 才有面单，预取门槛由
+   * `assemblyPending` / 运单号决定（2026-10-22）。
+   */
+  readonly labelReadyAfterPrepare?: boolean;
+
+  /**
+   * 批量取面单的单次上限（平台文档值）。缺省时调用方用全局配置
+   * （OZON package-label ≤20）。仅当适配器实现了 `fetchShippingLabels` 才有意义。
+   */
+  readonly labelBatchLimit?: number;
 
   /** Optional read-only public product image lookup, scoped to a store. */
   fetchProductImages?(

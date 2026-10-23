@@ -31,6 +31,25 @@ export async function mergePdfs(
   return { bytes: await merged.save(), pageCount };
 }
 
+/** 热敏面单纸张：58×40mm（WB 贴纸与 Yandex A9 同尺寸）。 */
+const LABEL_WIDTH_PT = (58 / 25.4) * 72;
+const LABEL_HEIGHT_PT = (40 / 25.4) * 72;
+
+/**
+ * PNG 贴纸 → 单页 PDF（2026-10-22）。
+ *
+ * WB 的**通用**贴纸接口只给 PNG（跨境接口给 PDF），而批量打印把多张面单合并成
+ * 一个 PDF 交给浏览器原生打印。混进一张 PNG 会让 `mergePdfs` 直接失败，前端
+ * 只能退回「逐张打印」。这里在取单时就转成 PDF，导出链路因此只认 PDF。
+ */
+export async function pngToPdfPage(bytes: Uint8Array): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const image = await doc.embedPng(bytes);
+  const page = doc.addPage([LABEL_WIDTH_PT, LABEL_HEIGHT_PT]);
+  page.drawImage(image, { x: 0, y: 0, width: LABEL_WIDTH_PT, height: LABEL_HEIGHT_PT });
+  return doc.save();
+}
+
 /**
  * 把一份多页面单 PDF 按页拆成多个单页 PDF（批量取面单用，用户指示 2026-10-21）。
  *

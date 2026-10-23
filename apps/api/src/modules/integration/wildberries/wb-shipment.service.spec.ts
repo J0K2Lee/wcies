@@ -27,7 +27,18 @@ interface Script {
   /** supplierStatus AFTER the order joined the supply; default confirm. */
   readonly supplierStatusAfter?: string;
   readonly supplyId?: string;
+  /** 通用贴纸（PNG）的 base64。 */
   readonly stickerFileB64?: string;
+  /**
+   * 跨境贴纸接口的行为（2026-10-22）：
+   * - `ready`：返回 PDF 贴纸 + parcelId；
+   * - `awaitingTrackNumber`：条目在但面单未生成；
+   * - `unsupported`：400（非跨境电商）→ 调用方应降级到通用贴纸；
+   * - `absent`：默认，跨境接口返回空列表（同样降级）。
+   */
+  readonly crossBorder?: 'ready' | 'awaitingTrackNumber' | 'unsupported' | 'absent';
+  readonly crossBorderPdfB64?: string;
+  readonly parcelId?: string;
 }
 
 function build(script: Script) {
@@ -58,21 +69,45 @@ function build(script: Script) {
     if (url.includes('/supplies/') && url.endsWith('/orders')) {
       return new Response(null, { status: 204 });
     }
+    if (url.includes('/api/v3/orders/stickers/cross-border')) {
+      if (script.crossBorder === 'unsupported') {
+        return new Response(JSON.stringify({ title: 'unsupported' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      const mode = script.crossBorder ?? 'absent';
+      const stickers =
+        mode === 'ready' || mode === 'awaitingTrackNumber'
+          ? [
+              {
+                orderId: Number(ORDER_ID),
+                status: mode === 'ready' ? 'ready' : 'awaitingTrackNumber',
+                ...(mode === 'ready' ? { parcelId: script.parcelId ?? 'WBCNRUGUBCJ2000ZAD' } : {}),
+                file:
+                  mode === 'ready'
+                    ? (script.crossBorderPdfB64 ??
+                      Buffer.from('%PDF-1.7 fake label').toString('base64'))
+                    : '',
+              },
+            ]
+          : [];
+      return new Response(JSON.stringify({ stickers }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
     if (url.includes('/api/v3/orders/stickers')) {
+      const requested = (body as { orders?: number[] } | undefined)?.orders ?? [];
       return new Response(
         JSON.stringify({
-          stickers:
-            script.stickerFileB64 === undefined
-              ? []
-              : [
-                  {
-                    orderId: Number(ORDER_ID),
-                    partA: '231648',
-                    partB: '9753',
-                    barcode: '!uKEtQZVx',
-                    file: script.stickerFileB64,
-                  },
-                ],
+          stickers: requested.map((orderId) => ({
+            orderId,
+            partA: '231648',
+            partB: '9753',
+            barcode: '!uKEtQZVx',
+            file: script.stickerFileB64 ?? '',
+          })),
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       );
@@ -154,19 +189,74 @@ describe('WbShipmentService.prepareShipment', () => {
   });
 });
 
-describe('WbShipmentService.fetchShippingLabel', () => {
-  it('decodes the base64 sticker file', async () => {
-    const b64 = Buffer.from('%PNG-sticker').toString('base64');
-    const { service } = build({ supplierStatus: 'confirm', stickerFileB64: b64 });
+/** 真实可解析的 1×1 PNG（PNG→PDF 转换需要合法解码）。 */
+const TINY_PNG_B64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+describe('WbShipmentService.fetchShippingLabel (2026-10-22 跨境优先)', () => {
+  it('prefers the cross-border PDF sticker and carries parcelId as the tracking number', async () => {
+    const { service, calls } = build({
+      supplierStatus: 'confirm',
+      crossBorder: 'ready',
+      parcelId: 'WBCNRUGUBCJ2000ZAD',
+    });
     const file = await service.fetchShippingLabel(CONTEXT, { platformOrderId: ORDER_ID });
-    expect(file?.mimeType).toBe('image/png');
-    expect(Buffer.from(file!.bytes).toString()).toBe('%PNG-sticker');
+    expect(file?.mimeType).toBe('application/pdf');
+    expect(Buffer.from(file!.bytes).toString()).toContain('%PDF');
+    expect(file?.trackingNumber).toBe('WBCNRUGUBCJ2000ZAD');
+    // 跨境就绪时不再打通用贴纸接口。
+    expect(calls.some((c) => c.url.includes('/stickers/cross-border'))).toBe(true);
+    expect(
+      calls.filter((c) => c.url.endsWith('/stickers?type=png&width=58&height=40')),
+    ).toHaveLength(0);
   });
 
-  it('returns null when the platform lists no sticker for the order', async () => {
-    const { service } = build({ supplierStatus: 'confirm', stickerFileB64: undefined });
+  it('returns null (not ready) when the cross-border sticker still awaits a track number', async () => {
+    const { service, calls } = build({
+      supplierStatus: 'confirm',
+      crossBorder: 'awaitingTrackNumber',
+    });
     await expect(
       service.fetchShippingLabel(CONTEXT, { platformOrderId: ORDER_ID }),
     ).resolves.toBeNull();
+    // 不能降级到通用贴纸：那是另一套流程的凭证。
+    expect(calls.filter((c) => c.url.includes('type=png'))).toHaveLength(0);
+  });
+
+  it('falls back to the generic PNG sticker and converts it to PDF for non-CBT sellers', async () => {
+    const { service } = build({
+      supplierStatus: 'confirm',
+      crossBorder: 'unsupported',
+      stickerFileB64: TINY_PNG_B64,
+    });
+    const file = await service.fetchShippingLabel(CONTEXT, { platformOrderId: ORDER_ID });
+    expect(file?.mimeType).toBe('application/pdf');
+    expect(Buffer.from(file!.bytes).toString().slice(0, 5)).toBe('%PDF-');
+    expect(file?.trackingNumber).toBeNull();
+  });
+
+  it('returns null when the platform lists no sticker at all', async () => {
+    const { service } = build({ supplierStatus: 'confirm', crossBorder: 'absent' });
+    await expect(
+      service.fetchShippingLabel(CONTEXT, { platformOrderId: ORDER_ID }),
+    ).resolves.toBeNull();
+  });
+});
+
+describe('WbShipmentService.fetchShippingLabels (批量, 2026-10-22)', () => {
+  it('returns only ready labels and keeps the caller order', async () => {
+    const { service, calls } = build({ supplierStatus: 'confirm', crossBorder: 'ready' });
+    const files = await service.fetchShippingLabels(CONTEXT, [ORDER_ID]);
+    expect(files).toHaveLength(1);
+    expect(files[0]?.platformOrderId).toBe(ORDER_ID);
+    expect(files[0]?.file.mimeType).toBe('application/pdf');
+    const batchCall = calls.find((c) => c.url.includes('/stickers/cross-border'));
+    expect((batchCall?.body as { orders: number[] }).orders).toEqual([Number(ORDER_ID)]);
+  });
+
+  it('is a no-op for an empty id list (no platform call)', async () => {
+    const { service, calls } = build({ supplierStatus: 'confirm', crossBorder: 'ready' });
+    await expect(service.fetchShippingLabels(CONTEXT, [])).resolves.toEqual([]);
+    expect(calls).toHaveLength(0);
   });
 });

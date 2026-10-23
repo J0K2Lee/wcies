@@ -217,6 +217,25 @@ export class OrderRepository {
   }
 
   /**
+   * 只写运单号（2026-10-22）：WB 的运单号（`parcelId`）只出现在面单响应里，
+   * 没有可回读的平台接口，因此由取单链路直接落库。`IS NULL` 保证已有值不被
+   * 覆盖，也保证重复取单是 no-op（与 applySyncedPlatformFacts 的 null-keeps
+   * 语义一致）。
+   */
+  async setPlatformTrackingNoIfMissing(id: string, trackingNumber: string): Promise<boolean> {
+    const result: unknown = await this.dataSource.query(
+      `UPDATE orders
+          SET platform_tracking_no = $2, updated_at = now()
+        WHERE id = $1::uuid AND platform_tracking_no IS NULL
+        RETURNING id`,
+      [id, trackingNumber],
+    );
+    const rows = (Array.isArray(result) && Array.isArray(result[0]) ? result[0] : result) as
+      Array<{ id: string }> | undefined;
+    return Array.isArray(rows) && rows.length > 0;
+  }
+
+  /**
    * 加急标记写入（用户指示 2026-10-16，ADR 0022）。只改 is_urgent /
    * urgent_marked_at，从不碰 erp_status（AGENTS.md §38）。取消加急时
    * 传入原有的 urgentMarkedAt 保留最后标记时间。

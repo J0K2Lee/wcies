@@ -5,13 +5,14 @@ import {
   PlatformCredentialContext,
   PlatformLabelFile,
   PlatformListingRaw,
+  PlatformOrderLabelFile,
   PlatformOrderRaw,
   PlatformShipmentPreparation,
   PlatformWebhookEvent,
   StoreContext,
 } from '@wcies/platform-contracts';
 import { WbClient, WbAuth } from './wb.client';
-import { WbShipmentService } from './wb-shipment.service';
+import { WB_STICKER_BATCH_LIMIT, WbShipmentService } from './wb-shipment.service';
 import {
   mapCardToListing,
   mapFbsOrderToOrder,
@@ -61,6 +62,15 @@ const ORDER_PAGE_SIZE = 1000;
 export class WbAdapter implements PlatformAdapter {
   readonly platformCode = 'WB' as const;
 
+  /**
+   * 入供应单（`confirm`）后贴纸立即可取，不依赖平台先分配运单号——预取门槛
+   * 因此不由运单号决定（2026-10-22）。
+   */
+  readonly labelReadyAfterPrepare = true;
+
+  /** 官方 spec：单次贴纸请求 ≤100 单。 */
+  readonly labelBatchLimit = WB_STICKER_BATCH_LIMIT;
+
   constructor(
     private readonly client: WbClient,
     private readonly shipmentService: WbShipmentService,
@@ -91,7 +101,10 @@ export class WbAdapter implements PlatformAdapter {
     );
   }
 
-  /** Sticker (面单) PNG for an order - only `confirm` / `complete` have one. */
+  /**
+   * 单张面单。跨境贴纸优先（PDF + 运单号），非跨境降级到通用 PNG 贴纸
+   * （已在 shipment service 内转成 PDF）。
+   */
   async fetchShippingLabel(
     context: StoreContext,
     order: { platformOrderId: string },
@@ -99,6 +112,17 @@ export class WbAdapter implements PlatformAdapter {
     return this.shipmentService.fetchShippingLabel(
       { storeId: context.storeId, credential: context.credential },
       order,
+    );
+  }
+
+  /** 批量贴纸：单次 ≤100 单，跨境优先、通用兜底（2026-10-22）。 */
+  async fetchShippingLabels(
+    context: StoreContext,
+    platformOrderIds: readonly string[],
+  ): Promise<readonly PlatformOrderLabelFile[]> {
+    return this.shipmentService.fetchShippingLabels(
+      { storeId: context.storeId, credential: context.credential },
+      platformOrderIds,
     );
   }
 

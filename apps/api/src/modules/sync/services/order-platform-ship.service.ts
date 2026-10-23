@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   PlatformAdapter,
+  PlatformLabelFile,
   PlatformOrderLabelFile,
   PlatformOrderRaw,
   PlatformShipmentPreparation,
@@ -42,6 +43,11 @@ export interface PrepareShipmentResult {
   assemblyPending: boolean;
   /** True when this call actually performed the platform write. */
   platformWritePerformed: boolean;
+  /**
+   * 平台「组包后即有面单」能力（WB / Yandex）。批量路径据此决定是否入队预取，
+   * 不再回头查适配器（2026-10-22）。
+   */
+  labelReadyAfterPrepare: boolean;
 }
 
 /** One order's outcome inside a batch 获取运单号 (订单页多选, 2026-10-13). */
@@ -222,9 +228,10 @@ export class OrderPlatformShipService {
       alreadyPrepared: result.alreadyPrepared,
       assemblyPending: result.assemblyPending === true,
       platformWritePerformed: !result.alreadyPrepared && result.assemblyPending !== true,
+      labelReadyAfterPrepare: adapter.labelReadyAfterPrepare === true,
     };
     if (options.enqueuePrefetch !== false) {
-      await this.scheduleLabelPrefetch(order, prepared);
+      await this.scheduleLabelPrefetch(order, prepared, prepared.labelReadyAfterPrepare);
     }
     return prepared;
   }
@@ -242,8 +249,12 @@ export class OrderPlatformShipService {
   private async scheduleLabelPrefetch(
     order: OrderForLabel,
     result: PrepareShipmentResult,
+    labelReadyAfterPrepare: boolean,
   ): Promise<void> {
-    const needsLabel = result.assemblyPending || result.trackingNumber !== null;
+    // WB / Yandex 一入供应单 / READY_TO_SHIP 就有面单，跟运单号无关；OZON 要等
+    // posting 进入 awaiting_deliver（运单号出现或组包异步确认）才有（2026-10-22）。
+    const needsLabel =
+      result.assemblyPending === true || result.trackingNumber !== null || labelReadyAfterPrepare;
     if (!needsLabel) {
       return;
     }
@@ -279,7 +290,11 @@ export class OrderPlatformShipService {
           alreadyPrepared: result.alreadyPrepared,
           assemblyPending: result.assemblyPending,
         });
-        if (result.assemblyPending || result.trackingNumber !== null) {
+        if (
+          result.assemblyPending === true ||
+          result.trackingNumber !== null ||
+          result.labelReadyAfterPrepare
+        ) {
           prefetchOrderIds.push(orderId);
         }
       } catch (error: unknown) {
@@ -430,7 +445,9 @@ export class OrderPlatformShipService {
         }
         continue;
       }
-      const chunkSize = Math.max(1, this.config.get<number>('app.label.batchFetchChunk') ?? 20);
+      // 平台自报的批量上限优先（WB ≤100），否则用全局配置（OZON ≤20）。
+      const configured = this.config.get<number>('app.label.batchFetchChunk') ?? 20;
+      const chunkSize = Math.max(1, store.adapter.labelBatchLimit ?? configured);
       for (let index = 0; index < group.needs.length; index += chunkSize) {
         await this.fetchLabelChunk(
           group.needs.slice(index, index + chunkSize),
@@ -546,7 +563,7 @@ export class OrderPlatformShipService {
 
   private async archiveLabel(
     need: LabelFetchNeed,
-    file: { fileName: string; mimeType: string; bytes: Uint8Array },
+    file: PlatformLabelFile,
     operator: OperatorContext,
     labelIds: Map<string, string>,
   ): Promise<BatchShippingLabelItem> {
@@ -562,6 +579,8 @@ export class OrderPlatformShipService {
         operator,
       );
       labelIds.set(need.orderId, label.id);
+      // 取面单顺带拿到的运单号（WB parcelId）：订单与已建发货单都要补上。
+      await this.persistLabelTracking(need.order, file.trackingNumber ?? null, operator);
       this.logger.log(
         `platform label archived order=${need.order.orderNo} via=batch bytes=${file.bytes.byteLength}`,
         'OrderPlatformShipService',
@@ -678,11 +697,28 @@ export class OrderPlatformShipService {
       },
       operator,
     );
+    await this.persistLabelTracking(order, file.trackingNumber ?? null, operator);
     this.logger.log(
       `platform label archived order=${order.orderNo} store=${context.storeId} bytes=${file.bytes.byteLength}`,
       'OrderPlatformShipService',
     );
     return label;
+  }
+
+  /**
+   * 取面单顺带拿到的运单号（WB 跨境贴纸的 parcelId）落库：订单列 + 已建发货单
+   * 快照。已有值不覆盖（平台只分配一次）。
+   */
+  private async persistLabelTracking(
+    order: OrderForLabel,
+    trackingNumber: string | null,
+    operator: OperatorContext,
+  ): Promise<void> {
+    if (trackingNumber === null || order.platformTrackingNo !== null) {
+      return;
+    }
+    await this.orderService.recordPlatformTrackingNo(order.id, trackingNumber, operator);
+    await this.shipmentService.backfillTrackingForOrder(order.id, trackingNumber, operator);
   }
 
   private batchFailureOf(orderId: string, error: unknown): BatchPrepareShipmentItem {

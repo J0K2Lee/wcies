@@ -62,6 +62,13 @@ const TARGETED_IDS_BATCH = 50;
 export class YandexAdapter implements PlatformAdapter {
   readonly platformCode = 'YANDEX' as const;
 
+  /**
+   * READY_TO_SHIP 后平台即生成面单（不依赖运单号先回传），所以组包成功就能
+   * 预取（2026-10-22）。批量面单没有同步接口（只有异步报表），故不声明
+   * `labelBatchLimit`，调用方仍逐单取。
+   */
+  readonly labelReadyAfterPrepare = true;
+
   constructor(
     private readonly client: YandexClient,
     private readonly shipmentService: YandexShipmentService,
