@@ -191,7 +191,10 @@ export interface PlatformOrderRaw {
   readonly platformStageChangedAt?: Date | null;
   /**
    * Platform-assigned waybill/tracking number of this shipment (OZON
-   * `tracking_number`). A platform FACT used for display and for filling the
+   * `tracking_number`). Yandex FBS 没有独立承运商运单号，用面单上的货位号
+   * `<orderId>-<箱号>`（`boxesLayout[].barcode`，见 yandex.mapper
+   * `readYxTrackCode`，2026-10-23 真实面单校正）。
+   * A platform FACT used for display and for filling the
    * internal Shipment's tracking number at outbound time - it does NOT make
    * the order the logistics model (AGENTS.md §37: Shipment/Package stay the
    * only logistics carrier). Null/absent while the platform has not assigned

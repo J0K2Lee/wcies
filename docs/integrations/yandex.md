@@ -89,13 +89,30 @@ https://market.yandex.ru/card/slug/5817028070?businessId=193261685
 因此代码里 **不再拼 Yandex 卡片地址**：`listing.url` 为空时退回 Market 搜索页
 （`search?text=<商品名>`），保证永远可点。缺标题才返回 null 并提示，不猜（§88）。
 
-### 5d. 运单号与面单（2026-10-22）
+### 5d. 运单号与面单（2026-10-22 建档，2026-10-23 用真实面单校正）
 
-- **运单号**：business-orders 的 `delivery.tracks[].trackCode`。此前只有手工点
-  「获取运单号」才读一次，轮询/webhook 从不刷新；现在 `mapOrderToOrder` 直接映射到
-  `platformTrackingNo`，每次同步都会收敛（null 不覆盖已有值）。
+**FBS 没有独立的承运商运单号。** 买家面单（卖家后台与 API 拿到的是同一份）上只有两个号：
+
+| 面单字段 | 值 | 含义 |
+|---|---|---|
+| номер заказа | 63259683777 | 订单号 |
+| номер грузоместа | 63259683777-1 | 货位号（`boxesLayout[].barcode`），= `<订单号>-<箱号>` |
+
+官方 spec 里 `OrderTrackDTO` 明确标注「Информация о трек-номере посылки **(DBS)**」，
+`OrderShipmentDTO.tracks` 也写「仅 DBS」——FBS 订单实测 113 单全为空。
+承运商名（如 GTA-GUOO COMBI）来自 `deliveryServiceId`，不是运单号。
+
+因此 `mapOrderToOrder` 的取值顺序是 **DBS `tracks[].trackCode` 优先，否则用货位号
+`boxesLayout[].barcode`**（多箱取第一箱）。落库字段仍是 `orders.platform_tracking_no`，
+值形如 `63259683777-1`，与面单完全对应。此前只有手工点「获取运单号」才读一次，
+轮询/webhook 从不刷新；现在每次同步都会收敛（null 不覆盖已有值）。
+
 - **面单**：`GET /v2/campaigns/{campaignId}/orders/{orderId}/delivery/labels`
-  （A9_HORIZONTALLY 58×40mm PDF）**逐单**，没有同步批量接口。
+  **逐单**，返回 1 页 PDF，实测 **212×283pt ≈ 75×100mm 竖版**——与卖家后台打印的
+  面单逐字一致（2026-10-23 用订单 63259683777 比对截图确认）。
+  `format` 参数（A9_HORIZONTALLY / A9 / A7）在该账号上**返回同一份文件**，
+  即尺寸由账号/店铺配置决定，代码里继续传 A9_HORIZONTALLY 但不依赖它。
+- 没有同步批量接口。
 - 面单在 `READY_TO_SHIP` 后即可取，适配器声明 `labelReadyAfterPrepare=true`，组包成功
   即入队预取。
 - 批量能力只有异步报表 `POST /v2/reports/documents/labels/generate`

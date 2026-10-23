@@ -122,10 +122,35 @@ describe('mapOrderToOrder tracking (2026-10-22 运单号回填)', () => {
     expect(mapped.platformTrackingNo).toBe('YX-TRACK-1');
   });
 
-  it('stays null until the platform assigns one (never fabricates)', () => {
+  it('falls back to the cargo-place barcode for FBS (面单上的「номер грузоместа」)', () => {
+    // 真实面单（2026-10-23）：номер заказа 63259683777 / номер грузоместа 63259683777-1
+    const mapped = mapOrderToOrder({
+      ...base,
+      orderId: 63259683777,
+      delivery: { boxesLayout: [{ boxId: 1, barcode: '63259683777-1' }] },
+    });
+    expect(mapped.platformTrackingNo).toBe('63259683777-1');
+  });
+
+  it('prefers the DBS track code over the box barcode', () => {
+    const mapped = mapOrderToOrder({
+      ...base,
+      delivery: {
+        tracks: [{ trackCode: 'DBS-TRACK-9' }],
+        boxesLayout: [{ boxId: 1, barcode: '1-1' }],
+      },
+    });
+    expect(mapped.platformTrackingNo).toBe('DBS-TRACK-9');
+  });
+
+  it('stays null when neither tracks nor a usable box barcode exist', () => {
     expect(mapOrderToOrder({ ...base }).platformTrackingNo).toBeNull();
     expect(
       mapOrderToOrder({ ...base, delivery: { tracks: [{ trackCode: '   ' }] } }).platformTrackingNo,
+    ).toBeNull();
+    expect(
+      mapOrderToOrder({ ...base, delivery: { boxesLayout: [{ boxId: 1, barcode: '  ' }] } })
+        .platformTrackingNo,
     ).toBeNull();
   });
 });

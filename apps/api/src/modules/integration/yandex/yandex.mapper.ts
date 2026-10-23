@@ -147,24 +147,44 @@ export function mapOrderToOrder(order: YxOrder): PlatformOrderRaw {
 }
 
 /**
- * 订单的运单号（`delivery.tracks[].trackCode`）。平台分配前为 null——绝不用
- * 订单号之类的东西顶替（AGENTS.md §88）。
+ * 订单的运单号（2026-10-23 按真实面单校正）。
+ *
+ * Yandex 的 FBS **没有独立的承运商运单号**：官方 spec 把 `tracks` 标注为
+ * 「Информация о трек-номере посылки **(DBS)**」，FBS 订单里永远为空——实测
+ * 113 单全为 null。FBS 面单上印的只有两个号：
+ *
+ *   номер заказа      = 订单号（`orderId`）
+ *   номер грузоместа  = 货位号（`boxesLayout[].barcode`，形如 `<orderId>-<箱号>`）
+ *
+ * 交接时承运商扫的是后者，运营也按它核对，所以 FBS 取货位号当运单号用，
+ * 与面单完全一致（用户 2026-10-23 用真实面单确认）。多箱订单取第一箱。
+ * DBS 的 `tracks[].trackCode` 优先，出现时以它为准。都没有则为 null。
  */
 export function readYxTrackCode(order: {
-  delivery?: { tracks?: readonly unknown[] };
+  delivery?: { tracks?: readonly unknown[]; boxesLayout?: readonly unknown[] };
 }): string | null {
   const tracks = order.delivery?.tracks;
-  if (!Array.isArray(tracks)) {
-    return null;
-  }
-  for (const raw of tracks) {
-    if (typeof raw !== 'object' || raw === null) {
-      continue;
+  if (Array.isArray(tracks)) {
+    for (const raw of tracks) {
+      if (typeof raw !== 'object' || raw === null) {
+        continue;
+      }
+      const code = readString((raw as Record<string, unknown>)['trackCode'])?.trim();
+      if (code !== undefined && code !== '') {
+        return code;
+      }
     }
-    const track = raw as Record<string, unknown>;
-    const code = readString(track['trackCode'])?.trim();
-    if (code !== undefined && code !== '') {
-      return code;
+  }
+  const boxes = order.delivery?.boxesLayout;
+  if (Array.isArray(boxes)) {
+    for (const raw of boxes) {
+      if (typeof raw !== 'object' || raw === null) {
+        continue;
+      }
+      const barcode = readString((raw as Record<string, unknown>)['barcode'])?.trim();
+      if (barcode !== undefined && barcode !== '') {
+        return barcode;
+      }
     }
   }
   return null;
