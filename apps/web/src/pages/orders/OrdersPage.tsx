@@ -836,6 +836,37 @@ function expandedFieldText(key: string, item: OrderItem, currency: string | null
 }
 
 /** 单个 SKU 行：块头（图 + 编码 + 名称 + 履约状态）+ 元信息行。 */
+/**
+ * 行内「缺货」徽标的统一口径（2026-10-23 用户两次反馈定稿）：
+ *
+ * 1. **未分配就是缺货**：`BACKORDERED` 与 `PENDING` 一样显示橙色「缺货」，与订单
+ *    rollup / 列表筛选 / 采购覆盖同一口径——不能再出现订单头说缺货、行内说待处理。
+ * 2. **tooltip 给 SKU 级缺口**：`该仓该 SKU 还缺多少件 = 总需求 − 在途未收`，
+ *    直接取后端派生的 `procurementGapQty`（不是本行数量，也不是本行未占用量）。
+ *    没有仓信息（未映射 / 店铺无绑定仓）时才退化为本行数量。
+ */
+function shortageBadgeOf(item: OrderItem): { tone: 'warning'; label: string; hint: string } | null {
+  if (item.fulfillmentStatus !== 'BACKORDERED' && item.fulfillmentStatus !== 'PENDING') {
+    return null;
+  }
+  const gap = item.procurementGapQty === null ? null : Number(item.procurementGapQty);
+  const inTransit =
+    item.procurementInTransitQty === null ? 0 : Number(item.procurementInTransitQty);
+  let hint: string;
+  if (gap === null) {
+    const reservedQty = (item.reservation?.lines ?? []).reduce(
+      (sum, line) => sum + Number(line.quantity),
+      0,
+    );
+    hint = `缺货 ${Math.max(0, Number(item.quantity) - reservedQty)} 件`;
+  } else if (gap > 0) {
+    hint = `该仓该 SKU 还缺 ${gap} 件（需求 − 在途 ${inTransit} 件）`;
+  } else {
+    hint = `该仓该 SKU 无缺口（在途 ${inTransit} 件已覆盖）`;
+  }
+  return { tone: 'warning', label: '缺货', hint };
+}
+
 function ExpandedItemBlock({
   item,
   currency,
@@ -871,28 +902,8 @@ function ExpandedItemBlock({
     unallocated && item.procurementCoverage === 'COVERED'
       ? (PROCUREMENT_META[item.procurementCoverage] ?? null)
       : null;
-  /**
-   * 缺货展示口径（2026-10-23 用户反馈）：订单头的 rollup 把
-   * BACKORDERED ∪ PENDING 都算缺货，行内却按原始状态显示「待处理」，同一个
-   * 订单上下两处说法不一致。这里与 rollup 对齐：已映射却没占到库存的行就是缺货，
-   * 并给出缺货件数（数量 − 已占用）。未映射行仍显示原状态（缺货原因在映射）。
-   */
-  const reservedQty = (item.reservation?.lines ?? []).reduce(
-    (sum, line) => sum + Number(line.quantity),
-    0,
-  );
-  const shortQty = Math.max(0, Number(item.quantity) - reservedQty);
-  const shortage =
-    unallocated && item.mappingStatus === 'MAPPED'
-      ? {
-          tone: 'warning' as const,
-          label: '缺货',
-          hint:
-            item.fulfillmentStatus === 'PENDING'
-              ? `缺货 ${shortQty} 件：该行尚未分配到库存（尚无占用）`
-              : `缺货 ${shortQty} 件：库存不足，等待补货或重新分配`,
-        }
-      : null;
+  // 缺货口径见 shortageBadgeOf（与订单 rollup 一致）。
+  const shortage = shortageBadgeOf(item);
   // 键盘可达（2026-10-17 体检 P2-9）：Enter / 空格 = 点击。
   const interaction = rowInteractionProps({
     selected,
@@ -2253,7 +2264,14 @@ export function OrdersPage() {
       : null;
   const railContent = useMemo<ContextRailContent>(() => {
     if (selectedItem !== null) {
-      const fulfillmentMeta = FULFILLMENT_STATUS_META[selectedItem.fulfillmentStatus];
+      const shortageMeta = shortageBadgeOf(selectedItem);
+      const fulfillmentMeta = shortageMeta ?? {
+        tone: FULFILLMENT_STATUS_META[selectedItem.fulfillmentStatus]?.tone ?? 'neutral',
+        label:
+          FULFILLMENT_STATUS_META[selectedItem.fulfillmentStatus]?.label ??
+          selectedItem.fulfillmentStatus,
+        hint: selectedItem.fulfillmentStatus,
+      };
       // 采购状态/入口只在**仍缺货**的行有意义（用户指示 2026-10-19）。
       const skuUnallocated =
         selectedItem.fulfillmentStatus === 'BACKORDERED' ||
@@ -2274,7 +2292,7 @@ export function OrdersPage() {
               <StatusBadge
                 tone={fulfillmentMeta?.tone ?? 'neutral'}
                 label={fulfillmentMeta?.label ?? selectedItem.fulfillmentStatus}
-                hint={selectedItem.fulfillmentStatus}
+                hint={fulfillmentMeta?.hint}
               />
             }
           />
@@ -2908,13 +2926,17 @@ export function OrdersPage() {
       dataIndex: 'fulfillmentStatus',
       key: 'fulfillmentStatus',
       width: 130,
-      render: (value: string) => (
-        <StatusBadge
-          tone={FULFILLMENT_STATUS_META[value]?.tone ?? 'neutral'}
-          label={FULFILLMENT_STATUS_META[value]?.label ?? value}
-          showDot={false}
-        />
-      ),
+      render: (value: string, row: OrderItem) => {
+        const shortage = shortageBadgeOf(row);
+        return (
+          <StatusBadge
+            tone={shortage?.tone ?? FULFILLMENT_STATUS_META[value]?.tone ?? 'neutral'}
+            label={shortage?.label ?? FULFILLMENT_STATUS_META[value]?.label ?? value}
+            hint={shortage?.hint}
+            showDot={false}
+          />
+        );
+      },
     },
     {
       title: '采购状态',
