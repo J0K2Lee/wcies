@@ -128,6 +128,19 @@ export class OrderEntity {
   @Column({ type: 'timestamptz', name: 'label_printed_at', nullable: true })
   labelPrintedAt!: Date | null;
 
+  /**
+   * 手工「标记外部履约」的时间与原因（2026-10-23 用户需求）。NULL = 从未标记。
+   *
+   * 标记会把订单关账为 SHIPPED，但平台侧可能还没真正发货；本字段让系统能区分
+   * 「我手工关账的外部履约」与「真的出库了」，从而提供「取消外部履约」——
+   * 未标记的单不出现该入口，已标记但平台已开始运输的单也不允许回退。
+   */
+  @Column({ type: 'timestamptz', name: 'external_fulfilled_at', nullable: true })
+  externalFulfilledAt!: Date | null;
+
+  @Column({ type: 'varchar', length: 500, name: 'external_fulfillment_reason', nullable: true })
+  externalFulfillmentReason!: string | null;
+
   /** How the order entered WCIES (Sprint 5 §58): MANUAL / API / POLLING / WEBHOOK. */
   @Column({ type: 'varchar', length: 30, name: 'sync_source', nullable: true })
   syncSource!: string | null;

@@ -30,6 +30,8 @@ import {
   OrderListQueryDto,
   OrderMarkExternalFulfillmentRequestDto,
   OrderMarkExternalFulfillmentResultDto,
+  OrderCancelExternalFulfillmentRequestDto,
+  OrderCancelExternalFulfillmentResultDto,
   OrderMarkLabelPrintedRequestDto,
   OrderMarkLabelPrintedResultDto,
   OrderRetryAllocationResultDto,
@@ -151,6 +153,22 @@ export class OrderController {
   ) {
     return ok<OrderMarkExternalFulfillmentResultDto>(
       await this.orderService.markExternalFulfillment(id, operator, request.reason),
+    );
+  }
+
+  @Post(':id/cancel-external-fulfillment')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '取消外部履约标记（平台未发货时可用）：RELEASED 行还原为 PENDING，可重新分配库存',
+  })
+  @ApiOkEnvelope(OrderCancelExternalFulfillmentResultDto)
+  async cancelExternalFulfillment(
+    @Param('id') id: string,
+    @Body() request: OrderCancelExternalFulfillmentRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ) {
+    return ok<OrderCancelExternalFulfillmentResultDto>(
+      await this.orderService.cancelExternalFulfillment(id, operator, request.reason),
     );
   }
 

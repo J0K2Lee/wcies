@@ -84,6 +84,8 @@ interface OrderListItem {
   erpStatus: string;
   /** 面单已打印时间（人工确认）；null = 未打印。 */
   labelPrintedAt: string | null;
+  /** 手工标记外部履约的时间（NULL = 从未标记，2026-10-23）。 */
+  externalFulfilledAt: string | null;
   fulfillmentMode: string | null;
   currency: string | null;
   orderedAt: string;
@@ -173,6 +175,8 @@ interface OrderDetail {
   platformStage: string | null;
   erpStatus: string;
   labelPrintedAt: string | null;
+  externalFulfilledAt: string | null;
+  externalFulfillmentReason: string | null;
   fulfillmentMode: string | null;
   currency: string | null;
   orderedAt: string;
@@ -1325,6 +1329,28 @@ export function OrdersPage() {
     onError: (error: Error) => message.error(`标记失败：${error.message}`),
   });
 
+  /**
+   * 取消外部履约标记（2026-10-23 用户需求）：平台还没发货时，把标记撤掉，
+   * RELEASED 行回到 PENDING，之后可以重新分配库存。
+   */
+  const cancelExternalMutation = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
+      apiPost<{ restoredItems: number; erpStatus: string }>(
+        '/api/v1/orders/{id}/cancel-external-fulfillment',
+        { ...(reason !== undefined && reason.trim() !== '' ? { reason } : {}) },
+        { id },
+      ),
+    onSuccess: (result) => {
+      message.success(
+        `已取消外部履约标记（还原 ${result.restoredItems} 行），订单状态 ${result.erpStatus}，可重新分配`,
+      );
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
+      void queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+    },
+    onError: (error: Error) => message.error(`取消失败：${error.message}`),
+  });
+
   const retryMutation = useMutation({
     mutationFn: (itemId: string) =>
       apiPost<{ reserved: boolean; fulfillmentStatus: string; mappingRepaired: boolean }>(
@@ -1884,8 +1910,9 @@ export function OrdersPage() {
   };
 
   // ---- 批量外部履约（用户指示 2026-10-14）：同一原因逐单关账 ----
-  // 与批量发货的本质区别：不产生任何库存流水。已发货/已取消的单前端先排除，
-  // 存在已占用（RESERVED/PICKED）行的单由后端逐单拒绝并说明原因。
+  // 与批量发货的本质区别：不产生任何库存流水。已发货/已取消的单前端先排除；
+  // 已占用的行由后端在标记流程里自动释放（2026-10-23），只有已拣货（PICKED）
+  // 的行会让该单被拒绝——货已离开货架，必须先走拦截/退回。
   const [batchExternalOpen, setBatchExternalOpen] = useState(false);
   const [batchExternalForm] = Form.useForm<{ reason: string }>();
   const eligibleExternalOrderIds = useMemo(
@@ -2556,18 +2583,59 @@ export function OrdersPage() {
         {/* 快速建档已从订单级操作区移除（用户指示 2026-10-14）：一个订单可能
             含多个 SKU，订单级按钮只能处理第一行、语义不清；建档入口收敛到
             SKU 行侧边栏（点开具体未映射行后操作）。 */}
-        {selectedRow.erpStatus !== 'SHIPPED' && selectedRow.erpStatus !== 'CANCELLED' && (
-          <Button
-            block
-            style={{ marginTop: 8 }}
-            onClick={() => {
-              setExternalTarget(selectedRow);
-              externalForm.setFieldsValue({ reason: '' });
-            }}
-          >
-            标记外部履约
-          </Button>
-        )}
+        {(() => {
+          // 2026-10-23 用户口径：已标记外部履约且平台尚未发货 → 「取消外部履约」；
+          // 平台已开始运输/已签收 → 两个按钮都隐藏（既成事实，不能回退）。
+          const platformShipped =
+            selectedRow.platformStage === 'IN_TRANSIT' || selectedRow.platformStage === 'DELIVERED';
+          const marked = selectedRow.externalFulfilledAt !== null;
+          if (selectedRow.erpStatus === 'CANCELLED') {
+            return null;
+          }
+          if (marked) {
+            if (platformShipped) {
+              return null;
+            }
+            return (
+              <Button
+                block
+                danger
+                style={{ marginTop: 8 }}
+                loading={cancelExternalMutation.isPending}
+                onClick={() => {
+                  modal.confirm({
+                    title: `取消外部履约标记：${selectedRow.platformOrderId}？`,
+                    content:
+                      '平台尚未发货，可以撤销。订单行会回到「缺货/待处理」，之后可重新尝试分配库存。',
+                    okText: '取消标记',
+                    okButtonProps: { danger: true },
+                    cancelText: '返回',
+                    onOk: () => {
+                      cancelExternalMutation.mutate({ id: selectedRow.id });
+                    },
+                  });
+                }}
+              >
+                取消外部履约
+              </Button>
+            );
+          }
+          if (selectedRow.erpStatus === 'SHIPPED') {
+            return null;
+          }
+          return (
+            <Button
+              block
+              style={{ marginTop: 8 }}
+              onClick={() => {
+                setExternalTarget(selectedRow);
+                externalForm.setFieldsValue({ reason: '' });
+              }}
+            >
+              标记外部履约
+            </Button>
+          );
+        })()}
         {selectedRow.erpStatus !== 'CANCELLED' && (
           <Button
             block
@@ -4089,9 +4157,10 @@ export function OrdersPage() {
             }}
           >
             适用于货物从未进入 WCIES
-            仓库、在系统外完成的订单（如线下采购直发买家）。订单行将关账、订单转入
-            SHIPPED，不产生任何库存流水，并关闭该订单的缺货/时限异常。存在 RESERVED / PICKED
-            行的订单请走「取消订单」。
+            仓库、在系统外完成的订单（如线下采购直发买家）。标记时会**自动释放该订单的库存占用**
+            （RESERVED → 释放），然后订单行关账、订单转入 SHIPPED，不产生库存流水，
+            并关闭该订单的缺货/时限异常。已拣货（PICKED）的行需先走拦截/退回——
+            货已离开货架，不能靠关账抹掉。
           </span>
           <Form.Item
             name="reason"

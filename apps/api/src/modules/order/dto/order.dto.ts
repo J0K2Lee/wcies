@@ -323,6 +323,12 @@ export class OrderListItemDto {
   })
   backorderedShortCount!: number;
   @ApiPropertyOptional({
+    nullable: true,
+    type: Date,
+    description: '手工标记外部履约的时间（NULL = 从未标记）。未发货时可在右栏「取消外部履约」',
+  })
+  externalFulfilledAt!: Date | null;
+  @ApiPropertyOptional({
     description: '加急订单（ADR 0022）：列表恒定置顶，缺货到货后优先参与库存分配',
   })
   isUrgent!: boolean;
@@ -496,6 +502,14 @@ export class OrderDetailDto {
   @ApiProperty({ enum: ERP_ORDER_STATUSES }) erpStatus!: string;
   @ApiProperty({ nullable: true, type: String, format: 'date-time' })
   labelPrintedAt!: Date | null;
+  @ApiPropertyOptional({
+    nullable: true,
+    type: Date,
+    description: '手工标记外部履约的时间（NULL = 从未标记）',
+  })
+  externalFulfilledAt!: Date | null;
+  @ApiPropertyOptional({ nullable: true, description: '外部履约标记原因' })
+  externalFulfillmentReason!: string | null;
   @ApiProperty({ nullable: true, type: String }) fulfillmentMode!: string | null;
   @ApiProperty({ nullable: true, type: String }) currency!: string | null;
   @ApiProperty({ type: Date }) orderedAt!: Date;
@@ -611,6 +625,23 @@ export class OrderMarkExternalFulfillmentResultDto {
   @ApiProperty() orderId!: string;
   @ApiProperty({ enum: ERP_ORDER_STATUSES }) erpStatus!: string;
   @ApiProperty() releasedItems!: number;
+}
+
+/** 取消外部履约标记（2026-10-23）：把 RELEASED 行还原成 PENDING，可重新分配。 */
+export class OrderCancelExternalFulfillmentRequestDto {
+  @ApiPropertyOptional({ maxLength: 200, description: '取消原因（可选，记入状态历史）' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  reason?: string;
+}
+
+export class OrderCancelExternalFulfillmentResultDto {
+  @ApiProperty() orderId!: string;
+  @ApiProperty() orderNo!: string;
+  @ApiProperty({ enum: ERP_ORDER_STATUSES }) erpStatus!: string;
+  @ApiProperty({ description: '被还原成 PENDING（可重新分配）的行数' })
+  restoredItems!: number;
 }
 
 // ---------------------------------------------------------------------------

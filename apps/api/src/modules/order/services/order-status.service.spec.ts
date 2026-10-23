@@ -57,6 +57,8 @@ function makeOrder(erpStatus: OrderEntity['erpStatus']): OrderEntity {
     isUrgent: false,
     urgentMarkedAt: null,
     labelPrintedAt: null,
+    externalFulfilledAt: null,
+    externalFulfillmentReason: null,
     syncSource: null,
     createdAt: new Date(),
     updatedAt: new Date(),

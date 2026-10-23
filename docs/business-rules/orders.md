@@ -569,9 +569,13 @@ fulfillment_status = RELEASED
 ```text
 订单行（非 SHIPPED/RELEASED）
 ↓
+已占用（RESERVED）的行：先释放预约（releaseReservation，订单域入口）
+↓
 fulfillment_status = RELEASED（关账）
 ↓
 erp_status → SHIPPED（显式迁移，历史记录「标记外部履约：<原因>」）
+↓
+orders.external_fulfilled_at = now()、external_fulfillment_reason = <原因>
 ↓
 RESOLVE 该订单的 ORDER_OUT_OF_STOCK / ORDER_SHIPMENT_DEADLINE_NEAR
 ↓
@@ -580,12 +584,36 @@ OperationLog：MARK_EXTERNAL_FULFILLMENT（操作人 + 原因）
 
 规则：
 
-1. **不产生任何库存流水**（货从未入系统，§14 账本不受影响）。
-2. 不新增 ERP 状态（§98）：复用 SHIPPED 作为「履约完成」的关账状态；
-   真实履约路径（拣货→打包→出库）与外部履约通过历史原因可区分。
-3. **存在 RESERVED / PICKED 行时拒绝**：释放预约或拦截回库属于库存动作，
-   必须走「取消订单」流程，不得借外部履约绕过。
-4. 已 CANCELLED / SHIPPED 的订单不可标记。
+1. **释放占用是标记流程的一部分**（2026-10-23 用户口径）：有 RESERVED 行不再
+   拒绝，而是先释放预约再关账——运营决定改由平台履约时，占用本来就没有意义了。
+   释放走订单域入口（`orderDomain`），行状态与 rollup 同步，不产生悬空占用。
+2. **已拣货（PICKED）的行仍然拒绝**：货已离开货架，释放库存会让账面与实物不符
+   （§16 Picked ≠ Reserved）。这类单必须先走拦截/退回，再标记外部履约。
+3. **不产生任何库存流水**（货从未入系统，§14 账本不受影响）。
+4. 不新增 ERP 状态（§98）：复用 SHIPPED 作为「履约完成」的关账状态；
+   真实履约路径与外部履约通过 `external_fulfilled_at` 与历史原因区分。
+5. 已 CANCELLED / SHIPPED 的订单不可标记。
+
+## 取消外部履约标记（2026-10-23）
+
+`POST /orders/:id/cancel-external-fulfillment`。标记只是**账面**关账，平台侧可能
+还没发货；此时允许撤销：
+
+```text
+RELEASED 行 → PENDING（可重新分配）
+↓
+orders.external_fulfilled_at = NULL、reason = NULL
+↓
+recomputeOrderStatus（PENDING → BACKORDERED/待分配）
+↓
+OperationLog：CANCEL_EXTERNAL_FULFILLMENT
+```
+
+- 只有 `external_fulfilled_at IS NOT NULL` 的单才能取消（未标记过 → 409）。
+- **平台已开始运输（platform_stage = IN_TRANSIT / DELIVERED）时拒绝**：货已经
+  离开，回退没有意义；前端在这种状态下直接隐藏按钮。
+- 取消后不自动重试分配：操作员按需点「重新尝试分配」（或等库存事件）。
+- `SHIPPED` 行不动（既成事实）。
 
 ## PENDING / 映射失败行取消
 

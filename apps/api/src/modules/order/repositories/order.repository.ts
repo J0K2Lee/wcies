@@ -246,6 +246,20 @@ export class OrderRepository {
       .update({ id: orderId }, { isUrgent, urgentMarkedAt, updatedAt: new Date() });
   }
 
+  /** 外部履约标记写入/清除（2026-10-23）：只动这两个字段，不碰 erp_status。 */
+  async setExternalFulfillmentMark(
+    orderId: string,
+    markedAt: Date | null,
+    reason: string | null,
+  ): Promise<void> {
+    await this.dataSource
+      .getRepository(OrderEntity)
+      .update(
+        { id: orderId },
+        { externalFulfilledAt: markedAt, externalFulfillmentReason: reason, updatedAt: new Date() },
+      );
+  }
+
   /**
    * Creates the order + its PENDING items on the caller's transaction.
    * PG 23505 on uq_orders_store_platform must be handled by the caller

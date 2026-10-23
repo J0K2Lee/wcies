@@ -167,6 +167,7 @@ export class OrderService {
         platformStatus: row.order.platformStatus,
         platformStage: row.order.platformStage,
         labelPrintedAt: row.order.labelPrintedAt,
+        externalFulfilledAt: row.order.externalFulfilledAt,
         erpStatus: row.order.erpStatus,
         fulfillmentMode: row.order.fulfillmentMode,
         currency: row.order.currency,
@@ -336,6 +337,8 @@ export class OrderService {
       platformStatus: order.platformStatus,
       platformStage: order.platformStage,
       labelPrintedAt: order.labelPrintedAt,
+      externalFulfilledAt: order.externalFulfilledAt,
+      externalFulfillmentReason: order.externalFulfillmentReason,
       erpStatus: order.erpStatus,
       fulfillmentMode: order.fulfillmentMode,
       currency: order.currency,
@@ -1027,17 +1030,29 @@ export class OrderService {
       throw new OrderInvalidStateError('订单已发货，无需标记外部履约', { orderId });
     }
     const items = await this.itemRepo.findByOrderId(order.id);
-    const blocking = items.filter(
-      (item) => item.fulfillmentStatus === 'RESERVED' || item.fulfillmentStatus === 'PICKED',
+    // 已拣货的行不能自动释放（2026-10-23）：货已经从货架取出，释放库存会让账面
+    // 与实际不符（AGENTS §16/§42 的 Picked ≠ Reserved 原则）。这类单必须先走
+    // 拦截/退回，再标记外部履约。
+    const picked = items.filter((item) => item.fulfillmentStatus === 'PICKED');
+    if (picked.length > 0) {
+      throw new OrderInvalidStateError('订单存在已拣货的行，需先走拦截/退回库存再标记外部履约', {
+        orderId,
+        blockingLineNos: picked.map((item) => item.lineNo),
+      });
+    }
+
+    // 已占用（RESERVED）的行是标记流程的一部分：先释放占用再关账
+    // （2026-10-23 用户需求）。释放走订单域入口，行状态与 rollup 同步。
+    const reserved = items.filter(
+      (item) => item.fulfillmentStatus === 'RESERVED' && item.reservationId !== null,
     );
-    if (blocking.length > 0) {
-      throw new OrderInvalidStateError(
-        '订单存在已占用库存的行（RESERVED / PICKED），请走取消订单流程释放或拦截库存，不能标记外部履约',
-        {
-          orderId,
-          blockingLineNos: blocking.map((item) => item.lineNo),
-        },
-      );
+    for (const item of reserved) {
+      await this.reservationService.releaseReservation(item.reservationId as string, {
+        operator,
+        idempotencyKey: orderReleaseKey(item.id),
+        remark: `mark external fulfillment order=${order.orderNo}`,
+        orderDomain: true,
+      });
     }
 
     let released = 0;
@@ -1056,6 +1071,7 @@ export class OrderService {
       operator,
       `标记外部履约：${trimmedReason}`,
     );
+    await this.orderRepo.setExternalFulfillmentMark(orderId, new Date(), trimmedReason);
     await this.resolveDeadlineException(orderId);
     await this.resolveClosedLineExceptions(items);
     await this.operationLog.record({
@@ -1071,6 +1087,76 @@ export class OrderService {
       operator,
     });
     return { orderId, erpStatus: 'SHIPPED', releasedItems: released };
+  }
+
+  /**
+   * 取消外部履约标记（2026-10-23 用户需求）。
+   *
+   * 标记只是账面上把订单关账为 SHIPPED；平台侧可能还没真正发货。此时允许撤销：
+   * 把标记写下的 RELEASED 行回到 PENDING（可重新分配），清掉标记，重算状态。
+   *
+   * 允许条件：本单确实被标记过；平台尚未开始运输（platform_stage 不是
+   * IN_TRANSIT/DELIVERED）。平台已发货/已签收的单不回退——那已经是既成事实。
+   */
+  async cancelExternalFulfillment(
+    orderId: string,
+    operator: OperatorContext,
+    reason?: string,
+  ): Promise<{ orderId: string; orderNo: string; erpStatus: string; restoredItems: number }> {
+    const order = await this.getOrderOrThrow(orderId);
+    if (order.externalFulfilledAt === null) {
+      throw new OrderInvalidStateError('该订单没有外部履约标记，无法取消', { orderId });
+    }
+    if (order.erpStatus === 'CANCELLED') {
+      throw new OrderInvalidStateError('订单已取消，无需取消外部履约标记', { orderId });
+    }
+    if (order.platformStage === 'IN_TRANSIT' || order.platformStage === 'DELIVERED') {
+      throw new OrderInvalidStateError('平台已发货/已签收，不能取消外部履约标记（货已离开）', {
+        orderId,
+        platformStage: order.platformStage,
+      });
+    }
+
+    const items = await this.itemRepo.findByOrderId(order.id);
+    let restored = 0;
+    for (const item of items) {
+      if (item.fulfillmentStatus !== 'RELEASED') {
+        continue; // SHIPPED 行是既成事实，不动
+      }
+      await this.dataSource.transaction(async (runner) => {
+        await this.itemRepo.updateFulfillment(runner, item.id, {
+          fulfillmentStatus: 'PENDING',
+          reservationId: null,
+        });
+      });
+      restored += 1;
+    }
+
+    await this.orderRepo.setExternalFulfillmentMark(order.id, null, null);
+    await this.statusService.recomputeOrderStatus(
+      order.id,
+      operator,
+      `取消外部履约标记${reason === undefined || reason.trim() === '' ? '' : `：${reason.trim()}`}`,
+    );
+    const updated = await this.getOrderOrThrow(order.id);
+    await this.operationLog.record({
+      entityType: 'ORDER',
+      entityId: order.id,
+      entityCode: order.orderNo,
+      action: 'CANCEL_EXTERNAL_FULFILLMENT',
+      changes: {
+        erpStatus: { from: order.erpStatus, to: updated.erpStatus },
+        restoredItems: { from: null, to: restored },
+        reason: { from: order.externalFulfillmentReason, to: null },
+      },
+      operator,
+    });
+    return {
+      orderId: order.id,
+      orderNo: order.orderNo,
+      erpStatus: updated.erpStatus,
+      restoredItems: restored,
+    };
   }
 
   /**

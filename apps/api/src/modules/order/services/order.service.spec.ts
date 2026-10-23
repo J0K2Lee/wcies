@@ -599,3 +599,197 @@ describe('OrderService.markLabelPrinted (2026-10-19 面单已打印)', () => {
     );
   });
 });
+
+/**
+ * 外部履约标记（2026-10-23 用户口径）：标记流程自带「释放占用」；
+ * 平台未发货时允许撤销标记，行回到 PENDING 以便重新分配。
+ */
+describe('OrderService markExternalFulfillment（释放占用）', () => {
+  function build(items: Array<Partial<OrderItemEntity>>, order: Partial<OrderEntity> = {}) {
+    const orderEntity = {
+      id: 'order-1',
+      orderNo: 'ORD00000001',
+      storeId: 'store-1',
+      platformOrderId: 'P1',
+      erpStatus: 'BACKORDERED',
+      platformStage: null,
+      externalFulfilledAt: null,
+      externalFulfillmentReason: null,
+      ...order,
+    };
+    const orderRepo = {
+      findById: vi.fn().mockResolvedValue(orderEntity),
+      setExternalFulfillmentMark: vi.fn().mockResolvedValue(undefined),
+    };
+    const itemRepo = {
+      findByOrderId: vi.fn().mockResolvedValue(items),
+      updateFulfillment: vi.fn().mockResolvedValue(undefined),
+    };
+    const reservationService = { releaseReservation: vi.fn().mockResolvedValue({}) };
+    const statusService = { transition: vi.fn().mockResolvedValue(undefined) };
+    const service = new OrderService(
+      {
+        transaction: vi.fn((work: (manager: unknown) => Promise<unknown>) => work({})),
+      } as unknown as DataSource,
+      orderRepo as unknown as OrderRepository,
+      itemRepo as unknown as OrderItemRepository,
+      {} as OrderStatusHistoryRepository,
+      {} as PlatformStatusHistoryRepository,
+      statusService as unknown as OrderStatusService,
+      {} as OrderDeadlineExceptionService,
+      { evaluate: vi.fn() } as unknown as OrderTrackingStallService,
+      {} as OrderIngestionService,
+      {} as OrderPlatformShippedService,
+      reservationService as unknown as ReservationService,
+      {} as InventoryQueryService,
+      {
+        listByReference: vi.fn().mockResolvedValue([]),
+        resolveByReference: vi.fn().mockResolvedValue(undefined),
+      } as unknown as ExceptionService,
+      {} as StoreService,
+      {} as SkuImageService,
+      { record: vi.fn() } as unknown as OperationLogService,
+      {} as AppLoggerService,
+      {} as OrderPickingStatePort,
+      {} as OrderInterceptionPort,
+      {} as OrderProcurementPort,
+      {} as PlatformAdapterRegistry,
+    );
+    const internals = service as unknown as {
+      resolveDeadlineException: (id: string) => Promise<void>;
+      resolveClosedLineExceptions: (items: unknown) => Promise<void>;
+    };
+    internals.resolveDeadlineException = vi.fn().mockResolvedValue(undefined);
+    internals.resolveClosedLineExceptions = vi.fn().mockResolvedValue(undefined);
+    return { service, orderRepo, itemRepo, reservationService, statusService };
+  }
+
+  it('先释放已占用行，再关账并写标记', async () => {
+    const { service, orderRepo, itemRepo, reservationService } = build([
+      { id: 'item-1', lineNo: 1, fulfillmentStatus: 'RESERVED', reservationId: 'res-1' },
+      { id: 'item-2', lineNo: 2, fulfillmentStatus: 'PENDING', reservationId: null },
+    ]);
+
+    const result = await service.markExternalFulfillment('order-1', OPERATOR, '线下直发');
+
+    expect(reservationService.releaseReservation).toHaveBeenCalledWith(
+      'res-1',
+      expect.objectContaining({ orderDomain: true }),
+    );
+    expect(itemRepo.updateFulfillment).toHaveBeenCalledWith(expect.anything(), 'item-1', {
+      fulfillmentStatus: 'RELEASED',
+    });
+    expect(result.releasedItems).toBe(2);
+    expect(orderRepo.setExternalFulfillmentMark).toHaveBeenCalledWith(
+      'order-1',
+      expect.any(Date),
+      '线下直发',
+    );
+  });
+
+  it('已拣货（PICKED）的行仍然拒绝标记：货已离开货架', async () => {
+    const { service, reservationService } = build([
+      { id: 'item-1', lineNo: 1, fulfillmentStatus: 'PICKED', reservationId: 'res-1' },
+    ]);
+    await expect(
+      service.markExternalFulfillment('order-1', OPERATOR, '线下直发'),
+    ).rejects.toBeInstanceOf(OrderInvalidStateError);
+    expect(reservationService.releaseReservation).not.toHaveBeenCalled();
+  });
+});
+
+describe('OrderService.cancelExternalFulfillment（2026-10-23）', () => {
+  function build(items: Array<Partial<OrderItemEntity>>, order: Partial<OrderEntity>) {
+    const orderEntity = {
+      id: 'order-1',
+      orderNo: 'ORD00000001',
+      storeId: 'store-1',
+      platformOrderId: 'P1',
+      erpStatus: 'SHIPPED',
+      platformStage: null,
+      externalFulfilledAt: new Date('2026-10-23T00:00:00Z'),
+      externalFulfillmentReason: '线下直发',
+      ...order,
+    };
+    const orderRepo = {
+      findById: vi.fn().mockResolvedValue(orderEntity),
+      setExternalFulfillmentMark: vi.fn().mockResolvedValue(undefined),
+    };
+    const itemRepo = {
+      findByOrderId: vi.fn().mockResolvedValue(items),
+      updateFulfillment: vi.fn().mockResolvedValue(undefined),
+    };
+    const statusService = {
+      // recompute 会落库新状态：让后续 getOrderOrThrow 读到它。
+      recomputeOrderStatus: vi.fn(async () => {
+        orderEntity.erpStatus = 'BACKORDERED';
+        return 'BACKORDERED';
+      }),
+    };
+    const service = new OrderService(
+      {
+        transaction: vi.fn((work: (manager: unknown) => Promise<unknown>) => work({})),
+      } as unknown as DataSource,
+      orderRepo as unknown as OrderRepository,
+      itemRepo as unknown as OrderItemRepository,
+      {} as OrderStatusHistoryRepository,
+      {} as PlatformStatusHistoryRepository,
+      statusService as unknown as OrderStatusService,
+      {} as OrderDeadlineExceptionService,
+      {} as OrderTrackingStallService,
+      {} as OrderIngestionService,
+      {} as OrderPlatformShippedService,
+      {} as ReservationService,
+      {} as InventoryQueryService,
+      {} as ExceptionService,
+      {} as StoreService,
+      {} as SkuImageService,
+      { record: vi.fn() } as unknown as OperationLogService,
+      {} as AppLoggerService,
+      {} as OrderPickingStatePort,
+      {} as OrderInterceptionPort,
+      {} as OrderProcurementPort,
+      {} as PlatformAdapterRegistry,
+    );
+    return { service, orderRepo, itemRepo, statusService };
+  }
+
+  it('把 RELEASED 行还原成 PENDING、清掉标记并重算状态', async () => {
+    const { service, orderRepo, itemRepo, statusService } = build(
+      [
+        { id: 'item-1', lineNo: 1, fulfillmentStatus: 'RELEASED' },
+        { id: 'item-2', lineNo: 2, fulfillmentStatus: 'RELEASED' },
+      ],
+      {},
+    );
+
+    const result = await service.cancelExternalFulfillment('order-1', OPERATOR);
+
+    expect(itemRepo.updateFulfillment).toHaveBeenCalledTimes(2);
+    expect(itemRepo.updateFulfillment).toHaveBeenCalledWith(expect.anything(), 'item-1', {
+      fulfillmentStatus: 'PENDING',
+      reservationId: null,
+    });
+    expect(orderRepo.setExternalFulfillmentMark).toHaveBeenCalledWith('order-1', null, null);
+    expect(statusService.recomputeOrderStatus).toHaveBeenCalled();
+    expect(result).toMatchObject({ restoredItems: 2, erpStatus: 'BACKORDERED' });
+  });
+
+  it('平台已开始运输时拒绝取消', async () => {
+    const { service } = build([{ id: 'item-1', fulfillmentStatus: 'RELEASED' }], {
+      platformStage: 'IN_TRANSIT',
+    });
+    await expect(service.cancelExternalFulfillment('order-1', OPERATOR)).rejects.toBeInstanceOf(
+      OrderInvalidStateError,
+    );
+  });
+
+  it('未标记过的订单不能取消', async () => {
+    const { service } = build([{ id: 'item-1', fulfillmentStatus: 'RELEASED' }], {
+      externalFulfilledAt: null,
+    });
+    await expect(service.cancelExternalFulfillment('order-1', OPERATOR)).rejects.toBeInstanceOf(
+      OrderInvalidStateError,
+    );
+  });
+});
