@@ -849,22 +849,17 @@ function shortageBadgeOf(item: OrderItem): { tone: 'warning'; label: string; hin
   if (item.fulfillmentStatus !== 'BACKORDERED' && item.fulfillmentStatus !== 'PENDING') {
     return null;
   }
-  const gap = item.procurementGapQty === null ? null : Number(item.procurementGapQty);
-  const inTransit =
-    item.procurementInTransitQty === null ? 0 : Number(item.procurementInTransitQty);
-  let hint: string;
-  if (gap === null) {
-    const reservedQty = (item.reservation?.lines ?? []).reduce(
-      (sum, line) => sum + Number(line.quantity),
-      0,
-    );
-    hint = `缺货 ${Math.max(0, Number(item.quantity) - reservedQty)} 件`;
-  } else if (gap > 0) {
-    hint = `该仓该 SKU 还缺 ${gap} 件（需求 − 在途 ${inTransit} 件）`;
-  } else {
-    hint = `该仓该 SKU 无缺口（在途 ${inTransit} 件已覆盖）`;
-  }
-  return { tone: 'warning', label: '缺货', hint };
+  // 缺口 = 总需求 − 在途未收（后端派生 procurementGapQty）；拿不到仓信息时
+  // 退化为本行数量。文案只给数字，不解释口径（用户 2026-10-23 明确）。
+  const gap =
+    item.procurementGapQty === null
+      ? Math.max(
+          0,
+          Number(item.quantity) -
+            (item.reservation?.lines ?? []).reduce((sum, line) => sum + Number(line.quantity), 0),
+        )
+      : Number(item.procurementGapQty);
+  return { tone: 'warning', label: '缺货', hint: `缺货 ${gap} 件` };
 }
 
 function ExpandedItemBlock({
