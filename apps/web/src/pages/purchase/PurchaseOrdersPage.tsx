@@ -20,6 +20,11 @@ import { ColumnsType } from 'antd/es/table';
 import { apiGet, apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime } from '../../utils/format';
 import {
+  loadPurchaseViewSettings,
+  savePurchaseViewSettings,
+  PurchaseOrdersViewSettings,
+} from './view-settings';
+import {
   ActionIsland,
   colors,
   ContextAction,
@@ -75,6 +80,8 @@ interface PurchaseOrderItem {
   unitCost: string | null;
   receivedQuantity: string;
   remark: string | null;
+  /** SKU 主图签名 URL（详情接口返回；未上传为 null）。 */
+  imageUrl?: string | null;
 }
 
 interface PurchaseOrderDetail extends PurchaseOrderRow {
@@ -182,6 +189,17 @@ export function PurchaseOrdersPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  // 视图设置（2026-10-24 用户需求）：默认展开明细 / 明细图片列，localStorage 持久化。
+  const [viewSettings, setViewSettings] =
+    useState<PurchaseOrdersViewSettings>(loadPurchaseViewSettings);
+  const [viewOpen, setViewOpen] = useState(false);
+  const updateViewSettings = useCallback((patch: Partial<PurchaseOrdersViewSettings>) => {
+    setViewSettings((current) => {
+      const next = { ...current, ...patch };
+      savePurchaseViewSettings(next);
+      return next;
+    });
+  }, []);
   const [form] = Form.useForm<PoFormValues>();
   const [showImages, setShowImages] = useState(false);
   const [supplierCreateOpen, setSupplierCreateOpen] = useState(false);
@@ -636,6 +654,7 @@ export function PurchaseOrdersPage() {
       <PageHeader
         title="采购单"
         description="登记已下单的采购，消除重复采购与漏采购；到货后在收货单完成入库"
+        secondary={<Button onClick={() => setViewOpen(true)}>视图设置</Button>}
         primary={
           <Button
             type="primary"
@@ -699,11 +718,22 @@ export function PurchaseOrdersPage() {
           expandable={{
             // 选中即展开（与订单页一致的用户指示 2026-09-17）：行点击选择
             // 驱动展开，直接显示该单的采购商品明细（需求 2026-10-09）。
-            expandedRowKeys: selectedId === null ? [] : [selectedId],
+            // 视图设置「默认展开明细」时整页展开，点击仅选中（2026-10-24）。
+            expandedRowKeys: viewSettings.defaultExpandAll
+              ? selectedId === null
+                ? rows.map((row) => row.id)
+                : [...new Set([...rows.map((row) => row.id), selectedId])]
+              : selectedId === null
+                ? []
+                : [selectedId],
             showExpandColumn: false,
             expandedRowRender: (row: PurchaseOrderRow) => (
               <div onClick={(event) => event.stopPropagation()}>
-                <ExpandedPoItems poId={row.id} />
+                <ExpandedPoItems
+                  poId={row.id}
+                  showImages={viewSettings.showImages}
+                  imageSize={viewSettings.imageSize}
+                />
               </div>
             ),
           }}
@@ -875,7 +905,7 @@ export function PurchaseOrdersPage() {
                     key: 'image',
                     width: 64,
                     render: (_: unknown, row: PurchaseOrderItem) => (
-                      <SkuThumbnail skuId={row.skuId} />
+                      <SkuThumbnail skuId={row.skuId} url={row.imageUrl} />
                     ),
                   },
                   {
@@ -947,6 +977,52 @@ export function PurchaseOrdersPage() {
           </>
         )}
       </Drawer>
+
+      {/* ---- 视图设置（2026-10-24 用户需求：默认展开明细 + 明细图片列） ---- */}
+      <Modal
+        title="视图设置"
+        open={viewOpen}
+        onCancel={() => setViewOpen(false)}
+        footer={
+          <Button type="primary" onClick={() => setViewOpen(false)}>
+            完成
+          </Button>
+        }
+        width={520}
+        destroyOnHidden
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <Switch
+              checked={viewSettings.defaultExpandAll}
+              onChange={(checked) => updateViewSettings({ defaultExpandAll: checked })}
+            />
+            默认展开所有采购单明细
+          </label>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <Switch
+              checked={viewSettings.showImages}
+              onChange={(checked) => updateViewSettings({ showImages: checked })}
+            />
+            明细显示 SKU 图片列
+          </label>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            图片尺寸：
+            <Select
+              size="small"
+              style={{ width: 100 }}
+              value={viewSettings.imageSize}
+              disabled={!viewSettings.showImages}
+              options={[32, 40, 56, 72].map((size) => ({ value: size, label: `${size}px` }))}
+              onChange={(value) => updateViewSettings({ imageSize: value })}
+            />
+          </span>
+          <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+            偏好保存在本机浏览器，不影响其他人；「默认展开明细」打开后整页明细直接展开，
+            点击行只做选中（右栏/详情抽屉）。图片取该 SKU 的主图，未上传时显示占位图。
+          </span>
+        </div>
+      </Modal>
 
       <Modal
         title="登记采购单"
@@ -1178,71 +1254,102 @@ export function PurchaseOrdersPage() {
 
 const IMAGE_FALLBACK = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="#f0f0f0"/><text x="20" y="24" text-anchor="middle" fill="#888" font-size="10">无图</text></svg>')}`;
 
-/** 展开行明细列（需求 2026-10-09）：紧凑视图，不含图片列（详情抽屉里有）。 */
-const EXPANDED_PO_ITEM_COLUMNS: ColumnsType<PurchaseOrderItem> = [
-  {
-    title: 'SKU',
-    key: 'sku',
-    // 定宽（2026-10-17，与订单页同因）：此前是这一列唯一没有 width，定宽表会把
-    // 剩余空间全分给它，右侧（数量/成本/小计）被挤到最右，中间留一大片空白。
-    width: 320,
-    render: (_: unknown, row: PurchaseOrderItem) => (
-      <div>
-        <span style={{ fontWeight: 550 }}>{row.skuCode}</span>
-
-        <span style={{ fontSize: 12.5, color: colors.textSecondary, marginLeft: 8 }}>
-          {row.skuName}
-        </span>
-        <CopyTextButton value={row.skuName} title="SKU 名称" />
-      </div>
-    ),
-  },
-  {
-    title: '数量',
-    dataIndex: 'quantity',
-    key: 'quantity',
-    width: 70,
-    align: 'right' as const,
-  },
-  {
-    title: '单位成本',
-    dataIndex: 'unitCost',
-    key: 'unitCost',
-    width: 90,
-    align: 'right' as const,
-    render: (value: string | null) => (value === null ? '—' : Number(value).toFixed(4)),
-  },
-  {
-    title: '已收货',
-    dataIndex: 'receivedQuantity',
-    key: 'receivedQuantity',
-    width: 70,
-    align: 'right' as const,
-  },
-  {
-    title: '小计',
-    key: 'subtotal',
-    width: 100,
-    align: 'right' as const,
-    render: (_: unknown, row: PurchaseOrderItem) => {
-      const subtotal = lineSubtotal(row);
-      return subtotal === null ? '—' : subtotal.toFixed(4);
+/**
+ * 展开行明细列（需求 2026-10-09；2026-10-24 增加图片列）。
+ *
+ * 图片来自详情接口随行返回的 `imageUrl`（后端批量签名，一次查询），
+ * 不在前端逐行请求；`showImages` / 尺寸由视图设置控制。
+ */
+function expandedPoItemColumns(options: {
+  showImages: boolean;
+  imageSize: number;
+}): ColumnsType<PurchaseOrderItem> {
+  const imageColumn: ColumnsType<PurchaseOrderItem> = options.showImages
+    ? [
+        {
+          title: '图片',
+          key: 'image',
+          width: options.imageSize + 24,
+          render: (_: unknown, row: PurchaseOrderItem) => (
+            <SkuThumbnail skuId={row.skuId} url={row.imageUrl} size={options.imageSize} />
+          ),
+        },
+      ]
+    : [];
+  return [
+    ...imageColumn,
+    {
+      title: 'SKU',
+      key: 'sku',
+      // 定宽（2026-10-17，与订单页同因）：此前是这一列唯一没有 width，定宽表会把
+      // 剩余空间全分给它，右侧（数量/成本/小计）被挤到最右，中间留一大片空白。
+      width: 320,
+      render: (_: unknown, row: PurchaseOrderItem) => (
+        <div>
+          <span style={{ fontWeight: 550 }}>{row.skuCode}</span>
+          <span style={{ fontSize: 12.5, color: colors.textSecondary, marginLeft: 8 }}>
+            {row.skuName}
+          </span>
+          <CopyTextButton value={row.skuName} title="SKU 名称" />
+        </div>
+      ),
     },
-  },
-  {
-    title: '关联订单',
-    dataIndex: 'orderNo',
-    key: 'orderNo',
-    width: 120,
-    render: (value: string | null) => value ?? '备货采购',
-  },
-];
+    {
+      title: '数量',
+      dataIndex: 'quantity',
+      key: 'quantity',
+      width: 70,
+      align: 'right' as const,
+    },
+    {
+      title: '单位成本',
+      dataIndex: 'unitCost',
+      key: 'unitCost',
+      width: 90,
+      align: 'right' as const,
+      render: (value: string | null) => (value === null ? '—' : Number(value).toFixed(4)),
+    },
+    {
+      title: '已收货',
+      dataIndex: 'receivedQuantity',
+      key: 'receivedQuantity',
+      width: 70,
+      align: 'right' as const,
+    },
+    {
+      title: '小计',
+      key: 'subtotal',
+      width: 100,
+      align: 'right' as const,
+      render: (_: unknown, row: PurchaseOrderItem) => {
+        const subtotal = lineSubtotal(row);
+        return subtotal === null ? '—' : subtotal.toFixed(4);
+      },
+    },
+    {
+      title: '关联订单',
+      dataIndex: 'orderNo',
+      key: 'orderNo',
+      width: 120,
+      render: (value: string | null) => value ?? '备货采购',
+    },
+  ];
+}
 
 /**
  * 展开行内容（需求 2026-10-09）：与详情抽屉共用 `['purchase-order-detail',
  * id]` 缓存键（§68 模式），展开选中行不产生额外请求（已查过的单直接命中）。
+ * 2026-10-24：图片列与尺寸由视图设置控制（图片随详情接口返回）。
  */
-function ExpandedPoItems({ poId }: { poId: string }) {
+function ExpandedPoItems({
+  poId,
+  showImages,
+  imageSize,
+}: {
+  poId: string;
+  showImages: boolean;
+  imageSize: number;
+}) {
   const detailQuery = useApiQuery<{ data: PurchaseOrderDetail }>(
     '/api/v1/purchase-orders/{id}',
     {},
@@ -1263,13 +1370,21 @@ function ExpandedPoItems({ poId }: { poId: string }) {
       dataSource={row.items}
       pagination={false}
       emptyTitle="无明细"
-      columns={EXPANDED_PO_ITEM_COLUMNS}
+      columns={expandedPoItemColumns({ showImages, imageSize })}
     />
   );
 }
 
 /** Reuse the list URL; only fetch images when a selected SKU is not in that list. */
-function SkuThumbnail({ skuId, url }: { skuId?: string; url?: string | null }) {
+function SkuThumbnail({
+  skuId,
+  url,
+  size = 40,
+}: {
+  skuId?: string;
+  url?: string | null;
+  size?: number;
+}) {
   const images = useApiQuery<SkuImageEnvelope>(
     '/api/v1/skus/{skuId}/images',
     {},
@@ -1283,8 +1398,8 @@ function SkuThumbnail({ skuId, url }: { skuId?: string; url?: string | null }) {
   const src = url === undefined ? sorted[0]?.url : url;
   return (
     <Image
-      width={40}
-      height={40}
+      width={size}
+      height={size}
       src={src || IMAGE_FALLBACK}
       fallback={IMAGE_FALLBACK}
       alt="SKU 图片"

@@ -8,6 +8,7 @@ import { PurchaseOrderRepository } from '../repositories/purchase-order.reposito
 import { PurchaseReceiptRepository } from '../repositories/purchase-receipt.repository';
 import { SupplierService } from './supplier.service';
 import { SkuService } from '../../product/services/sku.service';
+import { SkuImageService } from '../../product/services/sku-image.service';
 import { ProcurementCoverageService } from './procurement-coverage.service';
 import { WarehouseService } from '../../warehouse/services/warehouse.service';
 import { WarehouseNotFoundError } from '../../warehouse/errors/warehouse-errors';
@@ -114,6 +115,7 @@ function setup() {
     repository as unknown as PurchaseOrderRepository,
     { getEntityById: vi.fn().mockResolvedValue({}) } as unknown as SupplierService,
     { getEntityById: vi.fn().mockResolvedValue({}) } as unknown as SkuService,
+    { primaryUrlsBySkuIds: vi.fn().mockResolvedValue(new Map()) } as unknown as SkuImageService,
     codes as unknown as BusinessCodeService,
     log as unknown as OperationLogService,
     receipts as unknown as PurchaseReceiptRepository,

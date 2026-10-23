@@ -40,6 +40,25 @@ export class SkuImageService {
     return await Promise.all(images.map(async (image) => this.toResponse(image)));
   }
 
+  /**
+   * SKU 主图 URL 批量查询（2026-10-24，采购单展开明细用）：一次取主图、
+   * 一次签名，返回「skuId → 签名 URL」。没有图片的 SKU 不出现在 Map 里。
+   */
+  async primaryUrlsBySkuIds(skuIds: readonly string[]): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    if (skuIds.length === 0) {
+      return result;
+    }
+    const rows = await this.repository.listPrimaryBySkuIds([...new Set(skuIds)]);
+    await Promise.all(
+      rows.map(async (row) => {
+        const url = await this.objectStorage.getSignedUrl(row.objectKey);
+        result.set(row.skuId, url);
+      }),
+    );
+    return result;
+  }
+
   async upload(
     skuId: string,
     file: UploadedImageFile,

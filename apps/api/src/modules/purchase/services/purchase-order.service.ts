@@ -12,6 +12,7 @@ import {
 } from '../../operation-log/operation-log.service';
 import { BusinessCodeService } from '../../../infrastructure/business-code/business-code.service';
 import { SkuService } from '../../product/services/sku.service';
+import { SkuImageService } from '../../product/services/sku-image.service';
 import { SkuNotFoundError } from '../../product/errors/sku-errors';
 import { formatQty, parseQty } from '../../../common/utils/quantity';
 import { PurchaseOrderEntity } from '../entities/purchase-order.entity';
@@ -60,6 +61,7 @@ export class PurchaseOrderService {
     private readonly repository: PurchaseOrderRepository,
     private readonly supplierService: SupplierService,
     private readonly skuService: SkuService,
+    private readonly skuImageService: SkuImageService,
     private readonly businessCode: BusinessCodeService,
     private readonly operationLog: OperationLogService,
     private readonly receiptRepository: PurchaseReceiptRepository,
@@ -417,6 +419,10 @@ export class PurchaseOrderService {
       order.receivingWarehouseId === null
         ? null
         : await this.warehouseService.getEntityById(order.receivingWarehouseId);
+    // 展开明细的 SKU 图片（2026-10-24 用户需求）：一次批量取主图 + 一次签名。
+    const images = await this.skuImageService.primaryUrlsBySkuIds(
+      items.map((row) => row.item.skuId),
+    );
     return {
       id: order.id,
       poNo: order.poNo,
@@ -442,6 +448,7 @@ export class PurchaseOrderService {
         unitCost: row.item.unitCost,
         receivedQuantity: row.item.receivedQuantity,
         remark: row.item.remark,
+        imageUrl: images.get(row.item.skuId) ?? null,
       })),
     };
   }

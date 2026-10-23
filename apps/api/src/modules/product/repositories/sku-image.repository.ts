@@ -23,6 +23,27 @@ export class SkuImageRepository {
     });
   }
 
+  /**
+   * 批量取「每 SKU 的主图」（2026-10-24）：采购单展开明细要一屏显示多个 SKU
+   * 的图片，逐 SKU 查询会变成 N 次往返。排序与 `listBySkuId` 一致
+   * （primary 优先，其次 sortOrder/createdAt），每个 SKU 只取第一张。
+   */
+  async listPrimaryBySkuIds(
+    skuIds: readonly string[],
+  ): Promise<Array<{ skuId: string; objectKey: string }>> {
+    if (skuIds.length === 0) {
+      return [];
+    }
+    const rows = await this.dataSource.query<Array<{ sku_id: string; object_key: string }>>(
+      `SELECT DISTINCT ON (sku_id) sku_id, object_key
+         FROM sku_images
+        WHERE sku_id = ANY($1::uuid[])
+        ORDER BY sku_id, is_primary DESC, sort_order ASC, created_at ASC`,
+      [[...skuIds]],
+    );
+    return rows.map((row) => ({ skuId: row.sku_id, objectKey: row.object_key }));
+  }
+
   async findById(id: string): Promise<SkuImageEntity | null> {
     return this.repository.findOneBy({ id });
   }

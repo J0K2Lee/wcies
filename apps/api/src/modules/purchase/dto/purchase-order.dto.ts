@@ -134,6 +134,12 @@ export class PurchaseOrderItemDto {
   @ApiPropertyOptional({ nullable: true, example: '59.9000' }) unitCost!: string | null;
   @ApiProperty({ example: '0.000' }) receivedQuantity!: string;
   @ApiPropertyOptional({ nullable: true }) remark!: string | null;
+  @ApiPropertyOptional({
+    nullable: true,
+    type: String,
+    description: '该 SKU 主图签名 URL（展开明细图片列，2026-10-24）；未上传图片为 null',
+  })
+  imageUrl!: string | null;
 }
 
 export class PurchaseOrderListItemDto {
