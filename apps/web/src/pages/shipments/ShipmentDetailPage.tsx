@@ -5,6 +5,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiPatch, apiPost, useApiQuery } from '../../api/hooks';
 import {
+  CopyTextButton,
   DataTable,
   ErrorState,
   InfoGrid,
@@ -266,7 +267,17 @@ export function ShipmentDetailPage() {
           emptyTitle="无待发商品"
           columns={[
             { title: 'SKU', dataIndex: 'skuCode', key: 'skuCode', width: 130 },
-            { title: '名称', dataIndex: 'skuName', key: 'skuName' },
+            {
+              title: '名称',
+              dataIndex: 'skuName',
+              key: 'skuName',
+              render: (value: string) => (
+                <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                  {value}
+                  <CopyTextButton value={value} title="SKU 名称" />
+                </span>
+              ),
+            },
             { title: '应发数量', dataIndex: 'quantity', key: 'quantity', width: 100 },
             { title: '已打包', dataIndex: 'packedQty', key: 'packedQty', width: 100 },
             {
@@ -295,7 +306,17 @@ export function ShipmentDetailPage() {
                   pagination={false}
                   columns={[
                     { title: 'SKU', dataIndex: 'skuCode', key: 'skuCode', width: 130 },
-                    { title: '名称', dataIndex: 'skuName', key: 'skuName' },
+                    {
+                      title: '名称',
+                      dataIndex: 'skuName',
+                      key: 'skuName',
+                      render: (value: string) => (
+                        <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                          {value}
+                          <CopyTextButton value={value} title="SKU 名称" />
+                        </span>
+                      ),
+                    },
                     {
                       title: '原数量',
                       dataIndex: 'quantity',

@@ -80,6 +80,7 @@ export type { FilterChip, FilterChipsProps } from './components/FilterChips';
 export { KpiRow } from './components/KpiRow';
 export { RailHint } from './components/RailHint';
 export { RawDataBlock } from './components/RawDataBlock';
+export { CopyTextButton, copyToClipboard } from './components/CopyTextButton';
 export { CommandPalette } from './components/CommandPalette';
 export type { PaletteItem, PaletteSection } from './components/CommandPalette';
 export { colors, spacing, radius, typography, shadows, layout } from './tokens';

@@ -5,6 +5,7 @@ import { PlusOutlined } from '@ant-design/icons';
 import { apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime } from '../../utils/format';
 import {
+  CopyTextButton,
   colors,
   ContextAction,
   ContextMetric,
@@ -417,9 +418,19 @@ export function TransfersPage() {
                     key: 'sku',
                     render: (_: unknown, row: TransferLine) => (
                       <div>
-                        <div style={{ fontWeight: 550 }}>{row.skuCode}</div>
-                        <div style={{ fontSize: 12.5, color: colors.textSecondary }}>
+                        <div style={{ fontWeight: 550, display: 'flex', alignItems: 'center' }}>
+                          {row.skuCode}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 12.5,
+                            color: colors.textSecondary,
+                            display: 'flex',
+                            alignItems: 'center',
+                          }}
+                        >
                           {row.skuName}
+                          <CopyTextButton value={row.skuName} title="SKU 名称" />
                         </div>
                       </div>
                     ),

@@ -11,6 +11,7 @@ import {
   ContextMetric,
   ContextRailContent,
   ContextSection,
+  CopyTextButton,
   DataTable,
   DeleteConfirmModal,
   EntitySummary,
@@ -1050,12 +1051,26 @@ export function ListingsPage() {
                     title: '内部SKU',
                     dataIndex: 'skuCode',
                     render: (value: string | null) =>
-                      value ?? <StatusBadge tone="warning" label="未映射" showDot={false} />,
+                      value === null ? (
+                        <StatusBadge tone="warning" label="未映射" showDot={false} />
+                      ) : (
+                        <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                          {value}
+                        </span>
+                      ),
                   },
                   {
                     title: '名称',
                     dataIndex: 'skuName',
-                    render: (value: string | null) => value ?? '—',
+                    render: (value: string | null) =>
+                      value === null ? (
+                        '—'
+                      ) : (
+                        <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                          {value}
+                          <CopyTextButton value={value} title="SKU 名称" />
+                        </span>
+                      ),
                   },
                   {
                     title: '平台 SKU',

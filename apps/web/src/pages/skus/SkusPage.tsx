@@ -48,6 +48,7 @@ import {
   PlatformTag,
   StatusBadge,
   StatusSwitch,
+  CopyTextButton,
   colors,
   useContextRail,
   ContextRailContent,
@@ -1117,17 +1118,20 @@ export function SkusPage() {
                     />
                   )}
                   <div style={{ minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 13.5,
-                        fontWeight: 550,
-                        color: colors.textPrimary,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {record.nameZh}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
+                      <span
+                        style={{
+                          fontSize: 13.5,
+                          fontWeight: 550,
+                          color: colors.textPrimary,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {record.nameZh}
+                      </span>
+                      <CopyTextButton value={record.nameZh} title="SKU 名称" />
                     </div>
                     <div style={{ fontSize: 12.5, color: colors.textSecondary, marginTop: 1 }}>
                       {record.skuCode}
@@ -1330,8 +1334,24 @@ export function SkusPage() {
               children: sku !== undefined && (
                 <InfoGrid
                   items={[
-                    { label: 'SKU 编码', children: sku.skuCode },
-                    { label: '中文名称', children: sku.nameZh },
+                    {
+                      label: 'SKU 编码',
+                      children: (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                          {sku.skuCode}
+                          <CopyTextButton value={sku.skuCode} title="SKU 编码" />
+                        </span>
+                      ),
+                    },
+                    {
+                      label: '中文名称',
+                      children: (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                          {sku.nameZh}
+                          <CopyTextButton value={sku.nameZh} title="SKU 名称" />
+                        </span>
+                      ),
+                    },
                     { label: '品牌', children: sku.brandName ?? '—' },
                     { label: '分类', children: sku.categoryName ?? '—' },
                     { label: '型号', children: sku.model ?? '—' },

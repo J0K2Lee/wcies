@@ -176,7 +176,9 @@ export class ListingRepository {
                    OR (kw_pls.sku_id IS NOT NULL AND EXISTS (
                         SELECT 1 FROM skus kw_sku
                         WHERE kw_sku.id = kw_pls.sku_id
-                          AND kw_sku.sku_code ILIKE :kw)))))`,
+                          AND (kw_sku.sku_code ILIKE :kw
+                               OR kw_sku.name_zh ILIKE :kw
+                               OR kw_sku.name_ru ILIKE :kw))))))`,
         { kw: `%${filters.keyword}%` },
       );
     }

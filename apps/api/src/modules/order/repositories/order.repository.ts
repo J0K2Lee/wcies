@@ -502,8 +502,9 @@ export class OrderRepository {
       );
     if (filters.keyword !== undefined && filters.keyword !== '') {
       // 单框混搜（用户指示 2026-09-28：订单号/平台单号与商品标识合并）：
-      // 订单号 / 平台订单号 / 内部 SKU 编码 / offer_id / seller_sku /
+      // 订单号 / 平台订单号 / 内部 SKU 编码或名称 / offer_id / seller_sku /
       // platform_sku_id 任一命中即入选（EXISTS 仿 goodsStatePredicate）。
+      // SKU 名称（中/俄）2026-10-23 补上：运营常只记得名称，搜编码记不住。
       qb.andWhere(
         `(o.order_no ILIKE :kw OR o.platform_order_id ILIKE :kw OR EXISTS (
            SELECT 1 FROM order_items i
@@ -512,7 +513,9 @@ export class OrderRepository {
              AND (i.offer_id ILIKE :kw
                   OR i.seller_sku ILIKE :kw
                   OR i.platform_sku_id ILIKE :kw
-                  OR sk.sku_code ILIKE :kw)
+                  OR sk.sku_code ILIKE :kw
+                  OR sk.name_zh ILIKE :kw
+                  OR sk.name_ru ILIKE :kw)
          ))`,
         { kw: `%${filters.keyword}%` },
       );

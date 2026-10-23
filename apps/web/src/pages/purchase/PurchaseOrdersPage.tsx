@@ -23,6 +23,7 @@ import {
   ActionIsland,
   colors,
   ContextAction,
+  CopyTextButton,
   ContextMetric,
   ContextRailContent,
   ContextSection,
@@ -882,9 +883,19 @@ export function PurchaseOrdersPage() {
                     key: 'sku',
                     render: (_: unknown, row: PurchaseOrderItem) => (
                       <div>
-                        <div style={{ fontWeight: 550 }}>{row.skuCode}</div>
-                        <div style={{ fontSize: 12.5, color: colors.textSecondary }}>
+                        <div style={{ fontWeight: 550, display: 'flex', alignItems: 'center' }}>
+                          {row.skuCode}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 12.5,
+                            color: colors.textSecondary,
+                            display: 'flex',
+                            alignItems: 'center',
+                          }}
+                        >
                           {row.skuName}
+                          <CopyTextButton value={row.skuName} title="SKU 名称" />
                         </div>
                       </div>
                     ),
@@ -1178,9 +1189,11 @@ const EXPANDED_PO_ITEM_COLUMNS: ColumnsType<PurchaseOrderItem> = [
     render: (_: unknown, row: PurchaseOrderItem) => (
       <div>
         <span style={{ fontWeight: 550 }}>{row.skuCode}</span>
+
         <span style={{ fontSize: 12.5, color: colors.textSecondary, marginLeft: 8 }}>
           {row.skuName}
         </span>
+        <CopyTextButton value={row.skuName} title="SKU 名称" />
       </div>
     ),
   },

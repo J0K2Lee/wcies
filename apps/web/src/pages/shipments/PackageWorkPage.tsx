@@ -5,6 +5,7 @@ import { App as AntdApp, Button, Input, InputRef, Popconfirm, Progress } from 'a
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiPost, useApiQuery } from '../../api/hooks';
 import {
+  CopyTextButton,
   PACKAGE_STATUS_META,
   ScanFeedback,
   ScanFeedbackData,
@@ -277,6 +278,7 @@ export function PackageWorkPage() {
           <div key={row.orderItemId} style={{ ...lineStyle, padding: '8px 20px' }}>
             <span>
               <strong>{row.skuCode}</strong> {row.skuName}
+              <CopyTextButton value={row.skuName} title="SKU 名称" />
               {row.serialTracking && (
                 <span style={{ color: colors.warning, marginLeft: 8 }}>
                   SN：{row.pendingSerialNumbers.join(', ') || '全部已装'}
@@ -313,6 +315,7 @@ export function PackageWorkPage() {
             <div key={row.id} style={{ ...lineStyle, padding: '8px 20px' }}>
               <span>
                 <strong>{row.skuCode}</strong> {row.skuName}
+                <CopyTextButton value={row.skuName} title="SKU 名称" />
                 {row.serialNumbers.length > 0 && (
                   <span style={{ color: colors.warning, marginLeft: 8 }}>
                     SN：{row.serialNumbers.join(', ')}

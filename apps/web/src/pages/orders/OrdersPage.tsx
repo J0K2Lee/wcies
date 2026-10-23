@@ -16,7 +16,7 @@ import {
   Timeline,
   Tooltip,
 } from 'antd';
-import { CopyOutlined, DownOutlined, FlagFilled, UpOutlined } from '@ant-design/icons';
+import { DownOutlined, FlagFilled, UpOutlined } from '@ant-design/icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { apiGet, apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
@@ -42,6 +42,7 @@ import {
   PageHeader,
   PICKING_STATUS_META,
   PlatformTag,
+  CopyTextButton,
   RailHint,
   RawDataBlock,
   rowInteractionProps,
@@ -528,58 +529,6 @@ function fulfillmentModeTone(
     return 'warning';
   }
   return 'neutral';
-}
-
-/**
- * 复制到剪贴板（2026-10-19 用户指示）。局域网 http 属于非安全上下文，
- * navigator.clipboard 不可用，因此保留 execCommand 兜底。
- */
-function copyToClipboard(text: string): boolean {
-  if (typeof navigator !== 'undefined' && navigator.clipboard !== undefined) {
-    void navigator.clipboard.writeText(text).catch(() => undefined);
-    return true;
-  }
-  try {
-    const area = document.createElement('textarea');
-    area.value = text;
-    area.style.position = 'fixed';
-    area.style.opacity = '0';
-    document.body.appendChild(area);
-    area.select();
-    const ok = document.execCommand('copy');
-    document.body.removeChild(area);
-    return ok;
-  } catch {
-    return false;
-  }
-}
-
-/** 行内复制按钮：空值不渲染；点击不冒泡（避免触发行选中/展开）。 */
-function CopyTextButton({ value, title }: { value: string | null; title: string }) {
-  const { message } = AntdApp.useApp();
-  if (value === null || value === '') {
-    return null;
-  }
-  return (
-    <Button
-      type="text"
-      size="small"
-      aria-label={`复制${title}`}
-      title={`复制${title}`}
-      style={{ padding: '0 4px', height: 18, minWidth: 18, color: colors.textTertiary }}
-      onClick={(event) => {
-        event.stopPropagation();
-        const ok = copyToClipboard(value);
-        if (ok) {
-          void message.success(`${title}已复制`);
-        } else {
-          void message.error('复制失败，请手动选择文本复制');
-        }
-      }}
-    >
-      <CopyOutlined style={{ fontSize: 12 }} />
-    </Button>
-  );
 }
 
 /**

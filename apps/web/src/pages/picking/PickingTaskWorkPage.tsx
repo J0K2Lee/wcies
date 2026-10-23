@@ -8,6 +8,7 @@ import { apiPost, useApiQuery } from '../../api/hooks';
 import {
   ContextMetric,
   ContextSection,
+  CopyTextButton,
   EmptyState,
   PICKING_STATUS_META,
   ScanFeedback,
@@ -314,6 +315,7 @@ export function PickingTaskWorkPage() {
                   }}
                 >
                   {nextItem.skuName}
+                  <CopyTextButton value={nextItem.skuName} title="SKU 名称" size="middle" />
                   {nextItem.serialTracking && (
                     <span style={{ color: colors.warning, marginLeft: 8, fontSize: 13 }}>
                       SN 商品
@@ -455,6 +457,7 @@ export function PickingTaskWorkPage() {
                         <span style={{ fontWeight: 400, color: colors.textSecondary }}>
                           {item.skuName}
                         </span>
+                        <CopyTextButton value={item.skuName} title="SKU 名称" />
                         {item.serialTracking && (
                           <StatusBadge tone="warning" label="SN" showDot={false} />
                         )}

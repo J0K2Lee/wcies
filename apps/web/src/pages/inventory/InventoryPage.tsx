@@ -22,6 +22,7 @@ import {
   ContextAction,
   ContextMetric,
   ContextSection,
+  CopyTextButton,
   DataTable,
   EntitySummary,
   FilterBar,
@@ -577,7 +578,15 @@ export function InventoryPage() {
               width: 260,
               render: (_: unknown, record: InventoryRow) => (
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 550, color: colors.textPrimary }}>
+                  <div
+                    style={{
+                      fontSize: 13.5,
+                      fontWeight: 550,
+                      color: colors.textPrimary,
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                  >
                     {record.skuCode}
                   </div>
                   <div
@@ -587,9 +596,12 @@ export function InventoryPage() {
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
+                      display: 'flex',
+                      alignItems: 'center',
                     }}
                   >
                     {record.skuName}
+                    <CopyTextButton value={record.skuName} title="SKU 名称" />
                   </div>
                 </div>
               ),

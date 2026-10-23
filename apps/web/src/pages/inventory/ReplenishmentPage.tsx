@@ -8,6 +8,7 @@ import {
   ContextMetric,
   ContextRailContent,
   ContextSection,
+  CopyTextButton,
   DataTable,
   EntitySummary,
   FilterBar,
@@ -240,8 +241,20 @@ export function ReplenishmentPage() {
               key: 'sku',
               render: (_: unknown, row: SuggestionRow) => (
                 <div>
-                  <div style={{ fontWeight: 550 }}>{row.skuCode}</div>
-                  <div style={{ fontSize: 12.5, color: colors.textSecondary }}>{row.skuName}</div>
+                  <div style={{ fontWeight: 550, display: 'flex', alignItems: 'center' }}>
+                    {row.skuCode}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 12.5,
+                      color: colors.textSecondary,
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                  >
+                    {row.skuName}
+                    <CopyTextButton value={row.skuName} title="SKU 名称" />
+                  </div>
                 </div>
               ),
             },

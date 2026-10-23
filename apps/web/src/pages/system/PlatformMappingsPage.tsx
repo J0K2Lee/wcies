@@ -6,6 +6,7 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { useApiQuery, useDebouncedValue } from '../../api/hooks';
 import { fmtNumber } from '../../utils/format';
 import {
+  CopyTextButton,
   colors,
   ContextAction,
   ContextMetric,
@@ -383,6 +384,7 @@ export function PlatformMappingsPage() {
                         }}
                       >
                         {row.skuName ?? ''}
+                        <CopyTextButton value={row.skuName} title="SKU 名称" />
                       </div>
                     </div>
                   ),

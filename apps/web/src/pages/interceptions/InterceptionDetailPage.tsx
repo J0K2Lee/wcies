@@ -16,6 +16,7 @@ import {
   SectionCard,
   StatusBadge,
   typography,
+  CopyTextButton,
 } from '../../design-system';
 
 /**
@@ -193,6 +194,7 @@ export function InterceptionDetailPage() {
             <div style={{ fontSize: 20, fontWeight: 700 }}>
               {item.skuCode} ×{Number(item.remainingQty)}
               <span style={{ fontSize: 14, fontWeight: 400, marginLeft: 12 }}>{item.skuName}</span>
+              <CopyTextButton value={item.skuName} title="SKU 名称" size="middle" />
             </div>
             <div>
               原拣货库位：

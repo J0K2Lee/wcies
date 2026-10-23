@@ -6,6 +6,7 @@ import {
   ContextAction,
   ContextMetric,
   ContextSection,
+  CopyTextButton,
   DataTable,
   EntitySummary,
   FilterBar,
@@ -162,7 +163,14 @@ export function InterceptionsPage() {
             {
               title: 'SKU',
               key: 'sku',
-              render: (_: unknown, row: InterceptionListItem) => `${row.skuCode} ${row.skuName}`,
+              render: (_: unknown, row: InterceptionListItem) => (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                  <span>
+                    {row.skuCode} {row.skuName}
+                  </span>
+                  <CopyTextButton value={row.skuName} title="SKU 名称" />
+                </span>
+              ),
             },
             {
               title: '状态',
