@@ -13,6 +13,8 @@ import {
 } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { apiPost, useApiQuery } from '../api/hooks';
+import { CATEGORY_CASCADER_PROPS } from './CategoryCascader';
+import { CategoryPickerOption } from './CategoryCascader';
 import { BrandQuickCreateModal, CategoryQuickCreateModal } from './QuickCreateModals';
 import { brandSearchText } from '../utils/brandSearch';
 
@@ -33,17 +35,14 @@ interface SkuCreateModalProps {
 interface CategoryNode {
   id: string;
   nameZh: string;
+  /** 俄文名（只参与搜索匹配，不显示）。 */
+  nameRu: string | null;
   status: string;
   level: number;
   children?: CategoryNode[];
 }
 
-interface CategoryOption {
-  value: string;
-  label: string;
-  disabled?: boolean;
-  children?: CategoryOption[];
-}
+type CategoryOption = CategoryPickerOption;
 
 /** Cascader options: only level-3 leaves are pickable (decision 0005). */
 function toCategoryOption(node: CategoryNode): CategoryOption {
@@ -52,7 +51,10 @@ function toCategoryOption(node: CategoryNode): CategoryOption {
     .map((child) => toCategoryOption(child));
   return {
     value: node.id,
+    // label 只放中文（俄文会撑爆下拉宽度）；俄文由共享搜索 filter 匹配。
     label: node.nameZh,
+    nameZh: node.nameZh,
+    nameRu: node.nameRu,
     // Childless level-1/2 nodes would be selectable leaves — block them.
     disabled: node.level < 3 && (node.children ?? []).length === 0,
     ...(children.length > 0 ? { children } : {}),
@@ -184,10 +186,9 @@ export function SkuCreateModal({ open, onClose, onCreated }: SkuCreateModalProps
             },
           ]}
         >
-          <Cascader<CategoryOption>
-            allowClear
-            showSearch
-            placeholder="选择三级分类（支持搜索中文名）"
+          <Cascader<CategoryPickerOption>
+            {...CATEGORY_CASCADER_PROPS}
+            placeholder="选择三级分类（支持中文/俄文搜索）"
             options={categoryOptions}
           />
         </Form.Item>

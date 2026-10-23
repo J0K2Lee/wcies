@@ -15,6 +15,8 @@ import {
 } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { apiPost, useApiQuery } from '../api/hooks';
+import { CATEGORY_CASCADER_PROPS } from './CategoryCascader';
+import { CategoryPickerOption } from './CategoryCascader';
 import { printTasksBrowser } from '../printing/print-browser';
 import { colors, InfoGrid, StatusBadge } from '../design-system';
 import { BrandQuickCreateModal, CategoryQuickCreateModal } from './QuickCreateModals';
@@ -76,12 +78,6 @@ interface CategoryNode {
   sortOrder: number;
   status: string;
   children: CategoryNode[];
-}
-
-interface CategoryOption {
-  value: string;
-  label: string;
-  children?: CategoryOption[];
 }
 
 interface BrandItem {
@@ -235,10 +231,14 @@ export function ListingOnboardModal({
     return pathById;
   }, [categories.data]);
   const categoryOptions = useMemo(() => {
-    const toOptions = (nodes: CategoryNode[]): CategoryOption[] =>
+    // label 只放中文（俄文会撑爆下拉宽度）；俄文由 CategoryCascader 的搜索
+    // filter 匹配，仍然搜得到（2026-10-23）。
+    const toOptions = (nodes: CategoryNode[]): CategoryPickerOption[] =>
       nodes.map((node) => ({
         value: node.id,
-        label: node.nameRu !== null ? `${node.nameZh} (${node.nameRu})` : node.nameZh,
+        label: node.nameZh,
+        nameZh: node.nameZh,
+        nameRu: node.nameRu,
         children: node.children.length > 0 ? toOptions(node.children) : undefined,
       }));
     return toOptions(categories.data?.data ?? []);
@@ -625,10 +625,9 @@ export function ListingOnboardModal({
                 },
               ]}
             >
-              <Cascader<CategoryOption>
-                allowClear
-                showSearch
-                placeholder="选择三级分类（支持搜索中文名）"
+              <Cascader<CategoryPickerOption>
+                {...CATEGORY_CASCADER_PROPS}
+                placeholder="选择三级分类（支持中文/俄文搜索）"
                 options={categoryOptions}
               />
             </Form.Item>
