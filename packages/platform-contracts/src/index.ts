@@ -176,6 +176,16 @@ export interface PlatformOrderRaw {
    */
   readonly platformCancelled?: boolean;
   /**
+   * 同一张平台订单可能同时出现在两个数据源里（WB：FBS 任务流 `/api/v3/orders`
+   * 与统计流水 `/api/v1/supplier/orders`）。统计行的 `srid` 恰好等于 FBS 行的
+   * `rid`，但两者 platformOrderId 不同（数字 id vs srid），直接建单会变成
+   * 两张订单（2026-10-23 用户 bug）。
+   *
+   * 这里给出「已有订单」的关联方式：订单 `raw_data[field] === value` 的记录即
+   * 同一张单。同步时先按本店铺批量查一次，命中就跳过本行、不重复建单。
+   */
+  readonly dedupeByRawField?: { readonly field: string; readonly value: string };
+  /**
    * Normalized logistics stage (see PLATFORM_ORDER_STAGES). Null when the
    * mapper's status vocabulary value is not yet classified (e.g. OZON
    * `arbitration`) - unclassified values must be documented, never guessed

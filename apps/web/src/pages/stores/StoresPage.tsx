@@ -81,6 +81,9 @@ interface StoreRow {
   bindingCount: number;
 }
 
+/** 店铺记账币种：创建与编辑共用一份，避免两处不一致（2026-10-23）。 */
+const STORE_CURRENCIES = ['RUB', 'CNY', 'USD'] as const;
+
 /** Sprint 9 T2: store sync toggles live under settings.sync (read-modify-write). */
 function readSyncSettings(settings: Record<string, unknown> | null | undefined): {
   orderSyncEnabled: boolean;
@@ -255,7 +258,7 @@ export function StoresPage() {
   // 店铺基础信息编辑（改名）。此前页面无任何 PATCH /stores/{id} 的名称入口，
   // 后端契约一直支持（storeCode / platform 不可改）。
   const [editTarget, setEditTarget] = useState<StoreRow | null>(null);
-  const [editForm] = Form.useForm<{ name: string }>();
+  const [editForm] = Form.useForm<{ name: string; defaultCurrency?: string }>();
   const [deleting, setDeleting] = useState<StoreRow | null>(null);
   const [credentialOpen, setCredentialOpen] = useState(false);
   // Id snapshot taken when the credential modal opens: the drawer's onClose
@@ -617,9 +620,28 @@ export function StoresPage() {
     onError: (error: Error) => void message.error(error.message),
   });
 
+  /**
+   * 编辑店铺基本信息（2026-10-23 用户反馈：币种设错了却改不了）。
+   * 后端 UpdateStoreRequestDto 本来就支持 name / sellerId / defaultCurrency，
+   * 只是弹窗此前只暴露了名称。
+   */
   const renameStoreMutation = useMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) =>
-      apiPatch('/api/v1/stores/{id}', { name }, { id }),
+    mutationFn: ({
+      id,
+      name,
+      defaultCurrency,
+    }: {
+      id: string;
+      name: string;
+      defaultCurrency?: string;
+    }) =>
+      apiPatch(
+        '/api/v1/stores/{id}',
+        { name, ...(defaultCurrency ? { defaultCurrency } : {}) },
+        {
+          id,
+        },
+      ),
     onSuccess: () => {
       void message.success('店铺已保存');
       setEditTarget(null);
@@ -789,7 +811,10 @@ export function StoresPage() {
                 block
                 onClick={() => {
                   setEditTarget(selectedRow);
-                  editForm.setFieldsValue({ name: selectedRow.name });
+                  editForm.setFieldsValue({
+                    name: selectedRow.name,
+                    defaultCurrency: selectedRow.defaultCurrency ?? undefined,
+                  });
                 }}
               >
                 编辑
@@ -1137,11 +1162,10 @@ export function StoresPage() {
             <Form.Item name="defaultCurrency" label="币种" initialValue="RUB">
               <Select
                 style={{ width: 100 }}
-                options={[
-                  { value: 'RUB', label: 'RUB' },
-                  { value: 'CNY', label: 'CNY' },
-                  { value: 'USD', label: 'USD' },
-                ]}
+                options={STORE_CURRENCIES.map((currency) => ({
+                  value: currency,
+                  label: currency,
+                }))}
               />
             </Form.Item>
           </Space>
@@ -1283,6 +1307,11 @@ export function StoresPage() {
             renameStoreMutation.mutate({
               id: (editTarget as StoreRow).id,
               name: values.name.trim(),
+              ...(values.defaultCurrency !== undefined &&
+              values.defaultCurrency !== null &&
+              values.defaultCurrency !== ''
+                ? { defaultCurrency: String(values.defaultCurrency) }
+                : {}),
             }),
           );
         }}
@@ -1295,7 +1324,10 @@ export function StoresPage() {
           form={editForm}
           layout="vertical"
           preserve={false}
-          initialValues={{ name: editTarget === null ? '' : editTarget.name }}
+          initialValues={{
+            name: editTarget === null ? '' : editTarget.name,
+            defaultCurrency: editTarget?.defaultCurrency ?? undefined,
+          }}
         >
           <Form.Item
             name="name"
@@ -1307,8 +1339,24 @@ export function StoresPage() {
           >
             <Input maxLength={200} />
           </Form.Item>
+          <Form.Item
+            name="defaultCurrency"
+            label="币种"
+            tooltip="该店铺订单金额的记账币种。接入时填错可以在这里改，只影响展示/换算口径，不改历史订单已落的金额。"
+          >
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder="选择币种"
+              options={STORE_CURRENCIES.map((currency) => ({
+                value: currency,
+                label: currency,
+              }))}
+            />
+          </Form.Item>
           <span style={{ fontSize: 12.5, color: colors.textTertiary, display: 'block' }}>
-            店铺编码与所属平台不可修改；改名会记入操作日志。
+            店铺编码与所属平台不可修改；改名与改币种都会记入操作日志。
           </span>
         </Form>
       </Modal>

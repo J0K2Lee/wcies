@@ -192,6 +192,19 @@ export class OrderService {
     return { items, meta: { page: page.page, pageSize: page.pageSize, total } };
   }
 
+  /**
+   * 同步去重（2026-10-23）：按 raw_data 字段批量反查本店铺已有订单。
+   * 用于「同一张平台订单出现在两个数据源」的场景（WB FBS 任务流 + 统计流水），
+   * 命中即跳过，避免重复建单。
+   */
+  async findOrderIdsByRawField(
+    storeId: string,
+    field: string,
+    values: readonly string[],
+  ): Promise<Map<string, string>> {
+    return this.orderRepo.findIdsByRawField(storeId, field, values);
+  }
+
   /** Public facts-only read for sync/backfill; no adapter dependency. */
   async listMissingPlatformImages(
     storeId: string,

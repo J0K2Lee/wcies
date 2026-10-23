@@ -6,6 +6,7 @@ import {
   mapCardToListing,
   mapFbsOrderToOrder,
   mapStatsRowToOrder,
+  fulfillmentModeOfStatsRow,
   mapWebhookEnvelope,
   wbCancelledOf,
   wbStageOf,
@@ -236,6 +237,29 @@ describe('mapStatsRowToOrder (statistics DBW rows)', () => {
       quantity: '1',
       unitPrice: '1200.00',
     });
+  });
+
+  /**
+   * 2026-10-23 用户 bug：统计流水包含全部订单，卖家仓的 FBS 单被当成 FBW，
+   * 于是同一张单出现「数字 id / FBS」与「srid / FBW」两条记录。
+   */
+  it('用卖家仓判定 FBS，并给出 rid 去重键', () => {
+    const order = mapStatsRowToOrder({
+      ...row,
+      srid: 'eBH.i5bb6dba9b335bbce96ac43acba0842fc.0.0',
+      warehouseType: 'Склад продавца',
+    });
+    expect(order.fulfillmentMode).toBe('FBS');
+    // srid 等于 FBS 任务流的 rid：同步时用它反查已有订单并跳过。
+    expect(order.dedupeByRawField).toEqual({
+      field: 'rid',
+      value: 'eBH.i5bb6dba9b335bbce96ac43acba0842fc.0.0',
+    });
+  });
+
+  it('平台仓仍按 FBW 处理，未知仓库类型不猜', () => {
+    expect(fulfillmentModeOfStatsRow({ ...row, warehouseType: 'Склад WB' })).toBe('FBW');
+    expect(fulfillmentModeOfStatsRow({ ...row })).toBe('FBW');
   });
 
   it('maps isCancel to the cancelled stage', () => {

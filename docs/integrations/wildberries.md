@@ -69,6 +69,20 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 
 **重大结构差异（与 OZON 相比）**：OZON 的订单接口一套覆盖全部履约模式；WB 的 FBO(DBW) 订单只出现在统计报表（30 分钟延迟、90 天保留、单边游标），没有作业级状态机。订单同步必须双源合并：FBS/DBS 用 v3 作业订单，DBW 用 statistics（成本高、限流 1/min → 低频轮询）。
 
+**统计流水不是「只有 DBW」（2026-10-23 修复的真实 bug）**：
+
+1. `/api/v1/supplier/orders` 返回**全部订单**，包括卖家仓（FBS/DBS）的单。此前 mapper 一律按
+   `FBW` 落库，同一张单于是出现两条记录——`<数字 id> / FBS`（v3 源）与 `<srid> / FBW`
+   （统计源），后者还被当成平台履约（外部履约）。实测 WS-001：33 单里有 13 张重复。
+2. 判定口径：`warehouseType` 为 `Склад продавца`（卖家仓）→ `FBS`；其余保持 `FBW`
+   （WB 这里是俄文自由文本，没有稳定枚举，只做单向判定、不猜未知值）。
+3. **去重键**：统计行的 `srid` 恰好等于 v3 行里的 `rid`。`PlatformOrderRaw.dedupeByRawField`
+   让适配器声明「订单 raw_data 中该字段等于本值即同一张单」；同步服务每页批量查一次
+   `orders.raw_data->>'rid'`，命中即跳过（计入 skippedCount），不再重复建单。
+4. 存量重复由 `apps/api/scripts/cancel-wb-duplicate-orders-2026-10-23.ts` 取消（dry-run
+   默认，`--apply` 才写，执行前快照到 `.workbuddy/backup/`）。只取消后摄入的那条，
+   v3 记录是权威数据。
+
 ## 4. 商品卡 / Listing（已验证）
 
 - `POST https://content-api.wildberries.cn/content/v2/get/cards/list`——**T0 校准（2026-09-18 live，与早期文档记录有出入，以此为准）**：

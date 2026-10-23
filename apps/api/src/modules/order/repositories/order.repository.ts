@@ -246,6 +246,35 @@ export class OrderRepository {
       .update({ id: orderId }, { isUrgent, urgentMarkedAt, updatedAt: new Date() });
   }
 
+  /**
+   * 按 raw_data 字段批量反查订单（2026-10-23 WB 双源去重用）。
+   *
+   * `field` 由适配器给出（当前只有 `rid`），这里做白名单校验防止拼接注入；
+   * 返回值是「字段值 → 订单 id」。
+   */
+  async findIdsByRawField(
+    storeId: string,
+    field: string,
+    values: readonly string[],
+  ): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    if (values.length === 0 || !/^[a-zA-Z0-9_]+$/.test(field)) {
+      return result;
+    }
+    const rows = await this.dataSource.query<Array<{ key: string; id: string }>>(
+      `SELECT raw_data->>$3 AS key, id
+         FROM orders
+        WHERE store_id = $1::uuid AND raw_data->>$3 = ANY($2::text[])`,
+      [storeId, [...values], field],
+    );
+    for (const row of rows) {
+      if (row.key !== null && !result.has(row.key)) {
+        result.set(row.key, row.id);
+      }
+    }
+    return result;
+  }
+
   /** 外部履约标记写入/清除（2026-10-23）：只动这两个字段，不碰 erp_status。 */
   async setExternalFulfillmentMark(
     orderId: string,

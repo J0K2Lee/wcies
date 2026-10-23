@@ -259,14 +259,33 @@ export function mapStatsRowToOrder(row: WbStatsOrderRow): PlatformOrderRaw {
     platformCancelled: cancelled,
     platformStage: cancelled ? 'CANCELLED' : null,
     platformStageChangedAt: null,
-    // DBW (买断/ realization) = platform-managed fulfillment (WB_FBW, plan §4.2).
-    fulfillmentMode: 'FBW',
+    // 履约方式看仓库类型（2026-10-23 修复）：统计流水**包含全部订单**，
+    // 「Склад продавца」(卖家仓) 的行其实是 FBS/DBS 单，此前一律标成 FBW
+    // 会把同一张单变成「平台履约」的第二张订单。
+    fulfillmentMode: fulfillmentModeOfStatsRow(row),
     orderedAt,
     shipmentDeadline: null,
     currency: null,
     items: [item],
     rawData: { ...row },
+    // 同一张单在 FBS 任务流里已经有记录（raw_data.rid === 本条 srid）：同步时
+    // 命中即跳过，不重复建单。
+    dedupeByRawField: { field: 'rid', value: srid },
   };
+}
+
+/**
+ * 统计行的履约方式：只认「卖家仓」这一条明确事实，其余保持 FBW。
+ * WB 的 `warehouseType` 是俄文自由文本（如 `Склад продавца`），没有稳定枚举——
+ * 因此只做「卖家仓 → FBS」的单向判定，其余一律按平台仓处理（与改造前一致），
+ * 不猜测未知字符串（AGENTS.md §88）。
+ */
+export function fulfillmentModeOfStatsRow(row: WbStatsOrderRow): string {
+  const warehouseType = readString(row.warehouseType)?.toLowerCase() ?? '';
+  if (warehouseType.includes('склад продавца')) {
+    return 'FBS';
+  }
+  return 'FBW';
 }
 
 // ---------------------------------------------------------------------------

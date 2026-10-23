@@ -242,6 +242,34 @@ export class OrderSyncService {
     });
   }
 
+  /**
+   * 收集本页里「已存在记录」的关联键（双源去重）。一次查询覆盖整页，
+   * 无 dedupeByRawField 的行不参与。
+   */
+  private async collectAlreadyTracked(
+    storeId: string,
+    items: readonly PlatformOrderRaw[],
+  ): Promise<Set<string>> {
+    const byField = new Map<string, string[]>();
+    for (const item of items) {
+      const dedupe = item.dedupeByRawField;
+      if (dedupe === undefined) {
+        continue;
+      }
+      const list = byField.get(dedupe.field) ?? [];
+      list.push(dedupe.value);
+      byField.set(dedupe.field, list);
+    }
+    const found = new Set<string>();
+    for (const [field, values] of byField) {
+      const existing = await this.orderService.findOrderIdsByRawField(storeId, field, values);
+      for (const key of existing.keys()) {
+        found.add(key);
+      }
+    }
+    return found;
+  }
+
   private async run(syncJob: SyncJobEntity): Promise<OrderSyncOutcome> {
     const { store, adapter } = await this.contextService.resolveSyncableStore(syncJob.storeId);
     const context = await this.contextService.buildStoreContext(store);
@@ -255,7 +283,16 @@ export class OrderSyncService {
     try {
       for (;;) {
         const page = await adapter.fetchOrders(context, cursor);
+        // 双源去重（2026-10-23）：WB 的统计流水包含 FBS 订单，而 srid 等于 FBS
+        // 行的 rid。若不处理，同一张单会同时存在「数字 id / FBS」与「srid / FBW」
+        // 两条记录。这里按 raw_data 字段批量查一次本店铺已有订单，命中即跳过。
+        const duplicateKeys = await this.collectAlreadyTracked(store.id, page.items);
         for (const order of page.items) {
+          const dedupe = order.dedupeByRawField;
+          if (dedupe !== undefined && duplicateKeys.has(dedupe.value)) {
+            skippedCount += 1;
+            continue;
+          }
           const result = await this.ingestOne(store.id, order, 'POLLING');
           if (result === 'INGESTED') {
             successCount += 1;
