@@ -164,3 +164,81 @@ describe('OrderIngestionService.retryFailedMappingItem - external fulfillment', 
     expect(statusService.recomputeOrderStatus).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * 配置性失败可见化（2026-10-23 实证 ORD00000544）：店铺没有绑定仓库时，
+ * 映射修复路径此前直接抛错，行永远停在 PENDING——映射异常已关，页面上既没有
+ * 缺货徽标也没有任何异常可看。行为必须与摄入路径一致（BACKORDERED + 异常）。
+ */
+describe('OrderIngestionService.retryFailedMappingItem - 无仓库绑定', () => {
+  function buildWithoutWarehouse() {
+    const transaction = vi.fn(async (work: (manager: EntityManager) => Promise<unknown>) =>
+      work({} as EntityManager),
+    );
+    const itemRepo = {
+      updateMapping: vi.fn().mockResolvedValue(undefined),
+      updateFulfillment: vi.fn().mockResolvedValue(undefined),
+      findById: vi
+        .fn()
+        .mockResolvedValue({ ...makeItem(), skuId: 'sku-1', mappingStatus: 'MAPPED' }),
+    };
+    const exceptionService = {
+      resolveByReferenceInTx: vi.fn().mockResolvedValue(undefined),
+      createInTx: vi.fn().mockResolvedValue({ id: 'exc-1' }),
+    };
+    const statusService = {
+      transition: vi.fn(),
+      recomputeOrderStatus: vi.fn().mockResolvedValue('BACKORDERED'),
+    };
+    const platformShipped = { apply: vi.fn() };
+    const service: OrderIngestionService = Object.assign(
+      Object.create(OrderIngestionService.prototype) as OrderIngestionService,
+      {
+        dataSource: { transaction } as unknown as DataSource,
+        resolver: {
+          resolveInternalSku: vi
+            .fn()
+            .mockResolvedValue({ internalSkuId: 'sku-1', listingSkuId: 'ls-1' }),
+        },
+        itemRepo,
+        exceptionService,
+        statusService,
+        platformShipped,
+        bindingService: { resolveDefaultWarehouseId: vi.fn().mockResolvedValue(null) },
+        logger: { log: vi.fn(), warn: vi.fn() },
+      },
+    );
+    return { service, itemRepo, exceptionService, statusService };
+  }
+
+  it('记录缺货 + ORDER_INVALID_STATE，而不是把行留在 PENDING', async () => {
+    // 平台还没发货（否则会走「平台已事实发货」的收敛分支，不进入分配）。
+    const order = makeOrder({
+      fulfillmentMode: 'FBS',
+      platformStage: 'AWAITING_SHIPMENT',
+      platformStatus: 'awaiting_packaging',
+    });
+    const { service, itemRepo, exceptionService, statusService } = buildWithoutWarehouse();
+
+    const result = await service.retryFailedMappingItem(order, makeItem(), OPERATOR);
+
+    expect(result).toMatchObject({ resolved: true, reserved: false, reservationId: null });
+    expect(itemRepo.updateFulfillment).toHaveBeenCalledWith(expect.anything(), 'item-1', {
+      fulfillmentStatus: 'BACKORDERED',
+    });
+    expect(exceptionService.createInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        exceptionType: 'ORDER_INVALID_STATE',
+        referenceType: 'ORDER_ITEM',
+        referenceId: 'item-1',
+        severity: 'HIGH',
+      }),
+    );
+    expect(statusService.recomputeOrderStatus).toHaveBeenCalledWith(
+      'order-1',
+      OPERATOR,
+      expect.stringContaining('无法分配仓库'),
+    );
+  });
+});

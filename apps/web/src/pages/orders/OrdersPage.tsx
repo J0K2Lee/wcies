@@ -871,6 +871,28 @@ function ExpandedItemBlock({
     unallocated && item.procurementCoverage === 'COVERED'
       ? (PROCUREMENT_META[item.procurementCoverage] ?? null)
       : null;
+  /**
+   * 缺货展示口径（2026-10-23 用户反馈）：订单头的 rollup 把
+   * BACKORDERED ∪ PENDING 都算缺货，行内却按原始状态显示「待处理」，同一个
+   * 订单上下两处说法不一致。这里与 rollup 对齐：已映射却没占到库存的行就是缺货，
+   * 并给出缺货件数（数量 − 已占用）。未映射行仍显示原状态（缺货原因在映射）。
+   */
+  const reservedQty = (item.reservation?.lines ?? []).reduce(
+    (sum, line) => sum + Number(line.quantity),
+    0,
+  );
+  const shortQty = Math.max(0, Number(item.quantity) - reservedQty);
+  const shortage =
+    unallocated && item.mappingStatus === 'MAPPED'
+      ? {
+          tone: 'warning' as const,
+          label: '缺货',
+          hint:
+            item.fulfillmentStatus === 'PENDING'
+              ? `缺货 ${shortQty} 件：该行尚未分配到库存（尚无占用）`
+              : `缺货 ${shortQty} 件：库存不足，等待补货或重新分配`,
+        }
+      : null;
   // 键盘可达（2026-10-17 体检 P2-9）：Enter / 空格 = 点击。
   const interaction = rowInteractionProps({
     selected,
@@ -980,10 +1002,17 @@ function ExpandedItemBlock({
             )}
             {visible.has('fulfillmentStatus') && (
               <StatusBadge
-                tone={FULFILLMENT_STATUS_META[item.fulfillmentStatus]?.tone ?? 'neutral'}
-                label={
-                  FULFILLMENT_STATUS_META[item.fulfillmentStatus]?.label ?? item.fulfillmentStatus
+                tone={
+                  shortage?.tone ??
+                  FULFILLMENT_STATUS_META[item.fulfillmentStatus]?.tone ??
+                  'neutral'
                 }
+                label={
+                  shortage?.label ??
+                  FULFILLMENT_STATUS_META[item.fulfillmentStatus]?.label ??
+                  item.fulfillmentStatus
+                }
+                hint={shortage?.hint}
                 showDot={false}
               />
             )}
@@ -2359,16 +2388,18 @@ export function OrdersPage() {
                   在 SKU 管理搜索
                 </Button>
               )}
-              {selectedItem.fulfillmentStatus === 'BACKORDERED' && selectedItem.skuId !== null && (
-                <Button
-                  block
-                  style={{ marginTop: 8 }}
-                  loading={retryMutation.isPending}
-                  onClick={() => retryMutation.mutate(selectedItem.id)}
-                >
-                  重新尝试分配
-                </Button>
-              )}
+              {(selectedItem.fulfillmentStatus === 'BACKORDERED' ||
+                selectedItem.fulfillmentStatus === 'PENDING') &&
+                selectedItem.skuId !== null && (
+                  <Button
+                    block
+                    style={{ marginTop: 8 }}
+                    loading={retryMutation.isPending}
+                    onClick={() => retryMutation.mutate(selectedItem.id)}
+                  >
+                    重新尝试分配
+                  </Button>
+                )}
               {selectedItem.mappingStatus === 'FAILED' && (
                 <>
                   {/* SKU映射（用户指示 2026-10-14）：把该未映射行绑定到已有内部

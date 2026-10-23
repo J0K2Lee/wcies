@@ -509,6 +509,14 @@ export class OrderIngestionService {
     try {
       outcome = await this.allocateMappedItem(order, fresh, operator);
     } catch (error: unknown) {
+      if (error instanceof OrderIngestInvalidError) {
+        // 配置性失败（典型：店铺没有绑定仓库）。摄入路径此时写 BACKORDERED +
+        // ORDER_INVALID_STATE（2026-09-17）；修复路径此前直接抛错，行会**永远
+        // 停在 PENDING**：映射异常已关，页面上既没有缺货徽标也没有任何异常可看
+        // （2026-10-23 实证 ORD00000544）。这里与摄入路径对齐。
+        await this.recordAllocationBlocked(order, item, operator);
+        return { resolved: true, reserved: false, reservationId: null };
+      }
       // 映射已修复：无论分配是否成功，rollup 必须重算——否则订单头会永远
       // 停留在 EXCEPTION，与「异常已解决」的行事实自相矛盾（分配错误本身
       // 照常抛给调用方）。
@@ -550,6 +558,36 @@ export class OrderIngestionService {
         : `第 ${item.lineNo} 行映射修复后仍库存不足`,
     );
     return { resolved: true, ...outcome };
+  }
+
+  /**
+   * 配置性失败的行级可见化（与摄入路径同口径）：行置 BACKORDERED、写
+   * ORDER_INVALID_STATE 异常、重算订单状态。自吞失败不打扰调用方。
+   */
+  private async recordAllocationBlocked(
+    order: OrderEntity,
+    item: OrderItemEntity,
+    operator: OperatorContext,
+  ): Promise<void> {
+    await this.dataSource.transaction(async (runner) => {
+      await this.itemRepo.updateFulfillment(runner, item.id, {
+        fulfillmentStatus: 'BACKORDERED',
+      });
+      await this.exceptionService.createInTx(runner, {
+        exceptionType: 'ORDER_INVALID_STATE',
+        severity: 'HIGH',
+        referenceType: 'ORDER_ITEM',
+        referenceId: item.id,
+        storeId: order.storeId,
+        message: `订单 ${order.orderNo} 第 ${item.lineNo} 行无法分配仓库：店铺没有已绑定平台仓库的可用仓库`,
+        details: { orderNo: order.orderNo, lineNo: item.lineNo },
+      });
+    });
+    await this.statusService.recomputeOrderStatus(
+      order.id,
+      operator,
+      `第 ${item.lineNo} 行映射修复后仍无法分配仓库`,
+    );
   }
 
   /**
