@@ -1412,3 +1412,18 @@ RESERVED / PICKED 行的订单逐单拒绝并说明原因。
 
 历史重复单（WB 统计流水重复建单，2026-10-20/21 那批）按本节一次性清除，
 快照见 `.workbuddy/backup/purged-duplicate-orders-*.json`。
+
+## 18a. 同步任务的「墓碑」自愈（2026-10-24）
+
+`sync_jobs` 的 PENDING/RUNNING 行是**单飞守门员**（同一 store + syncType 同时只允许
+一条）。此前只回收 RUNNING：进程若在「写 DB」与「入队」之间退出、或 Redis 丢掉队列
+任务，PENDING 行会永远留着，之后每次派发都撞唯一约束而被当作「已在运行」——该店铺
+从此不再同步（实证：11 个店铺卡住 5 小时，界面一直显示「等待中」）。
+
+规则：
+
+1. 调度 tick 每轮回收 **PENDING 超过 10 分钟**的行（`SYNC_DISPATCH_STALE`）与
+   RUNNING 超过 10 分钟的行（`SYNC_JOB_STALE`），前者由下一轮重新派发；
+   若原队列任务其实还活着，它的 `claimRunning` 会因状态不是 PENDING 安全跳过。
+2. 入队失败必须立刻把行置 FAILED（`SYNC_DISPATCH_FAILED`），不允许留 PENDING。
+3. 同步任务与订单状态无关：回收只影响「这轮没跑」，不影响订单事实。

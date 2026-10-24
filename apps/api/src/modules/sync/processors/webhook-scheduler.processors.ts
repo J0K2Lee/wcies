@@ -57,6 +57,16 @@ export class SyncSchedulerProcessor extends WorkerHost {
       // Crash recovery: a worker restart leaves RUNNING jobs orphaned; fail
       // them so single-flight re-opens (cursor never advanced, re-run safe).
       await this.jobRepo.failStaleRunning(10);
+      // 同一件事的另一半（2026-10-24）：进程在「写 sync_jobs」与「入队」之间
+      // 退出会留下 PENDING 墓碑，把该 store+type 永久锁死（实证 11 个店铺卡 5h）。
+      // PENDING 正常几秒内就会被 claim，10 分钟还没动必然是丢了队列任务。
+      const stalePending = await this.jobRepo.failStalePending(10);
+      if (stalePending > 0) {
+        this.logger.warn('recovered stale PENDING sync jobs', {
+          module: 'sync',
+          count: stalePending,
+        });
+      }
 
       const orderIntervalMs = this.intervalMs('ORDER_SYNC_INTERVAL_SECONDS', 0, 60);
       const listingIntervalMs = this.intervalMs('LISTING_SYNC_INTERVAL_SECONDS', 0, 300);

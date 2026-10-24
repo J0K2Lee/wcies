@@ -201,6 +201,32 @@ export class SyncJobRepository {
   }
 
   /** Cancels jobs stuck in RUNNING (process crash recovery, scheduler tick). */
+  /**
+   * 回收「永远等不到执行」的 PENDING 任务（2026-10-24）。
+   *
+   * insertPending 是单飞守门员：同一 store + syncType 同时只允许一条 PENDING/
+   * RUNNING。若进程在「写 DB」与「入队」之间退出、或 Redis 丢过队列，这条
+   * PENDING 就变成**墓碑**——后续 dispatch 一直撞唯一约束（SYNC_ALREADY_RUNNING），
+   * 该店铺从此不再同步（实证：11 个店铺卡住 5 小时）。
+   *
+   * 置 FAILED 后下一轮 tick 会重新派发；若原 BullMQ 任务还活着，它的
+   * claimRunning 会因为状态不是 PENDING 而安全跳过。
+   */
+  async failStalePending(olderThanMinutes: number): Promise<number> {
+    const result = await this.dataSource.query<Array<{ id: string }>>(
+      `UPDATE sync_jobs SET
+         status = 'FAILED',
+         error_code = 'SYNC_DISPATCH_STALE',
+         error_message = 'Job never started (process restart / lost queue job); re-dispatched by the next tick',
+         finished_at = now(),
+         updated_at = now()
+       WHERE status = 'PENDING' AND created_at < now() - ($1 || ' minutes')::interval
+       RETURNING id`,
+      [String(olderThanMinutes)],
+    );
+    return returningRows(result).length;
+  }
+
   async failStaleRunning(olderThanMinutes: number): Promise<number> {
     const result = await this.dataSource.query<Array<{ id: string }>>(
       `UPDATE sync_jobs SET

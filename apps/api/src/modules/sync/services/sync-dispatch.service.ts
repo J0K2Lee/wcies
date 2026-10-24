@@ -63,19 +63,33 @@ export class SyncDispatchService {
       CATEGORY_TREE_SYNC: this.categoryTreeQueue,
       PRODUCT_ENRICHMENT_SYNC: this.enrichmentQueue,
     };
-    await queueByType[input.syncType].add(
-      'run',
-      { syncJobId: job.id },
-      {
-        // One attempt: retries are NEW dispatches (cursor never advanced, so
-        // a re-run is lossless); BullMQ-level retries would find the job
-        // already claimed and skip anyway.
-        attempts: 1,
-        removeOnComplete: { age: 3600 },
-        removeOnFail: { age: 24 * 3600 },
-        jobId: `syncjob-${job.id}`,
-      },
-    );
+    try {
+      await queueByType[input.syncType].add(
+        'run',
+        { syncJobId: job.id },
+        {
+          // One attempt: retries are NEW dispatches (cursor never advanced, so
+          // a re-run is lossless); BullMQ-level retries would find the job
+          // already claimed and skip anyway.
+          attempts: 1,
+          removeOnComplete: { age: 3600 },
+          removeOnFail: { age: 24 * 3600 },
+          jobId: `syncjob-${job.id}`,
+        },
+      );
+    } catch (error: unknown) {
+      // 入队失败必须立刻把 PENDING 行收口（2026-10-24）：否则这条行会变成
+      // 单飞墓碑，该 store+type 之后再也派发不出去（实证 11 个店铺卡 5h）。
+      await this.jobRepo
+        .finalize(job.id, {
+          status: 'FAILED',
+          errorCode: 'SYNC_DISPATCH_FAILED',
+          errorMessage:
+            error instanceof Error ? error.message.slice(0, 400) : 'failed to enqueue sync job',
+        })
+        .catch(() => undefined);
+      throw error;
+    }
 
     this.logger.info('sync job dispatched', {
       module: 'sync',

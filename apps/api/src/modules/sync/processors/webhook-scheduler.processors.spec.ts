@@ -22,7 +22,10 @@ function buildProcessor(env: Record<string, string>, settings: unknown) {
     new ConfigService(env),
     { dispatch } as unknown as SyncDispatchService,
     { resolveSyncableStore: vi.fn().mockResolvedValue({}) } as unknown as SyncContextService,
-    { failStaleRunning: vi.fn().mockResolvedValue(undefined) } as unknown as SyncJobRepository,
+    {
+      failStaleRunning: vi.fn().mockResolvedValue(undefined),
+      failStalePending: vi.fn().mockResolvedValue(0),
+    } as unknown as SyncJobRepository,
     {
       listAllActive: vi.fn().mockResolvedValue([{ id: 'store-1', settings }]),
     } as unknown as StoreService,
@@ -30,6 +33,25 @@ function buildProcessor(env: Record<string, string>, settings: unknown) {
   );
   return { processor, dispatch };
 }
+
+describe('SyncSchedulerProcessor 坏死任务回收（2026-10-24）', () => {
+  it('每次 tick 同时回收 RUNNING 与「等不到执行」的 PENDING', async () => {
+    const failStaleRunning = vi.fn().mockResolvedValue(0);
+    const failStalePending = vi.fn().mockResolvedValue(3);
+    const processor = new SyncSchedulerProcessor(
+      {} as Queue,
+      new ConfigService({ ORDER_SYNC_INTERVAL_SECONDS: '0' }),
+      { dispatch: vi.fn() } as unknown as SyncDispatchService,
+      { resolveSyncableStore: vi.fn() } as unknown as SyncContextService,
+      { failStaleRunning, failStalePending } as unknown as SyncJobRepository,
+      { listAllActive: vi.fn().mockResolvedValue([]) } as unknown as StoreService,
+      { warn: vi.fn(), info: vi.fn() } as unknown as AppLoggerService,
+    );
+    await processor.process({ data: {} } as never);
+    expect(failStaleRunning).toHaveBeenCalledWith(10);
+    expect(failStalePending).toHaveBeenCalledWith(10);
+  });
+});
 
 describe('SyncSchedulerProcessor store gating (Sprint 9 T2)', () => {
   it('readStoreSyncSettings treats absent sync settings as all-off', () => {
