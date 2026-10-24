@@ -49,6 +49,7 @@ import {
   INTERCEPTION_STATUS_META,
   SectionCard,
   StatusBadge,
+  StatusTone,
   colors,
   RelativeTime,
   useContextRail,
@@ -104,6 +105,8 @@ interface OrderListItem {
   backorderedCoveredCount: number;
   /** 缺货行中仍无在途覆盖（可继续采购）的行数（决策 0023）。 */
   backorderedShortCount: number;
+  /** 缺货行中因店铺未绑定仓库而无法分配的行数（2026-10-24）。不算缺货。 */
+  backorderedUnboundCount: number;
   pickedCount: number;
   mappingFailedCount: number;
   openExceptionsCount: number;
@@ -144,6 +147,11 @@ interface OrderItem {
   procurementInTransitQty: string | null;
   /** 缺口计算所用的仓（订单店铺绑定仓）。 */
   procurementWarehouseId: string | null;
+  /**
+   * 店铺尚未绑定任何 ACTIVE 仓库（2026-10-24 用户指示）：该行无法分配库存，
+   * 但这**不是缺货**——行内显示「店铺未绑定仓库」，不计入缺货件数。
+   */
+  storeWarehouseUnbound: boolean;
   /** Platform identifiers of the line; present even when mapping FAILED. */
   platformProductId: string | null;
   platformSkuId: string | null;
@@ -802,6 +810,11 @@ function shortageBadgeOf(item: OrderItem): { tone: 'warning'; label: string; hin
   if (item.fulfillmentStatus !== 'BACKORDERED' && item.fulfillmentStatus !== 'PENDING') {
     return null;
   }
+  // 店铺未绑定仓库（2026-10-24 用户指示）：行分配不了是配置问题，不是缺货。
+  // 由 warehouseUnboundBadgeOf 单独出徽标。
+  if (item.storeWarehouseUnbound) {
+    return null;
+  }
   // 缺口 = 总需求 − 在途未收（后端派生 procurementGapQty）；拿不到仓信息时
   // 退化为本行数量。文案只给数字，不解释口径（用户 2026-10-23 明确）。
   const gap =
@@ -813,6 +826,88 @@ function shortageBadgeOf(item: OrderItem): { tone: 'warning'; label: string; hin
         )
       : Number(item.procurementGapQty);
   return { tone: 'warning', label: '缺货', hint: `缺货 ${gap} 件` };
+}
+
+/**
+ * 「店铺未绑定仓库」徽标（2026-10-24 用户指示）：店铺没有任何 ACTIVE 的仓库
+ * 绑定，分配阶段拿不到仓，所以既不能占用库存也不能按仓采购。它不是缺货，
+ * 处理动作是去店铺配置里绑定仓库——不是补货。
+ */
+function warehouseUnboundBadgeOf(
+  item: OrderItem,
+): { tone: 'warning'; label: string; hint: string } | null {
+  if (!item.storeWarehouseUnbound) {
+    return null;
+  }
+  if (item.fulfillmentStatus !== 'BACKORDERED' && item.fulfillmentStatus !== 'PENDING') {
+    return null;
+  }
+  return {
+    tone: 'warning',
+    label: '店铺未绑定仓库',
+    hint: '该店铺还没有绑定仓库，无法分配库存；请到店铺配置绑定仓库后重试',
+  };
+}
+
+/**
+ * 详情页订单头状态：详情接口没有列表的聚合计数，直接用行事实推导
+ * 「所有未分配行都是店铺未绑定仓库」。
+ */
+function detailStatusMeta(detail: OrderDetail): { tone: StatusTone; label: string; hint?: string } {
+  const waiting = detail.items.filter(
+    (item) => item.mappingStatus !== 'FAILED' && isUnallocated(item),
+  );
+  const unbound = waiting.filter((item) => item.storeWarehouseUnbound).length;
+  return erpStatusMetaOf({
+    erpStatus: detail.erpStatus,
+    backorderedCount: waiting.length,
+    backorderedUnboundCount: unbound,
+  });
+}
+
+/** 未分配（未占用库存）的行：缺货 / 待处理同一口径。 */
+function isUnallocated(item: { fulfillmentStatus: string }): boolean {
+  return item.fulfillmentStatus === 'BACKORDERED' || item.fulfillmentStatus === 'PENDING';
+}
+
+/** 行状态徽标的唯一入口：未绑定仓库优先于缺货（两者互斥）。 */
+function statusBadgeOf(item: OrderItem): { tone: StatusTone; label: string; hint?: string } | null {
+  const unbound = warehouseUnboundBadgeOf(item);
+  if (unbound !== null) {
+    return unbound;
+  }
+  return shortageBadgeOf(item);
+}
+
+/**
+ * 订单头 ERP 状态徽标（列表 / 详情 / 右栏共用，2026-10-24）：当该订单所有未分配
+ * 行都是「店铺未绑定仓库」造成的，订单头不再显示「缺货」——那是配置问题，
+ * 补货解决不了。
+ */
+function erpStatusMetaOf(row: {
+  erpStatus: string;
+  backorderedCount: number;
+  backorderedUnboundCount: number;
+}): { tone: StatusTone; label: string; hint?: string } {
+  const meta: { tone: StatusTone; label: string; hint?: string } = ERP_STATUS_META[
+    row.erpStatus
+  ] ?? {
+    tone: 'neutral',
+    label: row.erpStatus,
+    hint: row.erpStatus,
+  };
+  if (
+    (row.erpStatus === 'BACKORDERED' || row.erpStatus === 'PARTIALLY_BACKORDERED') &&
+    row.backorderedUnboundCount > 0 &&
+    row.backorderedCount === row.backorderedUnboundCount
+  ) {
+    return {
+      tone: 'warning',
+      label: '仓库未绑定',
+      hint: '该店铺未绑定仓库，订单行无法分配库存；请到店铺配置绑定仓库',
+    };
+  }
+  return meta;
 }
 
 function ExpandedItemBlock({
@@ -850,8 +945,8 @@ function ExpandedItemBlock({
     unallocated && item.procurementCoverage === 'COVERED'
       ? (PROCUREMENT_META[item.procurementCoverage] ?? null)
       : null;
-  // 缺货口径见 shortageBadgeOf（与订单 rollup 一致）。
-  const shortage = shortageBadgeOf(item);
+  // 行状态徽标：未绑定仓库 / 缺货（见 statusBadgeOf）。
+  const shortage = statusBadgeOf(item);
   // 键盘可达（2026-10-17 体检 P2-9）：Enter / 空格 = 点击。
   const interaction = rowInteractionProps({
     selected,
@@ -2235,7 +2330,7 @@ export function OrdersPage() {
       : null;
   const railContent = useMemo<ContextRailContent>(() => {
     if (selectedItem !== null) {
-      const shortageMeta = shortageBadgeOf(selectedItem);
+      const shortageMeta = statusBadgeOf(selectedItem);
       const fulfillmentMeta = shortageMeta ?? {
         tone: FULFILLMENT_STATUS_META[selectedItem.fulfillmentStatus]?.tone ?? 'neutral',
         label:
@@ -2447,10 +2542,7 @@ export function OrdersPage() {
         ),
       };
     }
-    const statusMeta = ERP_STATUS_META[selectedRow.erpStatus] ?? {
-      tone: 'neutral' as const,
-      label: selectedRow.erpStatus,
-    };
+    const statusMeta = erpStatusMetaOf(selectedRow);
     const deadline = deadlineBadgeFor(
       selectedRow.shipmentDeadline,
       selectedRow.erpStatus,
@@ -2483,6 +2575,13 @@ export function OrdersPage() {
     // FAILED lines carry no skuId, so they need their own list to stay
     // clickable in the rail.
     const failedMappingItems = riskItems.filter((item) => item.mappingStatus === 'FAILED');
+    // 店铺未绑定仓库的行（2026-10-24）：重试分配没有意义（缺的是店铺绑定），
+    // 单独成组并指向店铺配置。
+    const unboundItems = riskItems.filter((item) => item.storeWarehouseUnbound);
+    const allocatableRiskItems = riskItems.filter(
+      (item) => !item.storeWarehouseUnbound && item.skuId !== null,
+    );
+    const shortRiskCount = Math.max(0, selectedRow.backorderedCount - unboundItems.length);
     // 操作区上移（用户指示 2026-10-13）：紧跟「订单概况」基础信息渲染，
     // 避免右栏信息过长时操作按钮被挤出可视区；最近状态排在操作区之后。
     const railActions = (
@@ -2714,32 +2813,43 @@ export function OrdersPage() {
           {selectedRow.mappingFailedCount === 0 && selectedRow.backorderedCount > 0 && (
             <ContextSection title="风险">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <StatusBadge
-                  tone="warning"
-                  label={`BACKORDERED ×${selectedRow.backorderedCount}`}
-                />
-                {riskItems
-                  .filter((item) => item.skuId !== null)
-                  .slice(0, 3)
-                  .map((item) => (
-                    <div
-                      key={item.id}
-                      style={{ display: 'flex', alignItems: 'center', gap: 8 }}
-                      onClick={(event) => event.stopPropagation()}
+                {shortRiskCount > 0 && (
+                  <StatusBadge tone="warning" label={`BACKORDERED ×${shortRiskCount}`} />
+                )}
+                {unboundItems.length > 0 && (
+                  <>
+                    <StatusBadge
+                      tone="warning"
+                      label={`店铺未绑定仓库 ×${unboundItems.length}`}
+                      hint="该店铺还没有绑定仓库，无法分配库存，也不能按仓采购"
+                    />
+                    <span style={{ fontSize: 12.5, color: colors.textSecondary }}>
+                      这些行不是缺货：请先到「店铺管理」为该店铺绑定仓库，再重试分配。
+                    </span>
+                    <Button size="small" onClick={() => void navigate('/stores')}>
+                      去店铺管理
+                    </Button>
+                  </>
+                )}
+                {allocatableRiskItems.slice(0, 3).map((item) => (
+                  <div
+                    key={item.id}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <span style={{ fontSize: 13, color: colors.textSecondary }}>
+                      {item.skuCode} ×{Number(item.quantity)}
+                    </span>
+                    <Button
+                      size="small"
+                      loading={retryMutation.isPending}
+                      style={{ marginLeft: 'auto' }}
+                      onClick={() => retryMutation.mutate(item.id)}
                     >
-                      <span style={{ fontSize: 13, color: colors.textSecondary }}>
-                        {item.skuCode} ×{Number(item.quantity)}
-                      </span>
-                      <Button
-                        size="small"
-                        loading={retryMutation.isPending}
-                        style={{ marginLeft: 'auto' }}
-                        onClick={() => retryMutation.mutate(item.id)}
-                      >
-                        重新尝试分配
-                      </Button>
-                    </div>
-                  ))}
+                      重新尝试分配
+                    </Button>
+                  </div>
+                ))}
               </div>
             </ContextSection>
           )}
@@ -2939,7 +3049,7 @@ export function OrdersPage() {
       key: 'fulfillmentStatus',
       width: 130,
       render: (value: string, row: OrderItem) => {
-        const shortage = shortageBadgeOf(row);
+        const shortage = statusBadgeOf(row);
         return (
           <StatusBadge
             tone={shortage?.tone ?? FULFILLMENT_STATUS_META[value]?.tone ?? 'neutral'}
@@ -3145,8 +3255,11 @@ export function OrdersPage() {
             </span>
           );
         }
+        // 未绑定仓库的行不算缺货（2026-10-24），单独报「仓库未绑定」。
+        const shortageRows = row.backorderedCount - row.backorderedUnboundCount;
         const distribution = [
-          row.backorderedCount > 0 ? `缺货 ${row.backorderedCount}` : null,
+          shortageRows > 0 ? `缺货 ${shortageRows}` : null,
+          row.backorderedUnboundCount > 0 ? `仓库未绑定 ${row.backorderedUnboundCount}` : null,
           row.backorderedCoveredCount > 0 ? `已采购 ${row.backorderedCoveredCount}` : null,
           row.reservedCount > 0 ? `已占用 ${row.reservedCount}` : null,
         ].filter((part): part is string => part !== null);
@@ -3204,9 +3317,9 @@ export function OrdersPage() {
       render: (value: string, row: OrderListItem) => (
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
           <StatusBadge
-            tone={ERP_STATUS_META[value]?.tone ?? 'neutral'}
-            label={ERP_STATUS_META[value]?.label ?? value}
-            hint={value}
+            tone={erpStatusMetaOf(row).tone}
+            label={erpStatusMetaOf(row).label}
+            hint={erpStatusMetaOf(row).hint ?? value}
             showDot={false}
           />
           {row.openExceptionsCount > 0 && (
@@ -3781,9 +3894,8 @@ export function OrdersPage() {
           <>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
               <StatusBadge
-                tone={ERP_STATUS_META[detail.erpStatus]?.tone ?? 'neutral'}
-                label={ERP_STATUS_META[detail.erpStatus]?.label ?? detail.erpStatus}
-                hint={detail.erpStatus}
+                {...detailStatusMeta(detail)}
+                hint={detailStatusMeta(detail).hint ?? detail.erpStatus}
               />
               <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
                 平台状态 {detail.platformStatus ?? '—'}

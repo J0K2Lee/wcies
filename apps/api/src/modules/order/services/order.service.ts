@@ -150,8 +150,13 @@ export class OrderService {
     const items: OrderListItemDto[] = rows.map((row) => {
       let covered = 0;
       let short = 0;
+      let unbound = 0;
       for (const itemId of backorderedIdsByOrder.get(row.order.id) ?? []) {
-        if (coverageByItem[itemId]?.coverage === 'COVERED') {
+        const coverage = coverageByItem[itemId];
+        if (coverage?.warehouseBound === false) {
+          // 店铺未绑定仓库（2026-10-24 用户指示）：不是缺货，单列计数。
+          unbound += 1;
+        } else if (coverage?.coverage === 'COVERED') {
           covered += 1;
         } else {
           short += 1;
@@ -186,6 +191,7 @@ export class OrderService {
         skuKindCount: row.skuKindCount,
         backorderedCoveredCount: covered,
         backorderedShortCount: short,
+        backorderedUnboundCount: unbound,
         isUrgent: row.order.isUrgent,
       };
     });
@@ -300,6 +306,7 @@ export class OrderService {
           procurementGapQty: null as string | null,
           procurementInTransitQty: null as string | null,
           procurementWarehouseId: null as string | null,
+          storeWarehouseUnbound: false,
           reservationId: item.reservationId,
           reservation,
           rawData: item.rawData,
@@ -329,6 +336,7 @@ export class OrderService {
       dto.procurementGapQty = coverage.gapQty;
       dto.procurementInTransitQty = coverage.inTransitQty;
       dto.procurementWarehouseId = coverage.warehouseId;
+      dto.storeWarehouseUnbound = !coverage.warehouseBound;
     }
 
     // Mapping switches authority to the internal SKU, even if it has no image.

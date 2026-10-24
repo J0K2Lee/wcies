@@ -48,6 +48,10 @@ interface OrderDetailItem {
     lines: Array<{ binCode: string; quantity: string; pickedQty: string }>;
   } | null;
   exceptions: Array<{ exceptionType: string; status: string }>;
+  /** 采购覆盖（ADR 0023 派生）；店铺未绑定仓库时 coverage 为 null。 */
+  procurementCoverage: 'COVERED' | 'SHORT' | null;
+  /** 店铺没有任何 ACTIVE 仓库绑定（2026-10-24）。 */
+  storeWarehouseUnbound: boolean;
 }
 interface OrderDetail {
   id: string;
@@ -644,14 +648,19 @@ describe('order ingestion + allocation (task §67-§73)', () => {
         backorderedCount: number;
         backorderedCoveredCount: number;
         backorderedShortCount: number;
+        backorderedUnboundCount: number;
       }>
     >(`/api/v1/orders?keyword=${encodeURIComponent(detail.orderNo)}&pageSize=10`);
     const row = list.body.data.find((r) => r.id === created.body.data.orderId);
     expect(row?.erpStatus).toBe('BACKORDERED');
     expect(row?.backorderedCount).toBe(1);
-    // 列表派生标记：行未被在途覆盖 → 计入「缺货」（null 覆盖同样算缺货）。
+    // 店铺未绑定仓库（2026-10-24 用户指示）：这类行**不算缺货**，单独计数。
     expect(row?.backorderedCoveredCount).toBe(0);
-    expect(row?.backorderedShortCount).toBe(1);
+    expect(row?.backorderedShortCount).toBe(0);
+    expect(row?.backorderedUnboundCount).toBe(1);
+    const detailItem = detail.items[0]!;
+    expect(detailItem.storeWarehouseUnbound).toBe(true);
+    expect(detailItem.procurementCoverage).toBeNull();
   });
 
   it('concurrent duplicate ingest -> exactly one order (§84)', async () => {

@@ -7,6 +7,12 @@ export type ProcurementCoverageState = 'COVERED' | 'SHORT';
 export interface OrderItemProcurementCoverage {
   /** null = 行已分配/终态/未映射/店铺无绑定仓，采购覆盖不适用 */
   coverage: ProcurementCoverageState | null;
+  /**
+   * 该行所属店铺是否存在 ACTIVE 的仓库绑定（2026-10-24）。false = 店铺还没绑定
+   * 仓库，分配/采购覆盖都无从计算——这类行必须显示「店铺未绑定仓库」，
+   * 不能被算作缺货（用户指示）。
+   */
+  warehouseBound: boolean;
   /** 该 SKU + 目标仓的缺口（未覆盖行为的 SKU 级数字） */
   gapQty: string | null;
   /** 该 SKU + 目标仓的在途未收数量 */
@@ -56,26 +62,34 @@ export class ProcurementCoverageService {
     const rows = await this.queryCoverage([...orderItemIds]);
     const result: Record<string, OrderItemProcurementCoverage> = {};
     for (const row of rows) {
+      const warehouseBound = row.warehouse_id !== null;
       result[row.item_id] = {
-        coverage: row.covered ? 'COVERED' : 'SHORT',
-        gapQty: row.gap_qty,
-        inTransitQty: row.outstanding_qty,
+        // 没有绑定仓就没有「该 SKU 在该仓」的需求/在途口径：覆盖结论为空。
+        coverage: warehouseBound ? (row.covered ? 'COVERED' : 'SHORT') : null,
+        warehouseBound,
+        gapQty: warehouseBound ? row.gap_qty : null,
+        inTransitQty: warehouseBound ? row.outstanding_qty : null,
         warehouseId: row.warehouse_id,
       };
     }
     return result;
   }
 
-  /** 被在途覆盖的订单行（「已采购」筛选）。 */
+  /**
+   * 被在途覆盖的订单行（「已采购」筛选）。
+   * 店铺没有绑定仓的行既不覆盖也不缺货，两个筛选都不含它。
+   */
   async listCoveredItemIds(): Promise<string[]> {
     const rows = await this.queryCoverage();
-    return rows.filter((row) => row.covered).map((row) => row.item_id);
+    return rows.filter((row) => row.warehouse_id !== null && row.covered).map((row) => row.item_id);
   }
 
   /** 未被覆盖的缺货行（「缺货 / 待采购」筛选）。 */
   async listShortItemIds(): Promise<string[]> {
     const rows = await this.queryCoverage();
-    return rows.filter((row) => !row.covered).map((row) => row.item_id);
+    return rows
+      .filter((row) => row.warehouse_id !== null && !row.covered)
+      .map((row) => row.item_id);
   }
 
   /** 创建采购单前的缺口校验（REPLENISH）。传入 manager 时在调用方事务内执行。 */
@@ -161,7 +175,7 @@ export class ProcurementCoverageService {
           JOIN orders o ON o.id = i.order_id
           JOIN stores s ON s.id = o.store_id
           JOIN platforms p ON p.id = s.platform_id
-          JOIN LATERAL (
+          LEFT JOIN LATERAL (
             SELECT b.warehouse_id
               FROM warehouse_platform_bindings b
              WHERE b.store_id = o.store_id AND b.status = 'ACTIVE'
@@ -195,8 +209,11 @@ export class ProcurementCoverageService {
                AS gap_qty,
              (d.cum_qty <= COALESCE(s.outstanding, 0)) AS covered
         FROM demand d
-        JOIN totals t ON t.sku_id = d.sku_id AND t.warehouse_id = d.warehouse_id
-        LEFT JOIN supply s ON s.sku_id = d.sku_id AND s.warehouse_id = d.warehouse_id
+        -- 未绑定仓的行 warehouse_id 为 NULL：必须用 IS NOT DISTINCT FROM，
+        -- 否则 NULL = NULL 不成立会把这类行整行丢掉（2026-10-24），
+        -- 前端就拿不到「店铺未绑定仓库」的信号。
+        LEFT JOIN totals t ON t.sku_id = d.sku_id AND t.warehouse_id IS NOT DISTINCT FROM d.warehouse_id
+        LEFT JOIN supply s ON s.sku_id = d.sku_id AND s.warehouse_id IS NOT DISTINCT FROM d.warehouse_id
         ${filter}
       `,
       params,

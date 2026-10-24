@@ -885,10 +885,25 @@ Sprint 4 在此基础上增加三个原子业务命令（显式 QueryRunner + In
 | `procurementGapQty` | 该 SKU 在该仓的剩余缺口数量（仅 `SHORT` 有值） |
 | `procurementInTransitQty` | 该 SKU 在该仓的在途未收采购总量 |
 | `procurementWarehouseId` | 缺口计算所用的仓（订单店铺绑定仓） |
+| `storeWarehouseUnbound` | 店铺没有任何 `ACTIVE` 仓库绑定（2026-10-24） |
 
 采购不再挂订单行：需求、在途、缺口与逐行覆盖全部按 `SKU × 目标仓` 现算，
 完整定义见 `docs/business-rules/purchase.md` §3.5（单一事实源，本文档不重复定义）。
 **「已到货」（`ARRIVED`）状态已整体移除。**
+
+## 店铺未绑定仓库 ≠ 缺货（用户指示 2026-10-24）
+
+店铺没有任何 `ACTIVE` 的 `warehouse_platform_bindings` 时，订单行在分配阶段拿不到
+目标仓：既不能占用库存，也不能按仓计算采购缺口。这类行**不是缺货**，补货解决
+不了它：
+
+- 行状态徽标显示「店铺未绑定仓库」（不是「缺货」），提示去店铺配置绑定仓库；
+- 列表计数：`backorderedUnboundCount` 单列，`backorderedShortCount` 与界面上的
+  「缺货 N」都**不包含**这类行；订单头若全部未分配行都是这个原因，ERP 徽标显示
+  「仓库未绑定」而不是「缺货」；
+- 「待采购」筛选不含这类行（它们没有目标仓，无法按 `SKU × 仓` 补货）；
+- 库存事实不变：行仍是 `BACKORDERED`（确实没有分配到库存），异常类型是
+  `ORDER_INVALID_STATE`（配置问题），绑定仓库后重试分配即可推进。
 
 ---
 

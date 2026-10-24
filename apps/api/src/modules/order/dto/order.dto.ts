@@ -322,6 +322,11 @@ export class OrderListItemDto {
     description: '缺货行中仍无在途采购覆盖（SHORT，仍可继续采购）的行数（2026-10-21 决策 0023）',
   })
   backorderedShortCount!: number;
+  @ApiProperty({
+    description:
+      '缺货行中因店铺未绑定仓库而无法分配的行数（2026-10-24）。这类行不计入缺货，界面显示「店铺未绑定仓库」',
+  })
+  backorderedUnboundCount!: number;
   @ApiPropertyOptional({
     nullable: true,
     type: Date,
@@ -418,6 +423,11 @@ export class OrderItemDto {
     description: '缺口计算所用的仓（该店铺绑定仓，与订单分配同源）',
   })
   procurementWarehouseId!: string | null;
+  @ApiProperty({
+    description:
+      '店铺尚未绑定任何 ACTIVE 仓库（2026-10-24）：该行无法分配库存，也不再按缺货口径展示，前端显示「店铺未绑定仓库」',
+  })
+  storeWarehouseUnbound!: boolean;
   @ApiProperty({ nullable: true, type: String }) reservationId!: string | null;
   @ApiProperty({
     nullable: true,
