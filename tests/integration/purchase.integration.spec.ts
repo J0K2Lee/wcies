@@ -76,11 +76,11 @@ async function backorderedLine(
   return { orderId: result.body.data.orderId, orderItemId: line.orderItemId, skuId };
 }
 
-async function orderProcurementState(orderId: string): Promise<Array<string | null>> {
+async function orderProcurementCoverage(orderId: string): Promise<Array<string | null>> {
   const detail = await client.get<{
-    items: Array<{ procurementState: string | null }>;
+    items: Array<{ procurementCoverage: string | null }>;
   }>(`/api/v1/orders/${orderId}`);
-  return detail.body.data.items.map((item) => item.procurementState);
+  return detail.body.data.items.map((item) => item.procurementCoverage);
 }
 
 beforeAll(async () => {
@@ -109,44 +109,52 @@ afterAll(async () => {
   await api.stop();
 });
 
-describe('purchase registration (Sprint 7 T3)', () => {
-  it('registering a PO for a backordered line derives ORDERED (task §T3.6-1)', async () => {
+describe('procurement coverage by SKU×warehouse (ADR 0023)', () => {
+  it('按缺口补货采购后，缺货行变为已覆盖（COVERED）', async () => {
     const line = await backorderedLine('R1');
-    expect(await orderProcurementState(line.orderId)).toEqual(['NOT_ORDERED']);
+    expect(await orderProcurementCoverage(line.orderId)).toEqual(['SHORT']);
 
     const created = await client.post<PoDetail>('/api/v1/purchase-orders', {
       sourceNote: '淘宝 订单号 10001',
-      items: [{ skuId: line.skuId, orderItemId: line.orderItemId, quantity: '2' }],
+      receivingWarehouseId: warehouseId,
+      purpose: 'REPLENISH',
+      items: [{ skuId: line.skuId, quantity: '2' }],
     });
-    expect(created.status).toBe(200);
+    expect(created.status, JSON.stringify(created.body.error ?? {})).toBe(200);
     expect(created.body.data.status).toBe('ORDERED');
     expect(created.body.data.poNo).toMatch(/^PO\d{6,}$/);
     expect(created.body.data.sourceNote).toBe('淘宝 订单号 10001');
+    expect(created.body.data.receivingWarehouseId).toBe(warehouseId);
 
-    expect(await orderProcurementState(line.orderId)).toEqual(['ORDERED']);
+    expect(await orderProcurementCoverage(line.orderId)).toEqual(['COVERED']);
   });
 
-  it('duplicate registration for the same line is refused (task §T3.6-2)', async () => {
+  it('同一 SKU×仓缺口重复补货采购被拒（409 PURCHASE_SKU_GAP_COVERED）', async () => {
     const line = await backorderedLine('R2');
     const first = await client.post<PoDetail>('/api/v1/purchase-orders', {
-      items: [{ skuId: line.skuId, orderItemId: line.orderItemId, quantity: '2' }],
+      receivingWarehouseId: warehouseId,
+      purpose: 'REPLENISH',
+      items: [{ skuId: line.skuId, quantity: '2' }],
     });
-    expect(first.status).toBe(200);
+    expect(first.status, JSON.stringify(first.body.error ?? {})).toBe(200);
 
     const duplicate = await client.post('/api/v1/purchase-orders', {
-      items: [{ skuId: line.skuId, orderItemId: line.orderItemId, quantity: '1' }],
+      receivingWarehouseId: warehouseId,
+      purpose: 'REPLENISH',
+      items: [{ skuId: line.skuId, quantity: '1' }],
     });
     expect(duplicate.status).toBe(409);
-    expect(duplicate.body.error?.code).toBe('PURCHASE_ORDER_ITEM_ALREADY_ORDERED');
-    expect(duplicate.body.error?.message).toContain(first.body.data.poNo);
+    expect(duplicate.body.error?.code).toBe('PURCHASE_SKU_GAP_COVERED');
   });
 
-  it('cancelling the PO frees the line back to NOT_ORDERED (task §T3.6-3)', async () => {
+  it('取消采购单后缺口重新暴露，可再次补货采购', async () => {
     const line = await backorderedLine('R3');
     const created = await client.post<PoDetail>('/api/v1/purchase-orders', {
-      items: [{ skuId: line.skuId, orderItemId: line.orderItemId, quantity: '2' }],
+      receivingWarehouseId: warehouseId,
+      purpose: 'REPLENISH',
+      items: [{ skuId: line.skuId, quantity: '2' }],
     });
-    expect(await orderProcurementState(line.orderId)).toEqual(['ORDERED']);
+    expect(await orderProcurementCoverage(line.orderId)).toEqual(['COVERED']);
 
     const cancelled = await client.post<PoDetail>(
       `/api/v1/purchase-orders/${created.body.data.id}/cancel`,
@@ -154,29 +162,33 @@ describe('purchase registration (Sprint 7 T3)', () => {
     );
     expect(cancelled.status).toBe(200);
     expect(cancelled.body.data.status).toBe('CANCELLED');
-    expect(await orderProcurementState(line.orderId)).toEqual(['NOT_ORDERED']);
+    // 在途清零 → 覆盖消失，行重新计入缺货。
+    expect(await orderProcurementCoverage(line.orderId)).toEqual(['SHORT']);
 
-    // The freed line can be registered again (no DB unique index, §9.3).
+    // 补货数量不得超过缺口（需求 2），超额同样被守卫拒绝。
     const again = await client.post<PoDetail>('/api/v1/purchase-orders', {
-      items: [{ skuId: line.skuId, orderItemId: line.orderItemId, quantity: '3' }],
+      receivingWarehouseId: warehouseId,
+      purpose: 'REPLENISH',
+      items: [{ skuId: line.skuId, quantity: '2' }],
     });
-    expect(again.status).toBe(200);
-    expect(await orderProcurementState(line.orderId)).toEqual(['ORDERED']);
+    expect(again.status, JSON.stringify(again.body.error ?? {})).toBe(200);
+    expect(await orderProcurementCoverage(line.orderId)).toEqual(['COVERED']);
   });
 
-  it('stock-up purchase without orderItemId works (task §T3.6-4)', async () => {
+  it('备货采购（STOCK）不受缺口守卫限制；列表/搜索与供应商引用', async () => {
     const supplier = await client.post<{ id: string; code: string }>('/api/v1/suppliers', {
       name: `${PREFIX} 固定供应商`,
     });
     const skuId = await newSku('R4');
     const created = await client.post<PoDetail>('/api/v1/purchase-orders', {
       supplierId: supplier.body.data.id,
+      receivingWarehouseId: warehouseId,
       items: [
         { skuId, quantity: '10', unitCost: '59.9000' },
         { skuId: await newSku('R4B'), quantity: '5' },
       ],
     });
-    expect(created.status).toBe(200);
+    expect(created.status, JSON.stringify(created.body.error ?? {})).toBe(200);
     expect(created.body.data.supplierId).toBe(supplier.body.data.id);
     expect(created.body.data.items).toHaveLength(2);
 
@@ -196,12 +208,15 @@ describe('purchase registration (Sprint 7 T3)', () => {
     expect(deleteRefused.body.error?.code).toBe('SUPPLIER_IN_USE');
   });
 
-  it('待采购 filter returns only uncovered BACKORDERED orders (task §T3.6-5)', async () => {
+  it('待采购筛选只返回未被在途覆盖的缺货单', async () => {
     const uncovered = await backorderedLine('R5A');
     const covered = await backorderedLine('R5B');
-    await client.post<PoDetail>('/api/v1/purchase-orders', {
-      items: [{ skuId: covered.skuId, orderItemId: covered.orderItemId, quantity: '2' }],
+    const po = await client.post<PoDetail>('/api/v1/purchase-orders', {
+      receivingWarehouseId: warehouseId,
+      purpose: 'REPLENISH',
+      items: [{ skuId: covered.skuId, quantity: '2' }],
     });
+    expect(po.status, JSON.stringify(po.body.error ?? {})).toBe(200);
 
     const list = await client.get<Array<{ id: string }>>(
       `/api/v1/orders?pendingProcurement=true&pageSize=100`,
@@ -212,33 +227,31 @@ describe('purchase registration (Sprint 7 T3)', () => {
     expect(ids).not.toContain(covered.orderId);
   });
 
-  it('update replaces items while ORDERED; invalid sku/line refs are rejected', async () => {
+  it('update replaces items while ORDERED; unknown sku is rejected', async () => {
     const line = await backorderedLine('R6');
     const created = await client.post<PoDetail>('/api/v1/purchase-orders', {
       expectedAt: new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString(),
-      items: [{ skuId: line.skuId, orderItemId: line.orderItemId, quantity: '2' }],
+      receivingWarehouseId: warehouseId,
+      items: [{ skuId: line.skuId, quantity: '2' }],
     });
+    expect(created.status, JSON.stringify(created.body.error ?? {})).toBe(200);
     const updated = await client.patch<PoDetail>(
       `/api/v1/purchase-orders/${created.body.data.id}`,
       {
         remark: '加急',
-        items: [{ skuId: line.skuId, orderItemId: line.orderItemId, quantity: '5' }],
+        items: [{ skuId: line.skuId, quantity: '5' }],
       },
     );
-    expect(updated.status).toBe(200);
+    expect(updated.status, JSON.stringify(updated.body.error ?? {})).toBe(200);
     expect(updated.body.data.remark).toBe('加急');
     expect(updated.body.data.items[0]?.quantity).toBe('5.000');
 
     const badSku = await client.post('/api/v1/purchase-orders', {
+      receivingWarehouseId: warehouseId,
       items: [{ skuId: randomUUID(), quantity: '1' }],
     });
     expect(badSku.status).toBe(404);
     expect(badSku.body.error?.code).toBe('SKU_NOT_FOUND');
-
-    const badLine = await client.post('/api/v1/purchase-orders', {
-      items: [{ skuId: await newSku('R6B'), orderItemId: randomUUID(), quantity: '1' }],
-    });
-    expect(badLine.status).toBe(404);
   });
 });
 
@@ -282,10 +295,11 @@ describe('列表搜索 / 采购商品列 / 批量删除（用户指示 2026-10-1
     const skuId = await newSku(label);
     const body: Record<string, unknown> = {
       sourceNote: `${PREFIX} ${label}`,
+      receivingWarehouseId: warehouseId,
       items: [{ skuId, quantity: options.quantity ?? '2' }],
     };
     if (options.withDraft === true) {
-      body['receipt'] = { warehouseId, defaultBinId: binId };
+      body['receipt'] = { defaultBinId: binId };
     }
     const created = await client.post<{ id: string; poNo: string }>(
       '/api/v1/purchase-orders',

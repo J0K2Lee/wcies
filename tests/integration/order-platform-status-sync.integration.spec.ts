@@ -724,13 +724,29 @@ describe('mark external fulfillment (T6, decision 6 = A)', () => {
       itemExceptions.every((e) => e.exceptionType !== 'ORDER_OUT_OF_STOCK' || e.status !== 'OPEN'),
     ).toBe(true);
 
-    // A RESERVED-line order must be rejected (stock release belongs to cancel).
+    // 已占用的行不再是阻断条件（2026-10-23 用户需求）：释放占用是标记流程的
+    // 一部分。释放后库存回到可售，行变 RELEASED，订单直接 SHIPPED。
     const reservedOrder = await orderByPlatformId('IT-S9-DDL-1');
-    const rejected = await client.post(
+    expect(reservedOrder.items[0]?.fulfillmentStatus).toBe('RESERVED');
+    const ddlSkuId = reservedOrder.items[0]?.skuId as string;
+    const ddlBefore = await inventoryOf(ddlSkuId);
+    expect(Number(ddlBefore.reservedQty)).toBe(1);
+
+    const releasedByMark = await client.post(
       `/api/v1/orders/${reservedOrder.id}/mark-external-fulfillment`,
-      { reason: 'should reject' },
+      { reason: '线下采购直发买家（已占用行，测试释放）' },
     );
-    expect(rejected.status).toBeGreaterThanOrEqual(400);
+    expect(releasedByMark.status).toBe(200);
+    expect(releasedByMark.body.data.erpStatus).toBe('SHIPPED');
+    expect(releasedByMark.body.data.releasedItems).toBe(1);
+
+    const ddlAfter = await inventoryOf(ddlSkuId);
+    expect(Number(ddlAfter.reservedQty)).toBe(0);
+    // 释放只减占用，实体库存不动（AGENTS §16：Reserved ≠ 出库）。
+    expect(ddlAfter.onHandQty).toBe(ddlBefore.onHandQty);
+    const ddlOrderAfter = await orderByPlatformId('IT-S9-DDL-1');
+    expect(ddlOrderAfter.erpStatus).toBe('SHIPPED');
+    expect(ddlOrderAfter.items[0]?.fulfillmentStatus).toBe('RELEASED');
   });
 });
 

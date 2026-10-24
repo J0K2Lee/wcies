@@ -177,7 +177,9 @@ describe('replenishment suggestions (Sprint 10 T4)', () => {
     expect(alerts.some((row) => row.skuId === calmSku)).toBe(false);
 
     // Open PO quantity reduces the suggestion: buy 12 -> suggest 18.
+    // 采购单必须有目标仓（2026-10-21 决策 0023）：在途量按 SKU×仓 统计。
     const po = await client.post<{ id: string }>('/api/v1/purchase-orders', {
+      receivingWarehouseId: warehouseId,
       items: [{ skuId: moverSku, quantity: '12' }],
     });
     expect(po.status).toBe(200);

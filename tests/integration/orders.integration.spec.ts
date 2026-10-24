@@ -585,14 +585,14 @@ describe('order ingestion + allocation (task §67-§73)', () => {
     expect(detail.erpStatus).toBe('BACKORDERED');
   });
 
-  it('MAPPED+PENDING 卡行计入列表缺货口径（backorderedCount/待采购/已采购）', async () => {
+  it('映射修复遇到配置性失败时行落 BACKORDERED（不留 PENDING），列表口径一致', async () => {
     // 用户 bug 报告（2026-10-15）：映射失败行被修复时店铺尚未绑定仓库，
     // retryFailedMappingItem 的分配阶段抛 OrderIngestInvalidError —— catch 只
     // 重算 rollup（行已是 MAPPED，被 rollup 记作缺货），但抛错路径不写
     // BACKORDERED，于是行卡在 MAPPED+PENDING：订单头 ERP 显示缺货，商品列却
     // 没有缺货徽标、右栏「风险」不渲染、行内也没有「重新尝试分配」。
-    // 口径（orders.md §5）已冻结为 MAPPED ∧ (BACKORDERED ∪ PENDING)；本用例
-    // 锁死列表契约（backorderedCount / 待采购）与筛选同口径。
+    // 2026-10-23 修正为与摄入路径对齐（7bc37a7/3062d91/085aaa2）：配置性失败
+    // 写 BACKORDERED + ORDER_INVALID_STATE 异常，任何路径都不再留 PENDING。
     const storeUnbound = (
       await client.post<{ id: string }>('/api/v1/stores', {
         platformId: ozonPlatformId,
@@ -617,28 +617,41 @@ describe('order ingestion + allocation (task §67-§73)', () => {
       fulfillmentStatus: string;
       mappingRepaired: boolean;
     }>(`/api/v1/orders/items/${item.orderItemId}/retry-allocation`);
-    expect(retry.status).toBe(422);
+    expect(retry.status, JSON.stringify(retry.body.error ?? {})).toBe(200);
+    expect(retry.body.data.reserved).toBe(false);
+    expect(retry.body.data.fulfillmentStatus).toBe('BACKORDERED');
     const stuck = await db.query<{ mapping_status: string; fulfillment_status: string }>(
       'SELECT mapping_status, fulfillment_status FROM order_items WHERE id = $1',
       [item.orderItemId],
     );
     expect(stuck.rows[0]?.mapping_status).toBe('MAPPED');
-    expect(stuck.rows[0]?.fulfillment_status).toBe('PENDING');
+    expect(stuck.rows[0]?.fulfillment_status).toBe('BACKORDERED');
+    // 配置性失败必须留痕：行有 OPEN 的配置异常可查（仓库未绑定是配置问题，
+    // 不是库存不足，所以异常类型是 ORDER_INVALID_STATE）。
+    expect(
+      (await openExceptionsOf(item.orderItemId)).some(
+        (e) => e.exceptionType === 'ORDER_INVALID_STATE',
+      ),
+    ).toBe(true);
 
     // 订单头按 rollup 显示缺货，列表必须同口径：backorderedCount 计入该卡行。
     const detail = await orderDetail(created.body.data.orderId);
     expect(detail.erpStatus).toBe('BACKORDERED');
     const list = await client.get<
-      Array<{ id: string; erpStatus: string; backorderedCount: number }>
+      Array<{
+        id: string;
+        erpStatus: string;
+        backorderedCount: number;
+        backorderedCoveredCount: number;
+        backorderedShortCount: number;
+      }>
     >(`/api/v1/orders?keyword=${encodeURIComponent(detail.orderNo)}&pageSize=10`);
     const row = list.body.data.find((r) => r.id === created.body.data.orderId);
     expect(row?.erpStatus).toBe('BACKORDERED');
     expect(row?.backorderedCount).toBe(1);
-    // 待采购视图（uncovered MAPPED 缺货行含 PENDING）与筛选同口径。
-    const pendingProcurement = await client.get<Array<{ id: string }>>(
-      `/api/v1/orders?keyword=${encodeURIComponent(detail.orderNo)}&pendingProcurement=true&pageSize=10`,
-    );
-    expect(pendingProcurement.body.data.some((r) => r.id === created.body.data.orderId)).toBe(true);
+    // 列表派生标记：行未被在途覆盖 → 计入「缺货」（null 覆盖同样算缺货）。
+    expect(row?.backorderedCoveredCount).toBe(0);
+    expect(row?.backorderedShortCount).toBe(1);
   });
 
   it('concurrent duplicate ingest -> exactly one order (§84)', async () => {
@@ -980,8 +993,8 @@ describe('dual-axis list contract: stage + goodsState filters (T3)', () => {
   interface ListItem {
     id: string;
     erpStatus: string;
-    backorderedOrderedCount: number;
-    backorderedArrivedCount: number;
+    backorderedCoveredCount: number;
+    backorderedShortCount: number;
   }
 
   /** List with the dual-axis filters, scoped to one order via keyword. */
@@ -1223,7 +1236,7 @@ describe('dual-axis list contract: stage + goodsState filters (T3)', () => {
     expect((await listOne(awaitingFailed.orderId, 'goodsState=SHIPMENT_OVERDUE')).hit).toBe(true);
   });
 
-  it('backorderedOrderedCount / backorderedArrivedCount follow the purchase lifecycle', async () => {
+  it('backorderedCoveredCount / backorderedShortCount follow the purchase lifecycle (ADR 0023)', async () => {
     const skuP = await newSku('AXP');
     await mapSku(skuP, `${PREFIX}-AXP-1`);
     const order = await ingestWith({
@@ -1235,20 +1248,23 @@ describe('dual-axis list contract: stage + goodsState filters (T3)', () => {
     const listBefore = await client.get<ListItem[]>(
       `/api/v1/orders?keyword=${encodeURIComponent(detail.platformOrderId)}&pageSize=10`,
     );
-    expect(listBefore.body.data[0]?.backorderedOrderedCount).toBe(0);
-    expect(listBefore.body.data[0]?.backorderedArrivedCount).toBe(0);
+    expect(listBefore.body.data[0]?.backorderedCoveredCount).toBe(0);
+    expect(listBefore.body.data[0]?.backorderedShortCount).toBe(1);
 
+    // 按 SKU×仓缺口补货采购（ADR 0023）：在途覆盖需求 → 「已采购」口径。
     const po = await client.post<{ id: string }>('/api/v1/purchase-orders', {
       sourceNote: '双轴测试 采购登记',
-      items: [{ skuId: skuP, orderItemId: order.itemResults[0]!.orderItemId, quantity: '2' }],
+      receivingWarehouseId: warehouseId,
+      purpose: 'REPLENISH',
+      items: [{ skuId: skuP, quantity: '2' }],
     });
     expect(po.status, JSON.stringify(po.body.error ?? {})).toBe(200);
 
     const listOrdered = await client.get<ListItem[]>(
       `/api/v1/orders?keyword=${encodeURIComponent(detail.platformOrderId)}&pageSize=10`,
     );
-    expect(listOrdered.body.data[0]?.backorderedOrderedCount).toBe(1);
-    expect(listOrdered.body.data[0]?.backorderedArrivedCount).toBe(0);
+    expect(listOrdered.body.data[0]?.backorderedCoveredCount).toBe(1);
+    expect(listOrdered.body.data[0]?.backorderedShortCount).toBe(0);
 
     const receipt = await client.post<{ id: string }>(
       `/api/v1/purchase-receipts/from-po/${po.body.data.id}`,
@@ -1268,12 +1284,12 @@ describe('dual-axis list contract: stage + goodsState filters (T3)', () => {
     // 与异步重分配存在竞态，2026-10-13 T8 修正为竞态感知）。
     const arrivedRow = listArrived.body.data[0];
     if (arrivedRow?.backorderedCount === 1) {
-      expect(arrivedRow.backorderedOrderedCount).toBe(0);
-      expect(arrivedRow.backorderedArrivedCount).toBe(1);
+      expect(arrivedRow.backorderedCoveredCount).toBe(0);
+      expect(arrivedRow.backorderedShortCount).toBe(1);
     } else {
       expect(arrivedRow?.reservedCount).toBe(1);
-      expect(arrivedRow?.backorderedOrderedCount).toBe(0);
-      expect(arrivedRow?.backorderedArrivedCount).toBe(0);
+      expect(arrivedRow?.backorderedCoveredCount).toBe(0);
+      expect(arrivedRow?.backorderedShortCount).toBe(0);
     }
   });
 });

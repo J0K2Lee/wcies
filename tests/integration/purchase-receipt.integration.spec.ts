@@ -92,7 +92,8 @@ describe('PO creation with optional receiving draft (2026-09-17 T1)', () => {
     }>('/api/v1/purchase-orders', {
       orderedAt,
       sourceNote: `${PREFIX} ${label}`,
-      receipt: { warehouseId, defaultBinId: binA01 },
+      receivingWarehouseId: warehouseId,
+      receipt: { defaultBinId: binA01 },
       items: [{ skuId, quantity: '10', unitCost: '12.3400' }],
     });
     expect(po.status).toBe(200);
@@ -196,7 +197,7 @@ describe('PO creation with optional receiving draft (2026-09-17 T1)', () => {
     const skuId = await newSku('AUTO4');
     const created = await client.post('/api/v1/purchase-orders', {
       sourceNote,
-      receipt: { warehouseId: '00000000-0000-4000-8000-000000000001' },
+      receivingWarehouseId: '00000000-0000-4000-8000-000000000001',
       items: [{ skuId, quantity: '1' }],
     });
     expect(created.body.error?.code).toBe('WAREHOUSE_NOT_FOUND');
@@ -211,7 +212,8 @@ describe('PO creation with optional receiving draft (2026-09-17 T1)', () => {
     const skuId = await newSku('AUTO5');
     const created = await client.post('/api/v1/purchase-orders', {
       sourceNote,
-      receipt: { warehouseId, defaultBinId: '00000000-0000-4000-8000-000000000001' },
+      receivingWarehouseId: warehouseId,
+      receipt: { defaultBinId: '00000000-0000-4000-8000-000000000001' },
       items: [{ skuId, quantity: '1' }],
     });
     expect(created.status).toBeGreaterThanOrEqual(400);
@@ -341,11 +343,15 @@ describe('purchase receipt confirmation (Sprint 7 T4)', () => {
     expect((await balanceOf(skuSn))[0]?.onHandQty).toBe('2.000');
   });
 
-  it('partial deliveries accrue the PO: PARTIALLY_RECEIVED then RECEIVED, line reaches ARRIVED (T4.5-5)', async () => {
+  it('partial deliveries accrue the PO: PARTIALLY_RECEIVED then RECEIVED (T4.5-5)', async () => {
     const sku = await newSku('C4');
     const po = await client.post<{ id: string; poNo: string; items: Array<{ id: string }> }>(
       '/api/v1/purchase-orders',
-      { sourceNote: '京东 订单号 30001', items: [{ skuId: sku, quantity: '10' }] },
+      {
+        sourceNote: '京东 订单号 30001',
+        receivingWarehouseId: warehouseId,
+        items: [{ skuId: sku, quantity: '10' }],
+      },
     );
     expect(po.status).toBe(200);
 
@@ -487,6 +493,7 @@ describe('收货默认库位与超收防御（决策 0021）', () => {
       '/api/v1/purchase-orders',
       {
         sourceNote: `${PREFIX} default-bin`,
+        receivingWarehouseId: warehouseId,
         items: [
           { skuId: stocked, quantity: '3' },
           { skuId: fresh, quantity: '2' },
@@ -510,6 +517,7 @@ describe('收货默认库位与超收防御（决策 0021）', () => {
     const sku = await newSku('D2');
     const po = await client.post<{ id: string }>('/api/v1/purchase-orders', {
       sourceNote: `${PREFIX} dedupe`,
+      receivingWarehouseId: warehouseId,
       items: [{ skuId: sku, quantity: '4' }],
     });
     const first = await client.post<ReceiptDetail>(
@@ -540,7 +548,11 @@ describe('收货默认库位与超收防御（决策 0021）', () => {
     const sku = await newSku('D3');
     const po = await client.post<{ id: string; items: Array<{ id: string }> }>(
       '/api/v1/purchase-orders',
-      { sourceNote: `${PREFIX} overreceipt`, items: [{ skuId: sku, quantity: '3' }] },
+      {
+        sourceNote: `${PREFIX} overreceipt`,
+        receivingWarehouseId: warehouseId,
+        items: [{ skuId: sku, quantity: '3' }],
+      },
     );
     const draft = await client.post<ReceiptDetail>(
       `/api/v1/purchase-receipts/from-po/${po.body.data.id}`,

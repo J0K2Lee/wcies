@@ -43,6 +43,26 @@ afterAll(async () => {
   await worker.stop();
 });
 
+/** 69 开头的条码必须校验位合法（2026-10-21），导入校验与创建接口同口径。 */
+function ean13(body: string): string {
+  const padded = `690${body}`.padEnd(12, '0').slice(0, 12);
+  const sum = [...padded].reduce(
+    (acc, digit, index) => acc + Number(digit) * (index % 2 === 0 ? 1 : 3),
+    0,
+  );
+  return `${padded}${String((10 - (sum % 10)) % 10)}`;
+}
+
+// 同一个测试库跨运行复用：条码必须每次运行都不同，否则第二次运行全部
+// 撞上「条码已绑定其他 SKU」。
+const RUN_SEED = Number(Date.now().toString().slice(-6));
+
+function barcodeOf(row: number): string {
+  return ean13(String(RUN_SEED * 1000 + row).padStart(9, '0'));
+}
+
+const ROW2_BARCODE = barcodeOf(1);
+
 async function skuSheet(): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('SKU');
@@ -74,7 +94,7 @@ async function skuSheet(): Promise<Buffer> {
       100,
       100,
       88.8,
-      `69${PREFIX}${String(i).padStart(6, '0')}`,
+      barcodeOf(i),
       'EAN',
       i === 1 ? `${PREFIX} 导入品牌` : '',
       i === 1 ? `${PREFIX} 导入三级` : '',
@@ -97,21 +117,7 @@ async function skuSheet(): Promise<Buffer> {
     '',
   ]);
   // row 93: duplicate barcode (will collide with row 2's barcode)
-  sheet.addRow([
-    '',
-    `${PREFIX} 重复条码`,
-    '',
-    '',
-    '',
-    '',
-    '',
-    '',
-    '',
-    `69${PREFIX}000001`,
-    'EAN',
-    '',
-    '',
-  ]);
+  sheet.addRow(['', `${PREFIX} 重复条码`, '', '', '', '', '', '', '', ROW2_BARCODE, 'EAN', '', '']);
   // row 94: unknown brand name -> BRAND_NOT_FOUND (never auto-created)
   sheet.addRow([
     '',

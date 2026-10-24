@@ -393,6 +393,7 @@ describe('purchase payables (finance.md §6)', () => {
     const { skuId } = await newSku('PAY1');
     const po = await client.post<{ id: string; poNo: string }>('/api/v1/purchase-orders', {
       supplierId,
+      receivingWarehouseId: warehouseId,
       items: [{ skuId, quantity: '10', unitCost: '30' }],
     });
     expect(po.status, JSON.stringify(po.body.error ?? {})).toBe(200);

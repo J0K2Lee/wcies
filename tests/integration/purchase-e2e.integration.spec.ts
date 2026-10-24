@@ -92,11 +92,11 @@ async function ingestOrder(input: {
 
 async function orderLine(orderId: string): Promise<{
   fulfillmentStatus: string;
-  procurementState: string | null;
+  procurementCoverage: string | null;
 }> {
   const detail = await client.get<{
     shipmentDeadline: string | null;
-    items: Array<{ fulfillmentStatus: string; procurementState: string | null }>;
+    items: Array<{ fulfillmentStatus: string; procurementCoverage: string | null }>;
   }>(`/api/v1/orders/${orderId}`);
   return detail.body.data.items[0]!;
 }
@@ -226,43 +226,47 @@ describe('chain A: stock-first selling (task §14 链路A)', () => {
 });
 
 describe('chain B: sell-first, buy-later (task §14 链路B, the main mode)', () => {
-  it('backorder -> register PO (dup refused) -> receive from PO -> retry -> pick -> ship', async () => {
+  it('backorder -> register PO (dup refused) -> receive from PO -> auto reallocate -> pick -> ship', async () => {
     const skuId = await newSku('B');
     const barcode = `${PREFIX}-B-BAR`;
     await addBarcode(skuId, barcode);
     const platformSkuId = `${PREFIX}-B-1`;
     await mapSku(skuId, platformSkuId);
 
-    // 1. Order with ZERO stock: BACKORDERED + exception + NOT_ORDERED.
+    // 1. Order with ZERO stock: BACKORDERED + exception + 未覆盖（SHORT）。
     const deadline = new Date(Date.now() + 36 * 3600 * 1000).toISOString();
     const order = await ingestOrder({ platformSkuId, quantity: '2', shipmentDeadline: deadline });
     expect(order.erpStatus).toBe('BACKORDERED');
     let line = await orderLine(order.orderId);
     expect(line.fulfillmentStatus).toBe('BACKORDERED');
-    expect(line.procurementState).toBe('NOT_ORDERED');
+    expect(line.procurementCoverage).toBe('SHORT');
     expect(
       (await openExceptionsOf('ORDER_ITEM', order.orderItemId)).some(
         (e) => e.exceptionType === 'ORDER_OUT_OF_STOCK' && e.status === 'OPEN',
       ),
     ).toBe(true);
 
-    // 2. Register the purchase for THIS line; duplicate refused.
+    // 2. 按 SKU×仓缺口补货采购（ADR 0023）；同一缺口重复采购被拒。
     const po = await client.post<{ id: string; poNo: string; items: Array<{ id: string }> }>(
       '/api/v1/purchase-orders',
       {
         sourceNote: '淘宝 订单号 50001',
-        items: [{ skuId, orderItemId: order.orderItemId, quantity: '2', unitCost: '120' }],
+        receivingWarehouseId: warehouseId,
+        purpose: 'REPLENISH',
+        items: [{ skuId, quantity: '2', unitCost: '120' }],
       },
     );
-    expect(po.status).toBe(200);
+    expect(po.status, JSON.stringify(po.body.error ?? {})).toBe(200);
     line = await orderLine(order.orderId);
-    expect(line.procurementState).toBe('ORDERED');
+    expect(line.procurementCoverage).toBe('COVERED');
 
     const duplicate = await client.post('/api/v1/purchase-orders', {
-      items: [{ skuId, orderItemId: order.orderItemId, quantity: '2' }],
+      receivingWarehouseId: warehouseId,
+      purpose: 'REPLENISH',
+      items: [{ skuId, quantity: '2' }],
     });
     expect(duplicate.status).toBe(409);
-    expect(duplicate.body.error?.code).toBe('PURCHASE_ORDER_ITEM_ALREADY_ORDERED');
+    expect(duplicate.body.error?.code).toBe('PURCHASE_SKU_GAP_COVERED');
 
     // 3. Goods arrive: receipt generated from the PO, confirmed.
     const receipt = await client.post<{ id: string }>(
@@ -280,8 +284,9 @@ describe('chain B: sell-first, buy-later (task §14 链路B, the main mode)', ()
     }>(`/api/v1/purchase-orders/${po.body.data.id}`);
     expect(poAfter.body.data.status).toBe('RECEIVED');
     expect(poAfter.body.data.items[0]?.receivedQuantity).toBe('2.000');
+    // 在途清零后覆盖标记消失（缺货口径 = 需求 − 在途，ADR 0023）。
     line = await orderLine(order.orderId);
-    expect(line.procurementState).toBe('ARRIVED');
+    expect(line.procurementCoverage).not.toBe('COVERED');
 
     // 4. 库存增加后自动重新分配（用户指示 2026-09-17）：收货确认产生
     //    RECEIVE 流水后，缺货行由 OrderAutoReallocationService 自动转

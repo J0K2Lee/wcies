@@ -16,6 +16,22 @@ const BASE = 'http://localhost:3105';
 const client = new ApiClient(BASE);
 const PREFIX = runPrefix();
 
+/**
+ * 69 开头的条码按 EAN-13 校验位校验（2026-10-21 用户指示），测试数据必须
+ * 生成合法校验位，不能用 PREFIX 拼人类可读的假码。
+ */
+function makeEan13(): string {
+  let body = '690';
+  for (let i = 0; i < 9; i += 1) {
+    body += String(Math.floor(Math.random() * 10));
+  }
+  const sum = [...body].reduce(
+    (acc, digit, index) => acc + Number(digit) * (index % 2 === 0 ? 1 : 3),
+    0,
+  );
+  return `${body}${String((10 - (sum % 10)) % 10)}`;
+}
+
 beforeAll(async () => {
   api = spawnApiEntry('main.js', { PORT: '3105', REDIS_URL: 'redis://localhost:6379/4' });
   await waitForHttp(`${BASE}/health/live`, 60_000);
@@ -132,13 +148,12 @@ describe('catalog (task §13/§14)', () => {
     });
     expect(leaf.body.data.level).toBe(3);
 
-    const tree =
-      await client.get<
-        Array<{
-          code: string;
-          children: Array<{ code: string; children: Array<{ code: string }> }>;
-        }>
-      >('/api/v1/categories');
+    const tree = await client.get<
+      Array<{
+        code: string;
+        children: Array<{ code: string; children: Array<{ code: string }> }>;
+      }>
+    >('/api/v1/categories');
     const node = tree.body.data.find((category) => category.code === `${PREFIX}-3C`);
     expect(node?.children.map((leafNode) => leafNode.code)).toEqual([`${PREFIX}-KBD`]);
     expect(node?.children[0]?.children.length).toBe(1);
@@ -242,23 +257,27 @@ describe('skus (task §78/§79, V1: direct creation with category/brand)', () =>
 
 describe('barcodes (task §80)', () => {
   let skuId = '';
+  let bc1 = '';
+  let bc2 = '';
 
   beforeAll(async () => {
     const skus = await client.get<Array<{ id: string; nameZh: string }>>(
       `/api/v1/skus?keyword=${encodeURIComponent(PREFIX)}`,
     );
     skuId = skus.body.data.find((sku) => sku.nameZh === `${PREFIX} 黑色`)?.id ?? '';
+    bc1 = makeEan13();
+    bc2 = makeEan13();
   });
 
   it('allows multiple barcodes per SKU; first becomes primary', async () => {
     const first = await client.post<{ isPrimary: boolean }>(`/api/v1/skus/${skuId}/barcodes`, {
-      barcode: `697${PREFIX}0001`,
+      barcode: bc1,
       barcodeType: 'EAN',
     });
     expect(first.body.data.isPrimary).toBe(true);
 
     const second = await client.post<{ isPrimary: boolean }>(`/api/v1/skus/${skuId}/barcodes`, {
-      barcode: `697${PREFIX}0002`,
+      barcode: bc2,
       barcodeType: 'EAN',
     });
     expect(second.body.data.isPrimary).toBe(false);
@@ -266,7 +285,7 @@ describe('barcodes (task §80)', () => {
 
   it('rejects a barcode already bound to another SKU (global unique)', async () => {
     const bad = await client.post('/api/v1/skus/00000000-0000-0000-0000-000000000001/barcodes', {
-      barcode: `697${PREFIX}0001`,
+      barcode: bc1,
       barcodeType: 'EAN',
     });
     expect(bad.status).toBe(404); // unknown sku
@@ -274,7 +293,7 @@ describe('barcodes (task §80)', () => {
       nameZh: `${PREFIX} other`,
     });
     const conflict = await client.post(`/api/v1/skus/${other.body.data.id}/barcodes`, {
-      barcode: `697${PREFIX}0001`,
+      barcode: bc1,
       barcodeType: 'EAN',
     });
     expect(conflict.status).toBe(409);
@@ -286,7 +305,7 @@ describe('barcodes (task §80)', () => {
     const barcodes = await client.get<Array<{ id: string; barcode: string; isPrimary: boolean }>>(
       `/api/v1/skus/${skuId}/barcodes`,
     );
-    const secondBarcode = barcodes.body.data.find((barcode) => barcode.barcode.endsWith('0002'));
+    const secondBarcode = barcodes.body.data.find((barcode) => barcode.barcode === bc2);
     await client.patch(`/api/v1/skus/${skuId}/barcodes/${secondBarcode?.id}`, { isPrimary: true });
     const after = await client.get<Array<{ isPrimary: boolean }>>(`/api/v1/skus/${skuId}/barcodes`);
     expect(after.body.data.filter((barcode) => barcode.isPrimary)).toHaveLength(1);
