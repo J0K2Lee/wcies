@@ -59,6 +59,12 @@ describe('OrderService.applySyncedPlatformFacts - fulfillmentMode', () => {
       markPlatformFactsChecked: vi.fn().mockResolvedValue(undefined),
     };
     const history = { insert: vi.fn() };
+    const itemRepo = {
+      findByOrderId: vi.fn().mockResolvedValue([]),
+      updateFulfillment: vi.fn().mockResolvedValue(undefined),
+    };
+    const exceptionService = { createInTx: vi.fn().mockResolvedValue(undefined) };
+    const statusService = { recomputeOrderStatus: vi.fn().mockResolvedValue('BACKORDERED') };
     const deadlineExceptionService = {
       evaluate: vi.fn().mockResolvedValue(undefined),
     } as unknown as OrderDeadlineExceptionService;
@@ -70,17 +76,17 @@ describe('OrderService.applySyncedPlatformFacts - fulfillmentMode', () => {
         transaction: vi.fn((work: (manager: unknown) => Promise<unknown>) => work({})),
       } as unknown as DataSource,
       orderRepo as unknown as OrderRepository,
-      {} as OrderItemRepository,
+      itemRepo as unknown as OrderItemRepository,
       {} as OrderStatusHistoryRepository,
       history as unknown as PlatformStatusHistoryRepository,
-      {} as OrderStatusService,
+      statusService as unknown as OrderStatusService,
       deadlineExceptionService,
       { evaluate: vi.fn() } as unknown as OrderTrackingStallService,
       {} as OrderIngestionService,
       platformShipped,
       {} as ReservationService,
       {} as InventoryQueryService,
-      {} as ExceptionService,
+      exceptionService as unknown as ExceptionService,
       {} as StoreService,
       {} as SkuImageService,
       {} as OperationLogService,
@@ -90,7 +96,16 @@ describe('OrderService.applySyncedPlatformFacts - fulfillmentMode', () => {
       {} as OrderProcurementPort,
       {} as PlatformAdapterRegistry,
     );
-    return { service, orderRepo, history, platformShipped, deadlineExceptionService };
+    return {
+      service,
+      orderRepo,
+      history,
+      platformShipped,
+      deadlineExceptionService,
+      itemRepo,
+      exceptionService,
+      statusService,
+    };
   }
 
   it.each(['FBS', null])(
@@ -117,6 +132,42 @@ describe('OrderService.applySyncedPlatformFacts - fulfillmentMode', () => {
       expect(history.insert).not.toHaveBeenCalled();
     },
   );
+
+  it('外部履约 → 内部履约：把外部履约行放回 PENDING 并留可见异常（2026-10-24）', async () => {
+    const { service, orderRepo, itemRepo, exceptionService, statusService } = build('FBW');
+    itemRepo.findByOrderId.mockResolvedValueOnce([
+      { id: 'item-1', fulfillmentStatus: 'EXTERNAL_FULFILLED', reservationId: null },
+      { id: 'item-2', fulfillmentStatus: 'SHIPPED', reservationId: null },
+      { id: 'item-3', fulfillmentStatus: 'EXTERNAL_FULFILLED', reservationId: 'res-1' },
+    ]);
+
+    await service.applySyncedPlatformFacts({ ...facts, fulfillmentMode: 'FBS' }, OPERATOR);
+
+    expect(orderRepo.updatePlatformFacts.mock.calls[0]?.[2]).toMatchObject({
+      fulfillmentMode: 'FBS',
+    });
+    // 只有「外部履约且无占用」的那一行被放回待处理
+    expect(itemRepo.updateFulfillment).toHaveBeenCalledTimes(1);
+    expect(itemRepo.updateFulfillment).toHaveBeenCalledWith(expect.anything(), 'item-1', {
+      fulfillmentStatus: 'PENDING',
+    });
+    expect(exceptionService.createInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        exceptionType: 'ORDER_INVALID_STATE',
+        referenceType: 'ORDER',
+        referenceId: 'order-1',
+      }),
+    );
+    expect(statusService.recomputeOrderStatus).toHaveBeenCalled();
+  });
+
+  it('内部履约 → 外部履约（反向）不动行状态', async () => {
+    const { service, itemRepo, exceptionService } = build('FBS');
+    await service.applySyncedPlatformFacts({ ...facts, fulfillmentMode: 'FBW' }, OPERATOR);
+    expect(itemRepo.updateFulfillment).not.toHaveBeenCalled();
+    expect(exceptionService.createInTx).not.toHaveBeenCalled();
+  });
 
   it.each([undefined, null, 'FBS'])(
     'does not rewrite a missing or unchanged channel (%s)',

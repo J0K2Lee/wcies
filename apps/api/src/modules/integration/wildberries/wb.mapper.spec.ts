@@ -7,6 +7,7 @@ import {
   mapFbsOrderToOrder,
   mapStatsRowToOrder,
   fulfillmentModeOfStatsRow,
+  statsRowIngestPolicy,
   mapWebhookEnvelope,
   wbCancelledOf,
   wbStageOf,
@@ -225,10 +226,12 @@ describe('mapStatsRowToOrder (statistics DBW rows)', () => {
     srid: 'srid-abc-1',
   };
 
-  it('keys the order on srid with FBW fulfillment', () => {
-    const order = mapStatsRowToOrder(row);
+  it('keys the order on srid；平台仓按 FBW 且允许建单', () => {
+    const order = mapStatsRowToOrder({ ...row, warehouseType: 'Склад WB' });
     expect(order.platformOrderId).toBe('srid-abc-1');
     expect(order.fulfillmentMode).toBe('FBW');
+    // FBO 没有装配任务，报表是唯一来源 → 允许建单
+    expect(order.ingestPolicy).toBe('CREATE_OR_UPDATE');
     expect(order.platformCancelled).toBe(false);
     expect(order.platformStage).toBeNull(); // weak fact: no logistics machine
     expect(order.items[0]).toMatchObject({
@@ -250,16 +253,22 @@ describe('mapStatsRowToOrder (statistics DBW rows)', () => {
       warehouseType: 'Склад продавца',
     });
     expect(order.fulfillmentMode).toBe('FBS');
-    // srid 等于 FBS 任务流的 rid：同步时用它反查已有订单并跳过。
+    // 卖家仓的作业事实源是 v3 装配任务：报表行只更新已有订单，绝不建单
+    // （2026-10-24，实证会建出只有订单 UID 的幽灵单）。
+    expect(order.ingestPolicy).toBe('UPDATE_ONLY');
+    // srid 等于 FBS 任务流的 rid：同步时用它反查已有订单。
     expect(order.dedupeByRawField).toEqual({
       field: 'rid',
       value: 'eBH.i5bb6dba9b335bbce96ac43acba0842fc.0.0',
     });
   });
 
-  it('平台仓仍按 FBW 处理，未知仓库类型不猜', () => {
+  it('仓库类型：平台仓→FBW，卖家仓→FBS，未知不猜', () => {
     expect(fulfillmentModeOfStatsRow({ ...row, warehouseType: 'Склад WB' })).toBe('FBW');
-    expect(fulfillmentModeOfStatsRow({ ...row })).toBe('FBW');
+    expect(fulfillmentModeOfStatsRow({ ...row, warehouseType: 'Склад продавца' })).toBe('FBS');
+    // 未知值不覆盖已有订单的履约方式（AGENTS §88）
+    expect(fulfillmentModeOfStatsRow({ ...row })).toBeNull();
+    expect(statsRowIngestPolicy({ ...row })).toBe('UPDATE_ONLY');
   });
 
   it('maps isCancel to the cancelled stage', () => {

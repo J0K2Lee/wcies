@@ -252,6 +252,40 @@ export class OrderRepository {
    * `field` 由适配器给出（当前只有 `rid`），这里做白名单校验防止拼接注入；
    * 返回值是「字段值 → 订单 id」。
    */
+  /**
+   * 按「平台标识」批量反查已有订单（2026-10-24）：`platform_order_id` 与
+   * `raw_data->>'rid'` 任一命中即同一张单。用于跨数据源去重——WB 的统计行
+   * `srid` 等于装配任务的 `rid`，而两者的 platform_order_id 不同。
+   */
+  async findIdsByPlatformIdentifiers(
+    storeId: string,
+    identifiers: readonly string[],
+  ): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    if (identifiers.length === 0) {
+      return result;
+    }
+    const rows = await this.dataSource.query<
+      Array<{ id: string; platform_order_id: string; rid: string | null }>
+    >(
+      `SELECT id, platform_order_id, raw_data->>'rid' AS rid
+         FROM orders
+        WHERE store_id = $1::uuid
+          AND (platform_order_id = ANY($2::text[]) OR raw_data->>'rid' = ANY($2::text[]))`,
+      [storeId, [...identifiers]],
+    );
+    for (const row of rows) {
+      // platform_order_id 优先：以它为「真实身份」，rid 只是别名。
+      if (!result.has(row.platform_order_id)) {
+        result.set(row.platform_order_id, row.id);
+      }
+      if (row.rid !== null && !result.has(row.rid)) {
+        result.set(row.rid, row.id);
+      }
+    }
+    return result;
+  }
+
   async findIdsByRawField(
     storeId: string,
     field: string,
@@ -372,7 +406,8 @@ export class OrderRepository {
     patch: {
       platformStatus: string | null;
       shipmentDeadline: Date | null;
-      rawData: Record<string, unknown> | null;
+      /** 省略 = 保持原值（报表型数据源不得覆盖作业单的原始数据）。 */
+      rawData?: Record<string, unknown> | null;
       platformStage?: string | null;
       platformStageChangedAt?: Date | null;
       fulfillmentMode?: string | null;
@@ -386,7 +421,7 @@ export class OrderRepository {
     const update: Record<string, unknown> = {
       platformStatus: patch.platformStatus,
       shipmentDeadline: patch.shipmentDeadline,
-      rawData: patch.rawData,
+      ...(patch.rawData === undefined ? {} : { rawData: patch.rawData }),
       updatedAt: new Date(),
     };
     if (patch.fulfillmentMode !== undefined && patch.fulfillmentMode !== null) {

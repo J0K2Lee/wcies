@@ -203,6 +203,17 @@ export class OrderService {
    * 用于「同一张平台订单出现在两个数据源」的场景（WB FBS 任务流 + 统计流水），
    * 命中即跳过，避免重复建单。
    */
+  /**
+   * 按平台标识（platform_order_id / raw.rid）批量反查已有订单，供同步层做
+   * 跨数据源去重（2026-10-24）。
+   */
+  async findOrderIdsByPlatformIdentifiers(
+    storeId: string,
+    identifiers: readonly string[],
+  ): Promise<Map<string, string>> {
+    return this.orderRepo.findIdsByPlatformIdentifiers(storeId, identifiers);
+  }
+
   async findOrderIdsByRawField(
     storeId: string,
     field: string,
@@ -740,6 +751,49 @@ export class OrderService {
    *   unmapped exceptions may still block);
    * - unchanged facts write NOTHING (idempotent re-sync).
    */
+  /**
+   * 外部履约 → 内部履约时把行放回待处理（2026-10-24）。
+   * 只处理「没有占用、仍是 EXTERNAL_FULFILLED」的行；已发货/已释放的不碰。
+   */
+  private async requeueExternallyFulfilledLines(
+    order: OrderEntity,
+    operator: OperatorContext,
+  ): Promise<void> {
+    const items = await this.itemRepo.findByOrderId(order.id);
+    const target = items.filter(
+      (item) => item.fulfillmentStatus === 'EXTERNAL_FULFILLED' && item.reservationId === null,
+    );
+    if (target.length === 0) {
+      return;
+    }
+    await this.dataSource.transaction(async (runner) => {
+      for (const item of target) {
+        await this.itemRepo.updateFulfillment(runner, item.id, {
+          fulfillmentStatus: 'PENDING',
+        });
+      }
+      await this.exceptionService.createInTx(runner, {
+        exceptionType: 'ORDER_INVALID_STATE',
+        severity: 'MEDIUM',
+        referenceType: 'ORDER',
+        referenceId: order.id,
+        storeId: order.storeId,
+        message: `订单 ${order.orderNo} 的履约方式由外部履约改为内部履约，${target.length} 行已重置为待处理，请重新分配库存`,
+        details: {
+          orderNo: order.orderNo,
+          from: 'EXTERNAL_FULFILLED',
+          to: 'PENDING',
+          resetLines: target.length,
+        },
+      });
+    });
+    await this.statusService.recomputeOrderStatus(
+      order.id,
+      operator,
+      '履约方式改为内部履约：行重置为待处理',
+    );
+  }
+
   async applySyncedPlatformFacts(
     input: OrderPlatformFactsInput,
     operator: OperatorContext,
@@ -787,6 +841,7 @@ export class OrderService {
     // round-trip, so a naive JSON.stringify diff would flag EVERY re-sync as
     // changed and break the zero-write idempotency rule.
     const rawChanged =
+      input.preserveRawData !== true &&
       canonicalJson(input.rawData ?? null) !== canonicalJson(order.rawData ?? null);
 
     let cancelled = false;
@@ -804,7 +859,7 @@ export class OrderService {
         await this.orderRepo.updatePlatformFacts(runner, order.id, {
           platformStatus: newStatus ?? oldStatus,
           shipmentDeadline: effectiveDeadline,
-          rawData: effectiveRawData,
+          ...(input.preserveRawData === true ? {} : { rawData: effectiveRawData }),
           ...(fulfillmentModeChanged ? { fulfillmentMode: newFulfillmentMode } : {}),
           ...(trackingNoChanged ? { platformTrackingNo: newTrackingNo } : {}),
           ...(stageChanged
@@ -830,6 +885,18 @@ export class OrderService {
           });
         }
       });
+    }
+
+    // 履约方式由外部（平台仓）改为内部（卖家仓）——2026-10-24 兜底：
+    // 此前只改订单头，行仍是 EXTERNAL_FULFILLED，订单卡在 NEW 且两边都不展示
+    // （实证 3 张）。行必须回到 PENDING 才能重新分配；同时留一条可见异常，
+    // 不让状态在没有提示的情况下改变。
+    if (
+      fulfillmentModeChanged &&
+      isExternalFulfillmentMode(order.fulfillmentMode) &&
+      !isExternalFulfillmentMode(newFulfillmentMode)
+    ) {
+      await this.requeueExternallyFulfilledLines(order, operator);
     }
 
     // Platform cancellation -> the existing cancel chain (decision 1-D1b=A).
@@ -1521,6 +1588,11 @@ export interface OrderPlatformFactsInput {
    */
   platformTrackingNo?: string | null;
   rawData: Record<string, unknown> | null;
+  /**
+   * 报表型数据源（2026-10-24）：只更新事实，绝不覆盖订单的 raw_data——
+   * 统计流水不能顶掉作业单的原始数据（数字 id / 装配信息都在里面）。
+   */
+  preserveRawData?: boolean;
   /** Channel that delivered the facts (ORDER_SYNC / WEBHOOK / ...). */
   source: string;
 }

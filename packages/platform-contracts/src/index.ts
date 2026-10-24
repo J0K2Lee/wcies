@@ -186,6 +186,21 @@ export interface PlatformOrderRaw {
    */
   readonly dedupeByRawField?: { readonly field: string; readonly value: string };
   /**
+   * 摄入策略（2026-10-24）：
+   * - `CREATE_OR_UPDATE`（默认）：没有对应订单时建单；
+   * - `UPDATE_ONLY`：**只更新已存在的订单**，找不到就跳过。
+   *
+   * 用于报表型数据源。WB 的统计流水 `/api/v1/supplier/orders` 是销售报表
+   * （按 lastChangeDate 增量、保留 90 天），它包含**卖家仓（FBS）订单**——这些
+   * 单的作业事实源是 `/api/v3/orders` 的装配任务，报表里出现却没有对应任务，
+   * 只说明这单已经装配走/取消了。把它当订单建出来会得到一张「只有订单 UID、
+   * 平台上搜不到、也无法操作」的幽灵单（2026-10-24 实证 3 张）。
+   *
+   * 平台仓（FBO/FBW）订单相反：它们没有装配任务，报表是唯一来源，因此仍用
+   * `CREATE_OR_UPDATE`。
+   */
+  readonly ingestPolicy?: 'CREATE_OR_UPDATE' | 'UPDATE_ONLY';
+  /**
    * Normalized logistics stage (see PLATFORM_ORDER_STAGES). Null when the
    * mapper's status vocabulary value is not yet classified (e.g. OZON
    * `arbitration`) - unclassified values must be documented, never guessed

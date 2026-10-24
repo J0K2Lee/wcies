@@ -74,8 +74,8 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 1. `/api/v1/supplier/orders` 返回**全部订单**，包括卖家仓（FBS/DBS）的单。此前 mapper 一律按
    `FBW` 落库，同一张单于是出现两条记录——`<数字 id> / FBS`（v3 源）与 `<srid> / FBW`
    （统计源），后者还被当成平台履约（外部履约）。实测 WS-001：33 单里有 13 张重复。
-2. 判定口径：`warehouseType` 为 `Склад продавца`（卖家仓）→ `FBS`；其余保持 `FBW`
-   （WB 这里是俄文自由文本，没有稳定枚举，只做单向判定、不猜未知值）。
+2. 判定口径：`warehouseType` 为 `Склад продавца`（卖家仓）→ `FBS`；`Склад WB` /
+   含 `wildberries`（平台仓）→ `FBW`；**其它未知值不猜**（返回 null，不覆盖已有订单的值）。
 3. **去重键**：统计行的 `srid` 恰好等于 v3 行里的 `rid`。`PlatformOrderRaw.dedupeByRawField`
    让适配器声明「订单 raw_data 中该字段等于本值即同一张单」；同步服务每页批量查一次
    `orders.raw_data->>'rid'`，命中即跳过（计入 skippedCount），不再重复建单。
@@ -160,6 +160,28 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 - **应答**：10 秒内 HTTP 200 即送达；否则按 10s→15min 递增重试，超限事件删除，长期失败 webhook 可能被停用。
 - **管理端点**：POST/GET/PUT/DELETE `/api/v1/webhooks`、`{id}/secret/refresh`、`/check`（URL 可达性）、`{id}/test/send`（`test:true` 事件探活）、events/deliveries/history 查询；全 API 共限 **1 req/s**。
 
+
+**统计源不再给卖家仓建单（2026-10-24，用户指示）**
+
+统计流水是**销售报表**，不是任务队列。卖家仓（FBS）订单的作业事实源是 v3 装配
+任务；报表里有、v3 里没有，说明这单已经装配走/取消了（实测：另一系统在同一账号
+上先完成了装配，v3 队列里已消失）。把它当订单建出来会得到一张「只有订单 UID
+（srid）、平台后台搜不到、也无法操作」的幽灵单——它的数字装配单号在 WB 公开 API
+里无法反查（archive 只收 3 个月前的单、v3 只列未装配任务、status 接口只吃数字 id）。
+
+因此 `PlatformOrderRaw` 增加 `ingestPolicy`：
+
+| 统计行 `warehouseType` | fulfillmentMode | ingestPolicy | 行为 |
+|---|---|---|---|
+| `Склад продавца`（卖家仓） | `FBS` | `UPDATE_ONLY` | 命中已有订单（srid→platform_order_id 或 rid）就更新事实，找不到就**跳过** |
+| `Склад WB` / `wildberries`（平台仓） | `FBW` | `CREATE_OR_UPDATE` | 照常建单（FBO 没有装配任务，报表是唯一来源） |
+| 未知 | null（不猜） | `UPDATE_ONLY` | 宁可少建，不可乱建 |
+
+去重同时改为**双向**：新到的单只要 `platform_order_id / raw.rid / raw.srid` 任一
+命中本店已有订单，就按「同一张单」处理（更新事实、不建第二张），不再依赖先后顺序。
+
+`UPDATE_ONLY` 的更新走 `applySyncedPlatformFacts(preserveRawData)`：状态/取消/金额
+照常更新，但**不覆盖**作业单的 `raw_data`（数字 id 与装配信息在里面）。
 ### 实现落点（2026-09-18）
 
 - 订阅管理：`sync/services/wb-webhook.service.ts` —— `POST/GET/DELETE /api/v1/stores/:storeId/webhooks/wb/subscription`；创建时 secret 加密落库为店铺 **WEBHOOK 凭证**（新增凭证类型，§28 预留），操作日志只记元数据（§29）；幂等（同 URL 已订阅直接返回）；secret 丢失/同 URL 多条一律 `WB_WEBHOOK_STATE_ERROR` 转人工，绝不盲删。

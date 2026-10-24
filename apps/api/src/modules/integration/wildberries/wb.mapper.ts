@@ -253,6 +253,7 @@ export function mapStatsRowToOrder(row: WbStatsOrderRow): PlatformOrderRaw {
   };
 
   const cancelled = row.isCancel === true;
+  const policy = statsRowIngestPolicy(row);
   return {
     platformOrderId: srid,
     platformStatus: cancelled ? 'canceled' : null,
@@ -262,7 +263,10 @@ export function mapStatsRowToOrder(row: WbStatsOrderRow): PlatformOrderRaw {
     // 履约方式看仓库类型（2026-10-23 修复）：统计流水**包含全部订单**，
     // 「Склад продавца」(卖家仓) 的行其实是 FBS/DBS 单，此前一律标成 FBW
     // 会把同一张单变成「平台履约」的第二张订单。
+    // 未知仓库类型不猜：留 null，让已有订单保持原值（2026-10-24）。
     fulfillmentMode: fulfillmentModeOfStatsRow(row),
+    // 摄入策略（2026-10-24）：卖家仓行只更新已有订单，绝不建单。
+    ingestPolicy: policy,
     orderedAt,
     shipmentDeadline: null,
     currency: null,
@@ -275,17 +279,34 @@ export function mapStatsRowToOrder(row: WbStatsOrderRow): PlatformOrderRaw {
 }
 
 /**
- * 统计行的履约方式：只认「卖家仓」这一条明确事实，其余保持 FBW。
- * WB 的 `warehouseType` 是俄文自由文本（如 `Склад продавца`），没有稳定枚举——
- * 因此只做「卖家仓 → FBS」的单向判定，其余一律按平台仓处理（与改造前一致），
- * 不猜测未知字符串（AGENTS.md §88）。
+ * 统计行的履约方式：只认明确事实，未知不猜。
+ * WB 的 `warehouseType` 是俄文自由文本，没有稳定枚举（AGENTS.md §88）：
+ * - `Склад продавца`（卖家仓）→ FBS；
+ * - `Склад WB` / 含 wildberries（平台仓）→ FBW；
+ * - 其它 → null（不覆盖已有订单的值）。
  */
-export function fulfillmentModeOfStatsRow(row: WbStatsOrderRow): string {
+export function fulfillmentModeOfStatsRow(row: WbStatsOrderRow): string | null {
   const warehouseType = readString(row.warehouseType)?.toLowerCase() ?? '';
   if (warehouseType.includes('склад продавца')) {
     return 'FBS';
   }
-  return 'FBW';
+  if (warehouseType.includes('склад wb') || warehouseType.includes('wildberries')) {
+    return 'FBW';
+  }
+  return null;
+}
+
+/**
+ * 统计行的摄入策略（2026-10-24）：
+ *
+ * - 卖家仓 → `UPDATE_ONLY`：这类单的作业事实源是 `/api/v3/orders` 的装配任务。
+ *   报表里有、装配任务里没有，说明已经装配走/取消——建单会得到一张只有
+ *   订单 UID、平台上搜不到、也无法操作的幽灵单（实证 3 张）。
+ * - 平台仓 → `CREATE_OR_UPDATE`：FBO 没有装配任务，报表是唯一来源。
+ * - 未知 → `UPDATE_ONLY`：宁可少建，不可乱建。
+ */
+export function statsRowIngestPolicy(row: WbStatsOrderRow): 'CREATE_OR_UPDATE' | 'UPDATE_ONLY' {
+  return fulfillmentModeOfStatsRow(row) === 'FBW' ? 'CREATE_OR_UPDATE' : 'UPDATE_ONLY';
 }
 
 // ---------------------------------------------------------------------------

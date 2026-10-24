@@ -66,6 +66,30 @@ export interface OrderSyncOutcome {
  *    path uses) - that is how platform cancellations and deadline changes
  *    become visible (planning §1.3).
  */
+/**
+ * 一页数据里的单条订单该怎么处理（2026-10-24）。
+ *
+ * - `UPDATE_ONLY`（报表型数据源，如 WB 统计流水）：只更新已存在的订单；
+ *   找不到就跳过——它不在我们的作业范围（已在别处装配走/取消）。
+ * - `CREATE_OR_UPDATE`：没有就建；已有且是**同一个 ID** 时走既有的
+ *   比较-更新路径；已有但匹配的是**另一个标识**（同一张单的别名，例如
+ *   统计单的 srid 命中装配单的 rid），只更新事实、不建第二张。
+ */
+export type OrderHandlingDecision = 'INGEST' | 'UPDATE_FACTS' | 'SKIP';
+
+export function decideOrderHandling(
+  order: { platformOrderId: string; ingestPolicy?: 'CREATE_OR_UPDATE' | 'UPDATE_ONLY' },
+  existing: { orderId: string; matchedBy: string } | null,
+): OrderHandlingDecision {
+  if (order.ingestPolicy === 'UPDATE_ONLY') {
+    return existing === null ? 'SKIP' : 'UPDATE_FACTS';
+  }
+  if (existing !== null && existing.matchedBy !== order.platformOrderId) {
+    return 'UPDATE_FACTS';
+  }
+  return 'INGEST';
+}
+
 @Injectable()
 export class OrderSyncService {
   constructor(
@@ -246,28 +270,48 @@ export class OrderSyncService {
    * 收集本页里「已存在记录」的关联键（双源去重）。一次查询覆盖整页，
    * 无 dedupeByRawField 的行不参与。
    */
-  private async collectAlreadyTracked(
+  /** 本页所有订单的候选标识（platformOrderId / raw.rid / raw.srid / 去重值）。 */
+  private identifiersOf(order: PlatformOrderRaw): string[] {
+    const raws = [order.rawData?.['rid'], order.rawData?.['srid']];
+    const values = [
+      order.platformOrderId,
+      ...raws.map((value) => (typeof value === 'string' ? value : null)),
+    ];
+    if (order.dedupeByRawField !== undefined) {
+      values.push(order.dedupeByRawField.value);
+    }
+    return [...new Set(values.filter((value): value is string => value !== null && value !== ''))];
+  }
+
+  /** 一次批量反查：标识 → 已有订单 id（跨数据源去重的基础）。 */
+  private async collectExistingIdentifiers(
     storeId: string,
     items: readonly PlatformOrderRaw[],
-  ): Promise<Set<string>> {
-    const byField = new Map<string, string[]>();
+  ): Promise<Map<string, string>> {
+    const identifiers = new Set<string>();
     for (const item of items) {
-      const dedupe = item.dedupeByRawField;
-      if (dedupe === undefined) {
-        continue;
-      }
-      const list = byField.get(dedupe.field) ?? [];
-      list.push(dedupe.value);
-      byField.set(dedupe.field, list);
-    }
-    const found = new Set<string>();
-    for (const [field, values] of byField) {
-      const existing = await this.orderService.findOrderIdsByRawField(storeId, field, values);
-      for (const key of existing.keys()) {
-        found.add(key);
+      for (const identifier of this.identifiersOf(item)) {
+        identifiers.add(identifier);
       }
     }
-    return found;
+    if (identifiers.size === 0) {
+      return new Map();
+    }
+    return this.orderService.findOrderIdsByPlatformIdentifiers(storeId, [...identifiers]);
+  }
+
+  /** 命中本店铺已有订单时返回匹配方式，供调用方判断「同 ID」还是「别名」。 */
+  private matchExistingOrder(
+    order: PlatformOrderRaw,
+    existingByKey: Map<string, string>,
+  ): { orderId: string; matchedBy: string } | null {
+    for (const identifier of this.identifiersOf(order)) {
+      const orderId = existingByKey.get(identifier);
+      if (orderId !== undefined) {
+        return { orderId, matchedBy: identifier };
+      }
+    }
+    return null;
   }
 
   private async run(syncJob: SyncJobEntity): Promise<OrderSyncOutcome> {
@@ -283,14 +327,28 @@ export class OrderSyncService {
     try {
       for (;;) {
         const page = await adapter.fetchOrders(context, cursor);
-        // 双源去重（2026-10-23）：WB 的统计流水包含 FBS 订单，而 srid 等于 FBS
-        // 行的 rid。若不处理，同一张单会同时存在「数字 id / FBS」与「srid / FBW」
-        // 两条记录。这里按 raw_data 字段批量查一次本店铺已有订单，命中即跳过。
-        const duplicateKeys = await this.collectAlreadyTracked(store.id, page.items);
+        // 跨数据源识别（2026-10-24）：同一张平台单可能以两个不同 ID 出现
+        // （WB：装配任务的数字 id / rid 与统计行的 srid）。这里按本店铺批量反查
+        // 一次，命中的行按「同一张单」处理——更新事实，绝不重复建单。
+        const existingByKey = await this.collectExistingIdentifiers(store.id, page.items);
         for (const order of page.items) {
-          const dedupe = order.dedupeByRawField;
-          if (dedupe !== undefined && duplicateKeys.has(dedupe.value)) {
-            skippedCount += 1;
+          const existing = this.matchExistingOrder(order, existingByKey);
+          const decision = decideOrderHandling(order, existing);
+          if (decision !== 'INGEST') {
+            if (decision === 'SKIP') {
+              skippedCount += 1;
+              continue;
+            }
+            // 只更新事实：报表行不得覆盖作业单的 raw_data（数字 id 在里面）。
+            const facts = await this.orderService.applySyncedPlatformFacts(
+              this.toFactsInput(store.id, order, 'POLLING', { preserveRawData: true }),
+              SYSTEM_OPERATOR,
+            );
+            if (facts.changed) {
+              successCount += 1;
+            } else {
+              skippedCount += 1;
+            }
             continue;
           }
           const result = await this.ingestOne(store.id, order, 'POLLING');
@@ -526,7 +584,7 @@ export class OrderSyncService {
     storeId: string,
     order: PlatformOrderRaw,
     source: 'POLLING' | 'WEBHOOK',
-    options: { platformChangedAt?: Date | null } = {},
+    options: { platformChangedAt?: Date | null; preserveRawData?: boolean } = {},
   ): OrderPlatformFactsInput {
     return {
       storeId,
@@ -542,7 +600,8 @@ export class OrderSyncService {
       platformChangedAt: options.platformChangedAt ?? null,
       shipmentDeadline: order.shipmentDeadline ?? null,
       platformTrackingNo: order.platformTrackingNo ?? null,
-      rawData: order.rawData ?? null,
+      rawData: options.preserveRawData === true ? null : (order.rawData ?? null),
+      ...(options.preserveRawData === true ? { preserveRawData: true } : {}),
       source,
     };
   }
