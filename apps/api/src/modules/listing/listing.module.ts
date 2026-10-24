@@ -16,6 +16,7 @@ import { PlatformCategoryMappingRepository } from './repositories/platform-categ
 import { ListingService } from './services/listing.service';
 import { ListingResolverService } from './services/listing-resolver.service';
 import { ListingOnboardingService } from './services/listing-onboarding.service';
+import { ListingSkuMatchService } from './services/listing-sku-match.service';
 import { ListingExportService } from './services/listing-export.service';
 import { ListingVariantBackfillService } from './services/listing-variant-backfill.service';
 import { CategoryImportService } from './services/category-import.service';
@@ -52,6 +53,7 @@ import { CategoryImportController } from './controllers/category-import.controll
     ListingRepository,
     PlatformCategoryMappingRepository,
     ListingOnboardingService,
+    ListingSkuMatchService,
     ListingExportService,
     ListingVariantBackfillService,
     CategoryImportService,

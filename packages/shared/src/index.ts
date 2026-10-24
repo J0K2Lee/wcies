@@ -44,3 +44,15 @@ export {
   validate69Barcode,
   type BarcodeValidationResult,
 } from './barcode.js';
+
+export {
+  SKU_CATEGORY_WORDS,
+  compareSkuNames,
+  normalizeSkuName,
+  skuNameNarrowToken,
+  skuNameSignature,
+  skuNameTokens,
+  skuSignatureKey,
+  type SkuNameComparison,
+  type SkuNameRelation,
+} from './sku-match.js';

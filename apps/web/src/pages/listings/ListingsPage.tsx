@@ -160,6 +160,12 @@ export function ListingsPage() {
   // Rail quick action (task: SKU映射): snapshot the listing row the modal was
   // opened for — the rail selection may change while the modal is open.
   const [railMapTarget, setRailMapTarget] = useState<ListingRow | null>(null);
+  // 建档弹窗「改用已有档案」转场：直接以 (listing, 变体, SKU) 打开映射弹窗。
+  const [mapSeed, setMapSeed] = useState<{
+    listingId: string;
+    variantId: string;
+    skuId: string;
+  } | null>(null);
   // Sprint 8 T1: quick onboarding (Product + SKU + optional barcode + mapping
   // in one transaction) from an unmapped listing / variant row. The dialog
   // itself is the shared ListingOnboardModal component.
@@ -1181,6 +1187,14 @@ export function ListingsPage() {
                   label: mapTarget.offerId ?? mapTarget.platformSkuId ?? '',
                 }
           }
+          onCreateNew={(mappingId) => {
+            // 没有对应档案：同一入口转去新建（变体锁定）。
+            const listingId = mapTarget?.listingId ?? null;
+            setMapTarget(null);
+            if (listingId !== null) {
+              openOnboard(listingId, mappingId);
+            }
+          }}
           onClose={() => setMapTarget(null)}
           zIndex={1100}
         />
@@ -1248,9 +1262,23 @@ export function ListingsPage() {
 
       {/* ---- Rail「SKU映射」（2026-10-14 换共享组件，与订单页同一行为） ---- */}
       <ListingVariantMapModal
-        open={railMapTarget !== null}
-        listingId={railMapTarget?.id ?? null}
-        onClose={() => setRailMapTarget(null)}
+        open={railMapTarget !== null || mapSeed !== null}
+        listingId={railMapTarget?.id ?? mapSeed?.listingId ?? null}
+        initialSkuId={mapSeed?.skuId ?? null}
+        initialVariantId={mapSeed?.variantId ?? null}
+        onCreateNew={(mappingId) => {
+          const listingId = railMapTarget?.id ?? mapSeed?.listingId ?? null;
+          setRailMapTarget(null);
+          setMapSeed(null);
+          if (listingId !== null) {
+            openOnboard(listingId, mappingId);
+          }
+        }}
+        onClose={() => {
+          setRailMapTarget(null);
+          setMapSeed(null);
+        }}
+        onCompleted={refreshListings}
         zIndex={1100}
       />
 
@@ -1265,6 +1293,14 @@ export function ListingsPage() {
           setOnboardVariantId(null);
         }}
         onCompleted={refreshListings}
+        onUseExisting={({ skuId, mappingId }) => {
+          const listingId = onboardListingId;
+          setOnboardListingId(null);
+          setOnboardVariantId(null);
+          if (listingId !== null) {
+            setMapSeed({ listingId, variantId: mappingId, skuId });
+          }
+        }}
         zIndex={1100}
       />
 

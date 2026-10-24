@@ -18,6 +18,7 @@ import { SkuImageService } from './services/sku-image.service';
 import { SkuImageImportService } from './services/sku-image-import.service';
 import { SkuReferenceRegistry } from './services/sku-reference.registry';
 import { SkuMergeService } from './services/sku-merge.service';
+import { SkuDuplicateQueryService } from './services/sku-duplicate-query.service';
 import { SkuBundleService } from './services/sku-bundle.service';
 import { SkuImageImportProcessor } from './processors/sku-image-import.processor';
 import { QUEUE_NAMES } from '../../infrastructure/queue/queue.constants';
@@ -56,6 +57,7 @@ import { BarcodeController } from './controllers/barcode.controller';
     SkuBundleService,
     SkuReferenceRegistry,
     SkuMergeService,
+    SkuDuplicateQueryService,
     SkuRepository,
     SkuBarcodeRepository,
     SkuImageRepository,
@@ -68,6 +70,7 @@ import { BarcodeController } from './controllers/barcode.controller';
     SkuBundleService,
     SkuReferenceRegistry,
     SkuMergeService,
+    SkuDuplicateQueryService,
   ],
 })
 export class ProductModule {}

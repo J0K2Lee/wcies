@@ -207,6 +207,31 @@ Sprint 8.5R1 起（2026-09-14，人工验收修复；映射规则变更见决策
 API：`GET /skus/:id/merge-preview?targetSkuId=`（影响面与冲突，只读）、
 `POST /skus/:id/merge-into { targetSkuId, confirmSkuCode }`。
 
+## 8b. 映射 / 建档之前的重复档案提示（2026-10-24 用户指示）
+
+合并是**事后修复**；更有效的是**建之前就知道**。映射与快速建档共用同一个候选接口：
+
+`GET /listings/:listingId/skus/:id/match-candidates?name=&brandId=`（只读、派生）
+
+分档只看证据类型（不按相似度数字）：
+
+| 档 | 触发 | 前端行为 |
+|---|---|---|
+| `SAME_VARIANT` | 同店铺里这个平台变体已经映射到某 SKU | 预选该 SKU；提交建档前二次确认 |
+| `SAME_FACT` | 跨店铺同一平台标识（offer/卖家编码/同平台 platform_sku）且名称不冲突，或名称签名一致 | 预选该 SKU；提交建档前二次确认 |
+| `SIMILAR_VARIANT` | 同型号的另一个配色/版本 | **只提示不预选**（通常是另一个档案） |
+
+判定规则（`@wcies/shared` 的 `sku-match`，与离线审计脚本同一实现）：
+
+1. 名称归一化：NFKC、小写、分隔符折叠；`+` 保留为型号词元（`TURBO` ≠ `TURBO+`）。
+2. 名称签名 = 去掉品类词（鼠标/键盘/耳机/保温杯…）与品牌前缀后的词元，顺序无关。
+3. **硬反证**（出现即不提示复用）：品牌不同、配色词元不同、型号词元不同
+   （`A5`/`A7`）、档位不同（`plus`/`pro`）、代际不同（多出数字）。
+4. 不阻断：命中只做一次确认（「改用该档案」/「仍要新建」）；运营始终可新建，
+   错误的重复由 §8a 的合并人工收口。
+5. 同一入口：映射弹窗里提供「新建 SKU 档案（用当前变体预填）」，订单页只保留
+   一个「映射 / 建档」按钮——运营只需判断「挂已有档案还是建新档案」。
+
 ## 9. Listing Resolver（订单安全边界）
 
 `ListingResolverService.resolveInternalSku({ storeId, platformSkuId?, sellerSku? })`：

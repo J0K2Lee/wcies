@@ -20,6 +20,11 @@ import { CategoryPickerOption } from './CategoryCascader';
 import { printTasksBrowser } from '../printing/print-browser';
 import { colors, InfoGrid, StatusBadge } from '../design-system';
 import { BrandQuickCreateModal, CategoryQuickCreateModal } from './QuickCreateModals';
+import {
+  SkuMatchCandidate,
+  SkuMatchCandidatesPanel,
+  useSkuMatchCandidates,
+} from './SkuMatchCandidates';
 import { brandSearchText } from '../utils/brandSearch';
 
 /**
@@ -109,6 +114,11 @@ export interface ListingOnboardModalProps {
   onClose: () => void;
   /** 建档成功（宿主据此刷新列表/订单） */
   onCompleted?: (result: OnboardResult) => void;
+  /**
+   * 「已有档案，改用那个」：命中重复时不再新建，转去映射弹窗。
+   * 宿主负责关闭本弹窗并打开映射弹窗（带 initialSkuId）。
+   */
+  onUseExisting?: (input: { skuId: string; mappingId: string }) => void;
   zIndex?: number;
 }
 
@@ -140,9 +150,10 @@ export function ListingOnboardModal({
   chained = false,
   onClose,
   onCompleted,
+  onUseExisting,
   zIndex,
 }: ListingOnboardModalProps) {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
   const [form] = Form.useForm();
   const [manualVariantId, setManualVariantId] = useState<string | null>(null);
@@ -335,6 +346,98 @@ export function ListingOnboardModal({
     });
   }, [open, result, ctx, selectedVariant, categoryPathById, form]);
 
+  // ---- 重复档案提示（2026-10-24）：名称/品牌填好后实时检查 ----
+  const watchedName = Form.useWatch('skuNameZh', form) as string | undefined;
+  const watchedBrandId = Form.useWatch('brandId', form) as string | undefined;
+  const candidatesQuery = useSkuMatchCandidates({
+    listingId,
+    mappingId: selectedVariantId,
+    name: watchedName ?? '',
+    brandId: watchedBrandId ?? null,
+    enabled: open && result === null,
+  });
+  const duplicateCandidate = useMemo(() => {
+    const candidates = candidatesQuery.data?.data.candidates ?? [];
+    return (
+      candidates.find((item) => item.level === 'SAME_VARIANT' || item.level === 'SAME_FACT') ?? null
+    );
+  }, [candidatesQuery.data]);
+
+  /** 真正提交（确认之后）。 */
+  const submitOnboard = (values: Record<string, unknown>): void => {
+    if (listingId === null || selectedVariantId === null) {
+      return;
+    }
+    const categoryPath = values.categoryPath as string[] | undefined;
+    mutation.mutate({
+      listingId,
+      mappingId: selectedVariantId,
+      skuNameZh: values.skuNameZh as string,
+      brandId: values.brandId as string | undefined,
+      categoryId:
+        categoryPath !== undefined && categoryPath.length === 3 ? categoryPath[2] : undefined,
+      rememberCategoryMapping: values.rememberCategoryMapping !== false,
+      generateBarcode: values.generateBarcode !== false,
+      weightG: values.weightG as number | undefined,
+      lengthMm: values.lengthMm as number | undefined,
+      widthMm: values.widthMm as number | undefined,
+      heightMm: values.heightMm as number | undefined,
+      latestPurchasePrice: values.latestPurchasePrice as number | undefined,
+    });
+  };
+
+  /**
+   * 提交前的一次确认（用户指示 2026-10-24：不阻断、但要付一次确认成本）。
+   * 命中「该变体已挂到某档案 / 极可能同一实物」时给出两条出路：
+   * - 改用那个档案（转去映射弹窗，不新建）；
+   * - 仍要新建（运营确认是两件不同的货）。
+   */
+  const startSubmit = (): void => {
+    if (selectedVariantId === null) {
+      void message.warning('没有可建档的未映射变体');
+      return;
+    }
+    void form.validateFields().then((values) => {
+      if (listingId === null) {
+        return;
+      }
+      const duplicate = duplicateCandidate;
+      if (duplicate === null) {
+        submitOnboard(values);
+        return;
+      }
+      const instance: { destroy: () => void } = modal.confirm({
+        title: '已有档案可能是同一件货',
+        width: 520,
+        content: (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <span style={{ fontSize: 13 }}>
+              {duplicate.skuCode}（{duplicate.nameZh}）—— {duplicate.evidence.join('；')}
+            </span>
+            <span style={{ fontSize: 12.5, color: colors.textSecondary }}>
+              {duplicate.level === 'SAME_VARIANT'
+                ? '这个平台变体已经映射到该档案；再新建会让同一变体出现两份库存记录。'
+                : '名称/平台标识指向同一件货；新建会产生重复档案，事后只能靠合并修复。'}
+            </span>
+            {onUseExisting !== undefined && (
+              <Button
+                onClick={() => {
+                  instance?.destroy();
+                  onUseExisting({ skuId: duplicate.skuId, mappingId: selectedVariantId });
+                }}
+              >
+                改用 {duplicate.skuCode}
+              </Button>
+            )}
+          </div>
+        ),
+        okText: '仍要新建',
+        cancelText: '取消',
+        onOk: () => submitOnboard(values),
+      });
+    });
+  };
+
   /**
    * Sprint 8.5 T7 保存并下一变体: after a successful submit, jump straight to
    * the next UNMAPPED variant with the just-created product pinned, keeping
@@ -408,35 +511,7 @@ export function ListingOnboardModal({
                   key="submit"
                   type="primary"
                   loading={mutation.isPending}
-                  onClick={() => {
-                    if (selectedVariantId === null) {
-                      void message.warning('没有可建档的未映射变体');
-                      return;
-                    }
-                    void form.validateFields().then((values) => {
-                      if (listingId === null) {
-                        return;
-                      }
-                      const categoryPath = values.categoryPath as string[] | undefined;
-                      mutation.mutate({
-                        listingId,
-                        mappingId: selectedVariantId,
-                        skuNameZh: values.skuNameZh as string,
-                        brandId: values.brandId as string | undefined,
-                        categoryId:
-                          categoryPath !== undefined && categoryPath.length === 3
-                            ? categoryPath[2]
-                            : undefined,
-                        rememberCategoryMapping: values.rememberCategoryMapping !== false,
-                        generateBarcode: values.generateBarcode !== false,
-                        weightG: values.weightG as number | undefined,
-                        lengthMm: values.lengthMm as number | undefined,
-                        widthMm: values.widthMm as number | undefined,
-                        heightMm: values.heightMm as number | undefined,
-                        latestPurchasePrice: values.latestPurchasePrice as number | undefined,
-                      });
-                    });
-                  }}
+                  onClick={startSubmit}
                 >
                   建档并映射
                 </Button>,
@@ -646,6 +721,23 @@ export function ListingOnboardModal({
             >
               <Input maxLength={255} placeholder="默认按变体标识预填" />
             </Form.Item>
+            <SkuMatchCandidatesPanel
+              listingId={listingId}
+              mappingId={selectedVariantId}
+              name={watchedName ?? ''}
+              brandId={watchedBrandId ?? null}
+              enabled={open && result === null}
+              onPick={
+                onUseExisting === undefined
+                  ? undefined
+                  : (candidate: SkuMatchCandidate) =>
+                      onUseExisting({
+                        skuId: candidate.skuId,
+                        mappingId: selectedVariantId ?? '',
+                      })
+              }
+              title="已有档案（优先复用；点选即改用）"
+            />
             <Space wrap size="middle">
               <Form.Item name="weightG" label="重量（g）" style={{ marginBottom: 0 }}>
                 <InputNumber min={0} placeholder="重量" style={{ width: 120 }} />

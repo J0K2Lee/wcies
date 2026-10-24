@@ -326,6 +326,70 @@ export class ListingRepository {
   }
 
   /**
+   * 同一平台标识已被哪些 SKU 认领（2026-10-24 重复档案检测）。
+   *
+   * 三种标识分别匹配，`sameStore` 区分「同店铺重复映射」与「跨店铺同一商品」：
+   * - 同店铺命中 = 这个平台变体已经有档案，属于 SAME_VARIANT；
+   * - 跨店铺命中 = 运营把同一平台商品在另一个店铺也建了档案，按 SAME_FACT 提示。
+   * 只读查询，不修改任何映射。
+   */
+  async findSkuBindingsByIdentifiers(input: {
+    storeId: string;
+    platformId: string;
+    platformSkuId: string | null;
+    offerId: string | null;
+    sellerSku: string | null;
+    excludeMappingId: string;
+  }): Promise<
+    Array<{
+      skuId: string;
+      sameStore: boolean;
+      storeCode: string;
+      platformCode: string;
+    }>
+  > {
+    const offerId = input.offerId ?? '';
+    const sellerSku = input.sellerSku ?? '';
+    const platformSkuId = input.platformSkuId ?? '';
+    if (offerId === '' && sellerSku === '' && platformSkuId === '') {
+      return [];
+    }
+    const rows = await this.mappingRepository.query<
+      Array<{ sku_id: string; same_store: boolean; store_code: string; platform_code: string }>
+    >(
+      `SELECT ls.sku_id,
+              (l.store_id = $2::uuid) AS same_store,
+              st.store_code,
+              p.code AS platform_code
+         FROM platform_listing_skus ls
+         JOIN platform_listings l ON l.id = ls.listing_id
+         JOIN stores st ON st.id = l.store_id
+         JOIN platforms p ON p.id = l.platform_id
+        WHERE ls.sku_id IS NOT NULL
+          AND ls.id <> $1::uuid
+          AND (
+                ($3 <> '' AND ls.offer_id = $3)
+             OR ($4 <> '' AND ls.seller_sku = $4)
+             OR ($5 <> '' AND l.platform_id = $6::uuid AND ls.platform_sku_id = $5)
+          )`,
+      [input.excludeMappingId, input.storeId, offerId, sellerSku, platformSkuId, input.platformId],
+    );
+    return rows.map(
+      (row: {
+        sku_id: string;
+        same_store: boolean;
+        store_code: string;
+        platform_code: string;
+      }) => ({
+        skuId: row.sku_id,
+        sameStore: row.same_store,
+        storeCode: row.store_code,
+        platformCode: row.platform_code,
+      }),
+    );
+  }
+
+  /**
    * Sprint 8.5 T1: row lock on the mapping INSIDE the onboarding
    * transaction. Taking the lock first serializes "check -> create -> map"
    * end to end, so two concurrent onboards of the same variant cannot both

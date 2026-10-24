@@ -36,6 +36,8 @@ import {
   ListingResponseDto,
   ListingSkuResponseDto,
   ResolveSkuRequestDto,
+  SkuMatchCandidatesDto,
+  SkuMatchCandidatesQueryDto,
   ResolveSkuResponseDto,
   UnmappedListingExportRequestDto,
   UnmappedListingExportResponseDto,
@@ -45,6 +47,7 @@ import {
 import { ListingService } from '../services/listing.service';
 import { ListingResolverService } from '../services/listing-resolver.service';
 import { ListingOnboardingService } from '../services/listing-onboarding.service';
+import { ListingSkuMatchService } from '../services/listing-sku-match.service';
 import { ListingExportService } from '../services/listing-export.service';
 import { ListingVariantBackfillService } from '../services/listing-variant-backfill.service';
 
@@ -69,6 +72,7 @@ export class ListingController {
     private readonly listingService: ListingService,
     private readonly resolverService: ListingResolverService,
     private readonly onboardingService: ListingOnboardingService,
+    private readonly skuMatchService: ListingSkuMatchService,
     private readonly exportService: ListingExportService,
     private readonly backfillService: ListingVariantBackfillService,
   ) {}
@@ -141,6 +145,25 @@ export class ListingController {
   @ApiOkEnvelope(ListingMappingStatsDto)
   async mappingStats(): Promise<{ success: true; data: ListingMappingStatsDto }> {
     return ok(await this.listingService.getMappingStats());
+  }
+
+  @Get(':listingId/skus/:id/match-candidates')
+  @ApiOperation({
+    summary:
+      '重复档案候选（2026-10-24）：映射/建档之前提示同店铺同变体、同名档案、同型号其他变体（只读）',
+  })
+  @ApiOkEnvelope(SkuMatchCandidatesDto)
+  async matchCandidates(
+    @Param('listingId') listingId: string,
+    @Param('id') id: string,
+    @Query() query: SkuMatchCandidatesQueryDto,
+  ): Promise<{ success: true; data: SkuMatchCandidatesDto }> {
+    return ok(
+      await this.skuMatchService.findCandidates(listingId, id, {
+        name: query.name ?? null,
+        brandId: query.brandId ?? null,
+      }),
+    );
   }
 
   @Get(':listingId/onboard-context')

@@ -1619,10 +1619,11 @@ export function OrdersPage() {
   const [quickOnboard, setQuickOnboard] = useState<{
     listingId: string;
     match: OnboardMatchIdentifiers;
+    /** 要建档的变体（映射弹窗「没有对应档案」转过来时锁定它）。 */
+    variantId: string | null;
     /** 触发建档的订单行：建档完成后对其自动重试映射（用户需求 2026-10-09）。 */
     orderItemId: string | null;
   } | null>(null);
-  const [onboardLookupPending, setOnboardLookupPending] = useState(false);
   // 打开商品链接（ERP 建议#3）按钮的反查 pending。
   const [platformLinkPending, setPlatformLinkPending] = useState(false);
 
@@ -2205,37 +2206,16 @@ export function OrdersPage() {
   );
 
   /** 快速建档：按订单行标识反查商品链接（storeId 来自列表行，单击选中即有）。 */
-  const openQuickOnboard = useCallback(
-    (item: OrderItem, storeId: string) => {
-      setOnboardLookupPending(true);
-      resolveListingForItem(item, storeId)
-        .then((listingId) => {
-          if (listingId === null) {
-            return;
-          }
-          setQuickOnboard({
-            listingId,
-            match: {
-              platformSkuId: item.platformSkuId,
-              offerId: item.offerId,
-              sellerSku: item.sellerSku,
-            },
-            orderItemId: item.id,
-          });
-        })
-        .catch((error: Error) => void message.error(`定位商品链接失败：${error.message}`))
-        .finally(() => setOnboardLookupPending(false));
-    },
-    [message, resolveListingForItem],
-  );
-
   // ---- SKU映射（用户指示 2026-10-14）：未映射订单行 → 绑定已有内部 SKU ----
-  // 与 openQuickOnboard 同样的反查（本店铺 + 未映射 + 平台标识），命中后打开
+  // 未映射订单行按平台标识反查（本店铺 + 未映射），命中后打开
   // 与 SKU映射 页面相同的共享映射弹窗，并按订单行标识预选变体。
   const [variantMap, setVariantMap] = useState<{
     listingId: string;
     match: OnboardMatchIdentifiers;
     orderItemId: string;
+    /** 建档弹窗「改用已有档案」转过来时要映射的 SKU 与变体。 */
+    skuId?: string | null;
+    variantId?: string | null;
   } | null>(null);
   const [variantMapLookupPending, setVariantMapLookupPending] = useState(false);
 
@@ -2485,37 +2465,19 @@ export function OrdersPage() {
                   </Button>
                 )}
               {selectedItem.mappingStatus === 'FAILED' && (
-                <>
-                  {/* SKU映射（用户指示 2026-10-14）：把该未映射行绑定到已有内部
-                      SKU，与 SKU映射 页面同一弹窗同一行为；映射完成自动对该行
-                      重试映射/分配。 */}
-                  <Button
-                    block
-                    style={{ marginTop: 8 }}
-                    loading={variantMapLookupPending}
-                    onClick={() =>
-                      openVariantMap(
-                        selectedItem,
-                        railDetail?.storeId ?? selectedRow?.storeId ?? '',
-                      )
-                    }
-                  >
-                    SKU映射
-                  </Button>
-                  <Button
-                    block
-                    style={{ marginTop: 8 }}
-                    loading={onboardLookupPending}
-                    onClick={() =>
-                      openQuickOnboard(
-                        selectedItem,
-                        railDetail?.storeId ?? selectedRow?.storeId ?? '',
-                      )
-                    }
-                  >
-                    快速建档
-                  </Button>
-                </>
+                // 「映射 / 建档」单一入口（2026-10-24 入口合一）：先看重复档案
+                // 候选，没有对应档案时在同一弹窗里转去新建，避免两个并列按钮
+                // 让运营在「绑定」和「新建」之间先做一次无意义的二选一。
+                <Button
+                  block
+                  style={{ marginTop: 8 }}
+                  loading={variantMapLookupPending}
+                  onClick={() =>
+                    openVariantMap(selectedItem, railDetail?.storeId ?? selectedRow?.storeId ?? '')
+                  }
+                >
+                  映射 / 建档
+                </Button>
               )}
             </ContextAction>
           </>
@@ -2956,8 +2918,6 @@ export function OrdersPage() {
     completedCount.data,
     cancelMutation.mutate,
     modal,
-    onboardLookupPending,
-    openQuickOnboard,
     openVariantMap,
     variantMapLookupPending,
   ]);
@@ -4432,7 +4392,23 @@ export function OrdersPage() {
       <ListingOnboardModal
         open={quickOnboard !== null}
         listingId={quickOnboard?.listingId ?? null}
+        preferredVariantId={quickOnboard?.variantId ?? null}
         matchIdentifiers={quickOnboard?.match ?? null}
+        onUseExisting={({ skuId, mappingId }) => {
+          // 改用已有档案：转到映射弹窗，带上要映射的 SKU（不再新建）。
+          const target = quickOnboard;
+          setQuickOnboard(null);
+          if (target === null) {
+            return;
+          }
+          setVariantMap({
+            listingId: target.listingId,
+            match: target.match,
+            orderItemId: target.orderItemId ?? '',
+            skuId,
+            variantId: mappingId,
+          });
+        }}
         onClose={() => setQuickOnboard(null)}
         onCompleted={() => {
           void queryClient.invalidateQueries({ queryKey: ['orders'] });
@@ -4452,6 +4428,22 @@ export function OrdersPage() {
         open={variantMap !== null}
         listingId={variantMap?.listingId ?? null}
         matchIdentifiers={variantMap?.match ?? null}
+        initialSkuId={variantMap?.skuId ?? null}
+        initialVariantId={variantMap?.variantId ?? null}
+        onCreateNew={(mappingId) => {
+          // 没有对应档案：在同一个入口里转去新建，变体已锁定。
+          const target = variantMap;
+          setVariantMap(null);
+          if (target === null) {
+            return;
+          }
+          setQuickOnboard({
+            listingId: target.listingId,
+            match: target.match,
+            variantId: mappingId,
+            orderItemId: target.orderItemId,
+          });
+        }}
         onClose={() => setVariantMap(null)}
         onCompleted={() => {
           void queryClient.invalidateQueries({ queryKey: ['orders'] });

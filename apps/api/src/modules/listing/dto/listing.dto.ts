@@ -221,6 +221,68 @@ export class ListingOnboardSkuDto {
   nameZh!: string;
 }
 
+/** 重复档案候选（2026-10-24）：映射/建档之前提示「可能已有档案」。 */
+export class SkuMatchCandidateDto {
+  @ApiProperty({ format: 'uuid' })
+  skuId!: string;
+
+  @ApiProperty({ example: 'SKU000012013' })
+  skuCode!: string;
+
+  @ApiProperty({ example: '迈从-V9 TURBO+耳机-白银' })
+  nameZh!: string;
+
+  @ApiProperty({ nullable: true })
+  brandName!: string | null;
+
+  @ApiProperty({ nullable: true })
+  categoryName!: string | null;
+
+  @ApiProperty({ example: 46, description: '该档案被订单行引用的数量（用于判断保留哪个）' })
+  orderLineCount!: number;
+
+  @ApiProperty({ example: '16.000' })
+  onHandQty!: string;
+
+  @ApiProperty({
+    enum: ['SAME_VARIANT', 'SAME_FACT', 'SIMILAR_VARIANT'],
+    description:
+      'SAME_VARIANT = 本店铺这个平台变体已挂在它上面；SAME_FACT = 极可能同一实物；SIMILAR_VARIANT = 同型号的其他配色/版本（通常应建新档案）',
+  })
+  level!: 'SAME_VARIANT' | 'SAME_FACT' | 'SIMILAR_VARIANT';
+
+  @ApiProperty({ type: [String], description: '人可读证据，前端直接展示' })
+  evidence!: string[];
+}
+
+export class SkuMatchCandidatesDto {
+  @ApiProperty({ type: [SkuMatchCandidateDto] })
+  candidates!: SkuMatchCandidateDto[];
+
+  @ApiProperty({
+    nullable: true,
+    format: 'uuid',
+    description: '建议直接映射的档案（SAME_VARIANT > SAME_FACT）；只为 SIMILAR 时为空',
+  })
+  recommendedSkuId!: string | null;
+}
+
+export class SkuMatchCandidatesQueryDto {
+  @ApiPropertyOptional({
+    description: '将要使用的 SKU 名称（建档流程传入；映射流程不传）',
+    maxLength: 200,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  name?: string;
+
+  @ApiPropertyOptional({ format: 'uuid', description: '品牌（给名称签名剥前缀、判品牌冲突）' })
+  @IsOptional()
+  @IsUUID()
+  brandId?: string;
+}
+
 export class ListingOnboardResponseDto {
   @ApiProperty({ format: 'uuid' })
   listingId!: string;

@@ -1,9 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
-import { App as AntdApp, Alert, Form, Image, Modal, Select } from 'antd';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { App as AntdApp, Alert, Button, Form, Image, Modal, Select } from 'antd';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiPost, useApiQuery, useDebouncedValue } from '../api/hooks';
 import { colors, SKU_STATUS_META, StatusBadge } from '../design-system';
 import { OnboardMatchIdentifiers } from './ListingOnboardModal';
+import {
+  SkuMatchCandidate,
+  SkuMatchCandidatesPanel,
+  useSkuMatchCandidates,
+} from './SkuMatchCandidates';
 
 /**
  * Shared「SKU映射」modal (2026-10-14): bind an UNMAPPED platform variant to an
@@ -85,9 +90,12 @@ function matchVariant(
 function InternalSkuPicker({
   value,
   onChange,
+  presetOption,
 }: {
   value?: string;
   onChange?: (id: string) => void;
+  /** 候选预选的 SKU：确保它纵使不在当前搜索结果里也能正确显示。 */
+  presetOption?: { value: string; label: string } | null;
 }) {
   const [keyword, setKeyword] = useState('');
   const debouncedKeyword = useDebouncedValue(keyword);
@@ -130,32 +138,39 @@ function InternalSkuPicker({
         placeholder="内部SKU：输入编码 / 名称 / 型号 / 条码搜索"
         style={{ width: '100%' }}
         optionLabelProp="label"
-        options={rows.map((sku) => ({
-          value: sku.id,
-          label: `${sku.skuCode} ${sku.nameZh}`,
-          // ReactNode option: thumbnail + code + name (+ 停用 badge).
-          children: (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Image
-                src={sku.primaryImageUrl || IMAGE_FALLBACK}
-                fallback={IMAGE_FALLBACK}
-                width={28}
-                height={28}
-                preview={false}
-                style={{ objectFit: 'contain', borderRadius: 4, background: colors.neutralBg }}
-              />
-              <span style={{ fontWeight: 550 }}>{sku.skuCode}</span>
-              <span style={{ fontSize: 12.5, color: colors.textSecondary }}>{sku.nameZh}</span>
-              {sku.status !== 'ACTIVE' && (
-                <StatusBadge
-                  tone={SKU_STATUS_META[sku.status]?.tone ?? 'neutral'}
-                  label={SKU_STATUS_META[sku.status]?.label ?? sku.status}
-                  showDot={false}
+        options={[
+          ...(presetOption !== null &&
+          presetOption !== undefined &&
+          !rows.some((sku) => sku.id === presetOption.value)
+            ? [{ value: presetOption.value, label: presetOption.label }]
+            : []),
+          ...rows.map((sku) => ({
+            value: sku.id,
+            label: `${sku.skuCode} ${sku.nameZh}`,
+            // ReactNode option: thumbnail + code + name (+ 停用 badge).
+            children: (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Image
+                  src={sku.primaryImageUrl || IMAGE_FALLBACK}
+                  fallback={IMAGE_FALLBACK}
+                  width={28}
+                  height={28}
+                  preview={false}
+                  style={{ objectFit: 'contain', borderRadius: 4, background: colors.neutralBg }}
                 />
-              )}
-            </div>
-          ),
-        }))}
+                <span style={{ fontWeight: 550 }}>{sku.skuCode}</span>
+                <span style={{ fontSize: 12.5, color: colors.textSecondary }}>{sku.nameZh}</span>
+                {sku.status !== 'ACTIVE' && (
+                  <StatusBadge
+                    tone={SKU_STATUS_META[sku.status]?.tone ?? 'neutral'}
+                    label={SKU_STATUS_META[sku.status]?.label ?? sku.status}
+                    showDot={false}
+                  />
+                )}
+              </div>
+            ),
+          })),
+        ]}
       />
       <div
         style={{
@@ -216,6 +231,14 @@ export interface ListingVariantMapModalProps {
   onClose: () => void;
   /** Called after a mapping is committed (pages invalidate their own caches). */
   onCompleted?: () => void;
+  /**
+   * 「这个变体没有对应档案」时的新建入口（2026-10-24 入口合一）：
+   * 宿主关闭本弹窗并打开建档弹窗，用当前变体预填。不传则不显示该入口。
+   */
+  onCreateNew?: ((mappingId: string) => void) | undefined;
+  /** 从建档弹窗「改用已有档案」转过来时，预先选中的 SKU 与变体。 */
+  initialSkuId?: string | null;
+  initialVariantId?: string | null;
   zIndex?: number;
 }
 
@@ -226,6 +249,9 @@ export function ListingVariantMapModal({
   matchIdentifiers = null,
   onClose,
   onCompleted,
+  onCreateNew,
+  initialSkuId = null,
+  initialVariantId = null,
   zIndex,
 }: ListingVariantMapModalProps) {
   const { message } = AntdApp.useApp();
@@ -280,6 +306,59 @@ export function ListingVariantMapModal({
 
   // 标题跟随当前映射目标（用户指示 2026-10-14）：货号优先，不显示平台数字 ID。
   const selectedMappingId = Form.useWatch('mappingId', form);
+  const selectedSkuId = Form.useWatch('skuId', form);
+  const activeMappingId = fixedVariant !== null ? fixedVariant.id : (selectedMappingId ?? null);
+
+  // 重复档案候选（2026-10-24）：变体选定即查，命中「该变体已挂到某档案 / 极可能
+  // 同一实物」时自动预选，运营仍可改（人工始终有最终决定权）。
+  const candidatesQuery = useSkuMatchCandidates({
+    listingId,
+    mappingId: activeMappingId,
+    enabled: open,
+  });
+  const recommended = useMemo(() => {
+    const payload = candidatesQuery.data?.data;
+    if (payload === undefined || payload.recommendedSkuId === null) {
+      return null;
+    }
+    return payload.candidates.find((item) => item.skuId === payload.recommendedSkuId) ?? null;
+  }, [candidatesQuery.data]);
+
+  useEffect(() => {
+    // 建档弹窗转场：锁定具体变体（不依赖标识反查能否命中）。
+    if (open && initialVariantId !== null && initialVariantId !== '' && fixedVariant === null) {
+      form.setFieldValue('mappingId', initialVariantId);
+    }
+  }, [open, initialVariantId, fixedVariant, form]);
+
+  // 切换变体时清掉上一个变体的选择（避免把 A 变体映射到为 B 预选的 SKU 上），
+  // 再按新变体的候选预选；「改用已有档案」转场带进来的 SKU 不覆盖。
+  const lastVariantRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open) {
+      lastVariantRef.current = null;
+      return;
+    }
+    if (lastVariantRef.current === activeMappingId) {
+      return;
+    }
+    lastVariantRef.current = activeMappingId;
+    form.setFieldValue(
+      'skuId',
+      initialSkuId === null || initialSkuId === '' ? undefined : initialSkuId,
+    );
+  }, [open, activeMappingId, initialSkuId, form]);
+
+  useEffect(() => {
+    // 只在用户还没选过 SKU 时预选，不覆盖人工选择。
+    if (!open || recommended === null) {
+      return;
+    }
+    const current = form.getFieldValue('skuId') as string | undefined;
+    if (current === undefined || current === '') {
+      form.setFieldValue('skuId', recommended.skuId);
+    }
+  }, [open, recommended, form, activeMappingId]);
   const titleSubject = useMemo(() => {
     if (fixedVariant !== null) {
       return fixedVariant.label !== '' ? fixedVariant.label : undefined;
@@ -344,13 +423,41 @@ export function ListingVariantMapModal({
             description="变体均已映射或不存在变体记录；无变体记录的链接请走「新建映射」补充。"
           />
         )}
+        <SkuMatchCandidatesPanel
+          listingId={listingId}
+          mappingId={activeMappingId}
+          enabled={open}
+          selectedSkuId={selectedSkuId ?? null}
+          onPick={(candidate: SkuMatchCandidate) => form.setFieldValue('skuId', candidate.skuId)}
+        />
         <Form.Item
           name="skuId"
           label="内部SKU"
           rules={[{ required: true, message: '请选择内部SKU' }]}
         >
-          <InternalSkuPicker />
+          <InternalSkuPicker
+            presetOption={
+              recommended === null
+                ? null
+                : {
+                    value: recommended.skuId,
+                    label: `${recommended.skuCode} ${recommended.nameZh}`,
+                  }
+            }
+          />
         </Form.Item>
+        {onCreateNew !== undefined && activeMappingId !== null && (
+          <div style={{ marginTop: -6, marginBottom: 4 }}>
+            <Button
+              type="link"
+              size="small"
+              style={{ paddingInline: 0 }}
+              onClick={() => onCreateNew(activeMappingId)}
+            >
+              没有对应档案？新建 SKU 档案（用当前变体预填）
+            </Button>
+          </div>
+        )}
       </Form>
     </Modal>
   );
