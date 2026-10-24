@@ -14,6 +14,7 @@ import { BusinessCodeService } from '../../../infrastructure/business-code/busin
 import { OperationLogService } from '../../operation-log/operation-log.service';
 import {
   PurchaseOrderNotFoundError,
+  PurchaseOrderWarehouseMissingError,
   PurchaseReceiptDuplicateDraftError,
   PurchaseReceiptInvalidStateError,
   PurchaseReceiptNotFoundError,
@@ -23,7 +24,7 @@ import {
 const operator = { userId: null, username: 'tester' };
 const manager = {} as EntityManager;
 
-function buildPo(overrides: Partial<{ receivingWarehouseId: string; status: string }>) {
+function buildPo(overrides: Partial<{ receivingWarehouseId: string | null; status: string }>) {
   return {
     id: 'po-1',
     poNo: 'PO000001',
@@ -34,7 +35,9 @@ function buildPo(overrides: Partial<{ receivingWarehouseId: string; status: stri
     expectedAt: null,
     remark: null,
     createdBy: null,
-    receivingWarehouseId: overrides.receivingWarehouseId ?? 'wh-1',
+    // 显式传 null 表示历史单据无目标仓；只有「未传」才回退默认仓。
+    receivingWarehouseId:
+      'receivingWarehouseId' in overrides ? (overrides.receivingWarehouseId ?? null) : 'wh-1',
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -114,6 +117,14 @@ describe('generateFromPo 收货仓 = 采购单目标仓（决策 0023）', () =>
     expect(ctx.repository.insertWithItems.mock.calls[0]?.[1]).toMatchObject({
       warehouseId: 'wh-po',
     });
+  });
+
+  it('历史单据没有目标仓时明确报错，不猜一个仓', async () => {
+    const ctx = setup(buildPo({ receivingWarehouseId: null }));
+    await expect(ctx.service.generateFromPo('po-1', {}, operator)).rejects.toBeInstanceOf(
+      PurchaseOrderWarehouseMissingError,
+    );
+    expect(ctx.repository.insertWithItems).not.toHaveBeenCalled();
   });
 
   it('请求仓库与目标仓不一致时拒绝，不生成草稿', async () => {

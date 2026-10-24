@@ -8,6 +8,7 @@ import { OperatorContext } from '../../operation-log/operation-log.service';
 import { booleanField, numericField, optionalField, requiredField } from '../services/excel-parser';
 import { ImportHandler, ImportRowContext, ValidRow } from './import-handler';
 import { BARCODE_TYPES, BarcodeType } from '../../product/constants/barcode.constants';
+import { validate69Barcode } from '@wcies/shared';
 
 interface SkuRowData {
   skuCode: string | null;
@@ -136,7 +137,17 @@ export class SkuImportHandler implements ImportHandler {
 
       const barcode = optionalField(cells, 'barcode');
       if (barcode !== null) {
-        if (barcodesInFile.has(barcode)) {
+        // 69 码校验位（2026-10-21）：创建接口会拒，导入校验必须同口径，
+        // 否则上传时算「有效行」、确认后才逐行失败（2026-10-24 实证）。
+        const ean = validate69Barcode(barcode);
+        if (!ean.ok) {
+          errors.push({
+            row: rowNumber,
+            field: 'barcode',
+            code: 'SKU_BARCODE_INVALID_EAN13',
+            message: ean.message ?? '69 码校验失败',
+          });
+        } else if (barcodesInFile.has(barcode)) {
           errors.push({
             row: rowNumber,
             field: 'barcode',

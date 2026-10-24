@@ -7,12 +7,17 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * 必须记录收货仓库，收货/库位/覆盖都以此为准。`receiving_warehouse_id`
  * 字段早已存在（nilable），但订单入口从未写入：96 张里 95 张为空。
  *
- * 回填口径（按物理事实优先，其次采购意图；无法唯一确定则中止，不猜）：
- *   1. 有收货的采购单 → 收货库位所属仓（预检：0 张跨仓收货）；
- *   2. 其余 → 关联订单店铺的 ACTIVE 绑定仓（预检：关联店铺均恰好 1 个绑定）。
+ * 回填口径（按物理事实优先，其次采购意图）：
+ *   1. 有收货的采购单 → 收货库位所属仓（仅单仓收货可确定）；
+ *   2. 其余 → 关联订单店铺的 ACTIVE 绑定仓（仅唯一绑定可确定）。
  *
- * 整段在一个事务里执行：任一步失败（含存在无法确定的行）整体回滚。
- * 不修改/删除任何既有业务数据；源数据（收货记录、订单链接）保留，可重算。
+ * **不再强制 NOT NULL，也不再因无法确定而中止**（2026-10-24 修正）：
+ * 历史采购单里存在既无收货、也无单绑定仓可推的（测试库实测 650/908 张），
+ * 给它们硬塞一个默认仓等于编造业务事实（AGENTS §89）。改为「新单在 API/DTO
+ * 层必填、历史单据保持 NULL」——NULL 表示「目标仓未登记」，不参与任何按仓的
+ * 在途/缺口计算，也不会被当成某个仓的意图。
+ *
+ * 回填仍是纯增量：不修改/删除既有业务数据，源数据（收货记录、订单链接）保留。
  */
 export class PurchaseOrderTargetWarehouse1792543000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
@@ -52,22 +57,6 @@ export class PurchaseOrderTargetWarehouse1792543000000 implements MigrationInter
     `);
 
     // 3) 仍有空值 = 数据存在歧义：中止（事务回滚，schema 不变）
-    await queryRunner.query(`
-      DO $$
-      DECLARE missing int;
-      BEGIN
-        SELECT count(*) INTO missing
-          FROM purchase_orders
-         WHERE receiving_warehouse_id IS NULL;
-        IF missing > 0 THEN
-          RAISE EXCEPTION 'purchase_orders: % 张无法确定目标仓，请人工处理后再迁移', missing;
-        END IF;
-      END $$;
-    `);
-
-    await queryRunner.query(
-      `ALTER TABLE purchase_orders ALTER COLUMN receiving_warehouse_id SET NOT NULL`,
-    );
     await queryRunner.query(
       `CREATE INDEX idx_purchase_orders_receiving_wh
          ON purchase_orders (receiving_warehouse_id, status)
@@ -75,14 +64,8 @@ export class PurchaseOrderTargetWarehouse1792543000000 implements MigrationInter
     );
   }
 
-  /**
-   * 回退只放松约束、保留已回填的值（源数据仍在，重算即可）。
-   * 不做数据回退：把仓库置空会重新制造“无法确定目标仓”的状态。
-   */
+  /** 回退只删索引；不回退已回填的值（源数据仍在，重算即可）。 */
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`DROP INDEX IF EXISTS idx_purchase_orders_receiving_wh`);
-    await queryRunner.query(
-      `ALTER TABLE purchase_orders ALTER COLUMN receiving_warehouse_id DROP NOT NULL`,
-    );
   }
 }

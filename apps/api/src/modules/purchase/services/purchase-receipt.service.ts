@@ -40,6 +40,7 @@ import {
 import { PurchaseOrderRepository } from '../repositories/purchase-order.repository';
 import {
   PurchaseOrderInvalidStateError,
+  PurchaseOrderWarehouseMissingError,
   PurchaseOrderNotFoundError,
   PurchaseReceiptDuplicateDraftError,
   PurchaseReceiptEmptyError,
@@ -161,14 +162,18 @@ export class PurchaseReceiptService {
     // 收货仓 = 采购单目标仓（2026-10-21 决策 0023）。采购单在创建时就必须写明
     // 送到哪个仓，收货单不允许落到别的仓——否则「SKU×仓缺口」的补货闭环会被
     // 绕过去（货到了 A 仓，缺货却发生在 B 仓）。
-    if (dto.warehouseId !== undefined && dto.warehouseId !== po.receivingWarehouseId) {
+    const poWarehouseId = po.receivingWarehouseId;
+    if (poWarehouseId === null) {
+      throw new PurchaseOrderWarehouseMissingError(po.poNo);
+    }
+    if (dto.warehouseId !== undefined && dto.warehouseId !== poWarehouseId) {
       throw new PurchaseReceiptWarehouseMismatchError({
         poNo: po.poNo,
-        expectedWarehouseId: po.receivingWarehouseId,
+        expectedWarehouseId: poWarehouseId,
         actualWarehouseId: dto.warehouseId,
       });
     }
-    const warehouseId = po.receivingWarehouseId;
+    const warehouseId = poWarehouseId;
     await this.assertWarehouseExists(warehouseId);
 
     const items = (await this.poRepository.findItemsWithRefs(poId))

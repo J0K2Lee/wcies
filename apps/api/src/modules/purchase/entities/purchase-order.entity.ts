@@ -47,12 +47,16 @@ export class PurchaseOrderEntity {
   createdBy!: string | null;
 
   /**
-   * 收货仓库 = 采购单目标仓（2026-10-21 起为一等字段，必填）。
+   * 收货仓库 = 采购单目标仓（2026-10-21 起为一等字段）。
    * 采购以「SKU + 仓」为单位补缺口：收货库位、库存归属、缺货覆盖都以此为准。
    * 库存事实仍在收货单上（decision 0013 不变）。
+   *
+   * **新单必填（DTO/Service 强制），历史单据允许 NULL**（2026-10-24）：早期采购单
+   * 无法唯一推断目标仓，硬塞默认仓等于编造事实。NULL = 目标仓未登记，不参与任何
+   * 按仓的在途/缺口计算。
    */
-  @Column({ type: 'uuid', name: 'receiving_warehouse_id', nullable: false })
-  receivingWarehouseId!: string;
+  @Column({ type: 'uuid', name: 'receiving_warehouse_id', nullable: true })
+  receivingWarehouseId!: string | null;
 
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;

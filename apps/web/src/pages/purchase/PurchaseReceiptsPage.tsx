@@ -231,7 +231,9 @@ export function PurchaseReceiptsPage() {
   >('/api/v1/warehouses', { page: 1, pageSize: 100 }, ['warehouses-for-receipt']);
 
   const openPos = useApiQuery<
-    Envelope<Array<{ id: string; poNo: string; status: string; receivingWarehouseId: string }>>
+    Envelope<
+      Array<{ id: string; poNo: string; status: string; receivingWarehouseId: string | null }>
+    >
   >('/api/v1/purchase-orders', { page: 1, pageSize: 100 }, ['pos-for-receipt']);
 
   // One cached detail query shared by the rail (edit entry) and the drawer,
@@ -1272,7 +1274,13 @@ export function PurchaseReceiptsPage() {
               optionFilterProp="label"
               placeholder="选择未完成收货的采购单"
               options={(openPos.data?.data ?? [])
-                .filter((po) => po.status === 'ORDERED' || po.status === 'PARTIALLY_RECEIVED')
+                // 历史单据可能没有目标仓（2026-10-24），后端会拒绝据此生成收货单，
+                // 这里直接不列出，避免操作者选到后才吃一个 422。
+                .filter(
+                  (po) =>
+                    po.receivingWarehouseId !== null &&
+                    (po.status === 'ORDERED' || po.status === 'PARTIALLY_RECEIVED'),
+                )
                 .map((po) => ({ value: po.id, label: `${po.poNo}（${po.status}）` }))}
             />
           </Form.Item>

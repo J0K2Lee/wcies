@@ -78,6 +78,19 @@ export class PurchaseReceiptWarehouseMismatchError extends DomainError {
   }
 }
 
+/**
+ * 历史采购单可能没有目标仓（2026-10-24 允许 NULL）。收货必须落到明确的仓，
+ * 这里拒绝生成草稿，而不是替操作者猜一个仓。
+ */
+export class PurchaseOrderWarehouseMissingError extends DomainError {
+  readonly code = 'PURCHASE_ORDER_WAREHOUSE_MISSING';
+  readonly httpStatus = 422;
+
+  constructor(poNo: string) {
+    super(`采购单 ${poNo} 没有登记目标仓，请先在采购单上补充收货仓库`, { poNo });
+  }
+}
+
 export class PurchaseReceiptNotFoundError extends DomainError {
   readonly code = 'PURCHASE_RECEIPT_NOT_FOUND';
   readonly httpStatus = 404;

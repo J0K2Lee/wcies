@@ -104,6 +104,20 @@ describe('SkuImportHandler.validate (V1: no product columns)', () => {
     });
   });
 
+  it('rejects an invalid 69 barcode at validation time (same rule as the API)', async () => {
+    // 上传校验若放过非法校验位，确认阶段才逐行失败：validRows 变成谎报
+    //（2026-10-24 实证 91 有效行 → 只导入 1 行）。
+    const { handler } = buildHandler();
+    const { validRows, errors } = await handler.validate([
+      { rowNumber: 2, cells: { name_zh: 'SKU A', barcode: '6901234567890', barcode_type: 'EAN' } },
+      { rowNumber: 3, cells: { name_zh: 'SKU B', barcode: '6901234567892', barcode_type: 'EAN' } },
+    ]);
+    expect(validRows.map((row) => row.rowNumber)).toEqual([3]);
+    expect(errors).toEqual([
+      expect.objectContaining({ row: 2, field: 'barcode', code: 'SKU_BARCODE_INVALID_EAN13' }),
+    ]);
+  });
+
   it('accepts a row without brand/category (both stay null)', async () => {
     const { handler } = buildHandler();
     const { validRows, errors } = await handler.validate([

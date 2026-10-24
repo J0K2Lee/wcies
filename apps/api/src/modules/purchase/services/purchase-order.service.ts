@@ -134,7 +134,13 @@ export class PurchaseOrderService {
         })),
       );
       const receipt = dto.receipt
-        ? await this.createReceiptDraft(manager, created, receiptBins, operator)
+        ? await this.createReceiptDraft(
+            manager,
+            created,
+            dto.receivingWarehouseId,
+            receiptBins,
+            operator,
+          )
         : null;
       return { created, receipt };
     });
@@ -532,6 +538,7 @@ export class PurchaseOrderService {
   private async createReceiptDraft(
     manager: EntityManager,
     po: PurchaseOrderEntity,
+    warehouseId: string,
     binsBySku: Map<string, string | null>,
     operator: OperatorContext,
   ): Promise<PurchaseReceiptEntity> {
@@ -545,7 +552,9 @@ export class PurchaseOrderService {
         purchaseOrderId: po.id,
         supplierId: po.supplierId,
         sourceNote: po.sourceNote,
-        warehouseId: po.receivingWarehouseId,
+        // 用创建入参而不是 po.receivingWarehouseId：实体字段已允许历史 NULL，
+        // 这里必须是本次新建单明确选择的仓。
+        warehouseId,
         status: 'DRAFT',
         remark: `从采购单 ${po.poNo} 创建时自动生成`,
         createdBy: operator.userId,
