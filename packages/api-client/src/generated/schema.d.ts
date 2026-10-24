@@ -1647,6 +1647,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/orders/{id}/purge-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 错误摄入订单的移除预览（2026-10-24）：会删掉哪些附属行、被哪些业务事实阻止（只读） */
+        get: operations["OrderController_purgePreview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders/{id}/purge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 彻底移除错误摄入的订单（不可逆）：仅当订单未产生任何业务事实时允许，需再次输入订单号 */
+        post: operations["OrderController_purge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/orders/{id}/cancel": {
         parameters: {
             query?: never;
@@ -5710,6 +5744,61 @@ export interface components {
             orderIds: string[];
             /** @description 外部履约原因（必填，应用于全部勾选订单，逐单记入状态历史与操作日志） */
             reason: string;
+        };
+        OrderPurgeItemDto: {
+            /** Format: uuid */
+            id: string;
+            /** @example 1 */
+            lineNo: number;
+            /** @example RELEASED */
+            fulfillmentStatus: string;
+        };
+        OrderPurgePreviewDto: {
+            /** Format: uuid */
+            orderId: string;
+            /** @example ORD00000607 */
+            orderNo: string;
+            /** @example eR.i49479b87ca8ab542f29327dfab47c528.0.0 */
+            platformOrderId: string;
+            /** @example CANCELLED */
+            erpStatus: string;
+            items: components["schemas"]["OrderPurgeItemDto"][];
+            /**
+             * @description 会随订单一并删除的附属行数
+             * @example {
+             *       "items": 1,
+             *       "statusHistory": 3,
+             *       "platformStatusHistory": 1,
+             *       "exceptions": 2
+             *     }
+             */
+            willDelete: Record<string, never>;
+            /** @description 阻止删除的业务事实（非空则拒绝）：库存流水/占用/拣货/发货/结算/财务/拦截/面单/采购引用 */
+            blockers: string[];
+        };
+        OrderPurgeResultDto: {
+            /** Format: uuid */
+            orderId: string;
+            /** @example ORD00000607 */
+            orderNo: string;
+            /**
+             * @example {
+             *       "items": 1,
+             *       "statusHistory": 3,
+             *       "platformStatusHistory": 1,
+             *       "exceptions": 2
+             *     }
+             */
+            deleted: Record<string, never>;
+        };
+        OrderPurgeRequestDto: {
+            /** @description 移除原因（写入操作日志） */
+            reason: string;
+            /**
+             * @description 再次输入订单号确认（不可逆动作）
+             * @example ORD00000607
+             */
+            confirmOrderNo: string;
         };
         OrderCancelResultDto: {
             orderId: string;
@@ -10870,6 +10959,60 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["OrderBatchMarkExternalFulfillmentResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    OrderController_purgePreview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderPurgePreviewDto"];
+                    };
+                };
+            };
+        };
+    };
+    OrderController_purge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderPurgeRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderPurgeResultDto"];
                     };
                 };
             };

@@ -25,6 +25,7 @@ import { buildOzonProductUrl, buildPlatformProductUrl } from '../../utils/platfo
 import { openShippingLabelPrintWindow, showMergedPdfInWindow } from '../../printing/print-browser';
 import { ListingOnboardModal, OnboardMatchIdentifiers } from '../../components/ListingOnboardModal';
 import { ListingVariantMapModal } from '../../components/ListingVariantMapModal';
+import { OrderPurgeModal } from '../../components/OrderPurgeModal';
 import {
   ActionIsland,
   ContextAction,
@@ -2219,6 +2220,14 @@ export function OrdersPage() {
   } | null>(null);
   const [variantMapLookupPending, setVariantMapLookupPending] = useState(false);
 
+  // 「彻底移除错误摄入的订单」（2026-10-24）：只对已取消的订单开放入口——
+  // 错单最典型的形态就是被前置修复取消掉的那批。
+  const [purgeTarget, setPurgeTarget] = useState<{
+    id: string;
+    orderNo: string;
+    platformOrderId: string;
+  } | null>(null);
+
   const openVariantMap = useCallback(
     (item: OrderItem, storeId: string) => {
       setVariantMapLookupPending(true);
@@ -2697,6 +2706,21 @@ export function OrdersPage() {
             </Button>
           );
         })()}
+        {selectedRow.erpStatus === 'CANCELLED' && (
+          <Button
+            block
+            style={{ marginTop: 8, color: colors.danger }}
+            onClick={() =>
+              setPurgeTarget({
+                id: selectedRow.id,
+                orderNo: selectedRow.orderNo,
+                platformOrderId: selectedRow.platformOrderId,
+              })
+            }
+          >
+            彻底移除（错误摄入）
+          </Button>
+        )}
         {selectedRow.erpStatus !== 'CANCELLED' && (
           <Button
             block
@@ -4420,6 +4444,13 @@ export function OrdersPage() {
           // 会被状态守卫 409 误报。列表/详情刷新后即可见修复结果。
         }}
         zIndex={1100}
+      />
+
+      {/* ---- 错误摄入订单的彻底移除（2026-10-24） ---- */}
+      <OrderPurgeModal
+        order={purgeTarget}
+        onClose={() => setPurgeTarget(null)}
+        onPurged={() => setPurgeTarget(null)}
       />
 
       {/* ---- SKU映射弹窗（2026-10-14，与 SKU映射 页面共用同一组件）：

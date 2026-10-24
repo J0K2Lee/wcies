@@ -27,6 +27,7 @@ import { OrderIngestionService } from './services/order-ingestion.service';
 import { OrderAutoReallocationService } from './services/order-auto-reallocation.service';
 import { OrderPlatformShippedService } from './services/order-platform-shipped.service';
 import { OrderService } from './services/order.service';
+import { OrderPurgeService } from './services/order-purge.service';
 import { SkuReferenceRelinkService } from './services/sku-reference-relink.service';
 import { OrderController } from './controllers/order.controller';
 
@@ -75,6 +76,7 @@ import { OrderController } from './controllers/order.controller';
     OrderIngestionService,
     OrderAutoReallocationService,
     OrderPlatformShippedService,
+    OrderPurgeService,
     OrderService,
   ],
   exports: [OrderService, OrderIngestionService, OrderStatusService, OrderPlatformShippedService],

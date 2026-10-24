@@ -5983,6 +5983,94 @@
         "tags": ["orders"]
       }
     },
+    "/api/v1/orders/{id}/purge-preview": {
+      "get": {
+        "operationId": "OrderController_purgePreview",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/OrderPurgePreviewDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "错误摄入订单的移除预览（2026-10-24）：会删掉哪些附属行、被哪些业务事实阻止（只读）",
+        "tags": ["orders"]
+      }
+    },
+    "/api/v1/orders/{id}/purge": {
+      "post": {
+        "operationId": "OrderController_purge",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderPurgeRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/OrderPurgeResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "彻底移除错误摄入的订单（不可逆）：仅当订单未产生任何业务事实时允许，需再次输入订单号",
+        "tags": ["orders"]
+      }
+    },
     "/api/v1/orders/{id}/cancel": {
       "post": {
         "operationId": "OrderController_cancel",
@@ -17408,6 +17496,116 @@
           }
         },
         "required": ["orderIds", "reason"]
+      },
+      "OrderPurgeItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lineNo": {
+            "type": "number",
+            "example": 1
+          },
+          "fulfillmentStatus": {
+            "type": "string",
+            "example": "RELEASED"
+          }
+        },
+        "required": ["id", "lineNo", "fulfillmentStatus"]
+      },
+      "OrderPurgePreviewDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderNo": {
+            "type": "string",
+            "example": "ORD00000607"
+          },
+          "platformOrderId": {
+            "type": "string",
+            "example": "eR.i49479b87ca8ab542f29327dfab47c528.0.0"
+          },
+          "erpStatus": {
+            "type": "string",
+            "example": "CANCELLED"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderPurgeItemDto"
+            }
+          },
+          "willDelete": {
+            "type": "object",
+            "description": "会随订单一并删除的附属行数",
+            "example": {
+              "items": 1,
+              "statusHistory": 3,
+              "platformStatusHistory": 1,
+              "exceptions": 2
+            }
+          },
+          "blockers": {
+            "description": "阻止删除的业务事实（非空则拒绝）：库存流水/占用/拣货/发货/结算/财务/拦截/面单/采购引用",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "orderId",
+          "orderNo",
+          "platformOrderId",
+          "erpStatus",
+          "items",
+          "willDelete",
+          "blockers"
+        ]
+      },
+      "OrderPurgeResultDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderNo": {
+            "type": "string",
+            "example": "ORD00000607"
+          },
+          "deleted": {
+            "type": "object",
+            "example": {
+              "items": 1,
+              "statusHistory": 3,
+              "platformStatusHistory": 1,
+              "exceptions": 2
+            }
+          }
+        },
+        "required": ["orderId", "orderNo", "deleted"]
+      },
+      "OrderPurgeRequestDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "移除原因（写入操作日志）",
+            "maxLength": 450
+          },
+          "confirmOrderNo": {
+            "type": "string",
+            "description": "再次输入订单号确认（不可逆动作）",
+            "example": "ORD00000607"
+          }
+        },
+        "required": ["reason", "confirmOrderNo"]
       },
       "OrderCancelResultDto": {
         "type": "object",

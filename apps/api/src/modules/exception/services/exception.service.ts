@@ -142,6 +142,22 @@ export class ExceptionService {
     });
   }
 
+  /**
+   * 删除某订单（含其订单行）的异常记录——用于「错误摄入订单彻底移除」
+   * （2026-10-24）：异常只属于那张单，留着会指向已删除的订单。
+   */
+  async deleteByReferenceInTx(
+    manager: EntityManager,
+    input: { orderId: string; orderItemIds: readonly string[] },
+  ): Promise<void> {
+    await manager.query(
+      `DELETE FROM system_exceptions
+        WHERE (reference_type = 'ORDER' AND reference_id = $1::uuid)
+           OR (reference_type = 'ORDER_ITEM' AND reference_id = ANY($2::uuid[]))`,
+      [input.orderId, [...input.orderItemIds]],
+    );
+  }
+
   /** Own-transaction variant of resolveByReferenceInTx for standalone flows. */
   async resolveByReference(input: {
     exceptionType: string;

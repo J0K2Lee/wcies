@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Post,
   Query,
   UseGuards,
@@ -17,6 +18,7 @@ import { ok, okPage } from '../../../common/dto/api-response';
 import { ApiOkEnvelope, ApiOkPagedEnvelope } from '../../../common/swagger/api-envelope';
 import { OrderService } from '../services/order.service';
 import { OrderIngestionService } from '../services/order-ingestion.service';
+import { OrderPurgeService } from '../services/order-purge.service';
 import { OrderGoodsStateFilter, OrderStageFilter } from '../enums/order.constants';
 import {
   NormalizedOrderInputDto,
@@ -34,6 +36,9 @@ import {
   OrderCancelExternalFulfillmentResultDto,
   OrderMarkLabelPrintedRequestDto,
   OrderMarkLabelPrintedResultDto,
+  OrderPurgePreviewDto,
+  OrderPurgeRequestDto,
+  OrderPurgeResultDto,
   OrderRetryAllocationResultDto,
   OrderSetUrgentRequestDto,
   OrderSetUrgentResultDto,
@@ -45,6 +50,7 @@ export class OrderController {
   constructor(
     private readonly orderService: OrderService,
     private readonly ingestionService: OrderIngestionService,
+    private readonly purgeService: OrderPurgeService,
   ) {}
 
   @Get()
@@ -126,6 +132,31 @@ export class OrderController {
         operator,
       ),
     );
+  }
+
+  @Get(':id/purge-preview')
+  @ApiOperation({
+    summary: '错误摄入订单的移除预览（2026-10-24）：会删掉哪些附属行、被哪些业务事实阻止（只读）',
+  })
+  @ApiOkEnvelope(OrderPurgePreviewDto)
+  async purgePreview(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<{ success: true; data: OrderPurgePreviewDto }> {
+    return ok(await this.purgeService.preview(id));
+  }
+
+  @Post(':id/purge')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '彻底移除错误摄入的订单（不可逆）：仅当订单未产生任何业务事实时允许，需再次输入订单号',
+  })
+  @ApiOkEnvelope(OrderPurgeResultDto)
+  async purge(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: OrderPurgeRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: OrderPurgeResultDto }> {
+    return ok(await this.purgeService.purge(id, operator, dto));
   }
 
   @Post(':id/cancel')

@@ -710,3 +710,64 @@ export class OrderBatchMarkExternalFulfillmentResultDto {
   @ApiProperty({ type: [OrderBatchMarkExternalFulfillmentItemDto] })
   results!: OrderBatchMarkExternalFulfillmentItemDto[];
 }
+
+// ---------------------------------------------------------------------------
+// 错误摄入订单的彻底移除（2026-10-24 用户指示）
+// ---------------------------------------------------------------------------
+
+export class OrderPurgeItemDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty({ example: 1 }) lineNo!: number;
+  @ApiProperty({ example: 'RELEASED' }) fulfillmentStatus!: string;
+}
+
+export class OrderPurgePreviewDto {
+  @ApiProperty({ format: 'uuid' }) orderId!: string;
+  @ApiProperty({ example: 'ORD00000607' }) orderNo!: string;
+  @ApiProperty({ example: 'eR.i49479b87ca8ab542f29327dfab47c528.0.0' })
+  platformOrderId!: string;
+  @ApiProperty({ example: 'CANCELLED' }) erpStatus!: string;
+  @ApiProperty({ type: [OrderPurgeItemDto] }) items!: OrderPurgeItemDto[];
+  @ApiProperty({
+    description: '会随订单一并删除的附属行数',
+    example: { items: 1, statusHistory: 3, platformStatusHistory: 1, exceptions: 2 },
+  })
+  willDelete!: {
+    items: number;
+    statusHistory: number;
+    platformStatusHistory: number;
+    exceptions: number;
+  };
+  @ApiProperty({
+    type: [String],
+    description:
+      '阻止删除的业务事实（非空则拒绝）：库存流水/占用/拣货/发货/结算/财务/拦截/面单/采购引用',
+  })
+  blockers!: string[];
+}
+
+export class OrderPurgeRequestDto {
+  @ApiProperty({ description: '移除原因（写入操作日志）', maxLength: 450 })
+  @IsString()
+  @MaxLength(450)
+  reason!: string;
+
+  @ApiProperty({ description: '再次输入订单号确认（不可逆动作）', example: 'ORD00000607' })
+  @IsString()
+  @MaxLength(40)
+  confirmOrderNo!: string;
+}
+
+export class OrderPurgeResultDto {
+  @ApiProperty({ format: 'uuid' }) orderId!: string;
+  @ApiProperty({ example: 'ORD00000607' }) orderNo!: string;
+  @ApiProperty({
+    example: { items: 1, statusHistory: 3, platformStatusHistory: 1, exceptions: 2 },
+  })
+  deleted!: {
+    items: number;
+    statusHistory: number;
+    platformStatusHistory: number;
+    exceptions: number;
+  };
+}
