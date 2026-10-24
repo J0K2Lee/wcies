@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProductModule } from '../product/product.module';
 import { WarehouseModule } from '../warehouse/warehouse.module';
@@ -17,6 +17,7 @@ import { InventorySafetyStockRepository } from './repositories/inventory-safety-
 import { InventorySerialRepository } from './repositories/inventory-serial.repository';
 import { ReplenishmentRepository } from './repositories/replenishment.repository';
 import { InventoryService } from './services/inventory.service';
+import { SkuMergeInventoryService } from './services/sku-merge-inventory.service';
 import { InventoryAdjustmentService } from './services/inventory-adjustment.service';
 import { InventoryMovementService } from './services/inventory-movement.service';
 import { InventoryQueryService } from './services/inventory-query.service';
@@ -46,7 +47,7 @@ import {
       InventoryTransactionEntity,
       InventorySerialEntity,
     ]),
-    ProductModule,
+    forwardRef(() => ProductModule),
     WarehouseModule,
     OperationLogModule,
   ],
@@ -56,6 +57,7 @@ import {
     InventorySafetyStockController,
   ],
   providers: [
+    SkuMergeInventoryService,
     InventoryBalanceRepository,
     InventoryReservationRepository,
     InventoryTransactionRepository,
@@ -75,6 +77,7 @@ import {
     ReservationService,
     InventoryQueryService,
     InventoryStockListenerRegistry,
+    SkuMergeInventoryService,
   ],
 })
 export class InventoryModule {}

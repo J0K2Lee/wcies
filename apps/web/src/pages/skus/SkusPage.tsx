@@ -63,6 +63,32 @@ import {
  * SKU 字段（D5）；分类管理与品牌管理入口从已删除的商品页迁入本页（D4）。
  */
 
+interface SkuMergePreview {
+  source: { id: string; skuCode: string; nameZh: string; status: string };
+  target: { id: string; skuCode: string; nameZh: string; status: string };
+  references: Record<string, number>;
+  product: {
+    platformMappings: number;
+    barcodes: number;
+    duplicateBarcodes: number;
+    images: number;
+    bundleAsBundle: number;
+    bundleAsComponent: number;
+    bundleConflicts: number;
+  };
+  inventory: {
+    balances: number;
+    onHandQty: string;
+    reservedQty: string;
+    pickedQty: string;
+    reservations: number;
+    serials: number;
+    safetyStacks?: number;
+    safetyStocks: number;
+    transactions: number;
+  };
+}
+
 interface SkuRow {
   id: string;
   skuCode: string;
@@ -296,6 +322,15 @@ export function SkusPage() {
     id: string;
     skuCode: string;
   } | null>(null);
+  /**
+   * 合并到其他 SKU（2026-10-24 用户需求）：把「其实是同一件实物」的重复档案
+   * 并到一个 SKU 上。源 SKU 会消失，目标 SKU 保留基础信息。
+   */
+  const [mergeSource, setMergeSource] = useState<{ id: string; skuCode: string } | null>(null);
+  const [mergeTargetId, setMergeTargetId] = useState<string | null>(null);
+  const [mergeKeyword, setMergeKeyword] = useState('');
+  const [mergeConfirmCode, setMergeConfirmCode] = useState('');
+  const [mergeForm] = Form.useForm();
   const [barcodeForm] = Form.useForm();
   const [editForm] = Form.useForm();
   const [listingForm] = Form.useForm();
@@ -758,6 +793,50 @@ export function SkusPage() {
   }, [editTargetId, sku, rows]);
 
   // ---- Context rail: quick view of the selected SKU (task §29) ----
+  // ---- 合并到其他 SKU（2026-10-24）----
+  const mergeTargets = useApiQuery<{ data: SkuRow[] }>(
+    '/api/v1/skus',
+    { page: 1, pageSize: 20, ...(mergeKeyword ? { keyword: mergeKeyword } : {}) },
+    ['skus-merge-targets', mergeKeyword],
+    undefined,
+    mergeSource !== null,
+  );
+  const mergePreview = useApiQuery<{ data: SkuMergePreview }>(
+    '/api/v1/skus/{id}/merge-preview',
+    { targetSkuId: mergeTargetId ?? '' },
+    ['sku-merge-preview', mergeSource?.id ?? '', mergeTargetId ?? ''],
+    { id: mergeSource?.id ?? '' },
+    mergeSource !== null && mergeTargetId !== null,
+  );
+  const mergeMutation = useMutation({
+    mutationFn: ({
+      sourceId,
+      targetSkuId,
+      confirmSkuCode,
+    }: {
+      sourceId: string;
+      targetSkuId: string;
+      confirmSkuCode: string;
+    }) =>
+      apiPost<{ mergedSourceSkuCode: string; targetSkuCode: string }>(
+        '/api/v1/skus/{id}/merge-into',
+        { targetSkuId, confirmSkuCode },
+        { id: sourceId },
+      ),
+    onSuccess: (result) => {
+      void message.success(
+        `已把 ${result.mergedSourceSkuCode} 合并到 ${result.targetSkuCode}（源档案已删除）`,
+      );
+      setMergeSource(null);
+      setMergeTargetId(null);
+      setMergeConfirmCode('');
+      void queryClient.invalidateQueries({ queryKey: ['skus'] });
+      void queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+    },
+    onError: (error: Error) => void message.error(`合并失败：${error.message}`),
+  });
+
   const railContent = useMemo<ContextRailContent>(() => {
     if (selectedRow === null) {
       return {
@@ -902,6 +981,19 @@ export function SkusPage() {
               }}
             >
               映射平台商品
+            </Button>
+            <Button
+              block
+              style={{ marginTop: 8 }}
+              onClick={() => {
+                setMergeSource({ id: selectedRow.id, skuCode: selectedRow.skuCode });
+                setMergeTargetId(null);
+                setMergeKeyword('');
+                setMergeConfirmCode('');
+                mergeForm.resetFields();
+              }}
+            >
+              合并到其他 SKU…
             </Button>
             <Button
               block
@@ -1563,6 +1655,110 @@ export function SkusPage() {
           ]}
         />
       </Drawer>
+
+      {/* ---- 合并到其他 SKU（2026-10-24）：预览影响面 + 输入目标编码确认 ---- */}
+      <Modal
+        title={`合并到其他 SKU：${mergeSource?.skuCode ?? ''}`}
+        open={mergeSource !== null}
+        onCancel={() => setMergeSource(null)}
+        width={680}
+        destroyOnHidden
+        footer={[
+          <Button key="cancel" onClick={() => setMergeSource(null)}>
+            取消
+          </Button>,
+          <Button
+            key="ok"
+            danger
+            disabled={mergeTargetId === null || mergePreview.data === undefined}
+            loading={mergeMutation.isPending}
+            onClick={() => {
+              if (mergeSource === null || mergeTargetId === null) {
+                return;
+              }
+              mergeMutation.mutate({
+                sourceId: mergeSource.id,
+                targetSkuId: mergeTargetId,
+                confirmSkuCode: mergeConfirmCode,
+              });
+            }}
+          >
+            确认合并
+          </Button>,
+        ]}
+      >
+        {(() => {
+          const preview = mergePreview.data?.data ?? null;
+          const blocked = mergePreview.error !== null && mergePreview.error !== undefined;
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+                把源 SKU 的全部平台映射、条码、图片、业务引用与库存账面并入目标 SKU， 源 SKU
+                将被删除；**目标 SKU 的基础信息（名称/品牌/分类/型号/规格）保持不变**。
+                合并不可撤销。
+              </span>
+              <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                <span style={{ fontSize: 12.5, color: colors.textTertiary }}>目标 SKU</span>
+                <Select
+                  showSearch
+                  filterOption={false}
+                  value={mergeTargetId ?? undefined}
+                  placeholder="搜索 SKU 编码 / 名称"
+                  style={{ width: '100%' }}
+                  onSearch={setMergeKeyword}
+                  loading={mergeTargets.isLoading}
+                  options={(mergeTargets.data?.data ?? [])
+                    .filter((sku) => sku.id !== mergeSource?.id)
+                    .map((sku) => ({
+                      value: sku.id,
+                      label: `${sku.skuCode} · ${sku.nameZh}`,
+                    }))}
+                  onChange={(value: string) => setMergeTargetId(value)}
+                />
+              </Space>
+              {mergeTargetId !== null && mergePreview.isLoading && (
+                <span style={{ fontSize: 12.5, color: colors.textTertiary }}>预览加载中…</span>
+              )}
+              {preview !== null && (
+                <div style={{ fontSize: 12.5, lineHeight: 1.9 }}>
+                  <div>
+                    平台映射 {preview.product.platformMappings} 条 · 条码 {preview.product.barcodes}{' '}
+                    个（其中与目标重复 {preview.product.duplicateBarcodes} 个会被丢弃） · 图片{' '}
+                    {preview.product.images} 张
+                  </div>
+                  <div>
+                    库存余额 {preview.inventory.balances} 行（实物 {preview.inventory.onHandQty}
+                    、占用 {preview.inventory.reservedQty}、已拣 {preview.inventory.pickedQty}） ·
+                    预留 {preview.inventory.reservations} · 流水 {preview.inventory.transactions}{' '}
+                    条将重算
+                  </div>
+                  <div>
+                    业务引用：
+                    {Object.entries(preview.references)
+                      .filter(([, count]) => count > 0)
+                      .map(([name, count]) => `${name} ${count}`)
+                      .join(' · ') || '无'}
+                  </div>
+                  <div style={{ color: colors.danger, marginTop: 4 }}>
+                    确认请输入目标编码：{preview.target.skuCode}
+                  </div>
+                </div>
+              )}
+              {blocked && (
+                <div style={{ fontSize: 12.5, color: colors.danger }}>
+                  无法合并：{String(mergePreview.error?.message ?? '')}
+                </div>
+              )}
+              <Input
+                placeholder="输入目标 SKU 编码以确认"
+                value={mergeConfirmCode}
+                onChange={(event) => setMergeConfirmCode(event.target.value)}
+                disabled={mergeTargetId === null}
+              />
+            </div>
+          );
+        })()}
+      </Modal>
 
       <Modal
         title="添加条码"

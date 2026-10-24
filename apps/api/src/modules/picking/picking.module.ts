@@ -11,6 +11,7 @@ import { PickingTaskItemEntity } from './entities/picking-task-item.entity';
 import { PickingTaskRepository } from './repositories/picking-task.repository';
 import { PickingTaskItemRepository } from './repositories/picking-task-item.repository';
 import { PickingService } from './services/picking.service';
+import { SkuReferenceRelinkService } from './services/sku-reference-relink.service';
 import { PickingController } from './controllers/picking.controller';
 import { ORDER_PICKING_STATE_PORT } from '../order/ports/order-picking-state.port';
 
@@ -33,6 +34,7 @@ import { ORDER_PICKING_STATE_PORT } from '../order/ports/order-picking-state.por
   ],
   controllers: [PickingController],
   providers: [
+    SkuReferenceRelinkService,
     PickingTaskRepository,
     PickingTaskItemRepository,
     PickingService,

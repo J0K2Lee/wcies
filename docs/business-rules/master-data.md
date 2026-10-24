@@ -178,6 +178,35 @@ Sprint 8.5R1 起（2026-09-14，人工验收修复；映射规则变更见决策
 23. **类目树精简端点**：`GET /categories/tree-lite` 返回 `id/parentId/code/nameZh/nameRu/level/sortOrder/status/children`（SQL 列裁剪，去掉 `createdAt/updatedAt` 等），供 SKU / Listing 两个页面的类目选择器与 SKU 页的「分类管理」树消费（商品页已删除，2026-10-13 决策 0020）；层级语义、排序（`sort_order, code`）与 `GET /categories` 完全一致。`GET /categories` 行为不变（向后兼容），两者共用同一建树实现以免形状漂移。
 24. **映射解析不使用 Offer ID**（决策 0016）：见 §9 第 6 条。人工映射要求至少一个**解析标识**（Platform SKU ID 或 Seller SKU）；纯 Offer ID 被拒（422 文案见 §12）。`offer_id` 仍同步入库、列表展示、Excel 导出列保留、关键字搜索可命中，仅从解析/绑定链路移除。
 
+## 8a. SKU 档案合并（2026-10-24 用户需求）
+
+背景：运营在不同平台商品上各自「快速建档」，会把**同一件实物**建成多个内部 SKU。
+合并把重复档案归到一个 SKU 上，**目标 SKU 的基础信息（名称/品牌/分类/型号/规格/成本）
+永远保留**。
+
+规则：
+
+1. 语义是**账面身份归并**，不是实物移动：同一个 SKU 身份下重新汇总数量。
+2. 平台映射、条码、图片、套装组件、各模块业务引用（订单行/采购明细/拣货/发货/
+   结算/调拨）全部改指目标；源 SKU 删除。
+3. 条码**全局唯一**：与目标重复的源条码直接丢弃（合并结果里给出丢弃数）；
+   主条码、主图均「目标优先」，目标没有时源的主条码/主图转正。
+4. 库存：同 `(仓, 库位, SELLABLE)` 的三项数量（on_hand / reserved / picked）相加，
+   源行删除；不同维度直接改指；预留、序列号、安全库存改指（安全库存是阈值，
+   目标已有则保留目标、丢弃源的）。
+5. **流水重算**：`inventory_transactions` 全部改指后，按 `(仓, 库位)` 以
+   `created_at, id` 升序**从 0 重放**，重写 `quantity_before/after`、
+   `reserved_before/after`、`picked_before/after`；终值必须等于合并后的余额，
+   否则整体拒绝（说明历史缺行或被手改）。
+6. 序列号撞号（同一 `serial_number` 在两个 SKU 上）= 同一台实物记了两次，
+   **拒绝合并**并报错。
+7. 执行约束：单事务；两个 SKU 按 id 排序加锁；操作员必须**再次输入目标 SKU 编码**
+   确认；成功后写 `operation_logs`（`MERGE_SKU`，含源编码/名称/引用计数/库存结果）。
+8. 不可撤销：源 SKU 与其基础信息不可恢复（历史流水已并入目标）。
+
+API：`GET /skus/:id/merge-preview?targetSkuId=`（影响面与冲突，只读）、
+`POST /skus/:id/merge-into { targetSkuId, confirmSkuCode }`。
+
 ## 9. Listing Resolver（订单安全边界）
 
 `ListingResolverService.resolveInternalSku({ storeId, platformSkuId?, sellerSku? })`：

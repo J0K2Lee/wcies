@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DataSource, EntityManager } from 'typeorm';
-import { ListingOnboardingService } from './listing-onboarding.service';
+import { ListingOnboardingService, resolveOnboardImageUrl } from './listing-onboarding.service';
 import { ListingRepository } from '../repositories/listing.repository';
 import { SkuService } from '../../product/services/sku.service';
 import { BarcodeService } from '../../product/services/barcode.service';
@@ -313,5 +313,46 @@ describe('ListingOnboardingService (V1: direct SKU onboarding)', () => {
     await ctx.service.onboard('listing-1', 'mapping-1', {}, operator);
     const actions = vi.mocked(ctx.operationLog.record).mock.calls.map((call) => call[0].action);
     expect(actions).toEqual(['CREATE', 'CREATE', 'MAP']);
+  });
+});
+
+/**
+ * 建档取图（2026-10-24 用户 bug）：WB / Yandex 的图不在变体 raw_data 上，
+ * 而在**商品链接** raw_data 里。修复前只读 OZON 的两个 key，两个平台永远拿不到图。
+ */
+describe('resolveOnboardImageUrl（按平台取图）', () => {
+  it('OZON：优先变体自带的 color_image / primary_image', () => {
+    expect(
+      resolveOnboardImageUrl(
+        { color_image: 'https://cdn/color.jpg', primary_image: 'https://cdn/primary.jpg' },
+        null,
+      ),
+    ).toBe('https://cdn/color.jpg');
+    expect(resolveOnboardImageUrl({ primary_image: 'https://cdn/primary.jpg' }, null)).toBe(
+      'https://cdn/primary.jpg',
+    );
+  });
+
+  it('YANDEX：取商品链接 offer.pictures[0]', () => {
+    expect(
+      resolveOnboardImageUrl(
+        { marketSku: 1 },
+        { offer: { pictures: ['https://avatars.mds.yandex.net/a.jpg'] } },
+      ),
+    ).toBe('https://avatars.mds.yandex.net/a.jpg');
+  });
+
+  it('WB：取商品链接 photos[0].c516x688', () => {
+    expect(
+      resolveOnboardImageUrl(
+        { chrtID: 1 },
+        { photos: [{ c516x688: 'https://basket-44.wbbasket.ru/x.webp' }] },
+      ),
+    ).toBe('https://basket-44.wbbasket.ru/x.webp');
+  });
+
+  it('都没有图片时返回 null（不猜）', () => {
+    expect(resolveOnboardImageUrl({ marketSku: 1 }, { offer: {} })).toBeNull();
+    expect(resolveOnboardImageUrl(null, null)).toBeNull();
   });
 });

@@ -38,6 +38,13 @@ import {
   UpdateBarcodeRequestDto,
   UpdateSkuImageRequestDto,
 } from '../dto/barcode-image.dto';
+import {
+  SkuMergePreviewResponseDto,
+  SkuMergeRequestDto,
+  SkuMergePreviewQueryDto,
+  SkuMergeResultResponseDto,
+} from '../dto/sku-merge.dto';
+import { SkuMergeService } from '../services/sku-merge.service';
 import { BarcodeService } from '../services/barcode.service';
 import { SkuService } from '../services/sku.service';
 import { SkuImageService } from '../services/sku-image.service';
@@ -49,7 +56,35 @@ export class SkuController {
     private readonly skuService: SkuService,
     private readonly barcodeService: BarcodeService,
     private readonly imageService: SkuImageService,
+    private readonly mergeService: SkuMergeService,
   ) {}
+
+  // ---- SKU 合并（2026-10-24）----
+
+  @Get('skus/:id/merge-preview')
+  @ApiOperation({ summary: 'SKU 合并预览：影响面与冲突（只读，不改数据）' })
+  @ApiOkEnvelope(SkuMergePreviewResponseDto)
+  async mergePreview(
+    @Param('id') id: string,
+    @Query() query: SkuMergePreviewQueryDto,
+  ): Promise<{ success: true; data: SkuMergePreviewResponseDto }> {
+    return ok(await this.mergeService.preview(id, query.targetSkuId));
+  }
+
+  @Post('skus/:id/merge-into')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      '把该 SKU 合并到目标 SKU（映射/条码/图片/业务引用改指，库存账面归并 + 流水重排，源 SKU 删除）',
+  })
+  @ApiOkEnvelope(SkuMergeResultResponseDto)
+  async mergeInto(
+    @Param('id') id: string,
+    @Body() body: SkuMergeRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: SkuMergeResultResponseDto }> {
+    return ok(await this.mergeService.merge(id, body.targetSkuId, body.confirmSkuCode, operator));
+  }
 
   // ---- SKU master data ----
 

@@ -16,6 +16,7 @@ import { ShipmentRepository } from './repositories/shipment.repository';
 import { PackageRepository } from './repositories/package.repository';
 import { ShippingLabelRepository } from './repositories/shipping-label.repository';
 import { ShipmentService } from './services/shipment.service';
+import { SkuReferenceRelinkService } from './services/sku-reference-relink.service';
 import { PackingService } from './services/packing.service';
 import { ShipmentShipService } from './services/shipment-ship.service';
 import { ShippingLabelService } from './services/shipping-label.service';
@@ -48,6 +49,7 @@ import { PackageController, ShipmentController } from './controllers/shipment.co
   ],
   controllers: [ShipmentController, PackageController],
   providers: [
+    SkuReferenceRelinkService,
     ShipmentRepository,
     PackageRepository,
     ShippingLabelRepository,

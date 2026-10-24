@@ -4,6 +4,7 @@ import { TransferOrderEntity } from './entities/transfer-order.entity';
 import { TransferOrderLineEntity } from './entities/transfer-order-line.entity';
 import { TransferOrderRepository } from './repositories/transfer-order.repository';
 import { TransferService } from './services/transfer.service';
+import { SkuReferenceRelinkService } from './services/sku-reference-relink.service';
 import { TransferController } from './controllers/transfer.controller';
 import { InventoryModule } from '../inventory/inventory.module';
 import { ProductModule } from '../product/product.module';
@@ -26,7 +27,7 @@ import { OperationLogModule } from '../operation-log/operation-log.module';
     OperationLogModule,
   ],
   controllers: [TransferController],
-  providers: [TransferOrderRepository, TransferService],
+  providers: [SkuReferenceRelinkService, TransferOrderRepository, TransferService],
   exports: [TransferService],
 })
 export class TransferModule {}

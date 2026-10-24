@@ -8,6 +8,7 @@ import { FinanceTransactionRepository } from './repositories/finance-transaction
 import { FinancePayoutRepository } from './repositories/finance-payout.repository';
 import { OrderSettlementRepository } from './repositories/order-settlement.repository';
 import { FinanceTransactionService } from './services/finance-transaction.service';
+import { SkuReferenceRelinkService } from './services/sku-reference-relink.service';
 import { FinancePayoutService } from './services/finance-payout.service';
 import { OrderSettlementService } from './services/order-settlement.service';
 import { FinanceReportService } from './services/finance-report.service';
@@ -41,6 +42,7 @@ import { OperationLogModule } from '../operation-log/operation-log.module';
   ],
   controllers: [FinanceController],
   providers: [
+    SkuReferenceRelinkService,
     FinanceTransactionRepository,
     FinancePayoutRepository,
     OrderSettlementRepository,

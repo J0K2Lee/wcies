@@ -3,6 +3,8 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { OperatorContext, OperationLogService } from '../../operation-log/operation-log.service';
 import { SkuImageImportService } from '../../product/services/sku-image-import.service';
+import { extractYandexOfferImageUrl } from '../../integration/yandex/yandex.mapper';
+import { extractWbCardImageUrl } from '../../integration/wildberries/wb.mapper';
 import { BarcodeService } from '../../product/services/barcode.service';
 import { SkuService } from '../../product/services/sku.service';
 import {
@@ -212,7 +214,7 @@ export class ListingOnboardingService {
 
     // T6: async image transfer - after commit, best-effort; a failure
     // retries in the queue and never affects onboarding facts.
-    await this.scheduleImageImport(mappingId, outcome.sku.id);
+    await this.scheduleImageImport(mappingId, outcome.sku.id, listing.rawData);
 
     // 映射修复后的订单行批量收敛（2026-10-15 bug 修复）：建档把变体落成
     // MAPPED 后，同店铺引用它的 FAILED 订单行自动重试（失败自吞，见
@@ -286,11 +288,26 @@ export class ListingOnboardingService {
     };
   }
 
-  private async scheduleImageImport(mappingId: string, skuId: string): Promise<void> {
+  /**
+   * 建档后异步搬运商品图（2026-10-24 修复）。
+   *
+   * 取图来源按平台不同：
+   * - OZON：变体（mapping）raw_data 自带 `color_image` / `primary_image`；
+   * - YANDEX：图片在**商品链接** raw_data 的 `offer.pictures[]`；
+   * - WB：图片在**商品链接** raw_data 的 `photos[]`。
+   *
+   * 修复前只读变体 raw 的两个 OZON key，WB/Yandex 永远取到 null（不排队、不落图，
+   * 且异常被吞）——表现为「快速建档后图片 (0)」。两个提取器都是形状守卫的纯
+   * 函数，依次尝试即可，不需要额外解析平台代码。
+   */
+  private async scheduleImageImport(
+    mappingId: string,
+    skuId: string,
+    listingRawData: Record<string, unknown> | null,
+  ): Promise<void> {
     try {
       const mapping = await this.repository.findMappingById(mappingId);
-      const raw = mapping?.rawData ?? null;
-      const url = readImageUrl(raw, 'color_image') ?? readImageUrl(raw, 'primary_image');
+      const url = resolveOnboardImageUrl(mapping?.rawData ?? null, listingRawData);
       await this.skuImageImport.scheduleFromOnboard(skuId, url);
     } catch {
       // Never let the optional image path mask a successful onboarding.
@@ -388,6 +405,22 @@ function scale(value: number | null, factor: number): number | null {
  * fields arrive as single-element JSON ARRAYS ("url"), although the spec
  * declares plain strings. Accept both shapes; anything else is "absent".
  */
+/**
+ * 建档取图：先看变体自带的 OZON 字段，再按形状尝试 Yandex / WB 的商品链接图片。
+ * 三个提取器都对「不是我的形状」返回 null，因此顺序调用是安全的。
+ */
+export function resolveOnboardImageUrl(
+  variantRawData: Record<string, unknown> | null,
+  listingRawData: Record<string, unknown> | null,
+): string | null {
+  const fromVariant =
+    readImageUrl(variantRawData, 'color_image') ?? readImageUrl(variantRawData, 'primary_image');
+  if (fromVariant !== null) {
+    return fromVariant;
+  }
+  return extractYandexOfferImageUrl(listingRawData) ?? extractWbCardImageUrl(listingRawData);
+}
+
 function readImageUrl(rawData: Record<string, unknown> | null, key: string): string | null {
   const value = rawData?.[key];
   if (typeof value === 'string' && value !== '') {

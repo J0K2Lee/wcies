@@ -13,6 +13,7 @@ import { SupplierRepository } from './repositories/supplier.repository';
 import { PurchaseOrderRepository } from './repositories/purchase-order.repository';
 import { PurchaseReceiptRepository } from './repositories/purchase-receipt.repository';
 import { SupplierService } from './services/supplier.service';
+import { SkuReferenceRelinkService } from './services/sku-reference-relink.service';
 import { PurchaseOrderService } from './services/purchase-order.service';
 import { PurchaseReceiptService } from './services/purchase-receipt.service';
 import { ProcurementCoverageService } from './services/procurement-coverage.service';
@@ -48,6 +49,7 @@ import { ORDER_PROCUREMENT_PORT } from '../order/ports/order-procurement.port';
   ],
   controllers: [SupplierController, PurchaseOrderController, PurchaseReceiptController],
   providers: [
+    SkuReferenceRelinkService,
     SupplierService,
     SupplierRepository,
     PurchaseOrderService,
