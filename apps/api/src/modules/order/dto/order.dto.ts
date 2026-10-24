@@ -260,6 +260,13 @@ export class OrderListItemDto {
   @ApiProperty({ example: 'ORD00000001' }) orderNo!: string;
   @ApiProperty() storeId!: string;
   @ApiProperty({ example: 'OZON A店' }) storeName!: string;
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'CNY',
+    description:
+      '店铺计价币种（stores.default_currency）。订单金额显示优先用平台原币 currency，缺失时回退到它',
+  })
+  storeCurrency!: string | null;
   @ApiProperty({ example: 'OZON' }) platformCode!: string;
   @ApiProperty({ example: '123456789' }) platformOrderId!: string;
   @ApiProperty({ nullable: true, type: String, example: 'awaiting_packaging' })
@@ -499,6 +506,13 @@ export class OrderDetailDto {
   @ApiProperty({ example: 'ORD00000001' }) orderNo!: string;
   @ApiProperty() storeId!: string;
   @ApiProperty({ example: 'OZON A店' }) storeName!: string;
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'CNY',
+    description:
+      '店铺计价币种（stores.default_currency）。订单金额显示优先用平台原币 currency，缺失时回退到它',
+  })
+  storeCurrency!: string | null;
   @ApiProperty({ example: 'OZON' }) platformCode!: string;
   @ApiProperty({ example: '123456789' }) platformOrderId!: string;
   @ApiProperty({ nullable: true, type: String }) platformStatus!: string | null;

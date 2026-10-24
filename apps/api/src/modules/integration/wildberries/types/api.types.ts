@@ -132,7 +132,8 @@ export interface WbV3Order {
   readonly price?: number;
   readonly finalPrice?: number;
   readonly salePrice?: number;
-  readonly currencyCode?: string;
+  /** 销售币种：实测报文为 ISO **数字**码（643），类型上兼容字符串。 */
+  readonly currencyCode?: string | number;
   readonly warehouseId?: number;
   readonly officeId?: number;
   readonly createdAt?: string;

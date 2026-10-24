@@ -117,13 +117,14 @@ export function mapOrderToOrder(order: YxOrder): PlatformOrderRaw {
     }
     return {
       // No marketSku on business-order rows (docs §8.3) - resolution rides on
-      // sellerSku; unitPrice subshape unverified -> null (T0), never 0.
+      // sellerSku. 单价按官方口径（2026-10-24）：商品金额 = payment + cashback，
+      // subsidy 是卖家奖励、不属于商品金额；缺字段时保持 null，不猜。
       platformProductId: null,
       platformSkuId: null,
       offerId,
       sellerSku: offerId,
       quantity: String(count),
-      unitPrice: null,
+      unitPrice: yxGoodsAmount(item.prices),
       rawData: { ...item },
     } satisfies PlatformOrderItemRaw;
   });
@@ -140,7 +141,13 @@ export function mapOrderToOrder(order: YxOrder): PlatformOrderRaw {
     // 平台运单号（2026-10-22）：business-orders 的 delivery.tracks[].trackCode。
     // 之前只有手工「获取运单号」会读它，轮询/webhook 从不刷新，运单号列长期为空。
     platformTrackingNo: readYxTrackCode(order),
-    currency: null,
+    // 币种（2026-10-24）：订单级 prices 优先，退回第一条明细的币种。
+    currency:
+      yxCurrencyOf(order.prices) ??
+      order.items
+        .map((item) => yxCurrencyOf((item as { prices?: unknown }).prices))
+        .find((code) => code !== null) ??
+      null,
     items,
     rawData: { ...order },
   };
@@ -160,6 +167,66 @@ export function mapOrderToOrder(order: YxOrder): PlatformOrderRaw {
  * 与面单完全一致（用户 2026-10-23 用真实面单确认）。多箱订单取第一箱。
  * DBS 的 `tracks[].trackCode` 优先，出现时以它为准。都没有则为 null。
  */
+/**
+ * 订单商品金额（官方口径，docs/yandex-partner-api-openapi.json）：
+ *
+ * > Стоимость товаров в заказе складывается из параметров `payment` и `cashback`.
+ * > Общая сумма вознаграждений продавцу возвращается в параметре `subsidy`.
+ *
+ * 即：**商品金额 = payment + cashback**（`subsidy` 是给卖家的奖励，不是商品价）。
+ * 实测对账：V9 TURBO 单 payment 711 + cashback 5661 = 6372 RUB，与同款在 WB 的
+ * 6754 RUB 同量级。金额单位为店铺币种，不做换算。
+ */
+interface YxMoney {
+  value?: unknown;
+  currencyId?: unknown;
+}
+
+interface YxPrices {
+  payment?: YxMoney;
+  cashback?: YxMoney;
+  subsidy?: YxMoney;
+}
+
+function readMoneyValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  }
+  return null;
+}
+
+/** 商品金额 = payment + cashback；payment 缺失时返回 null（不猜）。 */
+function asPrices(value: unknown): YxPrices | null {
+  return typeof value === 'object' && value !== null ? value : null;
+}
+
+export function yxGoodsAmount(value: unknown): string | null {
+  const prices = asPrices(value);
+  const payment = readMoneyValue(prices?.payment?.value);
+  if (payment === null) {
+    return null;
+  }
+  const cashback = readMoneyValue(prices?.cashback?.value) ?? 0;
+  return (payment + cashback).toFixed(2);
+}
+
+/**
+ * 币种：Yandex 用历史码 `RUR` 表示卢布，统一成 ISO 字母码 `RUB`；
+ * 其它值原样大写（不猜成 CNY）。
+ */
+export function yxCurrencyOf(value: unknown): string | null {
+  const raw = asPrices(value)?.payment?.currencyId;
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    return null;
+  }
+  const code = raw.trim().toUpperCase();
+  return code === 'RUR' ? 'RUB' : code;
+}
+
 export function readYxTrackCode(order: {
   delivery?: { tracks?: readonly unknown[]; boxesLayout?: readonly unknown[] };
 }): string | null {

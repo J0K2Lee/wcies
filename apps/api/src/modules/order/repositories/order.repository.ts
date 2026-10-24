@@ -32,6 +32,7 @@ export interface OrderListFilters {
 export interface OrderListRow {
   order: OrderEntity;
   storeName: string;
+  storeCurrency: string | null;
   platformCode: string;
   itemsCount: number;
   reservedCount: number;
@@ -539,6 +540,7 @@ export class OrderRepository {
       .innerJoin('stores', 's', 's.id = o.store_id')
       .innerJoin('platforms', 'p', 'p.id = s.platform_id')
       .addSelect('s.name', 'store_name')
+      .addSelect('s.default_currency', 'store_currency')
       .addSelect('p.code', 'platform_code')
       .addSelect(`(SELECT COUNT(*) FROM order_items i WHERE i.order_id = o.id)`, 'items_count')
       .addSelect(
@@ -641,6 +643,7 @@ export class OrderRepository {
         return {
           order,
           storeName: rawStr(raw['store_name']),
+          storeCurrency: rawStr(raw['store_currency']) || null,
           platformCode: rawStr(raw['platform_code']),
           itemsCount: Number(raw['items_count'] ?? 0),
           reservedCount: Number(raw['reserved_count'] ?? 0),

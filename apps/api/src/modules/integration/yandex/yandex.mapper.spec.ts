@@ -85,6 +85,46 @@ describe('mapOrderToOrder', () => {
       quantity: '2',
       unitPrice: null,
     });
+    // 没有 prices 时币种也保持 null（不猜）
+    expect(order.currency).toBeNull();
+  });
+
+  it('单价 = payment + cashback（官方口径），subsidy 是卖家奖励不计入', () => {
+    const order = mapOrderToOrder({
+      ...base,
+      prices: {
+        payment: { value: 711, currencyId: 'RUR' },
+        subsidy: { value: 2928, currencyId: 'RUR' },
+        cashback: { value: 5661, currencyId: 'RUR' },
+      },
+      items: [
+        {
+          offerId: 'SKU-A',
+          count: 1,
+          prices: {
+            payment: { value: 711, currencyId: 'RUR' },
+            subsidy: { value: 2928, currencyId: 'RUR' },
+            cashback: { value: 5661, currencyId: 'RUR' },
+          },
+        },
+      ],
+    });
+    // 711 + 5661 = 6372（RUB）；subsidy 2928 不参与
+    expect(order.items[0]?.unitPrice).toBe('6372.00');
+    // Yandex 用历史码 RUR，统一成 ISO 字母码
+    expect(order.currency).toBe('RUB');
+  });
+
+  it('没有 cashback 时单价就是 payment；订单级 prices 也可提供币种', () => {
+    const order = mapOrderToOrder({
+      ...base,
+      prices: { payment: { value: 2723, currencyId: 'RUR' } },
+      items: [
+        { offerId: 'SKU-A', count: 1, prices: { payment: { value: 2723, currencyId: 'RUR' } } },
+      ],
+    });
+    expect(order.items[0]?.unitPrice).toBe('2723.00');
+    expect(order.currency).toBe('RUB');
   });
 
   it('treats CANCELLED as platform cancellation', () => {

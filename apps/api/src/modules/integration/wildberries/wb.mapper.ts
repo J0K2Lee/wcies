@@ -198,7 +198,11 @@ export function mapFbsOrderToOrder(order: WbV3Order): PlatformOrderRaw {
     offerId: order.article,
     sellerSku: order.article,
     quantity: '1',
-    unitPrice: readPrice(order.finalPrice) ?? readPrice(order.salePrice),
+    // 2026-10-24：v3 /orders 实际**没有** finalPrice/salePrice（实测 13 单全无），
+    // 只有 `price` —— 官方口径「销售币种价格 ×100」（копейки）。此前取不存在的
+    // 字段导致每一行的单价都是 null，行金额/应收全空。
+    unitPrice:
+      readPrice(order.finalPrice) ?? readPrice(order.salePrice) ?? readKopecks(order.price),
     rawData: { ...order },
   };
 
@@ -216,7 +220,8 @@ export function mapFbsOrderToOrder(order: WbV3Order): PlatformOrderRaw {
     fulfillmentMode: 'FBS',
     orderedAt,
     shipmentDeadline: null,
-    currency: readString(order.currencyCode),
+    // currencyCode 是 ISO 数字码（643），落库/展示前归一化成 RUB 之类的字母码。
+    currency: normalizeCurrencyCode(readCode(order.currencyCode)),
     items: [item],
     rawData: { ...order },
   };
@@ -503,6 +508,53 @@ function firstBarcode(skus: readonly (number | string)[] | undefined): string | 
 }
 
 /** Tolerant numeric price -> decimal string (never fabricated as 0). */
+/**
+ * WB 金额字段以「分」为单位（官方 spec: multiplied by 100），转成两位小数金额。
+ * 非数字 / 负数返回 null——一条坏价格不能让整张单同步失败。
+ */
+function readKopecks(value: unknown): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    return null;
+  }
+  return (value / 100).toFixed(2);
+}
+
+/**
+ * ISO 4217 数字码 → 字母码（WB 的 currencyCode 是 643 这种数字）。
+ * 只映射常见成交币种；未知数字码原样返回（不猜成 CNY）。
+ */
+const ISO_NUMERIC_CURRENCIES: Record<string, string> = {
+  '643': 'RUB',
+  '810': 'RUB',
+  '156': 'CNY',
+  '840': 'USD',
+  '978': 'EUR',
+  '398': 'KZT',
+  '933': 'BYN',
+};
+
+/** WB 的 currencyCode 在实测报文里是数字（643），readString 会把它当缺失。 */
+function readCode(value: unknown): string | null {
+  if (typeof value === 'string' && value !== '') {
+    return value;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
+
+function normalizeCurrencyCode(value: string | null): string | null {
+  if (value === null || value === '') {
+    return null;
+  }
+  const numeric = ISO_NUMERIC_CURRENCIES[value];
+  if (numeric !== undefined) {
+    return numeric;
+  }
+  return /^[A-Za-z]{3}$/.test(value) ? value.toUpperCase() : value;
+}
+
 function readPrice(value: unknown): string | null {
   if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
     return value.toFixed(2);

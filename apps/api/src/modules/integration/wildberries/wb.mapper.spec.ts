@@ -192,6 +192,19 @@ describe('mapFbsOrderToOrder (marketplace v3)', () => {
     });
   });
 
+  it('v3 实际字段：price 以分计价、currencyCode 是 ISO 数字码（2026-10-24）', () => {
+    const order = mapFbsOrderToOrder({
+      ...base,
+      finalPrice: undefined,
+      salePrice: undefined,
+      price: 587900,
+      // 实测报文里 currencyCode 是数字
+      currencyCode: 643,
+    });
+    expect(order.items[0]?.unitPrice).toBe('5879.00');
+    expect(order.currency).toBe('RUB');
+  });
+
   it('falls back to supplierStatus for stage/status when wbStatus is absent', () => {
     const order = mapFbsOrderToOrder({ ...base, wbStatus: undefined, supplierStatus: 'confirm' });
     expect(order.platformStatus).toBe('confirm');

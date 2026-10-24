@@ -1427,3 +1427,16 @@ RESERVED / PICKED 行的订单逐单拒绝并说明原因。
    若原队列任务其实还活着，它的 `claimRunning` 会因状态不是 PENDING 安全跳过。
 2. 入队失败必须立刻把行置 FAILED（`SYNC_DISPATCH_FAILED`），不允许留 PENDING。
 3. 同步任务与订单状态无关：回收只影响「这轮没跑」，不影响订单事实。
+
+## 18b. 订单金额与「最近采购价」的币种口径（2026-10-24 用户指示）
+
+- **存档原数据**：`order_items.unit_price` 存平台**原币**金额（WB 用 `price/100` 的 RUB，
+  Yandex 用 `payment+cashback` 的 RUB，OZON 用其 posting 币种 CNY），
+  `orders.currency` 存归一化后的币种（ISO 字母码，不接受 `643` 这类数字码）。
+- **显示按原币**：单价/小计按 `orders.currency` 显示；订单没有平台币种时回退到
+  店铺计价币种 `stores.default_currency`（DTO 字段 `storeCurrency`）。
+- **最近采购价恒为 CNY**：`skus.latest_purchase_price` 记录的是我们自己的进货成本
+  （`cost_currency` 固定 CNY），**不得**跟随订单币种格式化——曾因跟订单币种显示成
+  `323.00 643`（WB 的 ISO 数字码），被误认为数据被 WB 覆盖。
+- 订单同步不写 `latest_purchase_price`；该字段只由 SKU 建档/编辑、Excel 导入、
+  SKU 合并与采购收货维护。

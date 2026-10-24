@@ -78,6 +78,8 @@ interface OrderListItem {
   orderNo: string;
   storeId: string;
   storeName: string;
+  /** 店铺计价币种；平台原币缺失时作为金额显示的回退（2026-10-24）。 */
+  storeCurrency: string | null;
   platformCode: string;
   platformOrderId: string;
   platformStatus: string | null;
@@ -178,6 +180,8 @@ interface OrderDetail {
   orderNo: string;
   storeId: string;
   storeName: string;
+  /** 店铺计价币种；平台原币缺失时作为金额显示的回退（2026-10-24）。 */
+  storeCurrency: string | null;
   platformCode: string;
   platformOrderId: string;
   platformStatus: string | null;
@@ -749,7 +753,7 @@ function ExpandedOrderItems({
           <ExpandedItemBlock
             key={item.id}
             item={item}
-            currency={detail.currency}
+            currency={detail.currency ?? detail.storeCurrency}
             fields={fields}
             thumbnailSize={thumbnailSize}
             selected={selectedItem?.id === item.id}
@@ -791,7 +795,9 @@ function expandedFieldText(key: string, item: OrderItem, currency: string | null
     case 'totalPrice':
       return fmtMoney(item.totalPrice, currency);
     case 'latestPurchasePrice':
-      return item.latestPurchasePrice === null ? '—' : fmtMoney(item.latestPurchasePrice, currency);
+      // 最近采购价字段语义恒为 CNY（用户 2026-10-24）：它记录的是我们自己的
+      // 进货成本，与订单的平台币种无关，不能跟随订单币种格式化。
+      return item.latestPurchasePrice === null ? '—' : fmtMoney(item.latestPurchasePrice, 'CNY');
     default:
       return '—';
   }
@@ -2365,7 +2371,8 @@ export function OrdersPage() {
                     value={
                       selectedItem.latestPurchasePrice === null
                         ? '—'
-                        : fmtMoney(selectedItem.latestPurchasePrice, railDetail?.currency)
+                        : // 采购价恒为 CNY（2026-10-24），不跟随订单的平台币种。
+                          fmtMoney(selectedItem.latestPurchasePrice, 'CNY')
                     }
                   />
                   <ContextMetric
@@ -3008,7 +3015,8 @@ export function OrdersPage() {
       key: 'latestPurchasePrice',
       width: 110,
       align: 'right' as const,
-      render: (value: string | null) => (value === null ? '—' : fmtMoney(value, detail?.currency)),
+      // 采购价恒为 CNY（用户 2026-10-24），不跟随订单的平台币种。
+      render: (value: string | null) => (value === null ? '—' : fmtMoney(value, 'CNY')),
     },
     { title: '数量', dataIndex: 'quantity', key: 'quantity', width: 70, align: 'right' as const },
     {
@@ -3017,7 +3025,7 @@ export function OrdersPage() {
       key: 'unitPrice',
       width: 110,
       align: 'right' as const,
-      render: (value: string | null) => fmtMoney(value, detail?.currency),
+      render: (value: string | null) => fmtMoney(value, detail?.currency ?? detail?.storeCurrency),
     },
     {
       title: '小计',

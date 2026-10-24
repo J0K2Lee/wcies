@@ -245,3 +245,20 @@ https://market.yandex.ru/card/slug/5817028070?businessId=193261685
   `yandex-shipment.service.ts` 的 `LABEL_FORMAT` 一个常量），二进制 PDF 直接落对象存储；
   平台未生成时（400/404/409）映射为“面单未就绪”。
 - FBY（平台仓）订单本就不进拣货（`isExternalFulfillmentMode`），不调用写接口。
+
+## 订单金额（2026-10-24 实现）
+
+官方口径（`docs/yandex-partner-api-openapi.json`，business-orders）：
+
+> Стоимость товаров в заказе складывается из параметров `payment` и `cashback`.
+> Общая сумма вознаграждений продавцу возвращается в параметре `subsidy`.
+> Все суммы указаны в валюте магазина.
+
+因此：
+
+- `order_items.unit_price = prices.payment.value + prices.cashback.value`
+  （`cashback` 缺失按 0；`payment` 缺失为 null，不猜）；
+- `subsidy` 是**卖家奖励**，不计入商品金额，保留在 `raw_data` 供财务；
+- `orders.currency` 取 `prices.payment.currencyId`，`RUR` 归一化成 `RUB`；
+  `payment` 缺失时退回第一条明细的币种；
+- 金额单位是店铺币种，不做汇率换算（显示原币；最近采购价恒为 CNY）。

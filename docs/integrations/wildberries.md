@@ -161,6 +161,19 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 - **管理端点**：POST/GET/PUT/DELETE `/api/v1/webhooks`、`{id}/secret/refresh`、`/check`（URL 可达性）、`{id}/test/send`（`test:true` 事件探活）、events/deliveries/history 查询；全 API 共限 **1 req/s**。
 
 
+**单价与币种（2026-10-24 修复）**
+
+v3 `/orders` 的实际字段里**没有** `finalPrice` / `salePrice`（此前 mapper 取这两个字段，
+导致每一行单价都是 null、行金额与应收全空）。官方口径：
+
+| 字段 | 口径 | 落库 |
+|---|---|---|
+| `price` | 销售币种价格，含折扣，**×100**（копейки） | `order_items.unit_price = price / 100` |
+| `currencyCode` | 销售币种，**ISO 数字码**（643） | `orders.currency` 归一化成字母码（643→RUB、156→CNY、840→USD、978→EUR） |
+| `convertedPrice` / `convertedCurrencyCode` | 卖家国币种价格（信息性），同样 ×100 | 不入库（留 raw_data） |
+
+对账样本：`price 587900` → 5,879.00 RUB，与另一个 ERP 显示一致；`6087591254` → 13,309.00 RUB 完全一致。
+
 **统计源不再给卖家仓建单（2026-10-24，用户指示）**
 
 统计流水是**销售报表**，不是任务队列。卖家仓（FBS）订单的作业事实源是 v3 装配

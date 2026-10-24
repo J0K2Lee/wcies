@@ -16524,6 +16524,12 @@
             "type": "string",
             "example": "OZON A店"
           },
+          "storeCurrency": {
+            "type": "object",
+            "nullable": true,
+            "example": "CNY",
+            "description": "店铺计价币种（stores.default_currency）。订单金额显示优先用平台原币 currency，缺失时回退到它"
+          },
           "platformCode": {
             "type": "string",
             "example": "OZON"
@@ -17036,6 +17042,12 @@
           "storeName": {
             "type": "string",
             "example": "OZON A店"
+          },
+          "storeCurrency": {
+            "type": "object",
+            "nullable": true,
+            "example": "CNY",
+            "description": "店铺计价币种（stores.default_currency）。订单金额显示优先用平台原币 currency，缺失时回退到它"
           },
           "platformCode": {
             "type": "string",

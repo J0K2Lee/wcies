@@ -5396,6 +5396,11 @@ export interface components {
             storeId: string;
             /** @example OZON A店 */
             storeName: string;
+            /**
+             * @description 店铺计价币种（stores.default_currency）。订单金额显示优先用平台原币 currency，缺失时回退到它
+             * @example CNY
+             */
+            storeCurrency?: Record<string, never> | null;
             /** @example OZON */
             platformCode: string;
             /** @example 123456789 */
@@ -5577,6 +5582,11 @@ export interface components {
             storeId: string;
             /** @example OZON A店 */
             storeName: string;
+            /**
+             * @description 店铺计价币种（stores.default_currency）。订单金额显示优先用平台原币 currency，缺失时回退到它
+             * @example CNY
+             */
+            storeCurrency?: Record<string, never> | null;
             /** @example OZON */
             platformCode: string;
             /** @example 123456789 */
