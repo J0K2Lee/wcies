@@ -667,6 +667,10 @@ CREATED → ASSIGNED → LOCATING → INTERCEPTED → RETURNED_TO_STOCK → CLOS
    暂存位不得阻塞实体找回。已扫码 / 已传入库位的仍严格校验归属。
 6. 失败：`FAILED` 不动库存（Picked 保持），创建 `ORDER_INTERCEPTION_FAILED` 异常并发送通知。
 7. 关闭：`RETURNED_TO_STOCK` / `FAILED` → `CLOSED`。
+8. **文案口径（2026-10-25 用户反馈）**：被取消的是**订单**，商品仍是「已拣货」。
+   拦截通知与任务原因必须陈述这一事实（「订单已取消；该行已拣货完成（未出库），
+   需要拦截找回」），不得写成「拣货商品已取消」——那会让通知与行状态自相矛盾。
+   任务原因说明「为什么要拦截」，不复述订单取消原因（后者在订单状态历史里）。
 
 禁止 Picked 取消时自动恢复库存。
 

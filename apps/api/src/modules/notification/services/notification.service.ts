@@ -67,7 +67,13 @@ export class NotificationService {
   // Domain events (task §50)
   // --------------------------------------------------------------------------
 
-  /** ORDER_INTERCEPTION_REQUIRED: a PICKED line was cancelled (task §50). */
+  /**
+   * ORDER_INTERCEPTION_REQUIRED: a PICKED line's ORDER was cancelled (task §50).
+   *
+   * 文案必须陈述事实（2026-10-25 用户反馈）：订单是被取消的那一方，**商品仍是
+   * 「已拣货」**、并没有被取消。此前写「拣货商品已取消」，读起来像拣货被撤销，
+   * 与订单行状态自相矛盾。
+   */
   async notifyInterceptionRequired(input: {
     orderNo: string;
     orderItemId: string;
@@ -78,7 +84,7 @@ export class NotificationService {
     remainingQty: string;
   }): Promise<void> {
     const content = [
-      `订单 ${input.orderNo} 的拣货商品已取消，需要拦截找回实体商品。`,
+      `订单 ${input.orderNo} 已取消；该行商品已拣货完成（未出库，库存仍为「已拣货」），需要拦截找回实体商品。`,
       `拦截任务：${input.interceptionNo}`,
       `SKU：${input.skuCode ?? '未知'}`,
       `仓库：${input.warehouseCode ?? '未知'}`,

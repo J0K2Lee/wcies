@@ -681,7 +681,12 @@ export class OrderService {
           orderNo: order.orderNo,
           orderItemId: item.id,
           warehouseId: item.warehouseId as string,
-          reason,
+          // 任务原因要说明「为什么需要拦截」；订单取消原因另在订单状态历史里，
+          // 直接搬过来会让人以为拦截任务本身是因为平台改状态而创建的。
+          reason:
+            reason === undefined || reason === ''
+              ? `订单 ${order.orderNo} 取消时该行已拣货，需要拦截找回实体商品`
+              : `订单 ${order.orderNo} 取消（${reason}）；该行已拣货，需要拦截找回实体商品`,
         });
         interceptionNos += 1;
       } else {
