@@ -18,6 +18,8 @@ function build() {
       inserted.push(row);
       return { id: 'n-1', ...row };
     }),
+    list: vi.fn(),
+    findOrderStatuses: vi.fn(),
   };
   const service = new NotificationService(
     {
@@ -28,7 +30,7 @@ function build() {
     new ConfigService({}),
     { add: vi.fn() } as unknown as Queue,
   );
-  return { service, inserted };
+  return { service, inserted, repository };
 }
 
 describe('notifyInterceptionRequired 文案（2026-10-25）', () => {
@@ -49,5 +51,66 @@ describe('notifyInterceptionRequired 文案（2026-10-25）', () => {
     expect(content).toContain('已拣货完成（未出库');
     expect(content).not.toContain('拣货商品已取消');
     expect(inserted[0]?.title).toBe('需要拦截：订单 ORD00000728（ITC00000002）');
+  });
+});
+
+/**
+ * 通知状态 ≠ 订单状态（2026-10-26 用户要求分两列）：
+ * 投递状态（SENT/FAILED）是通知自己的事实；订单状态取关联订单的当前 ERP 状态，
+ * 拦截类通知要穿过 order_interceptions 找到订单。
+ */
+describe('list 派生 orderStatus（通知状态与订单状态分离）', () => {
+  it('拦截类通知返回其订单的当前 ERP 状态；其它类型为 null', async () => {
+    const { service, repository } = build();
+    repository.list.mockResolvedValue({
+      rows: [
+        {
+          id: 'n-1',
+          type: 'ORDER_INTERCEPTION_REQUIRED',
+          channel: 'SYSTEM',
+          referenceType: 'ORDER_INTERCEPTION',
+          referenceId: 'itc-1',
+          recipient: null,
+          title: '需要拦截：订单 ORD00000728（ITC00000002）',
+          content: '…',
+          status: 'SENT',
+          attemptCount: 1,
+          lastError: null,
+          sentAt: new Date(),
+          failedAt: null,
+          createdAt: new Date(),
+        },
+        {
+          id: 'n-2',
+          type: 'SYNC_FAILED',
+          channel: 'SYSTEM',
+          referenceType: 'STORE',
+          referenceId: 'store-1',
+          recipient: null,
+          title: '同步失败',
+          content: '…',
+          status: 'SENT',
+          attemptCount: 1,
+          lastError: null,
+          sentAt: new Date(),
+          failedAt: null,
+          createdAt: new Date(),
+        },
+      ],
+      total: 2,
+    });
+    repository.findOrderStatuses.mockImplementation(
+      async (referenceType: string, ids: readonly string[]) =>
+        referenceType === 'ORDER_INTERCEPTION' && ids.includes('itc-1')
+          ? new Map([['itc-1', 'CANCELLED']])
+          : new Map(),
+    );
+
+    const page = await service.list({}, { page: 1, pageSize: 20 });
+    expect(page.items[0]).toMatchObject({ id: 'n-1', status: 'SENT', orderStatus: 'CANCELLED' });
+    // 非订单类通知没有订单状态
+    expect(page.items[1]).toMatchObject({ id: 'n-2', status: 'SENT', orderStatus: null });
+    // 每种 referenceType 只查一次
+    expect(repository.findOrderStatuses).toHaveBeenCalledTimes(2);
   });
 });

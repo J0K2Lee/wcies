@@ -41,6 +41,13 @@ export class NotificationDto {
   @ApiProperty({ nullable: true, type: Date }) sentAt!: Date | null;
   @ApiProperty({ nullable: true, type: Date }) failedAt!: Date | null;
   @ApiProperty({ type: Date }) createdAt!: Date;
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'CANCELLED',
+    description:
+      '关联订单的当前 ERP 状态（派生，不落库）。仅 ORDER / ORDER_INTERCEPTION 类型有值；不是通知自身的投递状态',
+  })
+  orderStatus!: string | null;
 }
 
 export class RetryNotificationResultDto {

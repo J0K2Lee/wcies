@@ -11,6 +11,7 @@ import {
   ContextSection,
   ContextMetric,
   DataTable,
+  ERP_STATUS_META,
   ErrorState,
   FilterBar,
   KpiRow,
@@ -46,6 +47,8 @@ interface NotificationItem {
   sentAt: string | null;
   failedAt: string | null;
   createdAt: string;
+  /** 关联订单的当前 ERP 状态（派生）；非订单类通知为 null。 */
+  orderStatus: string | null;
 }
 
 type Envelope<T> = { data: T; meta: { total: number } };
@@ -93,7 +96,10 @@ export function NotificationsPage() {
       children: (
         <ContextSection title="通知概况">
           <ContextMetric label="当前筛选" value={`${query.data?.meta.total ?? 0} 条`} />
-          <RailHint>通知是事件流；需要处理的问题请前往异常中心。</RailHint>
+          <RailHint>
+            通知是事件流；「通知状态」是投递结果，与你关心的订单业务状态是两件事——
+            后者在「订单状态」列（取关联订单的当前 ERP 状态）。需要处理的问题请前往异常中心。
+          </RailHint>
         </ContextSection>
       ),
     }),
@@ -147,7 +153,7 @@ export function NotificationsPage() {
         />
         <Select
           allowClear
-          placeholder="状态"
+          placeholder="通知状态"
           style={{ width: 130 }}
           value={status}
           onChange={(value) => {
@@ -226,18 +232,37 @@ export function NotificationsPage() {
                 ),
               },
               {
-                title: '状态',
+                title: '通知状态',
                 dataIndex: 'status',
                 key: 'status',
-                width: 96,
+                width: 100,
+                // 投递状态（系统通道落库即已送达；飞书可能失败/待重试），
+                // 与订单业务状态是两件事（用户 2026-10-26 要求拆两列）。
                 render: (value: string) => (
                   <StatusBadge
                     tone={NOTIFICATION_STATUS_META[value]?.tone ?? 'neutral'}
                     label={NOTIFICATION_STATUS_META[value]?.label ?? value}
-                    hint={value}
+                    hint={`通知投递状态：${value}`}
                     showDot={false}
                   />
                 ),
+              },
+              {
+                title: '订单状态',
+                dataIndex: 'orderStatus',
+                key: 'orderStatus',
+                width: 96,
+                render: (value: string | null) =>
+                  value === null ? (
+                    <span style={{ color: colors.textTertiary }}>—</span>
+                  ) : (
+                    <StatusBadge
+                      tone={ERP_STATUS_META[value]?.tone ?? 'neutral'}
+                      label={ERP_STATUS_META[value]?.label ?? value}
+                      hint={`订单当前状态：${ERP_STATUS_META[value]?.label ?? value}`}
+                      showDot={false}
+                    />
+                  ),
               },
               {
                 title: '时间',

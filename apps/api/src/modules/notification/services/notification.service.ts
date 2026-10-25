@@ -31,6 +31,12 @@ export interface NotificationDto {
   sentAt: Date | null;
   failedAt: Date | null;
   createdAt: Date;
+  /**
+   * 关联订单的**当前** ERP 状态（2026-10-26 用户要求：通知状态与订单状态分成两列）。
+   * 仅 ORDER / ORDER_INTERCEPTION 类型的通知有值；其它类型为 null。
+   * 这是派生字段，不是通知自身的事实。
+   */
+  orderStatus: string | null;
 }
 
 interface PublishInput {
@@ -131,8 +137,9 @@ export class NotificationService {
       page.pageSize,
       (page.page - 1) * page.pageSize,
     );
+    const orderStatuses = await this.collectOrderStatuses(rows);
     return {
-      items: rows.map((row) => this.toDto(row)),
+      items: rows.map((row) => this.toDto(row, orderStatuses.get(row.referenceId) ?? null)),
       meta: { page: page.page, pageSize: page.pageSize, total },
     };
   }
@@ -142,7 +149,8 @@ export class NotificationService {
     if (row === null) {
       throw new NotificationNotFoundError(id);
     }
-    return this.toDto(row);
+    const orderStatuses = await this.collectOrderStatuses([row]);
+    return this.toDto(row, orderStatuses.get(row.referenceId) ?? null);
   }
 
   /** Re-enqueues a FAILED FEISHU delivery (SYSTEM rows cannot fail). */
@@ -163,7 +171,11 @@ export class NotificationService {
         failedAt: null,
       });
       await this.enqueue(id);
-      return this.toDto({ ...row, status: 'PENDING', failedAt: null });
+      const statuses = await this.collectOrderStatuses([row]);
+      return this.toDto(
+        { ...row, status: 'PENDING', failedAt: null },
+        statuses.get(row.referenceId) ?? null,
+      );
     });
   }
 
@@ -284,22 +296,25 @@ export class NotificationService {
     }
   }
 
-  private toDto(row: {
-    id: string;
-    type: string;
-    channel: string;
-    referenceType: string;
-    referenceId: string;
-    recipient: string | null;
-    title: string;
-    content: string;
-    status: string;
-    attemptCount: number;
-    lastError: string | null;
-    sentAt: Date | null;
-    failedAt: Date | null;
-    createdAt: Date;
-  }): NotificationDto {
+  private toDto(
+    row: {
+      id: string;
+      type: string;
+      channel: string;
+      referenceType: string;
+      referenceId: string;
+      recipient: string | null;
+      title: string;
+      content: string;
+      status: string;
+      attemptCount: number;
+      lastError: string | null;
+      sentAt: Date | null;
+      failedAt: Date | null;
+      createdAt: Date;
+    },
+    orderStatus: string | null,
+  ): NotificationDto {
     return {
       id: row.id,
       type: row.type,
@@ -315,6 +330,27 @@ export class NotificationService {
       sentAt: row.sentAt,
       failedAt: row.failedAt,
       createdAt: row.createdAt,
+      orderStatus,
     };
+  }
+
+  /** 一页内按 referenceType 各查一次，避免逐行查询。 */
+  private async collectOrderStatuses(
+    rows: ReadonlyArray<{ referenceType: string; referenceId: string }>,
+  ): Promise<Map<string, string>> {
+    const byType = new Map<string, string[]>();
+    for (const row of rows) {
+      const list = byType.get(row.referenceType) ?? [];
+      list.push(row.referenceId);
+      byType.set(row.referenceType, list);
+    }
+    const merged = new Map<string, string>();
+    for (const [referenceType, ids] of byType) {
+      const statuses = await this.repository.findOrderStatuses(referenceType, ids);
+      for (const [id, status] of statuses) {
+        merged.set(id, status);
+      }
+    }
+    return merged;
   }
 }

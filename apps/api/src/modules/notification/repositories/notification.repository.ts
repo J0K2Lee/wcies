@@ -63,6 +63,43 @@ export class NotificationRepository {
     await manager.getRepository(NotificationEntity).update({ id }, patch);
   }
 
+  /**
+   * 关联订单的 ERP 状态（2026-10-26 用户要求：通知状态与订单状态分两列）。
+   *
+   * 只读派生查询：通知的 reference 可能是订单本身，也可能是拦截任务
+   * （`ORDER_INTERCEPTION` → `order_interceptions.order_id`）。这里直接读这两张表，
+   * 是为了避免 notification ↔ order/interception 的模块循环（AGENTS §9 的精神是
+   * 不读对方**内部实现**；这里是展示用的只读联查，不含业务判断）。
+   */
+  async findOrderStatuses(
+    referenceType: string,
+    referenceIds: readonly string[],
+  ): Promise<Map<string, string>> {
+    if (referenceIds.length === 0) {
+      return new Map();
+    }
+    if (referenceType === 'ORDER_INTERCEPTION') {
+      const rows = await this.dataSource.query<Array<{ reference_id: string; erp_status: string }>>(
+        `SELECT oi.id AS reference_id, o.erp_status
+           FROM order_interceptions oi
+           JOIN orders o ON o.id = oi.order_id
+          WHERE oi.id = ANY($1::uuid[])`,
+        [[...referenceIds]],
+      );
+      return new Map(rows.map((row) => [row.reference_id, row.erp_status]));
+    }
+    if (referenceType === 'ORDER') {
+      const rows = await this.dataSource.query<Array<{ reference_id: string; erp_status: string }>>(
+        `SELECT o.id AS reference_id, o.erp_status
+           FROM orders o
+          WHERE o.id = ANY($1::uuid[])`,
+        [[...referenceIds]],
+      );
+      return new Map(rows.map((row) => [row.reference_id, row.erp_status]));
+    }
+    return new Map();
+  }
+
   async list(
     filters: NotificationListFilters,
     limit: number,

@@ -5910,6 +5910,11 @@ export interface components {
             failedAt: string | null;
             /** Format: date-time */
             createdAt: string;
+            /**
+             * @description 关联订单的当前 ERP 状态（派生，不落库）。仅 ORDER / ORDER_INTERCEPTION 类型有值；不是通知自身的投递状态
+             * @example CANCELLED
+             */
+            orderStatus?: Record<string, never> | null;
         };
         RetryNotificationResultDto: {
             id: string;
