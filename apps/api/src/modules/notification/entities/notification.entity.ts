@@ -37,6 +37,13 @@ export class NotificationEntity {
   @Column({ type: 'text' })
   content!: string;
 
+  /**
+   * 去重键（2026-10-26）：同一事件在窗口内只记一条（如某个拦截任务重复失败）。
+   * null = 不去重。
+   */
+  @Column({ type: 'varchar', length: 200, name: 'dedupe_key', nullable: true })
+  dedupeKey!: string | null;
+
   @Column({ type: 'varchar', length: 20, default: 'PENDING' })
   status!: NotificationStatus;
 

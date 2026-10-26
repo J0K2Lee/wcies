@@ -9,6 +9,8 @@
  */
 export interface OrderInterceptionCreateInput {
   orderId: string;
+  /** 订阅条件（按店铺过滤）与卡片展示都需要。 */
+  storeId: string;
   orderNo: string;
   orderItemId: string;
   warehouseId: string;

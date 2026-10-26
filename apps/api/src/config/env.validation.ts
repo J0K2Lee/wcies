@@ -73,6 +73,10 @@ export const envValidationSchema = Joi.object({
   FEISHU_WEBHOOK_URL: Joi.string()
     .uri({ scheme: ['http', 'https'] })
     .optional(),
+  // 飞书企业自建应用（2026-10-26）：私聊/卡片投递需要。当前仅测试用，
+  // 后续改为系统设置项（加密存储）。
+  APP_ID: Joi.string().allow('').optional(),
+  APP_SECRET: Joi.string().allow('').optional(),
 
   // Transactional email via Feishu SMTP (user management verification).
   // All optional at boot (empty string = unconfigured) so the system keeps

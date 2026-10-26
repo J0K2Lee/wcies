@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { App as AntdApp, Button, Popconfirm, Select } from 'antd';
-import { BellOutlined, CloseCircleOutlined, ReloadOutlined } from '@ant-design/icons';
+import { BellOutlined, ClockCircleOutlined, ReloadOutlined } from '@ant-design/icons';
+import { NotificationSubscriptionsModal } from '../../components/NotificationSubscriptionsModal';
 import { useSearchParams } from 'react-router';
 import { apiPost, useApiQuery } from '../../api/hooks';
 import { fmtDateTime, fmtNumber } from '../../utils/format';
@@ -17,7 +18,6 @@ import {
   FilterBar,
   KpiRow,
   MetricCard,
-  NOTIFICATION_STATUS_META,
   NOTIFICATION_TYPE_META,
   PageHeader,
   RailHint,
@@ -50,6 +50,10 @@ interface NotificationItem {
   createdAt: string;
   /** 关联订单的当前 ERP 状态（派生）；非订单类通知为 null。 */
   orderStatus: string | null;
+  /** 当前用户是否已读（2026-10-26）。 */
+  isRead: boolean;
+  /** 当前用户自己最近一次推送状态；未订阅为 null。 */
+  deliveryStatus: string | null;
   /** 拦截类通知的「实物现在在哪」（派生）；其它类型为 null。 */
   goods: {
     interceptionStatus: string;
@@ -85,14 +89,13 @@ function goodsLine(goods: NonNullable<NotificationItem['goods']>): string {
   }
 }
 
-type Envelope<T> = { data: T; meta: { total: number } };
+type Envelope<T> = { data: T; meta: { total: number }; unreadTotal?: number };
 
 export function NotificationsPage() {
   const { message } = AntdApp.useApp();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
-  const [status, setStatus] = useState<string | undefined>();
   // 深链：通知铃铛条目跳转 /notifications?type=…（Phase 3 T6）。
   const [type, setType] = useState<string | undefined>(() => searchParams.get('type') ?? undefined);
 
@@ -101,19 +104,32 @@ export function NotificationsPage() {
     {
       page,
       pageSize: 20,
-      ...(status ? { status } : {}),
       ...(type ? { type } : {}),
     },
-    ['notifications', page, status, type],
+    ['notifications', page, type],
   );
 
-  const failedCount = useApiQuery<Envelope<NotificationItem[]>>(
-    '/api/v1/notifications',
-    { page: 1, pageSize: 1, status: 'FAILED' },
-    ['notifications-count', 'FAILED'],
-  );
+  const unreadTotal = query.data?.unreadTotal ?? 0;
 
   const rows = query.data?.data ?? [];
+
+  const [subscriptionsOpen, setSubscriptionsOpen] = useState(false);
+
+  const markReadMutation = useMutation({
+    mutationFn: (id: string) => apiPost('/api/v1/notifications/{id}/read', {}, { id }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const markAllReadMutation = useMutation({
+    mutationFn: () => apiPost('/api/v1/notifications/read-all', {}),
+    onSuccess: () => {
+      void message.success('已全部标为已读');
+      void queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      void queryClient.invalidateQueries({ queryKey: ['notifications-unread'] });
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
 
   const retryMutation = useMutation({
     mutationFn: (id: string) => apiPost('/api/v1/notifications/{id}/retry', {}, { id }),
@@ -147,12 +163,22 @@ export function NotificationsPage() {
         title="通知中心"
         description="系统事件与消息投递记录（事件流）；需要处理的问题请前往异常中心"
         secondary={
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={() => void queryClient.invalidateQueries({ queryKey: ['notifications'] })}
-          >
-            刷新
-          </Button>
+          <span style={{ display: 'inline-flex', gap: 8 }}>
+            <Button onClick={() => setSubscriptionsOpen(true)}>我的订阅</Button>
+            <Button
+              disabled={unreadTotal === 0}
+              loading={markAllReadMutation.isPending}
+              onClick={() => markAllReadMutation.mutate()}
+            >
+              全部已读
+            </Button>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => void queryClient.invalidateQueries({ queryKey: ['notifications'] })}
+            >
+              刷新
+            </Button>
+          </span>
         }
       />
 
@@ -163,10 +189,10 @@ export function NotificationsPage() {
           value={fmtNumber(query.data?.meta.total ?? 0)}
         />
         <MetricCard
-          icon={<CloseCircleOutlined />}
-          title="投递失败"
-          value={fmtNumber(failedCount.data?.meta.total ?? 0)}
-          aux="可重试（飞书渠道）"
+          icon={<ClockCircleOutlined />}
+          title="未读"
+          value={fmtNumber(unreadTotal)}
+          aux="点「全部已读」清空"
         />
       </KpiRow>
 
@@ -181,20 +207,6 @@ export function NotificationsPage() {
             setType(value);
           }}
           options={Object.entries(NOTIFICATION_TYPE_META).map(([value, meta]) => ({
-            value,
-            label: meta.label,
-          }))}
-        />
-        <Select
-          allowClear
-          placeholder="通知状态"
-          style={{ width: 130 }}
-          value={status}
-          onChange={(value) => {
-            setPage(1);
-            setStatus(value);
-          }}
-          options={Object.entries(NOTIFICATION_STATUS_META).map(([value, meta]) => ({
             value,
             label: meta.label,
           }))}
@@ -231,16 +243,30 @@ export function NotificationsPage() {
                 render: (_: unknown, row: NotificationItem) => (
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 550 }}>
+                      {!row.isRead && (
+                        <span
+                          aria-label="未读"
+                          style={{
+                            display: 'inline-block',
+                            width: 6,
+                            height: 6,
+                            borderRadius: 3,
+                            background: colors.primary,
+                            marginRight: 6,
+                            verticalAlign: 'middle',
+                          }}
+                        />
+                      )}
                       {NOTIFICATION_TYPE_META[row.type]?.label ?? row.type}
                       <span style={{ fontSize: 12.5, color: colors.textSecondary, marginLeft: 8 }}>
                         {row.title}
                       </span>
-                      {/* 投递状态不再单独占一列（能看到即已送达）；只在异常时提示。 */}
-                      {row.status !== 'SENT' && (
+                      {/* 投递状态不单独列（能看到即已送达）；只在自己推送失败时提示。 */}
+                      {row.deliveryStatus === 'FAILED' && (
                         <StatusBadge
-                          tone={NOTIFICATION_STATUS_META[row.status]?.tone ?? 'neutral'}
-                          label={`投递${NOTIFICATION_STATUS_META[row.status]?.label ?? row.status}`}
-                          hint={`通知投递状态：${row.status}`}
+                          tone="danger"
+                          label="推送失败"
+                          hint="飞书推送失败，可在操作列重试"
                           showDot={false}
                         />
                       )}
@@ -328,22 +354,34 @@ export function NotificationsPage() {
               {
                 title: '操作',
                 key: 'actions',
-                width: 76,
-                // 该页唯一行内按钮（概览型右栏例外）；L1 轻确认。
-                render: (_: unknown, row: NotificationItem) =>
-                  row.channel === 'FEISHU' && row.status === 'FAILED' ? (
-                    <Popconfirm
-                      title="重新投递该通知？"
-                      description="将重新入队飞书投递。"
-                      okText="重试"
-                      cancelText="取消"
-                      onConfirm={() => retryMutation.mutate(row.id)}
-                    >
-                      <Button size="small" loading={retryMutation.isPending}>
-                        重试
+                width: 130,
+                // 未读 → 标为已读；自己推送失败 → 重试（L1 轻确认）。
+                render: (_: unknown, row: NotificationItem) => (
+                  <span style={{ display: 'inline-flex', gap: 6 }}>
+                    {!row.isRead && (
+                      <Button
+                        size="small"
+                        loading={markReadMutation.isPending}
+                        onClick={() => markReadMutation.mutate(row.id)}
+                      >
+                        标为已读
                       </Button>
-                    </Popconfirm>
-                  ) : null,
+                    )}
+                    {row.deliveryStatus === 'FAILED' && (
+                      <Popconfirm
+                        title="重新投递该通知？"
+                        description="将重新入队飞书投递。"
+                        okText="重试"
+                        cancelText="取消"
+                        onConfirm={() => retryMutation.mutate(row.id)}
+                      >
+                        <Button size="small" loading={retryMutation.isPending}>
+                          重试
+                        </Button>
+                      </Popconfirm>
+                    )}
+                  </span>
+                ),
               },
             ]}
             expandable={{
@@ -362,6 +400,11 @@ export function NotificationsPage() {
           />
         )}
       </SectionCard>
+
+      <NotificationSubscriptionsModal
+        open={subscriptionsOpen}
+        onClose={() => setSubscriptionsOpen(false)}
+      />
     </div>
   );
 }

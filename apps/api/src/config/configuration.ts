@@ -52,6 +52,12 @@ export const appConfig = registerAs('app', () => {
      */
     feishuWebhookUrl: process.env.FEISHU_WEBHOOK_URL ?? null,
     /**
+     * 飞书企业自建应用（2026-10-26）：私聊/卡片投递需要。
+     * 目前从 .env 的 APP_ID / APP_SECRET 读取（仅测试用），后续改为系统设置项。
+     */
+    feishuAppId: process.env.APP_ID ?? null,
+    feishuAppSecret: process.env.APP_SECRET ?? null,
+    /**
      * Public base URL for INBOUND platform callbacks (OZON webhooks, see
      * docs/integrations/ozon-webhook-tunnel.md). Null when unset - callers
      * must NOT fall back to localhost, that URL is unreachable from OZON.

@@ -5,7 +5,8 @@ import { QUEUE_NAMES } from '../../../infrastructure/queue/queue.constants';
 import { NotificationService } from '../services/notification.service';
 
 export interface NotificationJobPayload {
-  notificationId: string;
+  /** 推送投递行 id（事件 × 用户 × 通道）。 */
+  deliveryId: string;
 }
 
 /**
@@ -23,7 +24,7 @@ export class NotificationProcessor extends WorkerHost {
   }
 
   async process(job: Job<NotificationJobPayload>): Promise<string> {
-    await this.notificationService.deliverFeishu(job.data.notificationId);
-    return `delivered: ${job.data.notificationId}`;
+    await this.notificationService.deliver(job.data.deliveryId);
+    return `delivered: ${job.data.deliveryId}`;
   }
 }

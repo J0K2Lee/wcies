@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { Badge, Button, Popover, Tooltip } from 'antd';
 import { useApiQuery } from '../api/hooks';
@@ -25,6 +24,8 @@ interface NotificationItem {
   content: string;
   status: string;
   createdAt: string;
+  isRead: boolean;
+  deliveryStatus: string | null;
 }
 
 export function NotificationBell() {
@@ -38,7 +39,12 @@ export function NotificationBell() {
   );
 
   const items = query.data?.data ?? [];
-  const hasFailed = useMemo(() => items.some((item) => item.status === 'FAILED'), [items]);
+  const unread = useApiQuery<{ data: { unreadTotal: number } }>(
+    '/api/v1/notifications/unread-count',
+    {},
+    ['notifications-unread'],
+  );
+  const unreadTotal = unread.data?.data.unreadTotal ?? 0;
 
   const content = (
     <div style={{ width: 320 }}>
@@ -100,6 +106,19 @@ export function NotificationBell() {
               }}
             >
               <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {!item.isRead && (
+                  <span
+                    aria-label="未读"
+                    style={{
+                      display: 'inline-block',
+                      width: 6,
+                      height: 6,
+                      borderRadius: 3,
+                      background: colors.primary,
+                      flexShrink: 0,
+                    }}
+                  />
+                )}
                 <span
                   style={{
                     fontSize: 13,
@@ -164,12 +183,12 @@ export function NotificationBell() {
           type="text"
           aria-label="通知中心"
           icon={
-            /* 仅存在 FAILED 时显示红点（Phase 3 T6）；颜色走 danger token。 */
+            /* 未读计数（2026-10-26）；没有未读就不显示角标。 */
             <Badge
-              dot
-              color={hasFailed ? colors.danger : undefined}
-              offset={[-2, 2]}
-              style={{ display: hasFailed ? undefined : 'none' }}
+              count={unreadTotal}
+              size="small"
+              offset={[-4, 2]}
+              style={{ display: unreadTotal > 0 ? undefined : 'none' }}
             >
               <BellGlyph />
             </Badge>

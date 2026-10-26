@@ -1841,10 +1841,115 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 通知列表（分页，按类型/通道/状态过滤） */
+        /** 通知列表（分页；带当前用户未读标记与自己的投递状态） */
         get: operations["NotificationController_list"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/unread-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 当前用户未读通知数（铃铛红点） */
+        get: operations["NotificationController_unreadCount"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/read-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 把当前用户的全部通知标为已读 */
+        post: operations["NotificationController_markAllRead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/event-catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 可订阅的事件目录（类型、级别、可过滤字段）——订阅 UI 据此渲染 */
+        get: operations["NotificationController_eventCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/subscriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 当前用户的通知订阅规则 */
+        get: operations["NotificationController_listSubscriptions"];
+        put?: never;
+        /** 新增订阅（用户 × 通道 × 事件 × 条件） */
+        post: operations["NotificationController_createSubscription"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/subscriptions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除订阅 */
+        delete: operations["NotificationController_deleteSubscription"];
+        options?: never;
+        head?: never;
+        /** 修改订阅（条件 / 启停） */
+        patch: operations["NotificationController_updateSubscription"];
+        trace?: never;
+    };
+    "/api/v1/notifications/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 当前用户的通道绑定（飞书 open_id / 邮箱） */
+        get: operations["NotificationController_listBindings"];
+        put?: never;
+        /** 绑定/更新通道地址（飞书 open_id / 邮箱） */
+        post: operations["NotificationController_upsertBinding"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1868,6 +1973,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notifications/{id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 标记该通知为已读（当前用户） */
+        post: operations["NotificationController_markRead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notifications/{id}/retry": {
         parameters: {
             query?: never;
@@ -1877,7 +1999,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 重试失败的 FEISHU 通知投递 */
+        /** 重试该通知下失败的推送 */
         post: operations["NotificationController_retry"];
         delete?: never;
         options?: never;
@@ -5935,18 +6057,134 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
             /**
-             * @description 关联订单的当前 ERP 状态（派生，不落库）。仅 ORDER / ORDER_INTERCEPTION 类型有值；不是通知自身的投递状态
+             * @description 关联订单的当前 ERP 状态（派生）；不是通知自身的投递状态
              * @example CANCELLED
              */
             orderStatus?: Record<string, never> | null;
-            /** @description 拦截类通知的「实物现在在哪」：拦截进度 + 原拣货库位 / 回库目标库位 / 已装包裹。其它类型为 null */
             goods?: components["schemas"]["NotificationGoodsDto"] | null;
+            /** @description 当前用户是否已读（2026-10-26） */
+            isRead: boolean;
+            /**
+             * @description 当前用户自己最近一次推送的状态；未订阅为 null
+             * @enum {string|null}
+             */
+            deliveryStatus?: "PENDING" | "SENT" | "FAILED" | "CANCELLED" | null;
         };
-        RetryNotificationResultDto: {
-            id: string;
+        NotificationUnreadCountDto: {
+            /** @example 2 */
+            unreadTotal: number;
+        };
+        NotificationMarkReadResultDto: {
+            /** @example 0 */
+            unreadTotal: number;
+        };
+        NotificationConditionFieldDto: {
+            /** @example storeId */
+            key: string;
+            /** @example 店铺 */
+            label: string;
+        };
+        NotificationEventCatalogItemDto: {
+            /** @example ORDER_INTERCEPTION_REQUIRED */
+            type: string;
+            /** @example 需要拦截 */
+            label: string;
             /** @enum {string} */
-            status: "PENDING" | "SENT" | "FAILED" | "CANCELLED";
-            message: string;
+            level: "INFO" | "WARN" | "HIGH";
+            conditionFields: components["schemas"]["NotificationConditionFieldDto"][];
+        };
+        NotificationSubscriptionDto: {
+            id: string;
+            userId: string;
+            /** @enum {string} */
+            channel: "FEISHU_DM" | "FEISHU_GROUP";
+            /** @enum {string} */
+            eventType: "ORDER_INTERCEPTION_REQUIRED" | "ORDER_INTERCEPTION_FAILED";
+            /**
+             * @example {
+             *       "level": [
+             *         "HIGH"
+             *       ]
+             *     }
+             */
+            conditions: Record<string, never>;
+            enabled: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        UpsertSubscriptionRequestDto: {
+            /**
+             * @example FEISHU_DM
+             * @enum {string}
+             */
+            channel: "FEISHU_DM" | "FEISHU_GROUP";
+            /**
+             * @example ORDER_INTERCEPTION_REQUIRED
+             * @enum {string}
+             */
+            eventType: "ORDER_INTERCEPTION_REQUIRED" | "ORDER_INTERCEPTION_FAILED";
+            /**
+             * @description AND 组合的过滤条件：键为事件可过滤字段（storeId / warehouseCode / skuCode / level），值为候选集合。空对象 = 该事件全收
+             * @example {
+             *       "level": [
+             *         "HIGH"
+             *       ]
+             *     }
+             */
+            conditions?: Record<string, never>;
+            /** @default true */
+            enabled: boolean;
+        };
+        UpdateSubscriptionRequestDto: {
+            /**
+             * @description 覆盖过滤条件（AND 组合）
+             * @example {
+             *       "storeId": [
+             *         "<uuid>"
+             *       ]
+             *     }
+             */
+            conditions?: Record<string, never>;
+            enabled?: boolean;
+        };
+        NotificationDeleteResultDto: {
+            /** @example true */
+            deleted: boolean;
+        };
+        UserChannelBindingDto: {
+            id: string;
+            userId: string;
+            /** @enum {string} */
+            channel: "FEISHU_DM" | "EMAIL";
+            address: string;
+            enabled: boolean;
+            /** Format: date-time */
+            verifiedAt: string | null;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        UpsertChannelBindingRequestDto: {
+            /**
+             * @example FEISHU_DM
+             * @enum {string}
+             */
+            channel: "FEISHU_DM" | "EMAIL";
+            /**
+             * @description 飞书 open_id（按应用隔离，换应用需重新绑定）或邮箱地址
+             * @example ou_73a01ef75e7500c9e59abd9271a4129f
+             */
+            address: string;
+            /** @default true */
+            enabled: boolean;
+        };
+        NotificationRetryResultDto: {
+            /**
+             * @description 重新入队的失败投递数
+             * @example 1
+             */
+            retried: number;
         };
         PickingTaskListItemDto: {
             id: string;
@@ -11322,7 +11560,6 @@ export interface operations {
             query?: {
                 type?: "ORDER_INTERCEPTION_REQUIRED" | "ORDER_INTERCEPTION_FAILED";
                 channel?: "SYSTEM" | "FEISHU";
-                status?: "PENDING" | "SENT" | "FAILED" | "CANCELLED";
                 referenceId?: string;
             };
             header?: never;
@@ -11345,6 +11582,229 @@ export interface operations {
                             pageSize: number;
                             total: number;
                         };
+                    };
+                };
+            };
+        };
+    };
+    NotificationController_unreadCount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["NotificationUnreadCountDto"];
+                    };
+                };
+            };
+        };
+    };
+    NotificationController_markAllRead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["NotificationMarkReadResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    NotificationController_eventCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["NotificationEventCatalogItemDto"][];
+                    };
+                };
+            };
+        };
+    };
+    NotificationController_listSubscriptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["NotificationSubscriptionDto"][];
+                    };
+                };
+            };
+        };
+    };
+    NotificationController_createSubscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertSubscriptionRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["NotificationSubscriptionDto"];
+                    };
+                };
+            };
+        };
+    };
+    NotificationController_deleteSubscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["NotificationDeleteResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    NotificationController_updateSubscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSubscriptionRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["NotificationSubscriptionDto"];
+                    };
+                };
+            };
+        };
+    };
+    NotificationController_listBindings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["UserChannelBindingDto"][];
+                    };
+                };
+            };
+        };
+    };
+    NotificationController_upsertBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertChannelBindingRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["UserChannelBindingDto"];
                     };
                 };
             };
@@ -11375,6 +11835,31 @@ export interface operations {
             };
         };
     };
+    NotificationController_markRead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["NotificationMarkReadResultDto"];
+                    };
+                };
+            };
+        };
+    };
     NotificationController_retry: {
         parameters: {
             query?: never;
@@ -11394,7 +11879,7 @@ export interface operations {
                     "application/json": {
                         /** @enum {boolean} */
                         success: true;
-                        data: components["schemas"]["RetryNotificationResultDto"];
+                        data: components["schemas"]["NotificationRetryResultDto"];
                     };
                 };
             };

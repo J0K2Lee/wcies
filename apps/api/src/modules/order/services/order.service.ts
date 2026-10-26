@@ -678,6 +678,7 @@ export class OrderService {
         // interception module owns finding the physical unit and returning it.
         await this.interceptionPort.createForCancelledPickedItem({
           orderId: order.id,
+          storeId: order.storeId,
           orderNo: order.orderNo,
           orderItemId: item.id,
           warehouseId: item.warehouseId as string,

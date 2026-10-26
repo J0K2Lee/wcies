@@ -6572,15 +6572,6 @@
             }
           },
           {
-            "name": "status",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": ["PENDING", "SENT", "FAILED", "CANCELLED"]
-            }
-          },
-          {
             "name": "referenceId",
             "required": false,
             "in": "query",
@@ -6632,7 +6623,328 @@
             }
           }
         },
-        "summary": "通知列表（分页，按类型/通道/状态过滤）",
+        "summary": "通知列表（分页；带当前用户未读标记与自己的投递状态）",
+        "tags": ["notifications"]
+      }
+    },
+    "/api/v1/notifications/unread-count": {
+      "get": {
+        "operationId": "NotificationController_unreadCount",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/NotificationUnreadCountDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "当前用户未读通知数（铃铛红点）",
+        "tags": ["notifications"]
+      }
+    },
+    "/api/v1/notifications/read-all": {
+      "post": {
+        "operationId": "NotificationController_markAllRead",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/NotificationMarkReadResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "把当前用户的全部通知标为已读",
+        "tags": ["notifications"]
+      }
+    },
+    "/api/v1/notifications/event-catalog": {
+      "get": {
+        "operationId": "NotificationController_eventCatalog",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/NotificationEventCatalogItemDto"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "可订阅的事件目录（类型、级别、可过滤字段）——订阅 UI 据此渲染",
+        "tags": ["notifications"]
+      }
+    },
+    "/api/v1/notifications/subscriptions": {
+      "get": {
+        "operationId": "NotificationController_listSubscriptions",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/NotificationSubscriptionDto"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "当前用户的通知订阅规则",
+        "tags": ["notifications"]
+      },
+      "post": {
+        "operationId": "NotificationController_createSubscription",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertSubscriptionRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/NotificationSubscriptionDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "新增订阅（用户 × 通道 × 事件 × 条件）",
+        "tags": ["notifications"]
+      }
+    },
+    "/api/v1/notifications/subscriptions/{id}": {
+      "patch": {
+        "operationId": "NotificationController_updateSubscription",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSubscriptionRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/NotificationSubscriptionDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "修改订阅（条件 / 启停）",
+        "tags": ["notifications"]
+      },
+      "delete": {
+        "operationId": "NotificationController_deleteSubscription",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/NotificationDeleteResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "删除订阅",
+        "tags": ["notifications"]
+      }
+    },
+    "/api/v1/notifications/channels": {
+      "get": {
+        "operationId": "NotificationController_listBindings",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UserChannelBindingDto"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "当前用户的通道绑定（飞书 open_id / 邮箱）",
+        "tags": ["notifications"]
+      },
+      "post": {
+        "operationId": "NotificationController_upsertBinding",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertChannelBindingRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/UserChannelBindingDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "绑定/更新通道地址（飞书 open_id / 邮箱）",
         "tags": ["notifications"]
       }
     },
@@ -6675,6 +6987,45 @@
         "tags": ["notifications"]
       }
     },
+    "/api/v1/notifications/{id}/read": {
+      "post": {
+        "operationId": "NotificationController_markRead",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/NotificationMarkReadResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "标记该通知为已读（当前用户）",
+        "tags": ["notifications"]
+      }
+    },
     "/api/v1/notifications/{id}/retry": {
       "post": {
         "operationId": "NotificationController_retry",
@@ -6702,7 +7053,7 @@
                       "enum": [true]
                     },
                     "data": {
-                      "$ref": "#/components/schemas/RetryNotificationResultDto"
+                      "$ref": "#/components/schemas/NotificationRetryResultDto"
                     }
                   }
                 }
@@ -6710,7 +7061,7 @@
             }
           }
         },
-        "summary": "重试失败的 FEISHU 通知投递",
+        "summary": "重试该通知下失败的推送",
         "tags": ["notifications"]
       }
     },
@@ -17982,17 +18333,26 @@
             "type": "object",
             "nullable": true,
             "example": "CANCELLED",
-            "description": "关联订单的当前 ERP 状态（派生，不落库）。仅 ORDER / ORDER_INTERCEPTION 类型有值；不是通知自身的投递状态"
+            "description": "关联订单的当前 ERP 状态（派生）；不是通知自身的投递状态"
           },
           "goods": {
             "nullable": true,
-            "description": "拦截类通知的「实物现在在哪」：拦截进度 + 原拣货库位 / 回库目标库位 / 已装包裹。其它类型为 null",
             "type": "object",
             "allOf": [
               {
                 "$ref": "#/components/schemas/NotificationGoodsDto"
               }
             ]
+          },
+          "isRead": {
+            "type": "boolean",
+            "description": "当前用户是否已读（2026-10-26）"
+          },
+          "deliveryStatus": {
+            "type": "string",
+            "nullable": true,
+            "enum": ["PENDING", "SENT", "FAILED", "CANCELLED"],
+            "description": "当前用户自己最近一次推送的状态；未订阅为 null"
           }
         },
         "required": [
@@ -18009,24 +18369,227 @@
           "lastError",
           "sentAt",
           "failedAt",
-          "createdAt"
+          "createdAt",
+          "isRead"
         ]
       },
-      "RetryNotificationResultDto": {
+      "NotificationUnreadCountDto": {
+        "type": "object",
+        "properties": {
+          "unreadTotal": {
+            "type": "number",
+            "example": 2
+          }
+        },
+        "required": ["unreadTotal"]
+      },
+      "NotificationMarkReadResultDto": {
+        "type": "object",
+        "properties": {
+          "unreadTotal": {
+            "type": "number",
+            "example": 0
+          }
+        },
+        "required": ["unreadTotal"]
+      },
+      "NotificationConditionFieldDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "example": "storeId"
+          },
+          "label": {
+            "type": "string",
+            "example": "店铺"
+          }
+        },
+        "required": ["key", "label"]
+      },
+      "NotificationEventCatalogItemDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "example": "ORDER_INTERCEPTION_REQUIRED"
+          },
+          "label": {
+            "type": "string",
+            "example": "需要拦截"
+          },
+          "level": {
+            "type": "string",
+            "enum": ["INFO", "WARN", "HIGH"]
+          },
+          "conditionFields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NotificationConditionFieldDto"
+            }
+          }
+        },
+        "required": ["type", "label", "level", "conditionFields"]
+      },
+      "NotificationSubscriptionDto": {
         "type": "object",
         "properties": {
           "id": {
             "type": "string"
           },
-          "status": {
-            "type": "string",
-            "enum": ["PENDING", "SENT", "FAILED", "CANCELLED"]
+          "userId": {
+            "type": "string"
           },
-          "message": {
+          "channel": {
+            "type": "string",
+            "enum": ["FEISHU_DM", "FEISHU_GROUP"]
+          },
+          "eventType": {
+            "type": "string",
+            "enum": ["ORDER_INTERCEPTION_REQUIRED", "ORDER_INTERCEPTION_FAILED"]
+          },
+          "conditions": {
+            "type": "object",
+            "example": {
+              "level": ["HIGH"]
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
             "type": "string"
           }
         },
-        "required": ["id", "status", "message"]
+        "required": [
+          "id",
+          "userId",
+          "channel",
+          "eventType",
+          "conditions",
+          "enabled",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "UpsertSubscriptionRequestDto": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": ["FEISHU_DM", "FEISHU_GROUP"],
+            "example": "FEISHU_DM"
+          },
+          "eventType": {
+            "type": "string",
+            "enum": ["ORDER_INTERCEPTION_REQUIRED", "ORDER_INTERCEPTION_FAILED"],
+            "example": "ORDER_INTERCEPTION_REQUIRED"
+          },
+          "conditions": {
+            "type": "object",
+            "description": "AND 组合的过滤条件：键为事件可过滤字段（storeId / warehouseCode / skuCode / level），值为候选集合。空对象 = 该事件全收",
+            "example": {
+              "level": ["HIGH"]
+            }
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": ["channel", "eventType"]
+      },
+      "UpdateSubscriptionRequestDto": {
+        "type": "object",
+        "properties": {
+          "conditions": {
+            "type": "object",
+            "description": "覆盖过滤条件（AND 组合）",
+            "example": {
+              "storeId": ["<uuid>"]
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "NotificationDeleteResultDto": {
+        "type": "object",
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "example": true
+          }
+        },
+        "required": ["deleted"]
+      },
+      "UserChannelBindingDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string",
+            "enum": ["FEISHU_DM", "EMAIL"]
+          },
+          "address": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "verifiedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": ["id", "userId", "channel", "address", "enabled", "verifiedAt", "updatedAt"]
+      },
+      "UpsertChannelBindingRequestDto": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": ["FEISHU_DM", "EMAIL"],
+            "example": "FEISHU_DM"
+          },
+          "address": {
+            "type": "string",
+            "example": "ou_73a01ef75e7500c9e59abd9271a4129f",
+            "description": "飞书 open_id（按应用隔离，换应用需重新绑定）或邮箱地址"
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": ["channel", "address"]
+      },
+      "NotificationRetryResultDto": {
+        "type": "object",
+        "properties": {
+          "retried": {
+            "type": "number",
+            "example": 1,
+            "description": "重新入队的失败投递数"
+          }
+        },
+        "required": ["retried"]
       },
       "PickingTaskListItemDto": {
         "type": "object",

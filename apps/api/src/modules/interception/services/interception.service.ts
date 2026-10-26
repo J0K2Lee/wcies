@@ -100,6 +100,7 @@ export class InterceptionService implements OrderInterceptionPort {
     // breaks the cancel transaction (task §51).
     await this.notificationService.notifyInterceptionRequired({
       orderNo: input.orderNo,
+      storeId: input.storeId,
       orderItemId: input.orderItemId,
       interceptionId: created.id,
       interceptionNo: created.interceptionNo,
@@ -552,6 +553,7 @@ export class InterceptionService implements OrderInterceptionPort {
       interceptionId: id,
       orderNo: order.orderNo,
       reason: input.reason,
+      storeId: order.storeId,
     });
     return this.getDetail(id);
   }
