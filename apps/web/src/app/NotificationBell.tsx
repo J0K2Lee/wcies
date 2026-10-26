@@ -1,13 +1,7 @@
 import { useNavigate } from 'react-router';
 import { Badge, Button, Popover, Tooltip } from 'antd';
 import { useApiQuery } from '../api/hooks';
-import {
-  colors,
-  NOTIFICATION_STATUS_META,
-  NOTIFICATION_TYPE_META,
-  RelativeTime,
-  StatusBadge,
-} from '../design-system';
+import { colors, NOTIFICATION_TYPE_META, RelativeTime, StatusBadge } from '../design-system';
 
 /**
  * Topbar notification popover (Phase 2 task §35-§36): recent event stream
@@ -132,11 +126,15 @@ export function NotificationBell() {
                 >
                   {NOTIFICATION_TYPE_META[item.type]?.label ?? item.type} · {item.title}
                 </span>
-                <StatusBadge
-                  tone={NOTIFICATION_STATUS_META[item.status]?.tone ?? 'neutral'}
-                  label={NOTIFICATION_STATUS_META[item.status]?.label ?? item.status}
-                  showDot={false}
-                />
+                {/* 站内事件行恒为 SENT，「能看到即已送达」；只提示自己推送失败。 */}
+                {item.deliveryStatus === 'FAILED' && (
+                  <StatusBadge
+                    tone="danger"
+                    label="推送失败"
+                    hint="飞书推送失败，可在通知中心重试"
+                    showDot={false}
+                  />
+                )}
               </span>
               <span
                 style={{
