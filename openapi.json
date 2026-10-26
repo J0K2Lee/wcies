@@ -17880,6 +17880,47 @@
           }
         }
       },
+      "NotificationGoodsDto": {
+        "type": "object",
+        "properties": {
+          "interceptionStatus": {
+            "type": "string",
+            "enum": [
+              "CREATED",
+              "ASSIGNED",
+              "LOCATING",
+              "INTERCEPTED",
+              "RETURNED_TO_STOCK",
+              "FAILED",
+              "CLOSED"
+            ],
+            "description": "拦截任务当前状态（货物在哪由它 + 库位决定）"
+          },
+          "pickBinCodes": {
+            "example": ["ZG-01-E01-1"],
+            "description": "实物当初从哪些库位拣出（拣货后未回归库位，通常就在拣货区/拣货车）",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "targetBinCode": {
+            "type": "object",
+            "nullable": true,
+            "example": "ZG-01-A01-1",
+            "description": "拦截回库后落入的库位（未回库为 null）"
+          },
+          "packageNos": {
+            "example": [],
+            "description": "已装入的包裹号（未装包为空）",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["interceptionStatus", "pickBinCodes", "packageNos"]
+      },
       "NotificationDto": {
         "type": "object",
         "properties": {
@@ -17942,6 +17983,16 @@
             "nullable": true,
             "example": "CANCELLED",
             "description": "关联订单的当前 ERP 状态（派生，不落库）。仅 ORDER / ORDER_INTERCEPTION 类型有值；不是通知自身的投递状态"
+          },
+          "goods": {
+            "nullable": true,
+            "description": "拦截类通知的「实物现在在哪」：拦截进度 + 原拣货库位 / 回库目标库位 / 已装包裹。其它类型为 null",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NotificationGoodsDto"
+              }
+            ]
           }
         },
         "required": [

@@ -5887,6 +5887,30 @@ export interface components {
             /** @description 处理备注（记录在 details.closeRemark） */
             remark?: string;
         };
+        NotificationGoodsDto: {
+            /**
+             * @description 拦截任务当前状态（货物在哪由它 + 库位决定）
+             * @enum {string}
+             */
+            interceptionStatus: "CREATED" | "ASSIGNED" | "LOCATING" | "INTERCEPTED" | "RETURNED_TO_STOCK" | "FAILED" | "CLOSED";
+            /**
+             * @description 实物当初从哪些库位拣出（拣货后未回归库位，通常就在拣货区/拣货车）
+             * @example [
+             *       "ZG-01-E01-1"
+             *     ]
+             */
+            pickBinCodes: string[];
+            /**
+             * @description 拦截回库后落入的库位（未回库为 null）
+             * @example ZG-01-A01-1
+             */
+            targetBinCode?: Record<string, never> | null;
+            /**
+             * @description 已装入的包裹号（未装包为空）
+             * @example []
+             */
+            packageNos: string[];
+        };
         NotificationDto: {
             id: string;
             /** @enum {string} */
@@ -5915,6 +5939,8 @@ export interface components {
              * @example CANCELLED
              */
             orderStatus?: Record<string, never> | null;
+            /** @description 拦截类通知的「实物现在在哪」：拦截进度 + 原拣货库位 / 回库目标库位 / 已装包裹。其它类型为 null */
+            goods?: components["schemas"]["NotificationGoodsDto"] | null;
         };
         RetryNotificationResultDto: {
             id: string;

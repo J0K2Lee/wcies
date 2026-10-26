@@ -13,6 +13,7 @@ import {
   DataTable,
   ERP_STATUS_META,
   ErrorState,
+  INTERCEPTION_STATUS_META,
   FilterBar,
   KpiRow,
   MetricCard,
@@ -49,6 +50,39 @@ interface NotificationItem {
   createdAt: string;
   /** 关联订单的当前 ERP 状态（派生）；非订单类通知为 null。 */
   orderStatus: string | null;
+  /** 拦截类通知的「实物现在在哪」（派生）；其它类型为 null。 */
+  goods: {
+    interceptionStatus: string;
+    pickBinCodes: string[];
+    targetBinCode: string | null;
+    packageNos: string[];
+  } | null;
+}
+
+/**
+ * 「货物在哪」一句话（2026-10-26 用户要求）：仓库/运营看通知时想知道的是实物
+ * 现在在哪，而不是通知投递成功没有。已拣货未出库的货物只有三种可能位置：
+ * 拣货区/拣货车（未回库）、拦截后回到目标库位、或已装进包裹。
+ */
+function goodsLine(goods: NonNullable<NotificationItem['goods']>): string {
+  const from =
+    goods.pickBinCodes.length === 0 ? '原库位未知' : `原库位 ${goods.pickBinCodes.join('、')}`;
+  if (goods.packageNos.length > 0) {
+    return `已装包 ${goods.packageNos.join('、')}`;
+  }
+  switch (goods.interceptionStatus) {
+    case 'RETURNED_TO_STOCK':
+    case 'CLOSED':
+      return goods.targetBinCode === null ? '已回库' : `已回库 → ${goods.targetBinCode}`;
+    case 'INTERCEPTED':
+      return `已找到，待回库（${from}）`;
+    case 'LOCATING':
+      return `正在库内查找（${from}）`;
+    case 'FAILED':
+      return `未找到实物（${from}，库存仍为已拣货）`;
+    default:
+      return `待拦截（${from}）`;
+  }
 }
 
 type Envelope<T> = { data: T; meta: { total: number } };
@@ -201,6 +235,15 @@ export function NotificationsPage() {
                       <span style={{ fontSize: 12.5, color: colors.textSecondary, marginLeft: 8 }}>
                         {row.title}
                       </span>
+                      {/* 投递状态不再单独占一列（能看到即已送达）；只在异常时提示。 */}
+                      {row.status !== 'SENT' && (
+                        <StatusBadge
+                          tone={NOTIFICATION_STATUS_META[row.status]?.tone ?? 'neutral'}
+                          label={`投递${NOTIFICATION_STATUS_META[row.status]?.label ?? row.status}`}
+                          hint={`通知投递状态：${row.status}`}
+                          showDot={false}
+                        />
+                      )}
                     </div>
                     <div
                       style={{
@@ -232,20 +275,31 @@ export function NotificationsPage() {
                 ),
               },
               {
-                title: '通知状态',
-                dataIndex: 'status',
-                key: 'status',
-                width: 100,
-                // 投递状态（系统通道落库即已送达；飞书可能失败/待重试），
-                // 与订单业务状态是两件事（用户 2026-10-26 要求拆两列）。
-                render: (value: string) => (
-                  <StatusBadge
-                    tone={NOTIFICATION_STATUS_META[value]?.tone ?? 'neutral'}
-                    label={NOTIFICATION_STATUS_META[value]?.label ?? value}
-                    hint={`通知投递状态：${value}`}
-                    showDot={false}
-                  />
-                ),
+                title: '货物状态',
+                key: 'goods',
+                width: 210,
+                // 仓库/运营关心「实物现在在哪」：拦截进度 + 库位/包裹（用户 2026-10-26）。
+                render: (_: unknown, row: NotificationItem) =>
+                  row.goods === null ? (
+                    <span style={{ color: colors.textTertiary }}>—</span>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <StatusBadge
+                        tone={
+                          INTERCEPTION_STATUS_META[row.goods.interceptionStatus]?.tone ?? 'neutral'
+                        }
+                        label={
+                          INTERCEPTION_STATUS_META[row.goods.interceptionStatus]?.label ??
+                          row.goods.interceptionStatus
+                        }
+                        hint={INTERCEPTION_STATUS_META[row.goods.interceptionStatus]?.hint}
+                        showDot={false}
+                      />
+                      <span style={{ fontSize: 12, color: colors.textTertiary }}>
+                        {goodsLine(row.goods)}
+                      </span>
+                    </div>
+                  ),
               },
               {
                 title: '订单状态',

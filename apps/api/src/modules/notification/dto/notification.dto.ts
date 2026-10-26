@@ -26,6 +26,39 @@ export class NotificationListQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() referenceId?: string;
 }
 
+export class NotificationGoodsDto {
+  @ApiProperty({
+    enum: [
+      'CREATED',
+      'ASSIGNED',
+      'LOCATING',
+      'INTERCEPTED',
+      'RETURNED_TO_STOCK',
+      'FAILED',
+      'CLOSED',
+    ],
+    description: '拦截任务当前状态（货物在哪由它 + 库位决定）',
+  })
+  interceptionStatus!: string;
+
+  @ApiProperty({
+    type: [String],
+    example: ['ZG-01-E01-1'],
+    description: '实物当初从哪些库位拣出（拣货后未回归库位，通常就在拣货区/拣货车）',
+  })
+  pickBinCodes!: string[];
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'ZG-01-A01-1',
+    description: '拦截回库后落入的库位（未回库为 null）',
+  })
+  targetBinCode!: string | null;
+
+  @ApiProperty({ type: [String], example: [], description: '已装入的包裹号（未装包为空）' })
+  packageNos!: string[];
+}
+
 export class NotificationDto {
   @ApiProperty() id!: string;
   @ApiProperty({ enum: NOTIFICATION_TYPES }) type!: string;
@@ -48,6 +81,13 @@ export class NotificationDto {
       '关联订单的当前 ERP 状态（派生，不落库）。仅 ORDER / ORDER_INTERCEPTION 类型有值；不是通知自身的投递状态',
   })
   orderStatus!: string | null;
+  @ApiPropertyOptional({
+    nullable: true,
+    type: NotificationGoodsDto,
+    description:
+      '拦截类通知的「实物现在在哪」：拦截进度 + 原拣货库位 / 回库目标库位 / 已装包裹。其它类型为 null',
+  })
+  goods!: NotificationGoodsDto | null;
 }
 
 export class RetryNotificationResultDto {

@@ -64,29 +64,46 @@ export class NotificationRepository {
   }
 
   /**
-   * 关联订单的 ERP 状态（2026-10-26 用户要求：通知状态与订单状态分两列）。
+   * 关联对象的展示上下文（2026-10-26 用户要求）：
+   * - `orderStatus`：关联订单**当前**的 ERP 状态（通知状态与订单状态分两列）；
+   * - `goods`：拦截类通知对应的**实物现在在哪**——拦截进度 + 原拣货库位 /
+   *   已回库目标库位 / 已装包裹。
    *
-   * 只读派生查询：通知的 reference 可能是订单本身，也可能是拦截任务
-   * （`ORDER_INTERCEPTION` → `order_interceptions.order_id`）。这里直接读这两张表，
-   * 是为了避免 notification ↔ order/interception 的模块循环（AGENTS §9 的精神是
-   * 不读对方**内部实现**；这里是展示用的只读联查，不含业务判断）。
+   * 只读派生查询（一页最多两次），直接联查订单/拦截表是为了避免
+   * notification ↔ order/interception 的模块循环（AGENTS §9 禁止的是读对方
+   * 内部实现并据此做业务判断，这里只是展示用的事实读取）。
    */
-  async findOrderStatuses(
+  async findReferenceContexts(
     referenceType: string,
     referenceIds: readonly string[],
-  ): Promise<Map<string, string>> {
+  ): Promise<
+    Map<
+      string,
+      {
+        orderStatus: string | null;
+        goods: {
+          interceptionStatus: string;
+          pickBinCodes: string[];
+          targetBinCode: string | null;
+          packageNos: string[];
+        } | null;
+      }
+    >
+  > {
+    const result = new Map<
+      string,
+      {
+        orderStatus: string | null;
+        goods: {
+          interceptionStatus: string;
+          pickBinCodes: string[];
+          targetBinCode: string | null;
+          packageNos: string[];
+        } | null;
+      }
+    >();
     if (referenceIds.length === 0) {
-      return new Map();
-    }
-    if (referenceType === 'ORDER_INTERCEPTION') {
-      const rows = await this.dataSource.query<Array<{ reference_id: string; erp_status: string }>>(
-        `SELECT oi.id AS reference_id, o.erp_status
-           FROM order_interceptions oi
-           JOIN orders o ON o.id = oi.order_id
-          WHERE oi.id = ANY($1::uuid[])`,
-        [[...referenceIds]],
-      );
-      return new Map(rows.map((row) => [row.reference_id, row.erp_status]));
+      return result;
     }
     if (referenceType === 'ORDER') {
       const rows = await this.dataSource.query<Array<{ reference_id: string; erp_status: string }>>(
@@ -95,9 +112,55 @@ export class NotificationRepository {
           WHERE o.id = ANY($1::uuid[])`,
         [[...referenceIds]],
       );
-      return new Map(rows.map((row) => [row.reference_id, row.erp_status]));
+      for (const row of rows) {
+        result.set(row.reference_id, { orderStatus: row.erp_status, goods: null });
+      }
+      return result;
     }
-    return new Map();
+    if (referenceType === 'ORDER_INTERCEPTION') {
+      const rows = await this.dataSource.query<
+        Array<{
+          reference_id: string;
+          erp_status: string;
+          interception_status: string;
+          target_bin_code: string | null;
+          pick_bin_codes: string[] | null;
+          package_nos: string[] | null;
+        }>
+      >(
+        `SELECT oi.id AS reference_id,
+                o.erp_status,
+                oi.status AS interception_status,
+                ob.bin_code AS target_bin_code,
+                (SELECT array_agg(DISTINCT pb.bin_code)
+                   FROM order_items i
+                   JOIN inventory_reservation_lines rl ON rl.reservation_id = i.reservation_id
+                   JOIN warehouse_bins pb ON pb.id = rl.bin_id
+                  WHERE i.id = oi.order_item_id AND rl.picked_qty > 0) AS pick_bin_codes,
+                (SELECT array_agg(DISTINCT p.package_no)
+                   FROM package_items pi
+                   JOIN packages p ON p.id = pi.package_id
+                  WHERE pi.order_item_id = oi.order_item_id AND pi.status = 'ACTIVE') AS package_nos
+           FROM order_interceptions oi
+           JOIN orders o ON o.id = oi.order_id
+           LEFT JOIN warehouse_bins ob ON ob.id = oi.target_bin_id
+          WHERE oi.id = ANY($1::uuid[])`,
+        [[...referenceIds]],
+      );
+      for (const row of rows) {
+        result.set(row.reference_id, {
+          orderStatus: row.erp_status,
+          goods: {
+            interceptionStatus: row.interception_status,
+            pickBinCodes: row.pick_bin_codes ?? [],
+            targetBinCode: row.target_bin_code,
+            packageNos: row.package_nos ?? [],
+          },
+        });
+      }
+      return result;
+    }
+    return result;
   }
 
   async list(

@@ -37,6 +37,22 @@ export interface NotificationDto {
    * 这是派生字段，不是通知自身的事实。
    */
   orderStatus: string | null;
+  /**
+   * 拦截类通知的「实物现在在哪」（2026-10-26 用户要求）：拦截进度 + 原拣货库位 /
+   * 已回库目标库位 / 已装包裹号。其它类型的通知为 null。
+   */
+  goods: {
+    interceptionStatus: string;
+    pickBinCodes: string[];
+    targetBinCode: string | null;
+    packageNos: string[];
+  } | null;
+}
+
+/** 派生上下文：关联订单状态 + 拦截货物的位置（均不落库）。 */
+interface NotificationReferenceContext {
+  orderStatus: string | null;
+  goods: NotificationDto['goods'];
 }
 
 interface PublishInput {
@@ -137,9 +153,9 @@ export class NotificationService {
       page.pageSize,
       (page.page - 1) * page.pageSize,
     );
-    const orderStatuses = await this.collectOrderStatuses(rows);
+    const contexts = await this.collectReferenceContexts(rows);
     return {
-      items: rows.map((row) => this.toDto(row, orderStatuses.get(row.referenceId) ?? null)),
+      items: rows.map((row) => this.toDto(row, contexts.get(row.referenceId) ?? null)),
       meta: { page: page.page, pageSize: page.pageSize, total },
     };
   }
@@ -149,8 +165,8 @@ export class NotificationService {
     if (row === null) {
       throw new NotificationNotFoundError(id);
     }
-    const orderStatuses = await this.collectOrderStatuses([row]);
-    return this.toDto(row, orderStatuses.get(row.referenceId) ?? null);
+    const contexts = await this.collectReferenceContexts([row]);
+    return this.toDto(row, contexts.get(row.referenceId) ?? null);
   }
 
   /** Re-enqueues a FAILED FEISHU delivery (SYSTEM rows cannot fail). */
@@ -171,10 +187,10 @@ export class NotificationService {
         failedAt: null,
       });
       await this.enqueue(id);
-      const statuses = await this.collectOrderStatuses([row]);
+      const contexts = await this.collectReferenceContexts([row]);
       return this.toDto(
         { ...row, status: 'PENDING', failedAt: null },
-        statuses.get(row.referenceId) ?? null,
+        contexts.get(row.referenceId) ?? null,
       );
     });
   }
@@ -313,7 +329,7 @@ export class NotificationService {
       failedAt: Date | null;
       createdAt: Date;
     },
-    orderStatus: string | null,
+    context: NotificationReferenceContext | null,
   ): NotificationDto {
     return {
       id: row.id,
@@ -330,25 +346,26 @@ export class NotificationService {
       sentAt: row.sentAt,
       failedAt: row.failedAt,
       createdAt: row.createdAt,
-      orderStatus,
+      orderStatus: context?.orderStatus ?? null,
+      goods: context?.goods ?? null,
     };
   }
 
   /** 一页内按 referenceType 各查一次，避免逐行查询。 */
-  private async collectOrderStatuses(
+  private async collectReferenceContexts(
     rows: ReadonlyArray<{ referenceType: string; referenceId: string }>,
-  ): Promise<Map<string, string>> {
+  ): Promise<Map<string, NotificationReferenceContext>> {
     const byType = new Map<string, string[]>();
     for (const row of rows) {
       const list = byType.get(row.referenceType) ?? [];
       list.push(row.referenceId);
       byType.set(row.referenceType, list);
     }
-    const merged = new Map<string, string>();
+    const merged = new Map<string, NotificationReferenceContext>();
     for (const [referenceType, ids] of byType) {
-      const statuses = await this.repository.findOrderStatuses(referenceType, ids);
-      for (const [id, status] of statuses) {
-        merged.set(id, status);
+      const contexts = await this.repository.findReferenceContexts(referenceType, ids);
+      for (const [id, context] of contexts) {
+        merged.set(id, context);
       }
     }
     return merged;
