@@ -102,7 +102,10 @@ BACKORDERED（不再停留 PENDING）；历史卡行由 Migration 20260917_007 �
 
 ## 平台已事实发货时缺货不成立（用户指示 2026-10-14）
 
-平台阶段 `IN_TRANSIT / DELIVERED`（OZON `delivering` / `delivered`）
+平台阶段 `IN_TRANSIT / DELIVERED`（OZON `delivering` / `delivered`；
+Yandex `DELIVERY / PICKUP / DELIVERED` 与 `PROCESSING × SHIPPED`；
+WB `wbStatus` 的 `accepted_by_carrier / sent_to_carrier / ready_for_pickup / sold`，
+以及 `supplierStatus=complete`——供应单已交付＝配送中，2026-10-26 补齐）
 即货物已发走：此时缺货与现实矛盾，**缺货不得阻塞订单**——缺货行转
 `EXTERNAL_FULFILLED`、OPEN `ORDER_OUT_OF_STOCK` 关闭；除未映射异常
 （`ORDER_SKU_MAPPING_FAILED`）外不阻塞，无未映射行且内部履约不在进行
@@ -194,6 +197,37 @@ BACKORDERED**——静默停在 PENDING 会让操作员看不到任何待办（�
 
 直接 409 `ORDER_INVALID_STATE`：该行既不缺库存、也没有映射问题可修
 （`RESERVED` 已占用、`SHIPPED` 已出库、`RELEASED` 不持有内部库存）。
+
+> `RESERVED` 行要退回待分配，请用「释放库存」（§A3），不要把重试分配当释放用。
+
+### A3. 手工释放库存占用（用户要求 2026-10-26）
+
+`releaseItemReservation(orderItemId)`（API：`POST /orders/items/:itemId/release-reservation`）
+——只对**已占用（`RESERVED`）**行生效，把占用退回「待分配」：
+
+```text
+RESERVED
+↓
+InventoryService.releaseReservation（orderDomain=true，幂等键 ORDER_RELEASE:<itemId>，
+                                     与取消共用）→ 库存侧 RELEASED + 流水
+↓
+行 → PENDING，清空 reservationId / warehouseId
+↓
+订单 rollup 重算（全部行待分配 → BACKORDERED / PARTIALLY_BACKORDERED）
+```
+
+规则要点：
+
+- **不立即重新分配**：自动分配只由「库存增加事件」（入库 / 移位 / 调拨入库）
+  触发，释放占用只是把可售还回去，不产生该事件；后续真实入库仍会按 §自动重新
+  分配 的优先级重新占用这一行（FIFO/加急/平台优先级不变）；
+- **不新建缺货异常**：这是运营主动决策，不是库存或数据故障；缺货视图、采购
+  覆盖都按行状态派生，行回到 `PENDING` 后自然重新出现；
+- 已取货/已出库/已取消/已发货的订单不能释放（409 `ORDER_INVALID_STATE`）；
+- 订单存在 **进行中的拣货任务** 时拒绝（拣货行仍引用这笔占用，先释放会让任务
+  与库存脱节），要求先完成或取消任务；
+- 与取消的区别：取消把行落到 `RELEASED`（终态），释放只是回到 `PENDING`
+  （可再次被分配）。
 
 ### B. 映射失败行（`FAILED`）— 决策 0012；2026-10-14 调整：**先修映射，再决定是否分配**
 

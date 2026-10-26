@@ -1922,6 +1922,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/orders/items/{itemId}/release-reservation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 释放该行的库存占用（已占用 → 待分配；释放后不会立即重新分配） */
+        post: operations["OrderController_releaseReservation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/orders/{id}/urgent": {
         parameters: {
             query?: never;
@@ -4371,10 +4388,10 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
-            /** @description Primary barcode value */
-            primaryBarcode: Record<string, never> | null;
             /** @description Signed URL of the primary image */
             primaryImageUrl: Record<string, never> | null;
+            /** @description Primary barcode value */
+            primaryBarcode: Record<string, never> | null;
             /** @example 3 */
             listingCount: number;
         };
@@ -4436,6 +4453,8 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+            /** @description Signed URL of the primary image */
+            primaryImageUrl: Record<string, never> | null;
         };
         CreateSkuRequestDto: {
             /**
@@ -6170,6 +6189,16 @@ export interface components {
             /** @description 本次是否修复了平台映射（修复失败的订单行时会先补映射、关异常，再按分配状态决定是否占库存） */
             mappingRepaired: boolean;
         };
+        OrderReleaseReservationResultDto: {
+            orderItemId: string;
+            orderId: string;
+            /** @enum {string} */
+            fulfillmentStatus: "PENDING" | "RESERVED" | "BACKORDERED" | "PICKED" | "SHIPPED" | "RELEASED" | "EXTERNAL_FULFILLED";
+            /** @enum {string} */
+            orderErpStatus: "NEW" | "ALLOCATING" | "READY_TO_PICK" | "PARTIALLY_BACKORDERED" | "BACKORDERED" | "PICKING" | "PICKED" | "PARTIALLY_SHIPPED" | "SHIPPED" | "CANCELLED" | "EXCEPTION";
+            /** @description 被释放的库存占用 id（库存侧已记 RELEASED） */
+            releasedReservationId: string;
+        };
         OrderSetUrgentResultDto: {
             orderId: string;
             /** @example ORD00000001 */
@@ -7310,6 +7339,10 @@ export interface components {
             /** @description 连续失败次数（成功即清零） */
             consecutiveFailures: number;
             activeJobId: string | null;
+            /** @description 订单自动轮询的生效间隔（分钟）：店铺自定义优先，否则系统默认；null = 系统级关闭 */
+            orderSyncIntervalMinutes: number | null;
+            /** @description 商品链接自动轮询的生效间隔（分钟）：店铺自定义优先，否则系统默认；null = 系统级关闭 */
+            listingSyncIntervalMinutes: number | null;
         };
         RawEventDto: {
             id: string;
@@ -11754,6 +11787,31 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["OrderRetryAllocationResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    OrderController_releaseReservation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                itemId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["OrderReleaseReservationResultDto"];
                     };
                 };
             };

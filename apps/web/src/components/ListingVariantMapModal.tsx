@@ -125,6 +125,22 @@ function InternalSkuPicker({
   const rows = skus.data?.data ?? [];
   const capped = total > rows.length;
 
+  /**
+   * 选中 SKU 的图片（用户要求 2026-10-26）：先看当前搜索结果（已带签名 URL）；
+   * 预选值（推荐候选/从建档转过来）不在结果里时，按 id 拉一次详情——
+   * 详情接口现在也返回 primaryImageUrl。
+   */
+  const selectedRow = rows.find((sku) => sku.id === value) ?? null;
+  const needDetail = value !== undefined && value !== '' && selectedRow === null;
+  const detail = useApiQuery<{ data: SkuOption }>(
+    '/api/v1/skus/{id}',
+    {},
+    ['sku-preview', value ?? ''],
+    { id: value ?? '' },
+    needDetail,
+  );
+  const preview: SkuOption | null = selectedRow ?? detail.data?.data ?? null;
+
   return (
     <div>
       <Select
@@ -217,6 +233,35 @@ function InternalSkuPicker({
           </span>
         )}
       </div>
+      {preview !== null && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            marginTop: 8,
+            padding: '8px 10px',
+            border: `1px solid ${colors.borderSoft}`,
+            borderRadius: 8,
+            background: colors.neutralBg,
+          }}
+        >
+          <Image
+            src={preview.primaryImageUrl || IMAGE_FALLBACK}
+            fallback={IMAGE_FALLBACK}
+            width={64}
+            height={64}
+            preview={preview.primaryImageUrl !== null}
+            style={{ objectFit: 'contain', borderRadius: 6, background: '#fff' }}
+          />
+          <div style={{ minWidth: 0, fontSize: 12.5, color: colors.textSecondary }}>
+            <div style={{ fontWeight: 550, color: colors.textPrimary }}>
+              {preview.skuCode} {preview.nameZh}
+            </div>
+            <div>{preview.primaryImageUrl === null ? '该 SKU 档案没有图片' : '点击图片可放大'}</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

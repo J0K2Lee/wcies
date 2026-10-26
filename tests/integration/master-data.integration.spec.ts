@@ -337,6 +337,12 @@ describe('sku images (task §85)', () => {
     expect(imageResponse.status).toBe(200);
     expect((await imageResponse.arrayBuffer()).byteLength).toBe(png.length);
 
+    // 详情接口也返回主图（2026-10-26）：SKU 映射弹窗要显示选中档案的图片。
+    const detail = await client.get<{ primaryImageUrl: string | null }>(`/api/v1/skus/${skuId}`);
+    expect(detail.body.data.primaryImageUrl).toBeTruthy();
+    const detailImage = await fetch(detail.body.data.primaryImageUrl as string);
+    expect(detailImage.status).toBe(200);
+
     const invalid = await client.upload(`/api/v1/skus/${skuId}/images`, {
       name: 'evil.txt',
       type: 'text/plain',

@@ -211,6 +211,12 @@ describe('mapFbsOrderToOrder (marketplace v3)', () => {
     expect(order.platformStage).toBe('AWAITING_SHIPMENT');
   });
 
+  it('supplierStatus=complete（供应单已交付）按平台事实记 IN_TRANSIT（2026-10-26）', () => {
+    const order = mapFbsOrderToOrder({ ...base, wbStatus: undefined, supplierStatus: 'complete' });
+    expect(order.platformStage).toBe('IN_TRANSIT');
+    expect(order.platformCancelled).toBe(false);
+  });
+
   it('treats supplierStatus cancel as a platform cancellation', () => {
     const order = mapFbsOrderToOrder({ ...base, supplierStatus: 'cancel' });
     expect(order.platformCancelled).toBe(true);

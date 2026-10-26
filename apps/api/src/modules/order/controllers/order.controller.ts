@@ -39,6 +39,7 @@ import {
   OrderPurgePreviewDto,
   OrderPurgeRequestDto,
   OrderPurgeResultDto,
+  OrderReleaseReservationResultDto,
   OrderRetryAllocationResultDto,
   OrderSetUrgentRequestDto,
   OrderSetUrgentResultDto,
@@ -213,6 +214,21 @@ export class OrderController {
   ) {
     return ok<OrderRetryAllocationResultDto>(
       await this.orderService.retryAllocation(itemId, operator),
+    );
+  }
+
+  @Post('items/:itemId/release-reservation')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '释放该行的库存占用（已占用 → 待分配；释放后不会立即重新分配）',
+  })
+  @ApiOkEnvelope(OrderReleaseReservationResultDto)
+  async releaseReservation(
+    @Param('itemId') itemId: string,
+    @CurrentOperator() operator: OperatorContext,
+  ) {
+    return ok<OrderReleaseReservationResultDto>(
+      await this.orderService.releaseItemReservation(itemId, operator),
     );
   }
 

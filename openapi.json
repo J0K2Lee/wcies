@@ -6778,6 +6778,45 @@
         "tags": ["orders"]
       }
     },
+    "/api/v1/orders/items/{itemId}/release-reservation": {
+      "post": {
+        "operationId": "OrderController_releaseReservation",
+        "parameters": [
+          {
+            "name": "itemId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/OrderReleaseReservationResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "释放该行的库存占用（已占用 → 待分配；释放后不会立即重新分配）",
+        "tags": ["orders"]
+      }
+    },
     "/api/v1/orders/{id}/urgent": {
       "post": {
         "operationId": "OrderController_setUrgent",
@@ -13967,15 +14006,15 @@
             "format": "date-time",
             "type": "string"
           },
-          "primaryBarcode": {
-            "type": "object",
-            "nullable": true,
-            "description": "Primary barcode value"
-          },
           "primaryImageUrl": {
             "type": "object",
             "nullable": true,
             "description": "Signed URL of the primary image"
+          },
+          "primaryBarcode": {
+            "type": "object",
+            "nullable": true,
+            "description": "Primary barcode value"
           },
           "listingCount": {
             "type": "number",
@@ -14008,8 +14047,8 @@
           "remark",
           "createdAt",
           "updatedAt",
-          "primaryBarcode",
           "primaryImageUrl",
+          "primaryBarcode",
           "listingCount"
         ]
       },
@@ -14130,6 +14169,11 @@
           "updatedAt": {
             "format": "date-time",
             "type": "string"
+          },
+          "primaryImageUrl": {
+            "type": "object",
+            "nullable": true,
+            "description": "Signed URL of the primary image"
           }
         },
         "required": [
@@ -14157,7 +14201,8 @@
           "status",
           "remark",
           "createdAt",
-          "updatedAt"
+          "updatedAt",
+          "primaryImageUrl"
         ]
       },
       "CreateSkuRequestDto": {
@@ -18525,6 +18570,56 @@
         },
         "required": ["orderItemId", "fulfillmentStatus", "reserved", "mappingRepaired"]
       },
+      "OrderReleaseReservationResultDto": {
+        "type": "object",
+        "properties": {
+          "orderItemId": {
+            "type": "string"
+          },
+          "orderId": {
+            "type": "string"
+          },
+          "fulfillmentStatus": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "RESERVED",
+              "BACKORDERED",
+              "PICKED",
+              "SHIPPED",
+              "RELEASED",
+              "EXTERNAL_FULFILLED"
+            ]
+          },
+          "orderErpStatus": {
+            "type": "string",
+            "enum": [
+              "NEW",
+              "ALLOCATING",
+              "READY_TO_PICK",
+              "PARTIALLY_BACKORDERED",
+              "BACKORDERED",
+              "PICKING",
+              "PICKED",
+              "PARTIALLY_SHIPPED",
+              "SHIPPED",
+              "CANCELLED",
+              "EXCEPTION"
+            ]
+          },
+          "releasedReservationId": {
+            "type": "string",
+            "description": "被释放的库存占用 id（库存侧已记 RELEASED）"
+          }
+        },
+        "required": [
+          "orderItemId",
+          "orderId",
+          "fulfillmentStatus",
+          "orderErpStatus",
+          "releasedReservationId"
+        ]
+      },
       "OrderSetUrgentResultDto": {
         "type": "object",
         "properties": {
@@ -21722,6 +21817,16 @@
           "activeJobId": {
             "type": "string",
             "nullable": true
+          },
+          "orderSyncIntervalMinutes": {
+            "type": "number",
+            "nullable": true,
+            "description": "订单自动轮询的生效间隔（分钟）：店铺自定义优先，否则系统默认；null = 系统级关闭"
+          },
+          "listingSyncIntervalMinutes": {
+            "type": "number",
+            "nullable": true,
+            "description": "商品链接自动轮询的生效间隔（分钟）：店铺自定义优先，否则系统默认；null = 系统级关闭"
           }
         },
         "required": [
@@ -21734,7 +21839,9 @@
           "lastCategoryTreeSync",
           "lastProductEnrichmentSync",
           "consecutiveFailures",
-          "activeJobId"
+          "activeJobId",
+          "orderSyncIntervalMinutes",
+          "listingSyncIntervalMinutes"
         ]
       },
       "RawEventDto": {

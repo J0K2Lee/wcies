@@ -844,3 +844,135 @@ describe('OrderService.cancelExternalFulfillment（2026-10-23）', () => {
     );
   });
 });
+
+/**
+ * 手工释放库存占用（用户要求 2026-10-26）：
+ * 已占用行 → 待分配（PENDING），库存由 InventoryService 正常释放；
+ * 释放本身不得触发重新分配（没有库存增加事件），也不新建缺货异常。
+ */
+describe('OrderService.releaseItemReservation', () => {
+  const RESERVED_ITEM = {
+    id: 'item-1',
+    orderId: 'order-1',
+    lineNo: 1,
+    fulfillmentStatus: 'RESERVED',
+    reservationId: 'res-1',
+    warehouseId: 'wh-1',
+  };
+
+  function build(item: Record<string, unknown> | null) {
+    const order = {
+      id: 'order-1',
+      orderNo: 'ORD00000001',
+      storeId: 'store-1',
+      erpStatus: 'READY_TO_PICK',
+      fulfillmentMode: 'FBS',
+      platformStage: 'AWAITING_SHIPMENT',
+    };
+    const orderRepo = { findById: vi.fn().mockResolvedValue(order) };
+    const itemRepo = {
+      findById: vi.fn().mockResolvedValue(item),
+      updateFulfillment: vi.fn().mockResolvedValue(undefined),
+    };
+    const reservationService = {
+      releaseReservation: vi.fn().mockResolvedValue({}),
+    } as unknown as ReservationService;
+    const statusService = {
+      recomputeOrderStatus: vi.fn().mockResolvedValue('BACKORDERED'),
+    } as unknown as OrderStatusService;
+    const pickingState = {
+      countActivePickingItems: vi.fn().mockResolvedValue(0),
+    } as unknown as OrderPickingStatePort;
+    const operationLog = { record: vi.fn().mockResolvedValue(undefined) };
+    const service = new OrderService(
+      {
+        transaction: vi.fn((work: (manager: unknown) => Promise<unknown>) => work({})),
+      } as unknown as DataSource,
+      orderRepo as unknown as OrderRepository,
+      itemRepo as unknown as OrderItemRepository,
+      {} as OrderStatusHistoryRepository,
+      {} as PlatformStatusHistoryRepository,
+      statusService,
+      {} as OrderDeadlineExceptionService,
+      {} as OrderTrackingStallService,
+      {} as OrderIngestionService,
+      {} as OrderPlatformShippedService,
+      reservationService,
+      {} as InventoryQueryService,
+      {} as ExceptionService,
+      {} as StoreService,
+      {} as SkuImageService,
+      operationLog as unknown as OperationLogService,
+      {} as AppLoggerService,
+      pickingState,
+      {} as OrderInterceptionPort,
+      {} as OrderProcurementPort,
+      {} as PlatformAdapterRegistry,
+    );
+    return {
+      service,
+      orderRepo,
+      itemRepo,
+      reservationService,
+      statusService,
+      pickingState,
+      operationLog,
+    };
+  }
+
+  it('释放占用：行回 PENDING 并清空占用/仓库，订单 rollup 重算', async () => {
+    const { service, itemRepo, reservationService, statusService } = build(RESERVED_ITEM);
+
+    const result = await service.releaseItemReservation('item-1', OPERATOR);
+
+    expect(reservationService.releaseReservation).toHaveBeenCalledWith(
+      'res-1',
+      expect.objectContaining({ orderDomain: true, idempotencyKey: 'ORDER_RELEASE:item-1' }),
+    );
+    expect(itemRepo.updateFulfillment).toHaveBeenCalledWith(expect.anything(), 'item-1', {
+      fulfillmentStatus: 'PENDING',
+      reservationId: null,
+      warehouseId: null,
+    });
+    expect(statusService.recomputeOrderStatus).toHaveBeenCalled();
+    expect(result).toMatchObject({
+      orderItemId: 'item-1',
+      fulfillmentStatus: 'PENDING',
+      orderErpStatus: 'BACKORDERED',
+      releasedReservationId: 'res-1',
+    });
+  });
+
+  it('只有已占用行可以释放', async () => {
+    const { service, reservationService } = build({
+      ...RESERVED_ITEM,
+      fulfillmentStatus: 'PICKED',
+    });
+    await expect(service.releaseItemReservation('item-1', OPERATOR)).rejects.toBeInstanceOf(
+      OrderInvalidStateError,
+    );
+    expect(reservationService.releaseReservation).not.toHaveBeenCalled();
+  });
+
+  it('订单有进行中的拣货任务时拒绝（避免任务与库存脱节）', async () => {
+    const { service, reservationService, pickingState } = build(RESERVED_ITEM);
+    pickingState.countActivePickingItems = vi.fn().mockResolvedValue(1);
+    await expect(service.releaseItemReservation('item-1', OPERATOR)).rejects.toBeInstanceOf(
+      OrderInvalidStateError,
+    );
+    expect(reservationService.releaseReservation).not.toHaveBeenCalled();
+  });
+
+  it('已取消订单不能释放', async () => {
+    const { service, orderRepo, reservationService } = build(RESERVED_ITEM);
+    orderRepo.findById.mockResolvedValue({
+      id: 'order-1',
+      orderNo: 'ORD00000001',
+      erpStatus: 'CANCELLED',
+    });
+    await expect(service.releaseItemReservation('item-1', OPERATOR)).rejects.toBeInstanceOf(
+      OrderInvalidStateError,
+    );
+    expect(reservationService.releaseReservation).not.toHaveBeenCalled();
+  });
+});

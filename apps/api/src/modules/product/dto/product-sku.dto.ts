@@ -420,6 +420,13 @@ export class SkuResponseDto {
 
   @ApiProperty({ format: 'date-time' })
   updatedAt!: Date;
+
+  /**
+   * 主图签名 URL（2026-10-26）：详情接口也返回，供 SKU 映射弹窗展示选中档案。
+   * 列表项沿用同名覆盖（SkuListItemDto 里重复声明，OpenAPI 保持稳定）。
+   */
+  @ApiProperty({ nullable: true, description: 'Signed URL of the primary image' })
+  primaryImageUrl!: string | null;
 }
 
 export class SkuListItemDto extends SkuResponseDto {

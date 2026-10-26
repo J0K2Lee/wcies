@@ -200,6 +200,21 @@ export class SkuRepository {
     return this.repository.findOneBy({ id });
   }
 
+  /**
+   * 主图 object key（2026-10-26）：列表页用子查询批量取；详情页只有一行，
+   * 走这个单行查询（SKU 映射弹窗展示选中档案的图片）。
+   */
+  async findPrimaryImageKey(skuId: string): Promise<string | null> {
+    const rows = await this.repository.manager.query<Array<{ object_key: string }>>(
+      `SELECT object_key FROM sku_images
+        WHERE sku_id = $1
+        ORDER BY is_primary DESC, sort_order ASC
+        LIMIT 1`,
+      [skuId],
+    );
+    return rows[0]?.object_key ?? null;
+  }
+
   async findByCode(skuCode: string): Promise<SkuEntity | null> {
     return this.repository.findOneBy({ skuCode });
   }

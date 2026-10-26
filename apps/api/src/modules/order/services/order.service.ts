@@ -621,6 +621,97 @@ export class OrderService {
     };
   }
 
+  /**
+   * 手工释放订单行的库存占用（用户要求 2026-10-26）：已占用（RESERVED）行可以
+   * 主动退回「待分配」，且释放后不立即重新分配。
+   *
+   * - 走 InventoryService 的正常释放链路（`orderDomain: true`，幂等键沿用
+   *   `ORDER_RELEASE:<itemId>`，与取消共用），库存流水/余额由库存模块写；
+   * - 行落到 **PENDING**（= 待分配 / 缺货的未分配态），清掉 reservationId 与
+   *   warehouseId——行不再声称持有任何仓库的库存；
+   * - **不触发自动重新分配**：库存增加监听器只在入库 / 移位 / 调拨入库等真实库存
+   *   增加时广播，释放占用只是把可售还回去，不产生该事件；后续真实入库仍会按
+   *   FIFO 自动分配（既有规则），这里只是不做「释放后立刻抢回」；
+   * - 不新建缺货异常：这是运营主动决策，不是库存/数据故障；缺货视图与采购覆盖
+   *   按行状态派生，天然会重新显示。
+   */
+  async releaseItemReservation(
+    orderItemId: string,
+    operator: OperatorContext,
+  ): Promise<{
+    orderItemId: string;
+    orderId: string;
+    fulfillmentStatus: string;
+    orderErpStatus: ErpOrderStatus;
+    releasedReservationId: string;
+  }> {
+    const item = await this.itemRepo.findById(orderItemId);
+    if (item === null) {
+      throw new OrderItemNotFoundError(orderItemId);
+    }
+    const order = await this.getOrderOrThrow(item.orderId);
+    if (order.erpStatus === 'CANCELLED' || order.erpStatus === 'SHIPPED') {
+      throw new OrderInvalidStateError('订单已取消或已发货，不能释放库存占用', {
+        orderId: order.id,
+        erpStatus: order.erpStatus,
+      });
+    }
+    if (item.fulfillmentStatus !== 'RESERVED' || item.reservationId === null) {
+      throw new OrderInvalidStateError('该行当前没有库存占用，只有「已占用」行可以释放', {
+        orderItemId: item.id,
+        fulfillmentStatus: item.fulfillmentStatus,
+      });
+    }
+    // 拣货任务行仍引用这笔占用：先释放会让任务与实际库存脱节（拣完无法出库）。
+    // 要求先完成或取消任务，而不是替运营猜。
+    if ((await this.pickingState.countActivePickingItems(order.id)) > 0) {
+      throw new OrderInvalidStateError(
+        '订单存在进行中的拣货任务，请先完成或取消拣货任务再释放该行',
+        { orderId: order.id, orderItemId: item.id },
+      );
+    }
+
+    const reservationId = item.reservationId;
+    await this.reservationService.releaseReservation(reservationId, {
+      operator,
+      idempotencyKey: orderReleaseKey(item.id),
+      remark: `manual release order=${order.orderNo} line=${item.lineNo}`,
+      orderDomain: true,
+    });
+    await this.dataSource.transaction(async (runner) => {
+      await this.itemRepo.updateFulfillment(runner, item.id, {
+        fulfillmentStatus: 'PENDING',
+        reservationId: null,
+        warehouseId: null,
+      });
+    });
+    const orderErpStatus = await this.statusService.recomputeOrderStatus(
+      order.id,
+      operator,
+      `第 ${item.lineNo} 行手工释放库存占用，回到待分配`,
+    );
+    await this.operationLog.record({
+      entityType: 'ORDER',
+      entityId: order.id,
+      entityCode: order.orderNo,
+      action: 'RELEASE_RESERVATION',
+      changes: {
+        fulfillmentStatus: { from: 'RESERVED', to: 'PENDING' },
+        reservationId: { from: reservationId, to: null },
+        orderItemId: { from: null, to: item.id },
+        lineNo: { from: null, to: item.lineNo },
+      },
+      operator,
+    });
+    return {
+      orderItemId: item.id,
+      orderId: order.id,
+      fulfillmentStatus: 'PENDING',
+      orderErpStatus,
+      releasedReservationId: reservationId,
+    };
+  }
+
   // --------------------------------------------------------------------------
   // Cancellation (task §52-§55/§79-§81)
   // --------------------------------------------------------------------------

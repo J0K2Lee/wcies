@@ -187,7 +187,14 @@ export class SkuService {
   async getById(id: string): Promise<SkuResponseDto> {
     const sku = await this.findOrThrow(id);
     const names = await this.resolveNames(sku);
-    return this.toResponse(sku, names.brandName, names.categoryName);
+    const base = this.toResponse(sku, names.brandName, names.categoryName);
+    // 详情带主图（2026-10-26，SKU 映射弹窗要显示选中档案的图片）：列表接口
+    // 一直有 primaryImageUrl，详情缺；签名 URL 由对象存储统一给出。
+    const imageKey = await this.repository.findPrimaryImageKey(sku.id);
+    return {
+      ...base,
+      primaryImageUrl: imageKey === null ? null : await this.objectStorage.getSignedUrl(imageKey),
+    };
   }
 
   async update(
@@ -537,6 +544,8 @@ export class SkuService {
       remark: sku.remark,
       createdAt: sku.createdAt,
       updatedAt: sku.updatedAt,
+      // 默认 null；getById 用签名 URL 覆盖（2026-10-26）。
+      primaryImageUrl: null,
     };
   }
 }

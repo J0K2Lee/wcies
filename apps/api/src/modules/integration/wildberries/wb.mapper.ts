@@ -182,12 +182,21 @@ export function mapFbsOrderToOrder(order: WbV3Order): PlatformOrderRaw {
   const supplierCancelled = supplierStatus === WB_SUPPLIER_CANCELLED;
   // A cancelled assembly task is dead regardless of the platform-side
   // vocabulary - supplierStatus wins (plan §7.2: supplierStatus 取消 →
-  // platformCancelled). Otherwise the wbStatus stage decides; only the two
-  // pre-shipment supplier states fall back safely to AWAITING_SHIPMENT.
+  // platformCancelled). Otherwise the wbStatus stage decides; the supplier-side
+  // fallback only covers states where wbStatus is still absent:
+  // - new / confirm = 尚未交给平台（组货中）→ AWAITING_SHIPMENT；
+  // - complete = 供应单已交付（配送中，docs §9.2）→ IN_TRANSIT。
+  //   **2026-10-26 修正**：此前 complete 落在兜底之外得到 null，导致 WB 在平台侧
+  //   已事实发货的订单与 OZON 不一致（不收敛、仍算发货超时、缺货照旧）——
+  //   "配送中"是平台侧事实（`PATCH /supplies/{id}/deliver` 之后），不是猜测。
   const stage = supplierCancelled
     ? ('CANCELLED' as PlatformOrderStage)
     : (wbStageOf(wbStatus) ??
-      (supplierStatus === 'new' || supplierStatus === 'confirm' ? 'AWAITING_SHIPMENT' : null));
+      (supplierStatus === 'complete'
+        ? 'IN_TRANSIT'
+        : supplierStatus === 'new' || supplierStatus === 'confirm'
+          ? 'AWAITING_SHIPMENT'
+          : null));
 
   const barcode = firstBarcode(order.skus);
   const nmId =

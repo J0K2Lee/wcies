@@ -44,6 +44,7 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 - `GET /api/v3/orders`：`limit` 1–1000；`next` 游标（**首次传 0**，后续取响应 `next`）；`dateFrom`/`dateTo` Unix 秒（UTC），**单请求 ≤30 天**；默认回看 30 天。3 个月前的订单走 `GET /api/marketplace/v3/fbs/orders/archive`（按 year/month 分页）。
 - 订单字段（原文 JSON 名）：`id, orderUid, rid, article, skus[], nmId, chrtId, price, finalPrice, salePrice, currencyCode, warehouseId, officeId, createdAt, ddate, sellerDate, deliveryType, cargoType, comment, address{fullAddress}, isZeroOrder, supplyId`。
 - 状态机：`supplierStatus`: new / confirm / complete / cancel（卖家侧）；`wbStatus`: waiting / sorted / sold / canceled / canceled_by_client / declined_by_client / defect / ready_for_pickup / postponed_delivery / accepted_by_carrier / sent_to_carrier / canceled_by_carrier（平台侧事实）。
+- 平台阶段映射（`wb.mapper.ts`，2026-10-26 校准）：`wbStatus` 优先；缺 `wbStatus` 时按 `supplierStatus` 兜底——`new/confirm` → `AWAITING_SHIPMENT`，**`complete`（供应单已交付＝配送中，§9.2）→ `IN_TRANSIT`**。此前 `complete` 落到 null，WB 在平台侧已事实发货的订单收不到与 OZON 相同的收敛（仍算发货超时、缺货照旧）。
 - 状态批量读取：`POST /api/v3/orders/status`（body `orders[]` ≤1000）。
 - 限流：订单/供应单/面单 300 req/min（200ms、burst 20；4XX×10）。
 

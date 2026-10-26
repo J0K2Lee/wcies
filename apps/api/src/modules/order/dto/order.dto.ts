@@ -597,6 +597,16 @@ export class OrderRetryAllocationResultDto {
   mappingRepaired!: boolean;
 }
 
+/** 手工释放库存占用（用户要求 2026-10-26）：已占用行退回待分配，不立即重分配。 */
+export class OrderReleaseReservationResultDto {
+  @ApiProperty() orderItemId!: string;
+  @ApiProperty() orderId!: string;
+  @ApiProperty({ enum: ORDER_ITEM_FULFILLMENT_STATUSES }) fulfillmentStatus!: string;
+  @ApiProperty({ enum: ERP_ORDER_STATUSES }) orderErpStatus!: string;
+  @ApiProperty({ description: '被释放的库存占用 id（库存侧已记 RELEASED）' })
+  releasedReservationId!: string;
+}
+
 export class OrderCancelResultDto {
   @ApiProperty() orderId!: string;
   @ApiProperty({ enum: ERP_ORDER_STATUSES }) erpStatus!: string;
