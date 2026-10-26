@@ -86,6 +86,19 @@ export class StoreSyncOverviewDto {
   lastProductEnrichmentSync!: { status: string; finishedAt: Date | null } | null;
   @ApiProperty({ description: '连续失败次数（成功即清零）' }) consecutiveFailures!: number;
   @ApiProperty({ nullable: true, type: String }) activeJobId!: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: Number,
+    description: '订单自动轮询的生效间隔（分钟）：店铺自定义优先，否则系统默认；null = 系统级关闭',
+  })
+  orderSyncIntervalMinutes!: number | null;
+  @ApiProperty({
+    nullable: true,
+    type: Number,
+    description:
+      '商品链接自动轮询的生效间隔（分钟）：店铺自定义优先，否则系统默认；null = 系统级关闭',
+  })
+  listingSyncIntervalMinutes!: number | null;
 }
 
 export class RawEventDto {

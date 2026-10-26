@@ -7,7 +7,11 @@ import { QUEUE_NAMES } from '../../../infrastructure/queue/queue.constants';
 import { SyncDispatchService } from '../services/sync-dispatch.service';
 import { SyncJobRepository } from '../repositories/sync-job.repository';
 import { WebhookProcessService } from '../services/webhook.service';
-import { readStoreSyncSettings, WebhookJobPayload } from '../sync.constants';
+import {
+  effectiveSyncIntervalMinutes,
+  readStoreSyncSettings,
+  WebhookJobPayload,
+} from '../sync.constants';
 import { StoreService } from '../../store/services/store.service';
 import { CredentialExpiryService } from '../../store/services/credential-expiry.service';
 import { SyncContextService } from '../services/sync-context.service';
@@ -86,9 +90,9 @@ export class SyncSchedulerProcessor extends WorkerHost {
         });
       }
 
-      const orderIntervalMs = this.intervalMs('ORDER_SYNC_INTERVAL_SECONDS', 0, 60);
-      const listingIntervalMs = this.intervalMs('LISTING_SYNC_INTERVAL_SECONDS', 0, 300);
-      if (orderIntervalMs === 0 && listingIntervalMs === 0) {
+      const orderEnvSeconds = this.envSeconds('ORDER_SYNC_INTERVAL_SECONDS');
+      const listingEnvSeconds = this.envSeconds('LISTING_SYNC_INTERVAL_SECONDS');
+      if (orderEnvSeconds === 0 && listingEnvSeconds === 0) {
         return 'ticked';
       }
 
@@ -101,19 +105,29 @@ export class SyncSchedulerProcessor extends WorkerHost {
         } catch {
           continue; // Store A's problem never blocks Store B (task §14/§44).
         }
-        if (orderIntervalMs > 0 && settings.orderSyncEnabled === true) {
+        const orderMinutes = effectiveSyncIntervalMinutes(
+          settings.orderSyncIntervalMinutes,
+          orderEnvSeconds,
+          'ORDER_SYNC',
+        );
+        if (orderMinutes !== null && settings.orderSyncEnabled === true) {
           await this.dispatchIfDue(
             store.id,
             'ORDER_SYNC',
-            orderIntervalMs,
+            orderMinutes * 60_000,
             this.lastOrderDispatchAt,
           );
         }
-        if (listingIntervalMs > 0 && settings.listingSyncEnabled === true) {
+        const listingMinutes = effectiveSyncIntervalMinutes(
+          settings.listingSyncIntervalMinutes,
+          listingEnvSeconds,
+          'LISTING_SYNC',
+        );
+        if (listingMinutes !== null && settings.listingSyncEnabled === true) {
           await this.dispatchIfDue(
             store.id,
             'LISTING_SYNC',
-            listingIntervalMs,
+            listingMinutes * 60_000,
             this.lastListingDispatchAt,
           );
         }
@@ -151,16 +165,13 @@ export class SyncSchedulerProcessor extends WorkerHost {
     }
   }
 
-  private intervalMs(key: string, fallbackSeconds: number, minSeconds: number): number {
+  /** ENV 里的系统默认间隔（秒）；缺失/非法 = 0（关闭）。 */
+  private envSeconds(key: string): number {
     const raw = this.config.get<string>(key);
     if (raw === undefined || raw === '') {
-      return fallbackSeconds * 1000;
+      return 0;
     }
     const seconds = Number(raw);
-    if (!Number.isFinite(seconds)) {
-      return fallbackSeconds * 1000;
-    }
-    // Frequencies below the documented-safe floor are clamped, never honored.
-    return Math.max(seconds, minSeconds) * 1000;
+    return Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
   }
 }

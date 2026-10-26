@@ -57,26 +57,93 @@ export const ORDER_SYNC_SOURCE = {
  */
 export const ENRICHMENT_SUPPORTED_PLATFORMS: readonly string[] = ['OZON'];
 
+/** 自动轮询间隔（分钟）：店铺可在 `settings.sync.*SyncIntervalMinutes` 覆盖系统默认。 */
+export const SYNC_INTERVAL_MINUTES_OPTIONS = [1, 5, 10, 15, 30, 60] as const;
+
+/** 每种同步类型允许的最小间隔（分钟）：订单高频安全，商品链接受平台限流约束。 */
+export const SYNC_INTERVAL_FLOOR_MINUTES: Record<'ORDER_SYNC' | 'LISTING_SYNC', number> = {
+  ORDER_SYNC: 1,
+  LISTING_SYNC: 5,
+};
+
+/** 间隔上限：一天。超过这个值等于「基本不同步」，应当直接关掉开关。 */
+export const SYNC_INTERVAL_MAX_MINUTES = 1_440;
+
 /**
  * Store-level sync enablement (task §57 staged rollout): scheduled syncs only
  * run for stores whose `settings.sync` explicitly opts in. Manual sync is
  * always allowed.
+ *
+ * 2026-10-26（用户要求「自动同步的频率应该可以设置」）：间隔也可以按店铺设置，
+ * 缺省跟随 ENV 里的系统默认（`ORDER_SYNC_INTERVAL_SECONDS` 等）。
  */
 export interface StoreSyncSettings {
   orderSyncEnabled?: boolean;
   listingSyncEnabled?: boolean;
+  /** 店铺自定义订单轮询间隔（分钟）；null = 跟随系统默认。 */
+  orderSyncIntervalMinutes: number | null;
+  /** 店铺自定义商品链接轮询间隔（分钟）；null = 跟随系统默认。 */
+  listingSyncIntervalMinutes: number | null;
+}
+
+/**
+ * 店铺自定义间隔的容错解析：只接受 floor..1440 的整数分钟；非法值（含低于平台
+ * 安全下限的）一律视为「跟随系统默认」，不静默改写成别的频率。
+ */
+function readIntervalMinutes(raw: unknown, floor: number): number | null {
+  const parsed = typeof raw === 'number' ? raw : Number(raw);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
+    return null;
+  }
+  if (parsed < floor || parsed > SYNC_INTERVAL_MAX_MINUTES) {
+    return null;
+  }
+  return parsed;
 }
 
 export function readStoreSyncSettings(settings: Record<string, unknown> | null): StoreSyncSettings {
   const sync = settings?.['sync'];
   if (typeof sync !== 'object' || sync === null) {
-    return {};
+    return {
+      orderSyncIntervalMinutes: null,
+      listingSyncIntervalMinutes: null,
+    };
   }
   const raw = sync as Record<string, unknown>;
   return {
     orderSyncEnabled: raw['orderSyncEnabled'] === true,
     listingSyncEnabled: raw['listingSyncEnabled'] === true,
+    orderSyncIntervalMinutes: readIntervalMinutes(
+      raw['orderSyncIntervalMinutes'],
+      SYNC_INTERVAL_FLOOR_MINUTES.ORDER_SYNC,
+    ),
+    listingSyncIntervalMinutes: readIntervalMinutes(
+      raw['listingSyncIntervalMinutes'],
+      SYNC_INTERVAL_FLOOR_MINUTES.LISTING_SYNC,
+    ),
   };
+}
+
+/**
+ * 生效间隔（分钟），调度器与店铺同步概览共用：
+ *
+ * - ENV 秒数为 0 = **系统级关闭**：店铺自定义值不能把它重新打开（null）；
+ * - 店铺有自定义值时按分钟取用，并夹到该类型的安全下限（商品链接 5 分钟）；
+ * - 店铺没设置时用 ENV 系统默认（同样夹到下限，避免 ENV 配得过低）。
+ */
+export function effectiveSyncIntervalMinutes(
+  storeMinutes: number | null,
+  envSeconds: number,
+  syncType: 'ORDER_SYNC' | 'LISTING_SYNC',
+): number | null {
+  if (!Number.isFinite(envSeconds) || envSeconds <= 0) {
+    return null;
+  }
+  const floorMinutes = SYNC_INTERVAL_FLOOR_MINUTES[syncType];
+  if (storeMinutes !== null) {
+    return Math.max(storeMinutes, floorMinutes);
+  }
+  return Math.max(envSeconds, floorMinutes * 60) / 60;
 }
 
 /**

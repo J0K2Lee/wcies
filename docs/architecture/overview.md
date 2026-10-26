@@ -21,9 +21,14 @@ apps/api/src/worker.ts  # 队列 Worker 进程（BullMQ 消费者，无 HTTP）
 > 同步调度 tick（`sync-scheduler-tick`，每 30s）由 `SyncModule.onModuleInit` 注册——
 > API 与 Worker 进程都加载 `SyncModule`，任一进程在即可保证调度存在（BullMQ 按
 > jobId 幂等去重，双进程注册安全）。此前注册只放在 Worker 进程，dev 只跑 API 时
-> 自动同步静默失效（2026-10-12 修复，ON-003 实证）。订单自动同步的实际频率仍由
-> `ORDER_SYNC_INTERVAL_SECONDS`（默认 0=关）+ 店铺 `settings.sync.orderSyncEnabled`
-> 双门槛控制。
+> 自动同步静默失效（2026-10-12 修复，ON-003 实证）。自动轮询的**频率**分三层
+> （2026-10-26）：`ORDER_SYNC_INTERVAL_SECONDS` / `LISTING_SYNC_INTERVAL_SECONDS`
+> 是系统默认（0 = 系统级关闭，店铺配置不能绕过）；店铺可在
+> `settings.sync.orderSyncIntervalMinutes` / `listingSyncIntervalMinutes` 上覆盖
+> （分钟；订单下限 1、商品链接下限 5，上限 1440），并且必须
+> `settings.sync.orderSyncEnabled` / `listingSyncEnabled` 为 true。店铺同步概览
+> 接口返回实际生效的间隔（`orderSyncIntervalMinutes` / `listingSyncIntervalMinutes`），
+> 店铺抽屉里的「实际生效」与「同步过期」判定都以它为准。
 
 ## 2. 基础设施依赖
 

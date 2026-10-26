@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PlatformCredentialService } from '../../store/services/platform-credential.service';
 import { StoreService } from '../../store/services/store.service';
 import { StoreNotFoundError } from '../../store/errors/store-errors';
@@ -16,6 +17,7 @@ import {
 } from '../dto/sync.dto';
 import { ExternalRawEventEntity } from '../entities/external-raw-event.entity';
 import { SyncJobEntity } from '../entities/sync-job.entity';
+import { effectiveSyncIntervalMinutes, readStoreSyncSettings } from '../sync.constants';
 
 /** Read models for the Sync Center + store sync tab (Sprint 5 task §34/§35). */
 @Injectable()
@@ -27,6 +29,7 @@ export class SyncJobService {
     private readonly credentialService: PlatformCredentialService,
     private readonly storeService: StoreService,
     private readonly platformService: PlatformService,
+    private readonly config: ConfigService,
   ) {}
 
   async list(query: SyncJobListQueryDto): Promise<{
@@ -75,6 +78,19 @@ export class SyncJobService {
         this.cursorRepo.find(storeId, 'ORDER_SYNC'),
         this.jobRepo.findActiveByStoreAndType(storeId, 'ORDER_SYNC'),
       ]);
+    // 生效间隔（2026-10-26）：店铺自定义优先，否则系统默认；null = 全局关闭。
+    // 与调度器共用同一个 helper，避免界面显示的频率和实际派发不一致。
+    const syncSettings = readStoreSyncSettings(store.settings);
+    const orderSyncIntervalMinutes = effectiveSyncIntervalMinutes(
+      syncSettings.orderSyncIntervalMinutes,
+      this.envSeconds('ORDER_SYNC_INTERVAL_SECONDS'),
+      'ORDER_SYNC',
+    );
+    const listingSyncIntervalMinutes = effectiveSyncIntervalMinutes(
+      syncSettings.listingSyncIntervalMinutes,
+      this.envSeconds('LISTING_SYNC_INTERVAL_SECONDS'),
+      'LISTING_SYNC',
+    );
     return {
       storeId,
       storeCode: store.storeCode,
@@ -88,7 +104,15 @@ export class SyncJobService {
       lastProductEnrichmentSync: lastEnrichment,
       consecutiveFailures: orderCursor?.consecutiveFailures ?? 0,
       activeJobId: active?.id ?? null,
+      orderSyncIntervalMinutes,
+      listingSyncIntervalMinutes,
     };
+  }
+
+  private envSeconds(key: string): number {
+    const raw = this.config.get<string>(key);
+    const seconds = Number(raw ?? 0);
+    return Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
   }
 
   async listRawEvents(

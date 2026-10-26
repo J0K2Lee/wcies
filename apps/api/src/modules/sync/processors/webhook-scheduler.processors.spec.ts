@@ -57,12 +57,29 @@ describe('SyncSchedulerProcessor 坏死任务回收（2026-10-24）', () => {
 });
 
 describe('SyncSchedulerProcessor store gating (Sprint 9 T2)', () => {
-  it('readStoreSyncSettings treats absent sync settings as all-off', () => {
-    expect(readStoreSyncSettings(null)).toEqual({});
+  it('readStoreSyncSettings treats absent sync settings as all-off / default interval', () => {
+    expect(readStoreSyncSettings(null)).toEqual({
+      orderSyncIntervalMinutes: null,
+      listingSyncIntervalMinutes: null,
+    });
     expect(readSyncSettingsOf({ sync: { orderSyncEnabled: true } })).toEqual({
       orderSyncEnabled: true,
       listingSyncEnabled: false,
+      orderSyncIntervalMinutes: null,
+      listingSyncIntervalMinutes: null,
     });
+  });
+
+  it('accepts store intervals within bounds and ignores values below the floor', () => {
+    expect(
+      readSyncSettingsOf({
+        sync: { orderSyncIntervalMinutes: 15, listingSyncIntervalMinutes: 30 },
+      }),
+    ).toMatchObject({ orderSyncIntervalMinutes: 15, listingSyncIntervalMinutes: 30 });
+    // 商品链接下限 5 分钟：0 / 3 都不接受，回落到系统默认。
+    expect(
+      readSyncSettingsOf({ sync: { orderSyncIntervalMinutes: 0, listingSyncIntervalMinutes: 3 } }),
+    ).toMatchObject({ orderSyncIntervalMinutes: null, listingSyncIntervalMinutes: null });
   });
 
   it('does not dispatch ORDER_SYNC when the store has not opted in', async () => {
@@ -101,6 +118,65 @@ describe('SyncSchedulerProcessor store gating (Sprint 9 T2)', () => {
     await processor.process({ data: {} } as never);
     expect(dispatch).toHaveBeenCalledTimes(1);
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ syncType: 'ORDER_SYNC' }));
+  });
+});
+
+/**
+ * 频率可按店铺设置（用户要求 2026-10-26）：店铺间隔覆盖 ENV 系统默认；
+ * ENV=0 是系统级关闭，店铺值不能把它重新打开。
+ */
+describe('SyncSchedulerProcessor 店铺级频率', () => {
+  it('店铺自定义间隔覆盖系统默认（15 分钟档之前不再重复派发）', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-10-26T00:00:00Z'));
+      const { processor, dispatch } = buildProcessor(
+        { ORDER_SYNC_INTERVAL_SECONDS: '300' },
+        { sync: { orderSyncEnabled: true, orderSyncIntervalMinutes: 15 } },
+      );
+      await processor.process({ data: {} } as never);
+      expect(dispatch).toHaveBeenCalledTimes(1);
+
+      // 系统默认是 5 分钟：若店铺值没生效，这里会再派发一次。
+      vi.setSystemTime(new Date('2026-10-26T00:06:00Z'));
+      await processor.process({ data: {} } as never);
+      expect(dispatch).toHaveBeenCalledTimes(1);
+
+      vi.setSystemTime(new Date('2026-10-26T00:16:00Z'));
+      await processor.process({ data: {} } as never);
+      expect(dispatch).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('店铺间隔低于安全下限时按系统默认（商品链接 5 分钟）', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-10-26T00:00:00Z'));
+      const { processor, dispatch } = buildProcessor(
+        { LISTING_SYNC_INTERVAL_SECONDS: '1800' },
+        { sync: { listingSyncEnabled: true, listingSyncIntervalMinutes: 1 } },
+      );
+      await processor.process({ data: {} } as never);
+      expect(dispatch).toHaveBeenCalledTimes(1);
+
+      // 1 分钟被拒（低于 5 分钟下限）→ 回落到 ENV 的 30 分钟。
+      vi.setSystemTime(new Date('2026-10-26T00:10:00Z'));
+      await processor.process({ data: {} } as never);
+      expect(dispatch).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ENV 关闭时店铺自定义间隔也无效（系统级开关优先）', async () => {
+    const { processor, dispatch } = buildProcessor(
+      {},
+      { sync: { orderSyncEnabled: true, orderSyncIntervalMinutes: 5 } },
+    );
+    await processor.process({ data: {} } as never);
+    expect(dispatch).not.toHaveBeenCalled();
   });
 });
 

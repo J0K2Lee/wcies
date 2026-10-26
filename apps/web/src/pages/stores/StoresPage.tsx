@@ -86,20 +86,49 @@ interface StoreRow {
 /** 店铺记账币种：创建与编辑共用一份，避免两处不一致（2026-10-23）。 */
 const STORE_CURRENCIES = ['RUB', 'CNY', 'USD'] as const;
 
+/** 自动轮询频率档位（用户要求 2026-10-26：频率可按店铺设置）。 */
+const ORDER_SYNC_INTERVAL_OPTIONS = [1, 5, 10, 15, 30, 60] as const;
+const LISTING_SYNC_INTERVAL_OPTIONS = [5, 10, 15, 30, 60] as const;
+
+/** 店铺自定义频率用 0 表示「跟随系统默认」（settings 里不写这个键）。 */
+const SYNC_INTERVAL_FOLLOW_DEFAULT = 0;
+
+/** settings.sync 的完整形状（null = 跟随系统默认）。 */
+interface SyncSettingsPatch {
+  orderSyncEnabled: boolean;
+  listingSyncEnabled: boolean;
+  orderSyncIntervalMinutes: number | null;
+  listingSyncIntervalMinutes: number | null;
+}
+
 /** Sprint 9 T2: store sync toggles live under settings.sync (read-modify-write). */
 function readSyncSettings(settings: Record<string, unknown> | null | undefined): {
   orderSyncEnabled: boolean;
   listingSyncEnabled: boolean;
+  orderSyncIntervalMinutes: number | null;
+  listingSyncIntervalMinutes: number | null;
 } {
   const sync = settings?.['sync'];
   if (typeof sync !== 'object' || sync === null) {
-    return { orderSyncEnabled: false, listingSyncEnabled: false };
+    return {
+      orderSyncEnabled: false,
+      listingSyncEnabled: false,
+      orderSyncIntervalMinutes: null,
+      listingSyncIntervalMinutes: null,
+    };
   }
   const raw = sync as Record<string, unknown>;
   return {
     orderSyncEnabled: raw['orderSyncEnabled'] === true,
     listingSyncEnabled: raw['listingSyncEnabled'] === true,
+    orderSyncIntervalMinutes: readInterval(raw['orderSyncIntervalMinutes']),
+    listingSyncIntervalMinutes: readInterval(raw['listingSyncIntervalMinutes']),
   };
+}
+
+function readInterval(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 interface SyncJobLite {
@@ -128,6 +157,9 @@ interface SyncOverview {
   lastProductEnrichmentSync: { status: string; finishedAt: string | null } | null;
   consecutiveFailures: number;
   activeJobId: string | null;
+  /** 生效的自动轮询间隔（分钟）；null = 系统级关闭（ENV=0）。 */
+  orderSyncIntervalMinutes: number | null;
+  listingSyncIntervalMinutes: number | null;
 }
 
 interface CredentialRow {
@@ -596,25 +628,27 @@ export function StoresPage() {
 
   // Sprint 9 T2: toggle settings.sync.orderSyncEnabled / listingSyncEnabled
   // through the existing PATCH /stores/:id (backend merges, never replaces).
+  // 2026-10-26: 频率也写在这里；null（跟随系统默认）就是删掉这个键。
   const syncSettingsMutation = useMutation({
-    mutationFn: ({
-      store,
-      patch,
-    }: {
-      store: StoreRow;
-      patch: Partial<{ orderSyncEnabled: boolean; listingSyncEnabled: boolean }>;
-    }) => {
+    mutationFn: ({ store, patch }: { store: StoreRow; patch: Partial<SyncSettingsPatch> }) => {
       const current = readSyncSettings(store.settings);
       const next = { ...current, ...patch };
+      const sync: Record<string, unknown> = {
+        orderSyncEnabled: next.orderSyncEnabled,
+        listingSyncEnabled: next.listingSyncEnabled,
+      };
+      if (next.orderSyncIntervalMinutes !== null) {
+        sync['orderSyncIntervalMinutes'] = next.orderSyncIntervalMinutes;
+      }
+      if (next.listingSyncIntervalMinutes !== null) {
+        sync['listingSyncIntervalMinutes'] = next.listingSyncIntervalMinutes;
+      }
       return apiPatch(
         '/api/v1/stores/{id}',
         {
           settings: {
             ...(store.settings ?? {}),
-            sync: {
-              orderSyncEnabled: next.orderSyncEnabled,
-              listingSyncEnabled: next.listingSyncEnabled,
-            },
+            sync,
           },
         },
         { id: store.id },
@@ -1464,19 +1498,23 @@ function StoreDetailBody({
   onToggleCredential: (credentialId: string, action: 'enable' | 'disable') => void;
   onDeleteCredential: (credential: CredentialRow) => void;
   onConfigure: () => void;
-  onToggleSyncSetting: (
-    patch: Partial<{ orderSyncEnabled: boolean; listingSyncEnabled: boolean }>,
-  ) => void;
+  onToggleSyncSetting: (patch: Partial<SyncSettingsPatch>) => void;
   syncSettingsSaving: boolean;
 }) {
   const syncSettings = readSyncSettings(store.settings);
   // Sprint 9 T2 freshness: automatic polling is ON but the last successful
-  // order sync is older than 3x the 300s interval -> flag red.
+  // order sync is older than 3x the effective interval (至少 15 分钟) -> flag red.
+  // 2026-10-26：间隔可配到 60 分钟，固定 15 分钟阈值会对慢频店铺误报。
   const lastOrderFinishedAt = overview?.lastOrderSync?.finishedAt ?? null;
+  const effectiveOrderMinutes = overview?.orderSyncIntervalMinutes ?? null;
+  const orderStaleMs =
+    effectiveOrderMinutes === null
+      ? ORDER_SYNC_STALE_MS
+      : Math.max(ORDER_SYNC_STALE_MS, effectiveOrderMinutes * 60_000 * 3);
   const orderSyncStale =
     syncSettings.orderSyncEnabled &&
     lastOrderFinishedAt !== null &&
-    Date.now() - new Date(lastOrderFinishedAt).getTime() > ORDER_SYNC_STALE_MS;
+    Date.now() - new Date(lastOrderFinishedAt).getTime() > orderStaleMs;
   return (
     <Space orientation="vertical" size="large" style={{ width: '100%' }}>
       <section>
@@ -1757,7 +1795,8 @@ function StoreDetailBody({
         />
         {orderSyncStale && (
           <p style={{ fontSize: 12.5, color: colors.danger, margin: '8px 0 0' }}>
-            订单自动同步已开启，但超过 15 分钟没有成功记录——请检查同步任务或凭证。
+            订单自动同步已开启，但超过 {Math.round(orderStaleMs / 60_000)}{' '}
+            分钟没有成功记录——请检查同步任务或凭证。
           </p>
         )}
         <p style={{ fontSize: 12.5, color: colors.textTertiary, margin: '8px 0 0' }}>
@@ -1776,42 +1815,110 @@ function StoreDetailBody({
             style={{
               display: 'flex',
               flexDirection: 'column',
-              gap: 3,
+              gap: 6,
               padding: '9px 16px 9px 0',
               borderBottom: `1px solid ${colors.borderSoft}`,
             }}
           >
-            <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
-              订单自动同步（约 5 分钟一次）
+            <span
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                fontSize: 12.5,
+                color: colors.textTertiary,
+              }}
+            >
+              订单自动同步
+              <Switch
+                checked={syncSettings.orderSyncEnabled}
+                loading={syncSettingsSaving}
+                disabled={store.status !== 'ACTIVE'}
+                onChange={(checked) => onToggleSyncSetting({ orderSyncEnabled: checked })}
+              />
             </span>
-            <Switch
-              checked={syncSettings.orderSyncEnabled}
-              loading={syncSettingsSaving}
-              disabled={store.status !== 'ACTIVE'}
-              onChange={(checked) => onToggleSyncSetting({ orderSyncEnabled: checked })}
+            <Select
+              size="small"
+              style={{ width: 180 }}
+              value={syncSettings.orderSyncIntervalMinutes ?? SYNC_INTERVAL_FOLLOW_DEFAULT}
+              disabled={store.status !== 'ACTIVE' || !syncSettings.orderSyncEnabled}
+              onChange={(value: number) =>
+                onToggleSyncSetting({
+                  orderSyncIntervalMinutes: value === SYNC_INTERVAL_FOLLOW_DEFAULT ? null : value,
+                })
+              }
+              options={[
+                { value: SYNC_INTERVAL_FOLLOW_DEFAULT, label: '跟随系统默认' },
+                ...ORDER_SYNC_INTERVAL_OPTIONS.map((minutes) => ({
+                  value: minutes,
+                  label: `每 ${minutes} 分钟`,
+                })),
+              ]}
             />
+            <span style={{ fontSize: 12, color: colors.textTertiary }}>
+              {overview === undefined
+                ? '生效频率加载中…'
+                : overview.orderSyncIntervalMinutes === null
+                  ? '自动轮询已被系统全局关闭（ORDER_SYNC_INTERVAL_SECONDS=0）'
+                  : `实际生效：每 ${fmtNumber(overview.orderSyncIntervalMinutes)} 分钟`}
+            </span>
           </div>
           <div
             style={{
               display: 'flex',
               flexDirection: 'column',
-              gap: 3,
+              gap: 6,
               padding: '9px 16px 9px 0',
               borderBottom: `1px solid ${colors.borderSoft}`,
             }}
           >
-            <span style={{ fontSize: 12.5, color: colors.textTertiary }}>商品链接自动同步</span>
-            <Switch
-              checked={syncSettings.listingSyncEnabled}
-              loading={syncSettingsSaving}
-              disabled={store.status !== 'ACTIVE'}
-              onChange={(checked) => onToggleSyncSetting({ listingSyncEnabled: checked })}
+            <span
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                fontSize: 12.5,
+                color: colors.textTertiary,
+              }}
+            >
+              商品链接自动同步
+              <Switch
+                checked={syncSettings.listingSyncEnabled}
+                loading={syncSettingsSaving}
+                disabled={store.status !== 'ACTIVE'}
+                onChange={(checked) => onToggleSyncSetting({ listingSyncEnabled: checked })}
+              />
+            </span>
+            <Select
+              size="small"
+              style={{ width: 180 }}
+              value={syncSettings.listingSyncIntervalMinutes ?? SYNC_INTERVAL_FOLLOW_DEFAULT}
+              disabled={store.status !== 'ACTIVE' || !syncSettings.listingSyncEnabled}
+              onChange={(value: number) =>
+                onToggleSyncSetting({
+                  listingSyncIntervalMinutes: value === SYNC_INTERVAL_FOLLOW_DEFAULT ? null : value,
+                })
+              }
+              options={[
+                { value: SYNC_INTERVAL_FOLLOW_DEFAULT, label: '跟随系统默认' },
+                ...LISTING_SYNC_INTERVAL_OPTIONS.map((minutes) => ({
+                  value: minutes,
+                  label: `每 ${minutes} 分钟`,
+                })),
+              ]}
             />
+            <span style={{ fontSize: 12, color: colors.textTertiary }}>
+              {overview === undefined
+                ? '生效频率加载中…'
+                : overview.listingSyncIntervalMinutes === null
+                  ? '自动轮询已被系统全局关闭（LISTING_SYNC_INTERVAL_SECONDS=0）'
+                  : `实际生效：每 ${fmtNumber(overview.listingSyncIntervalMinutes)} 分钟`}
+            </span>
           </div>
         </div>
         <p style={{ fontSize: 12.5, color: colors.textTertiary, margin: '8px 0 0' }}>
-          开关只影响调度器的自动轮询；手动同步始终可用（入口在列表页右栏）。商品同步默认仅手动（Sprint
-          9 决策 2）。
+          开关与频率只影响调度器的自动轮询；手动同步始终可用（入口在列表页右栏）。商品同步默认仅手动（Sprint
+          9 决策 2）。变更在该店铺的下一次派发起生效，不会打断正在运行的任务。
         </p>
       </section>
 
