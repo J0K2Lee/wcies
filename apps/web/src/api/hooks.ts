@@ -67,6 +67,20 @@ export function useDebouncedValue<TValue>(value: TValue, delayMs = 300): TValue 
 }
 
 /**
+ * Normalizes the `{ success, data, meta? }` envelope into the page-side
+ * `{ data, meta }` shape. Root-level aggregates (e.g. `unreadTotal`) must be
+ * preserved: dropping them makes the UI silently fall back to 0 while the rows
+ * themselves are still unread.
+ */
+export function normalizeEnvelope<TData>(body: unknown): TData {
+  const envelope = body as { data: TData; meta?: { total: number } };
+  return {
+    ...envelope,
+    meta: envelope.meta ?? { total: Array.isArray(envelope.data) ? envelope.data.length : 0 },
+  } as TData;
+}
+
+/**
  * Typed GET helper for the generated api-client: unwraps the envelope and
  * throws the unified error message on failure (pages only handle data).
  * `pathParams` substitutes `{placeholders}` in templated paths; `enabled`
@@ -95,13 +109,7 @@ export function useApiQuery<
       if (error !== undefined) {
         throw toApiError(error.error);
       }
-      // Normalize the { success, data, meta? } envelope into { data, meta }
-      // so paginated and plain lists share one page-side shape.
-      const envelope = data as { data: TData; meta?: { total: number } };
-      return {
-        data: envelope.data,
-        meta: envelope.meta ?? { total: Array.isArray(envelope.data) ? envelope.data.length : 0 },
-      } as TData;
+      return normalizeEnvelope<TData>(data);
     },
   });
 }
@@ -115,11 +123,7 @@ export async function apiGet<TData>(
   if (error !== undefined) {
     throw toApiError(error.error);
   }
-  const envelope = data as { data: TData; meta?: { total: number } };
-  return {
-    data: envelope.data,
-    meta: envelope.meta ?? { total: Array.isArray(envelope.data) ? envelope.data.length : 0 },
-  };
+  return normalizeEnvelope<{ data: TData; meta: { total: number } }>(data);
 }
 
 /** Typed POST helper returning the unwrapped data or throwing. */
