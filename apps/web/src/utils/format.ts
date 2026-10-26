@@ -100,13 +100,23 @@ export function fmtQty(value: string | number | null | undefined): string {
 }
 
 /**
- * Money display (UI spec §9): NUMERIC strings from the backend are shown
- * as-is with thousand separators + the currency mark; NULL is the long
- * dash (a missing fact is never rendered as 0).
+ * 货币显示（用户规则 2026-10-26，方案 B）：**金额 + ISO 4217 代码后缀**。
+ *
+ *   fmtMoney('320.5500', 'CNY')  → '320.55 CNY'
+ *   fmtMoney('5879.0000', 'RUB') → '5,879.00 RUB'
+ *   fmtMoney('643', '643')       → '6.43 RUB'（数字码先归一化）
+ *
+ * 为什么不用符号：¥ 同时是 CNY/JPY，$ 覆盖多种货币，多种卢布（RUB/BYN/KZT）
+ * 靠符号更分不出来。代码是唯一标识，新币种零成本接入，右对齐时数字部分也整齐。
+ * 符号只允许出现在文案里，不进入数值区。
+ *
+ * 币种是**必填参数**（用户 2026-10-26）：我们没有「默认币种」这回事——漏传就是
+ * 没想清楚这条数据用什么币种。调用方必须显式给（可以是 null 表示「未知」），
+ * 未知时显示 '320.55 —'，绝不默认成人民币。
  */
 export function fmtMoney(
   value: string | number | null | undefined,
-  currency?: string | null,
+  currency: string | null | undefined,
 ): string {
   if (value === null || value === undefined || value === '') {
     return '—';
@@ -115,12 +125,42 @@ export function fmtMoney(
   if (Number.isNaN(num)) {
     return String(value);
   }
-  const mark = currency === 'CNY' || currency === undefined || currency === null ? '¥' : currency;
   const body = num.toLocaleString('zh-CN', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-  return mark === '¥' ? `¥${body}` : `${body} ${mark}`;
+  const code = normalizeCurrencyCode(currency);
+  return code === null ? `${body} —` : `${body} ${code}`;
+}
+
+/**
+ * 币种码归一化（展示层防御）：ISO 数字码 → 字母码。
+ * 后端摄入时已归一化，这里只兜住历史数据/新数据源。
+ */
+const ISO_NUMERIC_CURRENCIES: Record<string, string> = {
+  '643': 'RUB',
+  '810': 'RUB',
+  '156': 'CNY',
+  '840': 'USD',
+  '978': 'EUR',
+  '398': 'KZT',
+  '933': 'BYN',
+};
+
+export function normalizeCurrencyCode(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const raw = String(value).trim();
+  if (raw === '') {
+    return null;
+  }
+  const mapped = ISO_NUMERIC_CURRENCIES[raw];
+  if (mapped !== undefined) {
+    return mapped;
+  }
+  const upper = raw.toUpperCase();
+  return upper === 'RUR' ? 'RUB' : upper;
 }
 
 /** Money cell with sign semantics: expenses render in danger color tokens. */

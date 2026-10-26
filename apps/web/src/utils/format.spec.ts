@@ -28,19 +28,30 @@ describe('fmtQty（数量：整数）', () => {
   });
 });
 
-describe('fmtMoney（货币：两位小数）', () => {
-  it('4 位小数的成本收敛到 2 位', () => {
-    expect(fmtMoney('320.5500', 'CNY')).toBe('¥320.55');
-    expect(fmtMoney('0.0000', 'CNY')).toBe('¥0.00');
+describe('fmtMoney（货币：两位小数 + 代码后缀，方案 B）', () => {
+  it('人民币也用代码后缀，不再显示 ¥', () => {
+    expect(fmtMoney('320.5500', 'CNY')).toBe('320.55 CNY');
+    expect(fmtMoney('0.0000', 'CNY')).toBe('0.00 CNY');
   });
 
   it('number 入参同样格式化为两位', () => {
-    expect(fmtMoney(323, 'CNY')).toBe('¥323.00');
-    expect(fmtMoney(323.5, 'CNY')).toBe('¥323.50');
+    expect(fmtMoney(323, 'CNY')).toBe('323.00 CNY');
+    expect(fmtMoney(323.5, 'CNY')).toBe('323.50 CNY');
   });
 
-  it('非 CNY 币种把代码放在金额后面', () => {
+  it('其它币种同一格式', () => {
     expect(fmtMoney('5879.0000', 'RUB')).toBe('5,879.00 RUB');
+  });
+
+  it('数字币种码与历史码在展示层归一化', () => {
+    expect(fmtMoney('12.5', '643')).toBe('12.50 RUB');
+    expect(fmtMoney('12.5', 'RUR')).toBe('12.50 RUB');
+  });
+
+  it('币种必填（显式传 null/undefined 表示未知），绝不默认人民币', () => {
+    // 编译期强制：currency 是必填参数；运行时未知币种明确留标记
+    expect(fmtMoney('320.55', null)).toBe('320.55 —');
+    expect(fmtMoney('320.55', undefined)).toBe('320.55 —');
   });
 
   it('缺失值显示长破折号', () => {

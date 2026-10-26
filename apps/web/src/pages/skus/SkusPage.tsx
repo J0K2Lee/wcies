@@ -1939,7 +1939,7 @@ export function SkusPage() {
               label="最新采购价（CNY）"
               style={{ marginBottom: 0 }}
             >
-              <InputNumber min={0} step={0.01} prefix="¥" style={{ width: 160 }} />
+              <InputNumber min={0} step={0.01} style={{ width: 160 }} />
             </Form.Item>
           </Space>
           <Form.Item

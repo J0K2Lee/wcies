@@ -219,7 +219,7 @@ export function SkuCreateModal({ open, onClose, onCreated }: SkuCreateModalProps
         </Space>
         <Space wrap>
           <Form.Item name="latestPurchasePrice" label="最新采购价（CNY）">
-            <InputNumber min={0} prefix="¥" style={{ width: 160 }} />
+            <InputNumber min={0} step={0.01} style={{ width: 160 }} />
           </Form.Item>
         </Space>
         <Form.Item name="purchaseUrl" label="采购链接">
