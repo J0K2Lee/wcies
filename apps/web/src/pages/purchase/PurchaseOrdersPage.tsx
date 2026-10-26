@@ -18,7 +18,7 @@ import {
 import { PlusOutlined } from '@ant-design/icons';
 import { ColumnsType } from 'antd/es/table';
 import { apiGet, apiPost, useApiQuery } from '../../api/hooks';
-import { fmtDateTime } from '../../utils/format';
+import { fmtDateTime, fmtMoney, fmtQty } from '../../utils/format';
 import {
   loadPurchaseViewSettings,
   savePurchaseViewSettings,
@@ -139,7 +139,7 @@ function OrderTotal({ items }: { items: CostLine[] }) {
   const total = items.reduce((sum, item) => sum + (lineSubtotal(item) ?? 0), 0);
   return (
     <div style={{ marginTop: 16, textAlign: 'right' }}>
-      <strong>本单合计：{total.toFixed(4)}</strong>
+      <strong>本单合计：{fmtMoney(total.toFixed(2), 'CNY')}</strong>
       {missingCount > 0 && (
         <small style={{ marginLeft: 12, color: colors.textSecondary }}>
           {missingCount} 行未填成本未计入
@@ -936,6 +936,8 @@ export function PurchaseOrdersPage() {
                     key: 'quantity',
                     width: 80,
                     align: 'right' as const,
+                    // 数量恒为整数，金额两位小数（用户规则 2026-10-26）
+                    render: (value: string) => fmtQty(value),
                   },
                   {
                     title: '单位成本',
@@ -944,7 +946,7 @@ export function PurchaseOrdersPage() {
                     width: 100,
                     align: 'right' as const,
                     render: (value: string | null) =>
-                      value === null ? '—' : Number(value).toFixed(4),
+                      value === null ? '—' : fmtMoney(value, 'CNY'),
                   },
                   {
                     title: '已收货',
@@ -952,6 +954,7 @@ export function PurchaseOrdersPage() {
                     key: 'receivedQuantity',
                     width: 80,
                     align: 'right' as const,
+                    render: (value: string) => fmtQty(value),
                   },
                   {
                     title: '小计',
@@ -960,7 +963,7 @@ export function PurchaseOrdersPage() {
                     align: 'right' as const,
                     render: (_: unknown, row: PurchaseOrderItem) => {
                       const subtotal = lineSubtotal(row);
-                      return subtotal === null ? '—' : subtotal.toFixed(4);
+                      return subtotal === null ? '—' : fmtMoney(subtotal.toFixed(2), 'CNY');
                     },
                   },
                   {
@@ -1162,7 +1165,12 @@ export function PurchaseOrdersPage() {
                     </Form.Item>
                     <div style={{ width: 110, textAlign: 'right' }}>
                       <small style={{ color: colors.textSecondary }}>小计</small>
-                      <div>{lineSubtotal(formItems?.[field.name] ?? {})?.toFixed(4) ?? '—'}</div>
+                      <div>
+                        {(() => {
+                          const subtotal = lineSubtotal(formItems?.[field.name] ?? {});
+                          return subtotal === null ? '—' : fmtMoney(subtotal.toFixed(2), 'CNY');
+                        })()}
+                      </div>
                     </div>
                     <Button
                       type="text"
@@ -1300,6 +1308,7 @@ function expandedPoItemColumns(options: {
       key: 'quantity',
       width: 70,
       align: 'right' as const,
+      render: (value: string) => fmtQty(value),
     },
     {
       title: '单位成本',
@@ -1307,7 +1316,7 @@ function expandedPoItemColumns(options: {
       key: 'unitCost',
       width: 90,
       align: 'right' as const,
-      render: (value: string | null) => (value === null ? '—' : Number(value).toFixed(4)),
+      render: (value: string | null) => (value === null ? '—' : fmtMoney(value, 'CNY')),
     },
     {
       title: '已收货',
@@ -1315,6 +1324,7 @@ function expandedPoItemColumns(options: {
       key: 'receivedQuantity',
       width: 70,
       align: 'right' as const,
+      render: (value: string) => fmtQty(value),
     },
     {
       title: '小计',
@@ -1323,7 +1333,7 @@ function expandedPoItemColumns(options: {
       align: 'right' as const,
       render: (_: unknown, row: PurchaseOrderItem) => {
         const subtotal = lineSubtotal(row);
-        return subtotal === null ? '—' : subtotal.toFixed(4);
+        return subtotal === null ? '—' : fmtMoney(subtotal.toFixed(2), 'CNY');
       },
     },
     {

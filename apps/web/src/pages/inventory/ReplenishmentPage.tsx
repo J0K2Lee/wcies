@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { App as AntdApp, Button, Input, InputNumber, Select, Space } from 'antd';
 import { ShoppingCartOutlined } from '@ant-design/icons';
 import { apiPost, useApiQuery } from '../../api/hooks';
+import { fmtQty } from '../../utils/format';
 import {
   colors,
   ContextMetric,
@@ -264,7 +265,7 @@ export function ReplenishmentPage() {
               key: 'availableQty',
               width: 90,
               align: 'right' as const,
-              render: (value: string) => Number(value),
+              render: (value: string) => fmtQty(value),
             },
             {
               title: '安全库存',
@@ -272,7 +273,7 @@ export function ReplenishmentPage() {
               key: 'safetyQty',
               width: 90,
               align: 'right' as const,
-              render: (value: string) => Number(value),
+              render: (value: string) => fmtQty(value),
             },
             {
               title: '日均销速',
@@ -280,7 +281,7 @@ export function ReplenishmentPage() {
               key: 'dailyVelocityQty',
               width: 90,
               align: 'right' as const,
-              render: (value: string) => Number(value),
+              render: (value: string) => fmtQty(value),
             },
             {
               title: '在途采购',
@@ -288,7 +289,7 @@ export function ReplenishmentPage() {
               key: 'openPoQty',
               width: 90,
               align: 'right' as const,
-              render: (value: string) => Number(value),
+              render: (value: string) => fmtQty(value),
             },
             {
               title: '建议采购',
@@ -298,7 +299,7 @@ export function ReplenishmentPage() {
               align: 'right' as const,
               render: (value: string, row: SuggestionRow) =>
                 row.needsReplenishment ? (
-                  <span style={{ color: colors.warning, fontWeight: 600 }}>{Number(value)}</span>
+                  <span style={{ color: colors.warning, fontWeight: 600 }}>{fmtQty(value)}</span>
                 ) : (
                   '—'
                 ),

@@ -18,7 +18,7 @@ import { PlusOutlined } from '@ant-design/icons';
 import { ColumnsType } from 'antd/es/table';
 import { apiPost, useApiQuery } from '../../api/hooks';
 import { apiClient } from '../../api/client';
-import { fmtDateTime } from '../../utils/format';
+import { fmtDateTime, fmtMoney, fmtQty } from '../../utils/format';
 import {
   ActionIsland,
   colors,
@@ -156,7 +156,9 @@ function ReceiptTotal({
     <div style={{ padding: '12px 0', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
       <strong>
         {title}：
-        {subtotals.length === 0 ? '—' : subtotals.reduce((sum, value) => sum + value, 0).toFixed(4)}
+        {subtotals.length === 0
+          ? '—'
+          : fmtMoney(subtotals.reduce((sum, value) => sum + value, 0).toFixed(2), 'CNY')}
       </strong>
       {missing > 0 && (
         <span style={{ fontSize: 12.5, color: colors.warning }}>
@@ -1125,6 +1127,7 @@ export function PurchaseReceiptsPage() {
                     key: 'quantity',
                     width: 70,
                     align: 'right' as const,
+                    render: (value: string) => fmtQty(value),
                   },
                   {
                     title: '单位成本',
@@ -1133,14 +1136,17 @@ export function PurchaseReceiptsPage() {
                     width: 90,
                     align: 'right' as const,
                     render: (value: string | null) =>
-                      value === null ? '—' : Number(value).toFixed(4),
+                      value === null ? '—' : fmtMoney(value, 'CNY'),
                   },
                   {
                     title: '小计',
                     key: 'subtotal',
                     width: 110,
                     align: 'right' as const,
-                    render: (_: unknown, row: ReceiptItem) => lineSubtotal(row)?.toFixed(4) ?? '—',
+                    render: (_: unknown, row: ReceiptItem) => {
+                      const subtotal = lineSubtotal(row);
+                      return subtotal === undefined ? '—' : fmtMoney(subtotal.toFixed(2), 'CNY');
+                    },
                   },
                   {
                     title: '入库库位',
@@ -1377,6 +1383,7 @@ const EXPANDED_RECEIPT_ITEM_COLUMNS: ColumnsType<ReceiptItem> = [
     key: 'quantity',
     width: 70,
     align: 'right' as const,
+    render: (value: string) => fmtQty(value),
   },
   {
     title: '单位成本',
@@ -1384,14 +1391,17 @@ const EXPANDED_RECEIPT_ITEM_COLUMNS: ColumnsType<ReceiptItem> = [
     key: 'unitCost',
     width: 90,
     align: 'right' as const,
-    render: (value: string | null) => (value === null ? '—' : Number(value).toFixed(4)),
+    render: (value: string | null) => (value === null ? '—' : fmtMoney(value, 'CNY')),
   },
   {
     title: '小计',
     key: 'subtotal',
     width: 110,
     align: 'right' as const,
-    render: (_: unknown, row: ReceiptItem) => lineSubtotal(row)?.toFixed(4) ?? '—',
+    render: (_: unknown, row: ReceiptItem) => {
+      const subtotal = lineSubtotal(row);
+      return subtotal === undefined ? '—' : fmtMoney(subtotal.toFixed(2), 'CNY');
+    },
   },
   {
     title: '入库库位',
@@ -1694,7 +1704,11 @@ function ReceiptItemsEditor({
                 )}
               </div>
               <span style={{ minWidth: 110, fontSize: 13 }}>
-                小计：{lineSubtotal(item)?.toFixed(4) ?? '—'}
+                小计：
+                {(() => {
+                  const subtotal = lineSubtotal(item);
+                  return subtotal === undefined ? '—' : fmtMoney(subtotal.toFixed(2), 'CNY');
+                })()}
               </span>
               <Select
                 allowClear

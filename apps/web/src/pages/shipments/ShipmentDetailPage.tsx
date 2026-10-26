@@ -15,7 +15,7 @@ import {
   SHIPMENT_STATUS_META,
   StatusBadge,
 } from '../../design-system';
-import { fmtDateTime } from '../../utils/format';
+import { fmtDateTime, fmtQty } from '../../utils/format';
 
 /**
  * Shipment workbench (Sprint 4 task §58): pending items, packed packages,
@@ -278,8 +278,20 @@ export function ShipmentDetailPage() {
                 </span>
               ),
             },
-            { title: '应发数量', dataIndex: 'quantity', key: 'quantity', width: 100 },
-            { title: '已打包', dataIndex: 'packedQty', key: 'packedQty', width: 100 },
+            {
+              title: '应发数量',
+              dataIndex: 'quantity',
+              key: 'quantity',
+              width: 100,
+              render: (value: string) => fmtQty(value),
+            },
+            {
+              title: '已打包',
+              dataIndex: 'packedQty',
+              key: 'packedQty',
+              width: 100,
+              render: (value: string) => fmtQty(value),
+            },
             {
               title: 'SN',
               key: 'serial',
@@ -322,7 +334,7 @@ export function ShipmentDetailPage() {
                       dataIndex: 'quantity',
                       key: 'quantity',
                       width: 90,
-                      render: (value: string) => Number(value),
+                      render: (value: string) => fmtQty(value),
                     },
                     {
                       title: '状态',

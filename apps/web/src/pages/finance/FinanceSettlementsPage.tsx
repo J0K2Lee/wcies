@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { App as AntdApp, Button, Drawer, Input, InputNumber, Modal, Form } from 'antd';
 import { CloudSyncOutlined } from '@ant-design/icons';
 import { apiPatch, apiPost, useApiQuery } from '../../api/hooks';
-import { fmtDateTime, fmtMoney } from '../../utils/format';
+import { fmtDateTime, fmtMoney, fmtQty } from '../../utils/format';
 import {
   colors,
   ContextMetric,
@@ -424,6 +424,7 @@ export function FinanceSettlementsPage() {
                     key: 'quantity',
                     width: 80,
                     align: 'right' as const,
+                    render: (value: string) => fmtQty(value),
                   },
                   {
                     title: '单价',

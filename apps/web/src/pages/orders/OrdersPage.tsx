@@ -20,7 +20,7 @@ import { DownOutlined, FlagFilled, UpOutlined } from '@ant-design/icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { apiGet, apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
-import { fmtDateTime, fmtMoney } from '../../utils/format';
+import { fmtDateTime, fmtMoney, fmtQty } from '../../utils/format';
 import { buildOzonProductUrl, buildPlatformProductUrl } from '../../utils/platformUrl';
 import { openShippingLabelPrintWindow, showMergedPdfInWindow } from '../../printing/print-browser';
 import { ListingOnboardModal, OnboardMatchIdentifiers } from '../../components/ListingOnboardModal';
@@ -2365,7 +2365,7 @@ export function OrdersPage() {
                 <>
                   <ContextMetric label="SKU 编码" value={selectedItem.skuCode} />
                   <ContextMetric label="SKU 名称" value={selectedItem.skuName} />
-                  <ContextMetric label="数量" value={Number(selectedItem.quantity)} />
+                  <ContextMetric label="数量" value={fmtQty(selectedItem.quantity)} />
                   <ContextMetric
                     label="最近采购价"
                     value={
@@ -2831,7 +2831,7 @@ export function OrdersPage() {
                     onClick={(event) => event.stopPropagation()}
                   >
                     <span style={{ fontSize: 13, color: colors.textSecondary }}>
-                      {item.skuCode} ×{Number(item.quantity)}
+                      {item.skuCode} ×{fmtQty(item.quantity)}
                     </span>
                     <Button
                       size="small"
@@ -3018,7 +3018,15 @@ export function OrdersPage() {
       // 采购价恒为 CNY（用户 2026-10-24），不跟随订单的平台币种。
       render: (value: string | null) => (value === null ? '—' : fmtMoney(value, 'CNY')),
     },
-    { title: '数量', dataIndex: 'quantity', key: 'quantity', width: 70, align: 'right' as const },
+    {
+      title: '数量',
+      dataIndex: 'quantity',
+      key: 'quantity',
+      width: 70,
+      align: 'right' as const,
+      // 数量恒为整数（用户规则 2026-10-26）
+      render: (value: string) => fmtQty(value),
+    },
     {
       title: '单价',
       dataIndex: 'unitPrice',

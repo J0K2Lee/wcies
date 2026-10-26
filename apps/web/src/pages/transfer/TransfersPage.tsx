@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { App as AntdApp, Button, Drawer, Form, Input, InputNumber, Modal, Select } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { apiPost, useApiQuery } from '../../api/hooks';
-import { fmtDateTime } from '../../utils/format';
+import { fmtDateTime, fmtQty } from '../../utils/format';
 import {
   CopyTextButton,
   colors,
@@ -441,6 +441,7 @@ export function TransfersPage() {
                     key: 'quantity',
                     width: 80,
                     align: 'right' as const,
+                    render: (value: string) => fmtQty(value),
                   },
                   {
                     title: '源库位',

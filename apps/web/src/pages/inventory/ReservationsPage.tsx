@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { App, Button, Select } from 'antd';
 import { useMemo, useState } from 'react';
 import { apiPost, useApiQuery } from '../../api/hooks';
+import { fmtQty } from '../../utils/format';
 import {
   ContextAction,
   ContextMetric,
@@ -37,8 +38,6 @@ interface ReservationRow {
   releasedAt: string | null;
   consumedAt: string | null;
 }
-
-const fmtQty = (value: string): string => (Number(value) % 1 === 0 ? String(Number(value)) : value);
 
 const LIFECYCLE_PATHS = {
   release: '/api/v1/inventory/reservations/{id}/release',

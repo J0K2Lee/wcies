@@ -79,17 +79,41 @@ export function fmtNumber(value: number | null | undefined): string {
 }
 
 /**
- * Money display (UI spec §9): NUMERIC strings from the backend are shown
- * as-is with thousand separators + the currency mark; NULL is the long
- * dash (a missing fact is never rendered as 0).
+ * 数量显示（用户规则 2026-10-26）：**整数**。
+ *
+ * 后端数量以「毫单位」存、按 3 位小数返回（"1.000"），业务口径是整件；整数值
+ * 直接显示为整数（带千分位）。历史/异常数据若真的带小数，保留最多 3 位小数——
+ * 宁可显示 1.5，也不静默四舍五入成 2。
  */
-export function fmtMoney(value: string | null | undefined, currency?: string | null): string {
+export function fmtQty(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === '') {
     return '—';
   }
   const num = Number(value);
   if (Number.isNaN(num)) {
-    return value;
+    return String(value);
+  }
+  return num.toLocaleString('zh-CN', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: Number.isInteger(num) ? 0 : 3,
+  });
+}
+
+/**
+ * Money display (UI spec §9): NUMERIC strings from the backend are shown
+ * as-is with thousand separators + the currency mark; NULL is the long
+ * dash (a missing fact is never rendered as 0).
+ */
+export function fmtMoney(
+  value: string | number | null | undefined,
+  currency?: string | null,
+): string {
+  if (value === null || value === undefined || value === '') {
+    return '—';
+  }
+  const num = Number(value);
+  if (Number.isNaN(num)) {
+    return String(value);
   }
   const mark = currency === 'CNY' || currency === undefined || currency === null ? '¥' : currency;
   const body = num.toLocaleString('zh-CN', {

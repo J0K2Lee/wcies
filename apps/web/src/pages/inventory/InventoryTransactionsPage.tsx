@@ -1,6 +1,7 @@
 import { Select } from 'antd';
 import { useMemo, useState } from 'react';
 import { useApiQuery } from '../../api/hooks';
+import { fmtQty } from '../../utils/format';
 import {
   ContextMetric,
   ContextSection,
@@ -38,8 +39,6 @@ interface TransactionRow {
   remark: string | null;
   createdAt: string;
 }
-
-const fmtQty = (value: string): string => (Number(value) % 1 === 0 ? String(Number(value)) : value);
 
 /**
  * 库存流水 (task §43/§53): auditable ledger list.

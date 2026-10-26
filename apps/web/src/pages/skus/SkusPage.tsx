@@ -21,6 +21,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { apiDelete, apiPatch, apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
+import { fmtMoney } from '../../utils/format';
 import { SkuCreateModal } from '../../components/SkuCreateModal';
 import { CategoryManageModal } from '../../components/CategoryManageModal';
 import { BrandManageModal } from '../../components/BrandManageModal';
@@ -921,14 +922,7 @@ export function SkusPage() {
               }
             />
             <ContextMetric label="主条码" value={selectedRow.primaryBarcode ?? '—'} />
-            <ContextMetric
-              label="成本"
-              value={
-                selectedRow.latestPurchasePrice !== null
-                  ? `¥${selectedRow.latestPurchasePrice}`
-                  : '—'
-              }
-            />
+            <ContextMetric label="成本" value={fmtMoney(selectedRow.latestPurchasePrice, 'CNY')} />
             <StatusSwitch
               active={selectedRow.status === 'ACTIVE'}
               entityName="SKU"
@@ -1256,7 +1250,8 @@ export function SkusPage() {
               dataIndex: 'latestPurchasePrice',
               width: 100,
               align: 'right',
-              render: (value: number | null) => (value !== null ? `¥${value}` : '—'),
+              // 货币两位小数（用户规则 2026-10-26）
+              render: (value: number | null) => fmtMoney(value, 'CNY'),
             },
             {
               title: '平台映射',
@@ -1454,8 +1449,7 @@ export function SkusPage() {
                     { label: '重量(g)', children: sku.weightG ?? '—' },
                     {
                       label: '最新采购价(CNY)',
-                      children:
-                        sku.latestPurchasePrice !== null ? `¥${sku.latestPurchasePrice}` : '—',
+                      children: fmtMoney(sku.latestPurchasePrice, 'CNY'),
                     },
                     {
                       label: '采购链接',

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { fmtQty } from '../../utils/format';
 import {
   App as AntdApp,
   Button,
@@ -639,7 +640,7 @@ export function ReturnsPage() {
                   key: 'quantity',
                   width: 80,
                   align: 'right' as const,
-                  render: (value: string) => Number(value),
+                  render: (value: string) => fmtQty(value),
                 },
                 {
                   title: '检验结论',

@@ -15,7 +15,7 @@ import {
 } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { fmtDateTime } from '../../utils/format';
+import { fmtDateTime, fmtQty } from '../../utils/format';
 import { newUuid } from '../../utils/uuid';
 import { apiPost, apiPut, useApiQuery, useDebouncedValue } from '../../api/hooks';
 import {
@@ -124,8 +124,6 @@ type Envelope<T> = { data: T; meta: { total: number } };
 /** Form number -> quantity string for the NUMERIC(18,3) wire format. */
 const asQty = (value: unknown): string =>
   typeof value === 'string' ? value : typeof value === 'number' ? String(value) : '';
-const fmtQty = (value: string): string => (Number(value) % 1 === 0 ? String(Number(value)) : value);
-
 type ActionMode = 'initialize' | 'adjust' | 'safety' | 'move';
 
 export function InventoryPage() {
