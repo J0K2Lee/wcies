@@ -17,3 +17,13 @@ export class CredentialAlreadyExistsError extends DomainError {
     super(`Credential of this type already exists for the store`, { storeId, credentialType });
   }
 }
+
+/** 绑定凭证必须声明有效期（长期 / 到期日），且到期日必须是将来的时间。 */
+export class CredentialValidityInvalidError extends DomainError {
+  readonly code = 'CREDENTIAL_VALIDITY_INVALID';
+  readonly httpStatus = 422;
+
+  constructor(message: string) {
+    super(message);
+  }
+}

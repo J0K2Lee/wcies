@@ -7,6 +7,9 @@
 export const NOTIFICATION_TYPES = [
   'ORDER_INTERCEPTION_REQUIRED',
   'ORDER_INTERCEPTION_FAILED',
+  // 2026-10-26：API Key 到期提醒（到期前 7 天起每天一次；过期后按 HIGH 提醒）
+  'STORE_CREDENTIAL_EXPIRING',
+  'STORE_CREDENTIAL_EXPIRED',
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 

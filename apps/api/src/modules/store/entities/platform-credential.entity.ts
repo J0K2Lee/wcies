@@ -35,6 +35,17 @@ export class PlatformCredentialEntity {
   @Column({ type: 'timestamptz', name: 'last_validated_at', nullable: true })
   lastValidatedAt!: Date | null;
 
+  /**
+   * 到期时间（2026-10-26）：NULL + validity_declared_at 非空 = 长期有效。
+   * 平台可能强制 Key 过期，绑定时必须声明其一。
+   */
+  @Column({ type: 'timestamptz', name: 'expires_at', nullable: true })
+  expiresAt!: Date | null;
+
+  /** 声明时间；NULL = 历史数据尚未声明（扫描跳过、界面提示补全）。 */
+  @Column({ type: 'timestamptz', name: 'validity_declared_at', nullable: true })
+  validityDeclaredAt!: Date | null;
+
   @Column({ type: 'varchar', length: 20, name: 'last_validation_status', nullable: true })
   lastValidationStatus!: string | null;
 

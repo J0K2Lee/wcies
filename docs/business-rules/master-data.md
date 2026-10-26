@@ -305,3 +305,11 @@ Sprint 8.5R1 修订（2026-09-14）：
 8. 分类编码 `CN%05d`，一/二/三级共用一条序列，编码不出现在前端表单。
 9. `GET /skus?categoryId=` 为**含子树**筛选（递归 CTE），选一/二级分类能查出其下三级分类的 SKU。
 10. 品牌命名（决策 `docs/decisions/0006`）：`name`（一般名称，必填，主显示名）/ `name_zh`（中文名，可空）/ `name_en` / `name_ru`；全站默认显示一般名称。
+
+## 9a. API Key 有效期（2026-10-26 用户需求）
+
+- 绑定/更新凭证必须声明「到期日」或「长期有效」，两者不能同时给、到期日必须是将来的时间；
+- `platform_credentials.expires_at` 为空且 `validity_declared_at` 非空 = 长期有效；
+  `validity_declared_at` 为空 = 历史未声明（界面提示补全，扫描跳过）；
+- 存量回填：OZON / WB 按「绑定时间 + 90 天」，Yandex 长期（用户指示）；
+- 到期前 7 天起每天推送提醒，订阅与渠道见 `notifications.md`。

@@ -9,6 +9,7 @@ import { SyncJobRepository } from '../repositories/sync-job.repository';
 import { WebhookProcessService } from '../services/webhook.service';
 import { readStoreSyncSettings, WebhookJobPayload } from '../sync.constants';
 import { StoreService } from '../../store/services/store.service';
+import { CredentialExpiryService } from '../../store/services/credential-expiry.service';
 import { SyncContextService } from '../services/sync-context.service';
 
 /** Consumes webhook follow-up processing (task §28: fast HTTP, slow work here). */
@@ -47,6 +48,7 @@ export class SyncSchedulerProcessor extends WorkerHost {
     private readonly contextService: SyncContextService,
     private readonly jobRepo: SyncJobRepository,
     private readonly storeService: StoreService,
+    private readonly credentialExpiry: CredentialExpiryService,
     private readonly logger: AppLoggerService,
   ) {
     super();
@@ -61,6 +63,22 @@ export class SyncSchedulerProcessor extends WorkerHost {
       // 退出会留下 PENDING 墓碑，把该 store+type 永久锁死（实证 11 个店铺卡 5h）。
       // PENDING 正常几秒内就会被 claim，10 分钟还没动必然是丢了队列任务。
       const stalePending = await this.jobRepo.failStalePending(10);
+      // API Key 到期提醒（2026-10-26）：每天一次，由服务内的日期闸门保证。
+      // 单条失败只记日志，绝不影响同步调度。
+      try {
+        const reminders = await this.credentialExpiry.scanIfDue();
+        if (reminders > 0) {
+          this.logger.info('credential expiry reminders published', {
+            module: 'store',
+            count: reminders,
+          });
+        }
+      } catch (error: unknown) {
+        this.logger.warn('credential expiry scan failed', {
+          module: 'store',
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       if (stalePending > 0) {
         this.logger.warn('recovered stale PENDING sync jobs', {
           module: 'sync',

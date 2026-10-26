@@ -286,6 +286,7 @@ beforeAll(async () => {
   await client.post(`/api/v1/stores/${storeId}/credentials`, {
     credentialType: 'MAIN_API',
     payload: { clientId: CLIENT_ID, apiKey: API_KEY },
+    longTerm: true,
   });
 
   const warehouse = await client.post<{ id: string }>('/api/v1/warehouses', {

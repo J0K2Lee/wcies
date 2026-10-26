@@ -240,7 +240,12 @@ export class WbWebhookService {
       );
       return;
     }
-    await this.credentialService.updatePayload(storeId, meta.credentialId, { secret }, operator);
+    await this.credentialService.updatePayload(
+      storeId,
+      meta.credentialId,
+      { payload: { secret } },
+      operator,
+    );
   }
 
   private view(

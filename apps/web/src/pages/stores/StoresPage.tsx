@@ -3,12 +3,14 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   App as AntdApp,
   Button,
+  DatePicker,
   Drawer,
   Dropdown,
   Form,
   Input,
   Modal,
   Popconfirm,
+  Radio,
   Select,
   Space,
   Switch,
@@ -136,6 +138,10 @@ interface CredentialRow {
   lastValidatedAt: string | null;
   lastValidationStatus: string | null;
   lastValidationError: string | null;
+  /** 有效期（2026-10-26）：null + validityDeclared=true = 长期。 */
+  expiresAt: string | null;
+  validityDeclared: boolean;
+  daysLeft: number | null;
   updatedAt: string;
 }
 
@@ -355,6 +361,10 @@ export function StoresPage() {
   // from the form's platformId (options only exist once platforms load).
   const createPlatformOptions = platforms.data?.data ?? [];
   const watchedCreatePlatformId = Form.useWatch('platformId', form);
+  const createValidityMode = Form.useWatch('validityMode', form) as
+    'LONG_TERM' | 'DATE' | undefined;
+  const credentialValidityMode = Form.useWatch('validityMode', credentialForm) as
+    'LONG_TERM' | 'DATE' | undefined;
   const createPlatformCode = useMemo(
     () =>
       createPlatformOptions.find((platform) => platform.id === watchedCreatePlatformId)?.code ??
@@ -378,8 +388,14 @@ export function StoresPage() {
     // 店铺 payload，店铺创建成功后立即用同一份输入配置 MAIN_API 凭证。
     // 凭证保存失败不回滚店铺（店铺已存在事实），提示到详情页补配。
     mutationFn: async (values: Record<string, unknown>) => {
-      const { credentialClientId, credentialApiKey, credentialCampaignId, ...storePayload } =
-        values;
+      const {
+        credentialClientId,
+        credentialApiKey,
+        credentialCampaignId,
+        validityMode,
+        credentialExpiresAt,
+        ...storePayload
+      } = values;
       const created = await apiPost<StoreRow>('/api/v1/stores', storePayload);
       if (typeof credentialApiKey === 'string' && credentialApiKey !== '') {
         const spec = credentialSpecForPlatform(createPlatformCode);
@@ -396,7 +412,16 @@ export function StoresPage() {
         }
         await apiPost(
           '/api/v1/stores/{storeId}/credentials',
-          { credentialType: 'MAIN_API', payload },
+          {
+            credentialType: 'MAIN_API',
+            payload,
+            // 绑定 Key 必须声明有效期（2026-10-26）：长期或到期日。
+            ...(validityMode === 'LONG_TERM'
+              ? { longTerm: true }
+              : {
+                  expiresAt: (credentialExpiresAt as { toISOString(): string }).toISOString(),
+                }),
+          },
           { storeId: created.id },
         );
       }
@@ -420,6 +445,8 @@ export function StoresPage() {
       campaignId?: string;
       storeId: string;
       credentialId?: string;
+      validityMode: 'LONG_TERM' | 'DATE';
+      expiresAt?: { toISOString(): string };
     }) => {
       // Per-platform payload (user suggestion #14): platforms whose MAIN_API
       // needs only an API key must not submit an empty clientId — the payload
@@ -436,21 +463,19 @@ export function StoresPage() {
       ) {
         payload.campaignId = values.campaignId.trim();
       }
+      const validity =
+        values.validityMode === 'LONG_TERM'
+          ? { longTerm: true }
+          : { expiresAt: values.expiresAt?.toISOString() ?? '' };
       return values.credentialId === undefined
         ? apiPost(
             '/api/v1/stores/{storeId}/credentials',
-            {
-              credentialType: 'MAIN_API',
-              payload,
-            },
+            { credentialType: 'MAIN_API', payload, ...validity },
             { storeId: values.storeId },
           )
         : apiPatch(
             '/api/v1/stores/{storeId}/credentials/{id}',
-            {
-              credentialType: 'MAIN_API',
-              payload,
-            },
+            { credentialType: 'MAIN_API', payload, ...validity },
             { storeId: values.storeId, id: values.credentialId },
           );
     },
@@ -1224,6 +1249,29 @@ export function StoresPage() {
                 >
                   <Input.Password placeholder="加密存储，不会回显" />
                 </Form.Item>
+                {/* API Key 有效期（2026-10-26）：平台可能强制过期，必须声明其一。 */}
+                <Form.Item
+                  name="validityMode"
+                  label="API Key 有效期"
+                  initialValue="DATE"
+                  rules={[{ required: true, message: '请选择长期有效或到期日' }]}
+                >
+                  <Radio.Group
+                    options={[
+                      { value: 'DATE', label: '指定到期日' },
+                      { value: 'LONG_TERM', label: '长期有效（无有效期）' },
+                    ]}
+                  />
+                </Form.Item>
+                {createValidityMode === 'DATE' && (
+                  <Form.Item
+                    name="credentialExpiresAt"
+                    label="到期时间"
+                    rules={[{ required: true, message: '请选择 API Key 到期时间' }]}
+                  >
+                    <DatePicker showTime style={{ width: '100%' }} />
+                  </Form.Item>
+                )}
               </>
             );
           })()}
@@ -1292,6 +1340,29 @@ export function StoresPage() {
                 >
                   <Input.Password placeholder="加密存储，不会回显" />
                 </Form.Item>
+                {/* API Key 有效期（2026-10-26）：必须声明「到期日」或「长期」。 */}
+                <Form.Item
+                  name="validityMode"
+                  label="API Key 有效期"
+                  initialValue="DATE"
+                  rules={[{ required: true, message: '请选择长期有效或到期日' }]}
+                >
+                  <Radio.Group
+                    options={[
+                      { value: 'DATE', label: '指定到期日' },
+                      { value: 'LONG_TERM', label: '长期有效（无有效期）' },
+                    ]}
+                  />
+                </Form.Item>
+                {credentialValidityMode === 'DATE' && (
+                  <Form.Item
+                    name="expiresAt"
+                    label="到期时间"
+                    rules={[{ required: true, message: '请选择 API Key 到期时间' }]}
+                  >
+                    <DatePicker showTime style={{ width: '100%' }} />
+                  </Form.Item>
+                )}
               </>
             );
           })()}
@@ -1492,6 +1563,38 @@ function StoreDetailBody({
                   showDot={false}
                 />
               ),
+            },
+            {
+              title: '有效期',
+              key: 'expiresAt',
+              width: 170,
+              render: (_: unknown, row: CredentialRow) => {
+                // 有效期（2026-10-26）：历史未声明的提示补全；到期前 7 天起告警。
+                if (!row.validityDeclared) {
+                  return (
+                    <StatusBadge
+                      tone="warning"
+                      label="未声明"
+                      hint="请编辑凭证，选择「长期有效」或填写到期时间"
+                      showDot={false}
+                    />
+                  );
+                }
+                if (row.expiresAt === null) {
+                  return <StatusBadge tone="success" label="长期" showDot={false} />;
+                }
+                const days = row.daysLeft ?? 0;
+                return (
+                  <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                    <span style={{ fontSize: 12.5 }}>{row.expiresAt.slice(0, 10)}</span>
+                    <StatusBadge
+                      tone={days <= 0 ? 'danger' : days <= 7 ? 'warning' : 'neutral'}
+                      label={days <= 0 ? '已过期' : `${days} 天`}
+                      showDot={false}
+                    />
+                  </span>
+                );
+              },
             },
             {
               title: '验证状态',

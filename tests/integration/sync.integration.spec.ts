@@ -380,11 +380,13 @@ beforeAll(async () => {
   const credA = await client.post<{ id: string }>(`/api/v1/stores/${storeA}/credentials`, {
     credentialType: 'MAIN_API',
     payload: { clientId: CLIENT_ID_A, apiKey: API_KEY_A },
+    longTerm: true,
   });
   credentialA = credA.body.data.id;
   const credB = await client.post<{ id: string }>(`/api/v1/stores/${storeB}/credentials`, {
     credentialType: 'MAIN_API',
     payload: { clientId: CLIENT_ID_B, apiKey: API_KEY_B },
+    longTerm: true,
   });
   expect(credB.status).toBe(201);
 

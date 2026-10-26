@@ -124,7 +124,7 @@ describe('WbWebhookService.subscribe', () => {
     expect(credentialService.updatePayload).toHaveBeenCalledWith(
       'store-1',
       'cred-9',
-      { secret: SECRET },
+      { payload: { secret: SECRET } },
       OPERATOR,
     );
     expect(credentialService.create).not.toHaveBeenCalled();

@@ -68,7 +68,12 @@ export class StoreCredentialController {
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true; data: CredentialResponseDto }> {
     return ok(
-      await this.credentialService.updatePayload(storeId, credentialId, dto.payload, operator),
+      await this.credentialService.updatePayload(
+        storeId,
+        credentialId,
+        { payload: dto.payload, longTerm: dto.longTerm, expiresAt: dto.expiresAt },
+        operator,
+      ),
     );
   }
 

@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsIn, IsObject } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsBoolean, IsDateString, IsIn, IsObject, IsOptional } from 'class-validator';
 import { CREDENTIAL_TYPES } from '../constants/store.constants';
 
 export class UpsertCredentialRequestDto {
@@ -13,6 +13,23 @@ export class UpsertCredentialRequestDto {
   })
   @IsObject()
   payload!: Record<string, unknown>;
+
+  @ApiPropertyOptional({
+    description: '长期有效（与 expiresAt 二选一，**必须声明其一**）',
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  longTerm?: boolean;
+
+  @ApiPropertyOptional({
+    format: 'date-time',
+    description: 'API Key 到期时间（平台强制过期时必须填；与 longTerm 二选一）',
+    example: '2027-01-31T00:00:00.000Z',
+  })
+  @IsOptional()
+  @IsDateString()
+  expiresAt?: string;
 }
 
 /**
@@ -50,6 +67,24 @@ export class CredentialResponseDto {
 
   @ApiProperty({ nullable: true, type: String, description: '最近一次验证失败原因（已脱敏）' })
   lastValidationError!: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    format: 'date-time',
+    description: '到期时间；null = 长期',
+  })
+  expiresAt!: Date | null;
+
+  @ApiProperty({
+    description: '是否已声明有效期（历史数据可能未声明，界面提示补全）',
+  })
+  validityDeclared!: boolean;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: '距离到期的天数（向上取整）；已过期为负数；长期/未声明为 null',
+  })
+  daysLeft!: number | null;
 
   @ApiProperty({ format: 'date-time' })
   updatedAt!: Date;

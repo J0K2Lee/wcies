@@ -74,6 +74,8 @@
 |---|---|---|---|
 | `ORDER_INTERCEPTION_REQUIRED` | WARN | storeId / warehouseCode / skuCode / level | `interception:<id>` |
 | `ORDER_INTERCEPTION_FAILED` | HIGH | 同上 + interceptionNo | `interception:<id>:failed` |
+| `STORE_CREDENTIAL_EXPIRING` | WARN | storeId / platform / credentialType | `credential:<id>:<YYYY-MM-DD>` |
+| `STORE_CREDENTIAL_EXPIRED` | HIGH | 同上 | 同上（过期后每天一条，直到换绑） |
 
 新增事件只需在事件目录登记（级别、可过滤字段、卡片布局、跳转路径），
 订阅与投递逻辑无需改动。
@@ -94,3 +96,15 @@ GET    /notifications/channels           我的通道绑定
 POST   /notifications/channels           绑定 open_id / 邮箱
 POST   /notifications/:id/retry          重试失败的推送
 ```
+
+## 8. API Key 到期提醒（2026-10-26 用户需求）
+
+- 平台可能强制 Key 过期，绑定凭证时**必须声明**「到期日」或「长期有效」，否则 422
+  （`CREDENTIAL_VALIDITY_INVALID`）；
+- 存量凭证按用户指示回填：OZON / WB = 绑定时间 + 90 天；Yandex = 长期；
+- 扫描（`CredentialExpiryService`，调度 tick 内每日一次）对「到期前 7 天内」的 ACTIVE
+  凭证发布 `STORE_CREDENTIAL_EXPIRING`，已过期的发布 `STORE_CREDENTIAL_EXPIRED`
+  （HIGH），直到换绑；
+- 「每天一条」由去重键 `credential:<id>:<日期>` 保证，多进程/重启不会重复；
+- 通知发送给**订阅了该事件**的人；默认全不订阅，因此需要各自开启；
+- 未声明有效期（历史/异常数据）的凭证不参与扫描，店铺页面提示「未声明」补全。

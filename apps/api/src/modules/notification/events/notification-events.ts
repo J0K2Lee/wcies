@@ -53,6 +53,30 @@ export const NOTIFICATION_EVENTS: Record<string, NotificationEventDefinition> = 
     cardFields: ['interceptionNo', 'skuCode', 'warehouseCode', 'remainingQty'],
     linkPath: '/interceptions',
   },
+  STORE_CREDENTIAL_EXPIRING: {
+    type: 'STORE_CREDENTIAL_EXPIRING',
+    label: 'API Key 即将到期',
+    level: 'WARN',
+    conditionFields: [
+      { key: 'storeId', label: '店铺' },
+      { key: 'platform', label: '平台' },
+      { key: 'credentialType', label: '凭证类型' },
+    ],
+    cardFields: ['storeCode', 'credentialType', 'expiresOn', 'daysLeft'],
+    linkPath: '/stores',
+  },
+  STORE_CREDENTIAL_EXPIRED: {
+    type: 'STORE_CREDENTIAL_EXPIRED',
+    label: 'API Key 已过期',
+    level: 'HIGH',
+    conditionFields: [
+      { key: 'storeId', label: '店铺' },
+      { key: 'platform', label: '平台' },
+      { key: 'credentialType', label: '凭证类型' },
+    ],
+    cardFields: ['storeCode', 'credentialType', 'expiresOn'],
+    linkPath: '/stores',
+  },
   ORDER_INTERCEPTION_FAILED: {
     type: 'ORDER_INTERCEPTION_FAILED',
     label: '拦截失败',

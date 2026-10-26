@@ -96,6 +96,8 @@ describe('stores + credentials (task §8-§12, §82)', () => {
     const created = await client.post<IdDto>(`/api/v1/stores/${storeA}/credentials`, {
       credentialType: 'MAIN_API',
       payload: { apiKey: secret, clientId: '42' },
+      // 绑定 Key 必须声明有效期（2026-10-26）：测试用长期。
+      longTerm: true,
     });
     expect(created.body.success).toBe(true);
 

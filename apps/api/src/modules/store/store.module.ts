@@ -8,6 +8,8 @@ import { PlatformCredentialEntity } from './entities/platform-credential.entity'
 import { StoreRepository } from './repositories/store.repository';
 import { PlatformCredentialRepository } from './repositories/platform-credential.repository';
 import { StoreService } from './services/store.service';
+import { CredentialExpiryService } from './services/credential-expiry.service';
+import { NotificationModule } from '../notification/notification.module';
 import { PlatformCredentialService } from './services/platform-credential.service';
 import { CredentialValidationService } from './services/credential-validation.service';
 import { StoreController } from './controllers/store.controller';
@@ -17,6 +19,7 @@ import { StoreCredentialController } from './controllers/store-credential.contro
   imports: [
     TypeOrmModule.forFeature([StoreEntity, PlatformCredentialEntity]),
     PlatformModule,
+    NotificationModule,
     OperationLogModule,
     CryptoModule,
   ],
@@ -25,9 +28,10 @@ import { StoreCredentialController } from './controllers/store-credential.contro
     StoreService,
     PlatformCredentialService,
     CredentialValidationService,
+    CredentialExpiryService,
     StoreRepository,
     PlatformCredentialRepository,
   ],
-  exports: [StoreService, PlatformCredentialService],
+  exports: [StoreService, PlatformCredentialService, CredentialExpiryService],
 })
 export class StoreModule {}

@@ -6,7 +6,11 @@ import {
 import { OperatorContext, OperationLogService } from '../../operation-log/operation-log.service';
 import { StoreNotFoundError } from '../errors/store-errors';
 import { StoreService } from './store.service';
-import { CredentialAlreadyExistsError, CredentialNotFoundError } from '../errors/credential-errors';
+import {
+  CredentialAlreadyExistsError,
+  CredentialNotFoundError,
+  CredentialValidityInvalidError,
+} from '../errors/credential-errors';
 import { PlatformCredentialEntity } from '../entities/platform-credential.entity';
 import { PlatformCredentialRepository } from '../repositories/platform-credential.repository';
 import { CredentialResponseDto, UpsertCredentialRequestDto } from '../dto/credential.dto';
@@ -46,12 +50,15 @@ export class PlatformCredentialService {
       throw new CredentialAlreadyExistsError(storeId, dto.credentialType);
     }
 
+    const validity = this.resolveValidity(dto.longTerm, dto.expiresAt);
     const encrypted = await this.encryptPayload(dto.payload);
     const credential = await this.repository.insert({
       storeId,
       credentialType: dto.credentialType,
       encryptedPayload: encrypted,
       status: 'ACTIVE',
+      expiresAt: validity.expiresAt,
+      validityDeclaredAt: new Date(),
     });
 
     await this.operationLog.record({
@@ -72,12 +79,22 @@ export class PlatformCredentialService {
   async updatePayload(
     storeId: string,
     credentialId: string,
-    payload: Record<string, unknown>,
+    dto: { payload: Record<string, unknown>; longTerm?: boolean; expiresAt?: string },
     operator: OperatorContext,
   ): Promise<CredentialResponseDto> {
     const credential = await this.findOwnedOrThrow(storeId, credentialId);
-    const encrypted = await this.encryptPayload(payload);
-    await this.repository.update(credential.id, { encryptedPayload: encrypted, status: 'ACTIVE' });
+    const validity =
+      dto.longTerm === undefined && dto.expiresAt === undefined
+        ? null
+        : this.resolveValidity(dto.longTerm, dto.expiresAt);
+    const encrypted = await this.encryptPayload(dto.payload);
+    await this.repository.update(credential.id, {
+      encryptedPayload: encrypted,
+      status: 'ACTIVE',
+      ...(validity === null
+        ? {}
+        : { expiresAt: validity.expiresAt, validityDeclaredAt: new Date() }),
+    });
     await this.operationLog.record({
       entityType: ENTITY_TYPE,
       entityId: credential.id,
@@ -234,7 +251,47 @@ export class PlatformCredentialService {
       lastValidationStatus: credential.lastValidationStatus,
       lastValidationError: credential.lastValidationError,
       createdAt: credential.createdAt,
+      expiresAt: credential.expiresAt,
+      validityDeclared: credential.validityDeclaredAt !== null,
+      daysLeft: daysLeft(credential.expiresAt),
       updatedAt: credential.updatedAt,
     };
   }
+
+  /**
+   * 有效期声明（2026-10-26 用户需求）：必须二选一。
+   * 历史数据未声明的行保持 usable，但扫描会跳过并提示补全。
+   */
+  private resolveValidity(
+    longTerm: boolean | undefined,
+    expiresAt: string | undefined,
+  ): { expiresAt: Date | null } {
+    if (longTerm === true && expiresAt !== undefined) {
+      throw new CredentialValidityInvalidError('长期有效与到期日只能二选一');
+    }
+    if (longTerm === true) {
+      return { expiresAt: null };
+    }
+    if (expiresAt === undefined || expiresAt === '') {
+      throw new CredentialValidityInvalidError(
+        '必须声明 API Key 的有效期：选择「长期有效」或填写到期时间',
+      );
+    }
+    const parsed = new Date(expiresAt);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new CredentialValidityInvalidError('到期时间格式无法解析');
+    }
+    if (parsed.getTime() <= Date.now()) {
+      throw new CredentialValidityInvalidError('到期时间必须晚于当前时间');
+    }
+    return { expiresAt: parsed };
+  }
+}
+
+/** 距离到期天数（向上取整）；NULL = 长期或未声明。 */
+export function daysLeft(expiresAt: Date | null): number | null {
+  if (expiresAt === null) {
+    return null;
+  }
+  return Math.ceil((expiresAt.getTime() - Date.now()) / 86_400_000);
 }

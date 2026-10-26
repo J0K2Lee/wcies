@@ -155,6 +155,49 @@ export class NotificationService {
   }
 
   /**
+   * API Key 到期提醒（2026-10-26 用户需求）：到期前 7 天起每天一条，过期后按
+   * 已过期事件继续提醒（直到换绑新 Key）。dedupeKey 带日期，保证「每天一次」。
+   */
+  async notifyCredentialExpiry(input: {
+    credentialId: string;
+    storeId: string;
+    storeCode: string;
+    platform: string;
+    credentialType: string;
+    expiresAt: Date;
+    daysLeft: number;
+  }): Promise<void> {
+    const expired = input.daysLeft <= 0;
+    const expiresOn = input.expiresAt.toISOString().slice(0, 10);
+    const daysText =
+      input.daysLeft > 0 ? `还有 ${input.daysLeft} 天到期` : `已于 ${expiresOn} 过期`;
+    await this.publishEvent({
+      type: expired ? 'STORE_CREDENTIAL_EXPIRED' : 'STORE_CREDENTIAL_EXPIRING',
+      title: expired
+        ? `API Key 已过期：${input.storeCode}（${input.credentialType}）`
+        : `API Key 即将到期：${input.storeCode}（${input.credentialType}，${input.daysLeft} 天）`,
+      level: expired ? 'HIGH' : 'WARN',
+      factors: compactFactors({
+        storeId: input.storeId,
+        platform: input.platform,
+        credentialType: input.credentialType,
+        storeCode: input.storeCode,
+      }),
+      lines: [
+        `店铺：${input.storeCode}`,
+        `平台：${input.platform}`,
+        `凭证类型：${input.credentialType}`,
+        `到期时间：${expiresOn}（${daysText}）`,
+        '请尽快在「店铺管理 → 凭证」中换绑新的 API Key，并重新声明有效期。',
+      ],
+      linkPath: eventDefinition('STORE_CREDENTIAL_EXPIRING').linkPath,
+      dedupeKey: `credential:${input.credentialId}:${new Date().toISOString().slice(0, 10)}`,
+      referenceType: 'PLATFORM_CREDENTIAL',
+      referenceId: input.credentialId,
+    });
+  }
+
+  /**
    * 写事件 + 解析订阅 + 生成投递。同一 (type, dedupeKey) 在 30 分钟内只记一条，
    * 避免同一拦截任务反复失败时刷屏。
    */
