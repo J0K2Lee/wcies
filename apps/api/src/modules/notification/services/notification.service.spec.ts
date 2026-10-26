@@ -59,6 +59,23 @@ describe('notifyInterceptionRequired 文案（2026-10-25）', () => {
     expect(content).not.toContain('拣货商品已取消');
     expect(inserted[0]?.title).toBe('需要拦截：订单 ORD00000728（ITC00000002）');
   });
+
+  it('数量按整数显示，不把数据库精度 (1.000) 写进文案', async () => {
+    const { service, inserted } = build();
+    await service.notifyInterceptionRequired({
+      orderNo: 'ORD00000728',
+      orderItemId: 'item-1',
+      interceptionId: 'itc-1',
+      interceptionNo: 'ITC00000002',
+      skuCode: 'SKU000012006',
+      warehouseCode: 'ZG-01',
+      remainingQty: '1.000',
+    });
+
+    const content = inserted[0]?.['content'] as string;
+    expect(content).toContain('待找回数量：1');
+    expect(content).not.toContain('1.000');
+  });
 });
 
 /**

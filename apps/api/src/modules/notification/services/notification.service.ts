@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { PageMeta } from '@wcies/shared';
+import { PageMeta, formatQtyText } from '@wcies/shared';
 import { QUEUE_NAMES } from '../../../infrastructure/queue/queue.constants';
 import {
   NotificationRepository,
@@ -114,7 +114,7 @@ export class NotificationService {
         `拦截任务：${input.interceptionNo}`,
         `SKU：${input.skuCode ?? '未知'}`,
         `仓库：${input.warehouseCode ?? '未知'}`,
-        `待找回数量：${input.remainingQty}`,
+        `待找回数量：${formatQtyText(input.remainingQty)}`,
       ],
       linkPath: eventDefinition('ORDER_INTERCEPTION_REQUIRED').linkPath,
       dedupeKey: `interception:${input.interceptionId}`,

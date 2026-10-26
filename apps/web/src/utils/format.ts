@@ -3,6 +3,8 @@
  * grouped numbers, and compact durations. Pages must not hand-roll date strings.
  */
 
+import { formatQtyText } from '@wcies/shared';
+
 /** Absolute timestamp for tooltips / detail views: 2026-09-10 16:30:22 */
 export function fmtDateTime(iso: string): string {
   const d = new Date(iso);
@@ -89,14 +91,7 @@ export function fmtQty(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === '') {
     return '—';
   }
-  const num = Number(value);
-  if (Number.isNaN(num)) {
-    return String(value);
-  }
-  return num.toLocaleString('zh-CN', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: Number.isInteger(num) ? 0 : 3,
-  });
+  return formatQtyText(value);
 }
 
 /**

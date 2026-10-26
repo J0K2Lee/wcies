@@ -56,3 +56,5 @@ export {
   type SkuNameComparison,
   type SkuNameRelation,
 } from './sku-match.js';
+
+export { formatQtyText } from './format.js';
