@@ -66,8 +66,11 @@ export const SYNC_INTERVAL_FLOOR_MINUTES: Record<'ORDER_SYNC' | 'LISTING_SYNC', 
   LISTING_SYNC: 5,
 };
 
-/** 间隔上限：一天。超过这个值等于「基本不同步」，应当直接关掉开关。 */
-export const SYNC_INTERVAL_MAX_MINUTES = 1_440;
+/**
+ * 间隔上限：30 天。店铺侧以「数字 + 单位（分/小时/天）」填写，所以上限必须容得下
+ * 按天表达的值；再大就属于「基本不同步」，应当直接关掉开关。
+ */
+export const SYNC_INTERVAL_MAX_MINUTES = 43_200;
 
 /**
  * Store-level sync enablement (task §57 staged rollout): scheduled syncs only

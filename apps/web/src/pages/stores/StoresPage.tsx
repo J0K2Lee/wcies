@@ -8,6 +8,7 @@ import {
   Dropdown,
   Form,
   Input,
+  InputNumber,
   Modal,
   Popconfirm,
   Radio,
@@ -28,6 +29,15 @@ import {
 import { useSearchParams, useNavigate } from 'react-router';
 import { apiDelete, apiPatch, apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
 import { fmtDateTime, fmtNumber } from '../../utils/format';
+import {
+  convertDraft,
+  draftToMinutes,
+  formatInterval,
+  SYNC_INTERVAL_FLOOR,
+  SYNC_INTERVAL_UNITS,
+  toDraftInterval,
+  SyncIntervalUnit,
+} from '../../utils/sync-interval';
 import {
   ActionMenu,
   colors,
@@ -86,12 +96,10 @@ interface StoreRow {
 /** 店铺记账币种：创建与编辑共用一份，避免两处不一致（2026-10-23）。 */
 const STORE_CURRENCIES = ['RUB', 'CNY', 'USD'] as const;
 
-/** 自动轮询频率档位（用户要求 2026-10-26：频率可按店铺设置）。 */
-const ORDER_SYNC_INTERVAL_OPTIONS = [1, 5, 10, 15, 30, 60] as const;
-const LISTING_SYNC_INTERVAL_OPTIONS = [5, 10, 15, 30, 60] as const;
-
-/** 店铺自定义频率用 0 表示「跟随系统默认」（settings 里不写这个键）。 */
-const SYNC_INTERVAL_FOLLOW_DEFAULT = 0;
+/**
+ * 自动轮询频率（用户要求 2026-10-26）：按店铺设置，填写方式是「数字 + 单位」。
+ * 换算规则集中在 utils/sync-interval（与后端 sync.constants 的下限/上限一致）。
+ */
 
 /** settings.sync 的完整形状（null = 跟随系统默认）。 */
 interface SyncSettingsPatch {
@@ -1469,6 +1477,82 @@ export function StoresPage() {
   );
 }
 
+/**
+ * 「数字 + 单位」频率编辑器（用户 2026-10-26）。落库统一是分钟，单位只影响
+ * 输入/展示；改单位时按总时长换算，不改变实际频率。失焦或回车才提交，
+ * 避免每敲一个数字就发一次 PATCH。
+ */
+function SyncIntervalEditor({
+  minutes,
+  floorMinutes,
+  disabled,
+  saving,
+  onChange,
+}: {
+  minutes: number | null;
+  floorMinutes: number;
+  disabled: boolean;
+  saving: boolean;
+  onChange: (minutes: number | null) => void;
+}) {
+  const [draft, setDraft] = useState(() => toDraftInterval(minutes));
+  useEffect(() => {
+    setDraft(toDraftInterval(minutes));
+  }, [minutes]);
+
+  const commit = (next: { amount: number | null; unit: SyncIntervalUnit }) => {
+    const totalMinutes = draftToMinutes(next, floorMinutes);
+    if (totalMinutes === null) {
+      setDraft(toDraftInterval(minutes)); // 空值/0 不提交，回到已保存的值
+      return;
+    }
+    if (totalMinutes !== minutes) {
+      onChange(totalMinutes);
+    }
+  };
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <InputNumber
+        size="small"
+        style={{ width: 84 }}
+        min={0}
+        precision={2}
+        placeholder="默认"
+        value={draft.amount}
+        disabled={disabled}
+        onChange={(value) => setDraft({ ...draft, amount: value })}
+        onBlur={() => commit(draft)}
+        onPressEnter={() => commit(draft)}
+      />
+      <Select
+        size="small"
+        style={{ width: 76 }}
+        value={draft.unit}
+        disabled={disabled}
+        onChange={(unit: SyncIntervalUnit) => {
+          const next = convertDraft(draft, unit);
+          setDraft(next);
+          commit(next);
+        }}
+        options={SYNC_INTERVAL_UNITS.map((item) => ({ value: item.value, label: item.label }))}
+      />
+      {minutes !== null && (
+        <Button
+          type="link"
+          size="small"
+          style={{ padding: 0 }}
+          loading={saving}
+          disabled={disabled}
+          onClick={() => onChange(null)}
+        >
+          跟随默认
+        </Button>
+      )}
+    </span>
+  );
+}
+
 /** Drawer body: 基础信息 / Connection / 同步状态 / 仓库绑定 (task §11). */
 function StoreDetailBody({
   store,
@@ -1837,30 +1921,19 @@ function StoreDetailBody({
                 onChange={(checked) => onToggleSyncSetting({ orderSyncEnabled: checked })}
               />
             </span>
-            <Select
-              size="small"
-              style={{ width: 180 }}
-              value={syncSettings.orderSyncIntervalMinutes ?? SYNC_INTERVAL_FOLLOW_DEFAULT}
+            <SyncIntervalEditor
+              minutes={syncSettings.orderSyncIntervalMinutes}
+              floorMinutes={SYNC_INTERVAL_FLOOR.ORDER_SYNC}
               disabled={store.status !== 'ACTIVE' || !syncSettings.orderSyncEnabled}
-              onChange={(value: number) =>
-                onToggleSyncSetting({
-                  orderSyncIntervalMinutes: value === SYNC_INTERVAL_FOLLOW_DEFAULT ? null : value,
-                })
-              }
-              options={[
-                { value: SYNC_INTERVAL_FOLLOW_DEFAULT, label: '跟随系统默认' },
-                ...ORDER_SYNC_INTERVAL_OPTIONS.map((minutes) => ({
-                  value: minutes,
-                  label: `每 ${minutes} 分钟`,
-                })),
-              ]}
+              saving={syncSettingsSaving}
+              onChange={(minutes) => onToggleSyncSetting({ orderSyncIntervalMinutes: minutes })}
             />
             <span style={{ fontSize: 12, color: colors.textTertiary }}>
               {overview === undefined
                 ? '生效频率加载中…'
                 : overview.orderSyncIntervalMinutes === null
                   ? '自动轮询已被系统全局关闭（ORDER_SYNC_INTERVAL_SECONDS=0）'
-                  : `实际生效：每 ${fmtNumber(overview.orderSyncIntervalMinutes)} 分钟`}
+                  : `实际生效：${formatInterval(overview.orderSyncIntervalMinutes)}`}
             </span>
           </div>
           <div
@@ -1889,30 +1962,19 @@ function StoreDetailBody({
                 onChange={(checked) => onToggleSyncSetting({ listingSyncEnabled: checked })}
               />
             </span>
-            <Select
-              size="small"
-              style={{ width: 180 }}
-              value={syncSettings.listingSyncIntervalMinutes ?? SYNC_INTERVAL_FOLLOW_DEFAULT}
+            <SyncIntervalEditor
+              minutes={syncSettings.listingSyncIntervalMinutes}
+              floorMinutes={SYNC_INTERVAL_FLOOR.LISTING_SYNC}
               disabled={store.status !== 'ACTIVE' || !syncSettings.listingSyncEnabled}
-              onChange={(value: number) =>
-                onToggleSyncSetting({
-                  listingSyncIntervalMinutes: value === SYNC_INTERVAL_FOLLOW_DEFAULT ? null : value,
-                })
-              }
-              options={[
-                { value: SYNC_INTERVAL_FOLLOW_DEFAULT, label: '跟随系统默认' },
-                ...LISTING_SYNC_INTERVAL_OPTIONS.map((minutes) => ({
-                  value: minutes,
-                  label: `每 ${minutes} 分钟`,
-                })),
-              ]}
+              saving={syncSettingsSaving}
+              onChange={(minutes) => onToggleSyncSetting({ listingSyncIntervalMinutes: minutes })}
             />
             <span style={{ fontSize: 12, color: colors.textTertiary }}>
               {overview === undefined
                 ? '生效频率加载中…'
                 : overview.listingSyncIntervalMinutes === null
                   ? '自动轮询已被系统全局关闭（LISTING_SYNC_INTERVAL_SECONDS=0）'
-                  : `实际生效：每 ${fmtNumber(overview.listingSyncIntervalMinutes)} 分钟`}
+                  : `实际生效：${formatInterval(overview.listingSyncIntervalMinutes)}`}
             </span>
           </div>
         </div>

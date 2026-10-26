@@ -82,6 +82,15 @@ describe('SyncSchedulerProcessor store gating (Sprint 9 T2)', () => {
     ).toMatchObject({ orderSyncIntervalMinutes: null, listingSyncIntervalMinutes: null });
   });
 
+  it('按「天」填写的值也能落库（上限 30 天），超过上限视为未设置', async () => {
+    expect(readSyncSettingsOf({ sync: { orderSyncIntervalMinutes: 2_880 } })).toMatchObject({
+      orderSyncIntervalMinutes: 2_880,
+    });
+    expect(readSyncSettingsOf({ sync: { orderSyncIntervalMinutes: 43_201 } })).toMatchObject({
+      orderSyncIntervalMinutes: null,
+    });
+  });
+
   it('does not dispatch ORDER_SYNC when the store has not opted in', async () => {
     const { processor, dispatch } = buildProcessor({ ORDER_SYNC_INTERVAL_SECONDS: '300' }, null);
     await processor.process({ data: {} } as never);

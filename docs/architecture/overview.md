@@ -25,7 +25,8 @@ apps/api/src/worker.ts  # 队列 Worker 进程（BullMQ 消费者，无 HTTP）
 > （2026-10-26）：`ORDER_SYNC_INTERVAL_SECONDS` / `LISTING_SYNC_INTERVAL_SECONDS`
 > 是系统默认（0 = 系统级关闭，店铺配置不能绕过）；店铺可在
 > `settings.sync.orderSyncIntervalMinutes` / `listingSyncIntervalMinutes` 上覆盖
-> （分钟；订单下限 1、商品链接下限 5，上限 1440），并且必须
+> （统一存分钟，界面按「数字 + 单位（分钟/小时/天）」填写；订单下限 1、商品链接
+> 下限 5，上限 30 天），并且必须
 > `settings.sync.orderSyncEnabled` / `listingSyncEnabled` 为 true。店铺同步概览
 > 接口返回实际生效的间隔（`orderSyncIntervalMinutes` / `listingSyncIntervalMinutes`），
 > 店铺抽屉里的「实际生效」与「同步过期」判定都以它为准。
