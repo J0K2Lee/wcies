@@ -228,6 +228,8 @@ InventoryService.releaseReservation（orderDomain=true，幂等键 ORDER_RELEASE
   与库存脱节），要求先完成或取消任务；
 - 与取消的区别：取消把行落到 `RELEASED`（终态），释放只是回到 `PENDING`
   （可再次被分配）。
+- 入口位置：**订单行右栏**（行级操作按钮统一放侧边栏，行内只保留状态徽标），
+  与「重新尝试分配」并列，仅 `RESERVED` 行可见。
 
 ### B. 映射失败行（`FAILED`）— 决策 0012；2026-10-14 调整：**先修映射，再决定是否分配**
 

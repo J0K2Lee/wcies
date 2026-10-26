@@ -726,40 +726,12 @@ function ExpandedOrderItems({
   selectedItem: OrderItem | null;
   onItemRowClick: (item: OrderItem) => void;
 }) {
-  const { message, modal } = AntdApp.useApp();
-  const queryClient = useQueryClient();
   const detailQuery = useApiQuery<Envelope<OrderDetail> & { data: OrderDetail }>(
     '/api/v1/orders/{id}',
     {},
     ['order-detail', order.id],
     { id: order.id },
   );
-  /**
-   * 手工释放库存占用（用户要求 2026-10-26）：已占用行退回「待分配」。
-   * 后端释放后不会立即重新分配；下次真实入库仍按 FIFO 自动分配。
-   */
-  const releaseMutation = useMutation({
-    mutationFn: (itemId: string) =>
-      apiPost('/api/v1/orders/items/{itemId}/release-reservation', {}, { itemId }),
-    onSuccess: () => {
-      void message.success('已释放库存占用，该行回到待分配（不会立即重新分配）');
-      void queryClient.invalidateQueries({ queryKey: ['orders'] });
-      void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
-      void queryClient.invalidateQueries({ queryKey: ['exceptions'] });
-    },
-    onError: (error: Error) => void message.error(`释放失败：${error.message}`),
-  });
-  const confirmRelease = (item: OrderItem) => {
-    modal.confirm({
-      title: '释放该行的库存占用？',
-      content:
-        '释放后该行回到「待分配」（缺货），这部分库存可被其它订单使用；系统不会立即重新分配这一行。',
-      okText: '释放库存',
-      okButtonProps: { danger: true },
-      cancelText: '返回',
-      onOk: () => releaseMutation.mutateAsync(item.id),
-    });
-  };
   if (detailQuery.isLoading) {
     return <span style={{ fontSize: 12.5, color: colors.textTertiary }}>商品明细加载中…</span>;
   }
@@ -787,8 +759,6 @@ function ExpandedOrderItems({
             selected={selectedItem?.id === item.id}
             first={index === 0}
             onActivate={() => onItemRowClick(item)}
-            onReleaseReservation={confirmRelease}
-            releasing={releaseMutation.isPending && releaseMutation.variables === item.id}
           />
         ))}
         {detail.items.length > 1 && (
@@ -955,8 +925,6 @@ function ExpandedItemBlock({
   selected,
   first,
   onActivate,
-  onReleaseReservation,
-  releasing,
 }: {
   item: OrderItem;
   currency: string | null;
@@ -965,9 +933,6 @@ function ExpandedItemBlock({
   selected: boolean;
   first: boolean;
   onActivate: () => void;
-  /** 手工释放该行库存占用（2026-10-26）；只有已占用行会显示入口。 */
-  onReleaseReservation: (item: OrderItem) => void;
-  releasing: boolean;
 }) {
   const visible = new Set(fields);
   // 主图 / SKU / 履约状态 固定在块头，其余字段按视图设置的顺序排在元信息行。
@@ -1111,20 +1076,6 @@ function ExpandedItemBlock({
                 hint={shortage?.hint}
                 showDot={false}
               />
-            )}
-            {item.fulfillmentStatus === 'RESERVED' && (
-              <Button
-                size="small"
-                type="link"
-                style={{ padding: 0 }}
-                loading={releasing}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onReleaseReservation(item);
-                }}
-              >
-                释放库存
-              </Button>
             )}
           </span>
         </div>
@@ -1501,6 +1452,39 @@ export function OrdersPage() {
     },
     onError: (error: Error) => message.error(`取消失败：${error.message}`),
   });
+
+  /**
+   * 手工释放库存占用（用户要求 2026-10-26）：已占用行退回「待分配」。
+   * 释放后不会立即重新分配；下次真实入库仍按 FIFO 自动分配。
+   * 入口在右栏（行级操作的按钮统一放侧边栏），不放在行内。
+   */
+  const releaseReservationMutation = useMutation({
+    mutationFn: (itemId: string) =>
+      apiPost<{ fulfillmentStatus: string; orderErpStatus: string }>(
+        '/api/v1/orders/items/{itemId}/release-reservation',
+        {},
+        { itemId },
+      ),
+    onSuccess: () => {
+      void message.success('已释放库存占用，该行回到待分配（不会立即重新分配）');
+      void queryClient.invalidateQueries({ queryKey: ['order-detail'] });
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['exceptions'] });
+    },
+    onError: (error: Error) => void message.error(`释放失败：${error.message}`),
+  });
+
+  const confirmReleaseReservation = (item: OrderItem) => {
+    modal.confirm({
+      title: '释放该行的库存占用？',
+      content:
+        '释放后该行回到「待分配」（缺货），这部分库存可被其它订单使用；系统不会立即重新分配这一行。',
+      okText: '释放库存',
+      okButtonProps: { danger: true },
+      cancelText: '返回',
+      onOk: () => releaseReservationMutation.mutateAsync(item.id),
+    });
+  };
 
   const retryMutation = useMutation({
     mutationFn: (itemId: string) =>
@@ -2529,6 +2513,18 @@ export function OrdersPage() {
                     重新尝试分配
                   </Button>
                 )}
+              {selectedItem.fulfillmentStatus === 'RESERVED' && (
+                // 手工释放占用（2026-10-26）：行级库存操作的按钮统一放右栏
+                // （与「重新尝试分配」同一位置），行内只保留状态徽标。
+                <Button
+                  block
+                  style={{ marginTop: 8 }}
+                  loading={releaseReservationMutation.isPending}
+                  onClick={() => confirmReleaseReservation(selectedItem)}
+                >
+                  释放库存
+                </Button>
+              )}
               {selectedItem.mappingStatus === 'FAILED' && (
                 // 「映射 / 建档」单一入口（2026-10-24 入口合一）：先看重复档案
                 // 候选，没有对应档案时在同一弹窗里转去新建，避免两个并列按钮
