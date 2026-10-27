@@ -90,6 +90,11 @@
 必须让人当天就知道。对应异常类型 `WEBHOOK_PAUSED`(HIGH) / `WEBHOOK_UNHEALTHY`
 (MEDIUM)，恢复健康后自动 RESOLVE。
 
+判定口径：`PAUSED` 只看平台返回的 `enable`；`UNHEALTHY` 只看**本机公网自检**
+（把平台的探测请求 POST 回自己的回调地址，要求 200 + `{version,name,time}`）。
+平台 `notification/check` 的 `errors` 是滚动窗口，修复接收端后仍会残留旧错误，
+不参与判定，只写进原因与详情。
+
 新增事件只需在事件目录登记（级别、可过滤字段、卡片布局、跳转路径），
 订阅与投递逻辑无需改动。
 

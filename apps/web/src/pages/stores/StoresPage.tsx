@@ -179,6 +179,7 @@ interface WebhookHealthRow {
   reason: string;
   checkedAt: string;
   check: { isActive: boolean; errors: Array<{ type: string; description: string }> } | null;
+  selfCheck: { ok: boolean; detail: string } | null;
 }
 
 interface CredentialRow {
@@ -865,6 +866,20 @@ export function StoresPage() {
             />
             {webhookHealth !== null && (
               <>
+                {webhookHealth.selfCheck !== null && (
+                  <ContextMetric
+                    label="入口自检"
+                    value={
+                      webhookHealth.selfCheck.ok ? (
+                        <span style={{ color: colors.success }}>正常</span>
+                      ) : (
+                        <span style={{ color: colors.danger }}>
+                          {webhookHealth.selfCheck.detail}
+                        </span>
+                      )
+                    }
+                  />
+                )}
                 <RailHint>{webhookHealth.reason}</RailHint>
                 <ContextMetric
                   label="体检时间"

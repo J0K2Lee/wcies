@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebhookHealthService } from './webhook-health.service';
 import { StoreService } from '../../store/services/store.service';
 import { PlatformService } from '../../platform/platform.service';
@@ -17,6 +17,8 @@ function build(options: {
   subscribed?: boolean;
   enabled?: boolean | null;
   checkErrors?: Array<{ type: string; description: string }>;
+  /** 本机公网自检结果：默认正常（200 + 标准应答）。 */
+  selfProbeOk?: boolean;
   wb?: boolean;
 }) {
   const store = {
@@ -59,6 +61,20 @@ function build(options: {
     notifyWebhookHealth: vi.fn().mockResolvedValue(undefined),
   } as unknown as NotificationService;
   const logger = { warn: vi.fn(), info: vi.fn() } as unknown as AppLoggerService;
+  const selfProbeOk = options.selfProbeOk ?? true;
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValue(
+        selfProbeOk
+          ? new Response(
+              JSON.stringify({ version: '2.0', name: 'WCIES', time: '2026-10-27T10:00:00Z' }),
+              { status: 200 },
+            )
+          : new Response('gateway error', { status: 502 }),
+      ),
+  );
   const service = new WebhookHealthService(
     storeService,
     platformService,
@@ -70,6 +86,10 @@ function build(options: {
   );
   return { service, exceptionService, notification, ozonWebhook };
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('WebhookHealthService.scan', () => {
   it('平台暂停订阅 → WEBHOOK_PAUSED 异常 + 暂停通知，并关闭不健康异常', async () => {
@@ -92,10 +112,11 @@ describe('WebhookHealthService.scan', () => {
     );
   });
 
-  it('体检报错 → WEBHOOK_UNHEALTHY（MEDIUM）+ 通知，并关闭暂停异常', async () => {
+  it('入口自检失败 → WEBHOOK_UNHEALTHY（MEDIUM）+ 通知，并关闭暂停异常', async () => {
     const { service, exceptionService, notification } = build({
       platformCode: 'OZON',
       checkErrors: [{ type: 'SERVER_FAULT', description: 'x' }],
+      selfProbeOk: false,
     });
 
     const result = await service.scan();
@@ -107,6 +128,24 @@ describe('WebhookHealthService.scan', () => {
     expect(notification.notifyWebhookHealth).toHaveBeenCalledWith(
       expect.objectContaining({ state: 'UNHEALTHY' }),
     );
+  });
+
+  it('平台仍需窗口里残留旧错误、但入口自检 200 → 判健康（不误报）', async () => {
+    const { service, exceptionService, notification } = build({
+      platformCode: 'OZON',
+      checkErrors: [
+        { type: 'WRONG_RESULT_FIELD', description: 'x' },
+        { type: 'STATUS_CODE_NOT_OK', description: 'y' },
+      ],
+      selfProbeOk: true,
+    });
+
+    const result = await service.scan();
+
+    expect(result.unhealthy).toBe(0);
+    expect(exceptionService.create).not.toHaveBeenCalled();
+    expect(notification.notifyWebhookHealth).not.toHaveBeenCalled();
+    expect(exceptionService.resolveByReference).toHaveBeenCalledTimes(2);
   });
 
   it('健康 → 关闭两类异常，不发通知', async () => {

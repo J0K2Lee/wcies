@@ -555,13 +555,16 @@ TYPE_ORDER_STATE_CHANGED / TYPE_POSTING_CANCELLED / TYPE_STATE_CHANGED
    + `STORE_WEBHOOK_UNHEALTHY`；恢复健康自动关闭异常。店铺抽屉显示最近
    体检结果并提供「立即体检」（`POST /api/v1/sync/stores/:id/webhook-health/check`）。
 
-**check 语义补充（实测）**：`is_active` 表示订阅可用；`errors` 是监控
-**滚动窗口**里累计的失败类别，修复接收端后短时间内仍会返回旧错误。
-2026-10-27 修复后新建的订阅（ON-009 #473535）立刻也报
-`WRONG_RESULT_FIELD / STATUS_CODE_NOT_OK`，而同一时刻平台探测到达我们
-入口全部 200，可证 errors 非「本次探测结果」。因此：出现 errors 只当
-**弱信号**记异常，不要据此判断当前入口有问题；以入口 200 与
-`enable` 状态为准。
+**check 语义补充（实测）**：`is_active` 只表示订阅记录可用（修复前探测持续
+502 时它也是 `true`）；`errors` 是监控**滚动窗口**里累计的失败类别，修复接收端
+后短时间内仍会返回旧错误。2026-10-27 修复后新建的订阅（ON-009 #473535）立刻
+也报 `WRONG_RESULT_FIELD / STATUS_CODE_NOT_OK`，而同一时刻平台探测到达我们
+入口全部 200，可证 errors 不是「本次探测结果」。
+
+因此健康判定**不信窗口、自己验证**：巡检对同一回调地址发一次 `POST {}`（就是
+平台探测的形状），要求 200 + `{version,name,time}`，失败才判 `WEBHOOK_UNHEALTHY`；
+`errors` 只作为诊断信息写进原因与详情。这样避免「刚修好就 10 家店一起告警」的
+假阳性，同时真断网/入口坏掉时仍会告警（自检与平台走同一条公网路径）。
 
 **改名陷阱**：订阅 URL 里含**店铺编码**（`/stores/<storeCode>`），店铺改名后
 旧订阅仍指向旧编码，真实事件打到不存在的店铺路径必然失败，而订阅还占着

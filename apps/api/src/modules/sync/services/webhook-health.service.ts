@@ -11,6 +11,13 @@ import { WbWebhookService } from './wb-webhook.service';
 export const WEBHOOK_HEALTH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 /**
+ * 店铺之间的最小间隔：OZON 的 notification 系列接口**每秒级限速**，
+ * 12 家店铺连着打（每家 list + check）会直接 429，巡检把那些店判成
+ * UNKNOWN 就白跑了。6 小时一轮多等十几秒完全值得。
+ */
+export const WEBHOOK_HEALTH_STORE_GAP_MS = 800;
+
+/**
  * 抽屉打开时复用最近一次结果的窗口（2026-10-27）：`/v1/notification/check`
  * 是外部调用，不能在每次渲染/切行时打一遍；只有「立即体检」才强制刷新。
  */
@@ -37,6 +44,13 @@ export interface WebhookHealthResult {
   checkedAt: string;
   /** OZON 平台体检明细（其它平台为 null）。 */
   check: { isActive: boolean; errors: Array<{ type: string; description: string }> } | null;
+  /**
+   * 本机公网自检：用 `PUBLIC_BASE_URL` 把同一个探测请求打回自己的入口
+   * （与平台走同一条公网路径，2026-10-27）。平台 `check.errors` 是**滚动
+   * 窗口**里的累计值，修复接收端后仍会返回旧错误，不能直接当"现在坏了"；
+   * 自检失败才是真的坏了（隧道/入口/应答格式）。
+   */
+  selfCheck: { ok: boolean; detail: string } | null;
 }
 
 /**
@@ -104,6 +118,7 @@ export class WebhookHealthService {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+      await new Promise((resolve) => setTimeout(resolve, WEBHOOK_HEALTH_STORE_GAP_MS));
     }
     return { scanned: stores.length, paused, unhealthy };
   }
@@ -149,7 +164,7 @@ export class WebhookHealthService {
     knownPlatformCode?: string,
   ): Promise<WebhookHealthResult> {
     const platform = knownPlatformCode ?? (await this.resolvePlatformCode(platformId));
-    const base = { storeId, storeCode, platform, check: null };
+    const base = { storeId, storeCode, platform, check: null, selfCheck: null };
     const partial =
       platform === 'OZON'
         ? await this.inspectOzon(base)
@@ -163,6 +178,8 @@ export class WebhookHealthService {
     storeId: string;
     storeCode: string;
     platform: string;
+    check: null;
+    selfCheck: null;
   }): Promise<Omit<WebhookHealthResult, 'checkedAt'>> {
     const getStatus = this.ozonWebhook.getStatus.bind(this.ozonWebhook);
     const check = this.ozonWebhook.check.bind(this.ozonWebhook);
@@ -186,11 +203,30 @@ export class WebhookHealthService {
         };
       }
       const probe = await check(base.storeId);
-      if (probe.errors.length > 0 || !probe.isActive) {
-        const reason = probe.errors.map((error) => error.type).join(' / ') || '平台探测不可用';
-        return { ...base, state: 'UNHEALTHY', reason, check: probe };
+      const selfCheck = await this.probeOwnUrl(probe.url);
+      const platformErrors = probe.errors.map((error) => error.type).join(' / ');
+      if (!selfCheck.ok) {
+        return {
+          ...base,
+          state: 'UNHEALTHY',
+          reason:
+            platformErrors === ''
+              ? selfCheck.detail
+              : `${selfCheck.detail}；平台记录：${platformErrors}`,
+          check: probe,
+          selfCheck,
+        };
       }
-      return { ...base, state: 'OK', reason: '探测正常', check: probe };
+      return {
+        ...base,
+        state: 'OK',
+        reason:
+          platformErrors === ''
+            ? '入口自检正常'
+            : `入口自检正常（平台监控窗口仍含历史错误：${platformErrors}）`,
+        check: probe,
+        selfCheck,
+      };
     } catch (error: unknown) {
       return {
         ...base,
@@ -205,6 +241,8 @@ export class WebhookHealthService {
     storeId: string;
     storeCode: string;
     platform: string;
+    check: null;
+    selfCheck: null;
   }): Promise<Omit<WebhookHealthResult, 'checkedAt'>> {
     try {
       const status = await this.wbWebhook.getStatus(base.storeId);
@@ -292,6 +330,38 @@ export class WebhookHealthService {
     // OK / NOT_SUBSCRIBED：健康或本来就没订阅（轮询兜底），关闭历史异常。
     await resolve('WEBHOOK_PAUSED');
     await resolve('WEBHOOK_UNHEALTHY');
+  }
+
+  /**
+   * 自己打自己：POST `{}`（就是平台连通性探测的形状）到公网回调地址，
+   * 期望 200 + `{version, name, time}`。5 秒超时——平台对单条通知也是这个红线。
+   */
+  private async probeOwnUrl(url: string): Promise<{ ok: boolean; detail: string }> {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+        signal: AbortSignal.timeout(5_000),
+      });
+      const body = await response.text();
+      if (response.status !== 200) {
+        return { ok: false, detail: `回调地址返回 HTTP ${response.status}` };
+      }
+      const parsed = JSON.parse(body) as { version?: unknown; name?: unknown; time?: unknown };
+      const shaped =
+        typeof parsed.version === 'string' &&
+        typeof parsed.name === 'string' &&
+        typeof parsed.time === 'string';
+      return shaped
+        ? { ok: true, detail: '200 + 标准应答' }
+        : { ok: false, detail: '应答体不是 {version,name,time}' };
+    } catch (error: unknown) {
+      return {
+        ok: false,
+        detail: `公网回调地址不可达：${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
   }
 
   private async resolvePlatformCode(platformId: string): Promise<string> {

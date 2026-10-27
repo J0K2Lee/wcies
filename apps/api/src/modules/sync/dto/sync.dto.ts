@@ -120,6 +120,14 @@ export class WebhookHealthDto {
     description: 'OZON 平台探测明细（isActive + errors），其它平台为 null',
   })
   check!: { isActive: boolean; errors: Array<{ type: string; description: string }> } | null;
+  @ApiProperty({
+    nullable: true,
+    type: Object,
+    description:
+      '本机公网自检（把平台的探测请求打回自己的回调地址）：ok=true 表示入口现在可用；' +
+      '平台 check.errors 是滚动窗口，修复后仍可能残留旧错误',
+  })
+  selfCheck!: { ok: boolean; detail: string } | null;
 }
 
 export class RawEventDto {
