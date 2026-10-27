@@ -2,16 +2,22 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from 
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PageMeta } from '@wcies/shared';
 import { ok, okPage } from '../../../common/dto/api-response';
-import { ApiOkEnvelope, ApiOkPagedEnvelope } from '../../../common/swagger/api-envelope';
+import {
+  ApiOkEnvelope,
+  ApiOkNullableEnvelope,
+  ApiOkPagedEnvelope,
+} from '../../../common/swagger/api-envelope';
 import { CurrentOperator } from '../../../common/decorators/current-operator.decorator';
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import { SyncDispatchService } from '../services/sync-dispatch.service';
 import { SyncJobService } from '../services/sync-job.service';
+import { WebhookHealthService } from '../services/webhook-health.service';
 import {
   RawEventDto,
   RawEventListQueryDto,
   StoreSyncOverviewDto,
   SyncJobDto,
+  WebhookHealthDto,
   SyncJobListQueryDto,
   TriggerSyncRequestDto,
 } from '../dto/sync.dto';
@@ -26,6 +32,7 @@ export class SyncController {
   constructor(
     private readonly dispatchService: SyncDispatchService,
     private readonly jobService: SyncJobService,
+    private readonly webhookHealth: WebhookHealthService,
   ) {}
 
   @Post('orders')
@@ -143,6 +150,30 @@ export class SyncController {
     @Param('storeId') storeId: string,
   ): Promise<{ success: true; data: StoreSyncOverviewDto }> {
     return ok(await this.jobService.storeOverview(storeId));
+  }
+
+  @Get('stores/:storeId/webhook-health')
+  @ApiOperation({
+    summary: '最近一次 Webhook 订阅体检结果（5 分钟内复用缓存，不主动探测平台）',
+  })
+  @ApiOkNullableEnvelope(WebhookHealthDto)
+  storeWebhookHealth(@Param('storeId') storeId: string): {
+    success: true;
+    data: WebhookHealthDto | null;
+  } {
+    return ok(this.webhookHealth.getLastResult(storeId));
+  }
+
+  @Post('stores/:storeId/webhook-health/check')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '立即体检 Webhook 订阅（平台探测回调地址；只读，不改订阅状态）',
+  })
+  @ApiOkEnvelope(WebhookHealthDto)
+  async checkWebhookHealth(
+    @Param('storeId') storeId: string,
+  ): Promise<{ success: true; data: WebhookHealthDto }> {
+    return ok(await this.webhookHealth.checkStore(storeId, { force: true }));
   }
 
   @Get('events')

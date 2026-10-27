@@ -101,6 +101,27 @@ export class StoreSyncOverviewDto {
   listingSyncIntervalMinutes!: number | null;
 }
 
+/** Webhook 订阅体检结果（2026-10-27）：抽屉「立即体检」与巡检共用。 */
+export class WebhookHealthDto {
+  @ApiProperty() storeId!: string;
+  @ApiProperty({ example: 'ON-003' }) storeCode!: string;
+  @ApiProperty({ example: 'OZON' }) platform!: string;
+  @ApiProperty({
+    enum: ['OK', 'NOT_SUBSCRIBED', 'PAUSED', 'UNHEALTHY', 'UNSUPPORTED', 'UNKNOWN'],
+  })
+  state!: string;
+  @ApiProperty({ description: '人可读原因（进异常详情与通知正文）' })
+  reason!: string;
+  @ApiProperty({ description: '本次体检完成时间（ISO，UTC）' })
+  checkedAt!: string;
+  @ApiProperty({
+    nullable: true,
+    type: Object,
+    description: 'OZON 平台探测明细（isActive + errors），其它平台为 null',
+  })
+  check!: { isActive: boolean; errors: Array<{ type: string; description: string }> } | null;
+}
+
 export class RawEventDto {
   @ApiProperty() id!: string;
   @ApiProperty({ example: 'OZON' }) platform!: string;

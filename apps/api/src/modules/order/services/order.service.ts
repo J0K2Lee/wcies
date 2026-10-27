@@ -828,7 +828,10 @@ export class OrderService {
    */
   async listPlatformRefreshCandidates(
     storeId: string,
-    options: { limit: number; fallbackHours: number },
+    options: {
+      limit: number;
+      hours: { awaitingShipment: number; inTransit: number; delivered: number };
+    },
   ): Promise<Array<{ id: string; platformOrderId: string }>> {
     return this.orderRepo.listPlatformRefreshCandidates(storeId, options);
   }

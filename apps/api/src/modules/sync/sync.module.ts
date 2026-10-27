@@ -14,6 +14,8 @@ import { OrderModule } from '../order/order.module';
 import { PlatformModule } from '../platform/platform.module';
 import { StoreModule } from '../store/store.module';
 import { ExceptionModule } from '../exception/exception.module';
+import { NotificationModule } from '../notification/notification.module';
+import { SystemModule } from '../system/system.module';
 import { ExternalRawEventEntity } from './entities/external-raw-event.entity';
 import { SyncCursorEntity } from './entities/sync-cursor.entity';
 import { SyncJobEntity } from './entities/sync-job.entity';
@@ -33,6 +35,7 @@ import { WebhookIngestService, WebhookProcessService } from './services/webhook.
 import { WbWebhookService } from './services/wb-webhook.service';
 import { OzonWebhookService } from './services/ozon-webhook.service';
 import { PlatformWarehouseQueryService } from './services/platform-warehouse-query.service';
+import { WebhookHealthService } from './services/webhook-health.service';
 import { OrderPlatformShipService } from './services/order-platform-ship.service';
 import { SyncController } from './controllers/sync.controller';
 import {
@@ -90,6 +93,10 @@ import { LABEL_JOB } from './services/label-prefetch.service';
     // service. ShipmentModule never imports SyncModule, so no cycle.
     ShipmentModule,
     ExceptionModule,
+    // 订阅巡检要把结果发成通知事件（2026-10-27）；NotificationModule 不依赖
+    // SyncModule，无环。
+    NotificationModule,
+    SystemModule,
     OperationLogModule,
   ],
   controllers: [
@@ -111,6 +118,7 @@ import { LABEL_JOB } from './services/label-prefetch.service';
     SyncFailureAlertService,
     SyncJobService,
     PlatformWarehouseQueryService,
+    WebhookHealthService,
     OrderPlatformShipService,
     ListingSyncService,
     OrderSyncService,

@@ -170,6 +170,17 @@ interface SyncOverview {
   listingSyncIntervalMinutes: number | null;
 }
 
+/** Webhook 订阅体检结果（后端 WebhookHealthDto）：state 见 WebhookHealthState。 */
+interface WebhookHealthRow {
+  storeId: string;
+  storeCode: string;
+  platform: string;
+  state: 'OK' | 'NOT_SUBSCRIBED' | 'PAUSED' | 'UNHEALTHY' | 'UNSUPPORTED' | 'UNKNOWN';
+  reason: string;
+  checkedAt: string;
+  check: { isActive: boolean; errors: Array<{ type: string; description: string }> } | null;
+}
+
 interface CredentialRow {
   id: string;
   credentialType: string;
@@ -289,6 +300,27 @@ function latestJobAt(latest: Map<string, SyncJobLite>, storeId: string): SyncJob
   return order.createdAt >= listing.createdAt ? order : listing;
 }
 
+const WEBHOOK_HEALTH_META: Record<
+  NonNullable<WebhookHealthRow['state']>,
+  { tone: 'success' | 'warning' | 'danger' | 'neutral'; label: string }
+> = {
+  OK: { tone: 'success', label: '正常' },
+  NOT_SUBSCRIBED: { tone: 'neutral', label: '未订阅' },
+  PAUSED: { tone: 'danger', label: '已被平台暂停' },
+  UNHEALTHY: { tone: 'warning', label: '体检异常' },
+  UNSUPPORTED: { tone: 'neutral', label: '不支持查询' },
+  UNKNOWN: { tone: 'warning', label: '无法确认' },
+};
+
+/** 订阅健康胶囊；null = 本进程还没体检过该店铺。 */
+function WebhookHealthBadge({ state }: { state: WebhookHealthRow['state'] | null }) {
+  if (state === null) {
+    return <span style={{ color: colors.textTertiary, fontSize: 13 }}>尚未体检</span>;
+  }
+  const meta = WEBHOOK_HEALTH_META[state];
+  return <StatusBadge tone={meta.tone} label={meta.label} hint={state} />;
+}
+
 export function StoresPage() {
   const { message } = AntdApp.useApp();
   const queryClient = useQueryClient();
@@ -388,6 +420,25 @@ export function StoresPage() {
     { storeId: detailId ?? '' },
     detailId !== null,
   );
+
+  // Webhook 订阅体检（2026-10-27）：平台会在连续投递失败后自动暂停订阅，
+  // 而暂停的后果是「订单状态不再更新」——抽屉里必须一眼看到平台怎么说。
+  const webhookHealthQuery = useApiQuery<{ data: WebhookHealthRow | null }>(
+    '/api/v1/sync/stores/{storeId}/webhook-health',
+    {},
+    ['store-webhook-health', focusId],
+    { storeId: focusId ?? '' },
+    focusId !== null,
+  );
+  const webhookHealth = webhookHealthQuery.data?.data ?? null;
+  const webhookHealthCheck = useMutation({
+    mutationFn: (storeId: string) =>
+      apiPost('/api/v1/sync/stores/{storeId}/webhook-health/check', {}, { storeId }),
+    onSuccess: (_data, storeId) => {
+      void queryClient.invalidateQueries({ queryKey: ['store-webhook-health', storeId] });
+    },
+    onError: (error: Error) => void message.error(`体检失败：${error.message}`),
+  });
 
   const selectedRow = useMemo(
     () => rows.find((row) => row.id === selectedId) ?? null,
@@ -806,6 +857,35 @@ export function StoresPage() {
                 />
               )}
             <ContextMetric label="绑定仓库" value={`${selectedRow.bindingCount} 个`} />
+          </ContextSection>
+          <ContextSection title="推送订阅">
+            <ContextMetric
+              label="订阅健康"
+              value={<WebhookHealthBadge state={webhookHealth?.state ?? null} />}
+            />
+            {webhookHealth !== null && (
+              <>
+                <RailHint>{webhookHealth.reason}</RailHint>
+                <ContextMetric
+                  label="体检时间"
+                  value={<RelativeTime value={webhookHealth.checkedAt} />}
+                />
+              </>
+            )}
+            {webhookHealth === null && (
+              <RailHint>
+                尚未体检。推送被平台暂停后订单状态不再更新，建议开通后先体检一次。
+              </RailHint>
+            )}
+            <Button
+              size="small"
+              block
+              loading={webhookHealthCheck.isPending}
+              disabled={selectedRow.status !== 'ACTIVE'}
+              onClick={() => webhookHealthCheck.mutate(selectedRow.id)}
+            >
+              立即体检
+            </Button>
           </ContextSection>
           <ContextSection title="最近同步">
             <ContextMetric

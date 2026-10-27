@@ -23,6 +23,7 @@ import { DomainError } from '../../../common/errors/domain.error';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { LabelPrefetchService } from './label-prefetch.service';
 import { SyncContextService } from './sync-context.service';
+import { OrderCancelledOnPlatformError } from '../errors/sync-errors';
 
 /** Outcome of the platform 组包 step, as reported back to the order page. */
 export interface PrepareShipmentResult {
@@ -162,6 +163,16 @@ export class OrderPlatformShipService {
     try {
       result = await prepare(context, { platformOrderId: order.platformOrderId });
     } catch (error: unknown) {
+      // 2026-10-27（平台已取消但 ERP 不知道）：组包失败最常见的原因之一就是
+      // 平台已经取消了这张单。既然失败已经发生，顺手做一次定向回读——读到
+      // 取消就**落库并走取消链**（释放占用 / 生成拦截 / 发通知），而不是只回
+      // 一个 409 把事实丢掉（ORD00000746 实证）。
+      const cancelled = await this.persistCancellationIfAny(order, operator, 'prepare');
+      if (cancelled) {
+        // 已取消的订单不再记 OPEN 失败异常（取消链自己会关闭相关异常），
+        // 只把「平台已取消」这个事实性 409 返回给操作员。
+        throw new OrderCancelledOnPlatformError(order.orderNo);
+      }
       await this.reportPrepareFailure(order, error);
       throw error;
     }
@@ -556,7 +567,24 @@ export class OrderPlatformShipService {
         });
         labelIds.set(need.orderId, label.id);
       } catch (error: unknown) {
-        outcomes.set(need.orderId, this.labelFailure(need.orderId, need.order.orderNo, error));
+        // 同组包路径：取面单失败也可能是平台已取消。定向回读一次，读到取消
+        // 就落库并走取消链，再把结果行标记为「不可打印」并说明已自动处理。
+        const cancelled = await this.persistCancellationIfAny(need.order, operator, 'label');
+        outcomes.set(
+          need.orderId,
+          cancelled
+            ? {
+                orderId: need.orderId,
+                orderNo: need.order.orderNo,
+                ok: false,
+                code: ORDER_LABEL_NOT_PRINTABLE,
+                message: '平台已取消该订单；系统已按平台事实转入取消并生成拦截任务',
+                signedUrl: null,
+                fileName: null,
+                fromArchive: false,
+              }
+            : this.labelFailure(need.orderId, need.order.orderNo, error),
+        );
       }
     }
   }
@@ -824,6 +852,60 @@ export class OrderPlatformShipService {
         code: error instanceof DomainError ? error.code : 'UNKNOWN',
       },
     });
+  }
+
+  /**
+   * 定向回读：平台已取消时把事实落库（applySyncedPlatformFacts → 取消链：
+   * 释放占用 / PICKED 行生成拦截 / 通知），返回是否发生了取消。
+   *
+   * 只服务于「动作已经失败」的路径（组包 / 取面单）：这些路径上平台拒绝的
+   * 最常见原因就是订单已被取消，而此前的事实被丢掉了（2026-10-27 实证：
+   * ORD00000746 打印时平台报 cancelled，ERP 仍停在已拣货、没有拦截与通知）。
+   *
+   * 任何失败都吞掉并记日志：这里只是「顺手把事实补上」，不能把原本要返回的
+   * 平台错误替换成内部错误。
+   */
+  private async persistCancellationIfAny(
+    order: OrderForLabel,
+    operator: OperatorContext,
+    source: 'prepare' | 'label',
+  ): Promise<boolean> {
+    try {
+      const { adapter, context } = await this.resolveStore(order.storeId);
+      const fresh = await this.reReadOrder(adapter, context, order.platformOrderId);
+      if (fresh === null || fresh.platformCancelled !== true) {
+        return false;
+      }
+      const facts = await this.orderService.applySyncedPlatformFacts(
+        {
+          storeId: order.storeId,
+          platformOrderId: order.platformOrderId,
+          platformStatus: fresh.platformStatus ?? null,
+          platformCancelled: true,
+          platformStage: fresh.platformStage ?? null,
+          platformStageChangedAt: fresh.platformStageChangedAt ?? null,
+          shipmentDeadline: fresh.shipmentDeadline ?? null,
+          rawData: fresh.rawData ?? null,
+          source: 'MANUAL',
+        },
+        operator,
+      );
+      this.logger.warn(
+        `platform cancellation discovered while ${source}: order=${order.orderNo} cancelled=${String(
+          facts.cancelled,
+        )}`,
+        'OrderPlatformShipService',
+      );
+      return facts.cancelled === true || facts.applied;
+    } catch (error: unknown) {
+      this.logger.warn(
+        `cancellation re-read failed order=${order.orderNo} during ${source}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        'OrderPlatformShipService',
+      );
+      return false;
+    }
   }
 
   private async resolveStore(

@@ -5,6 +5,7 @@ import {
   OzonFbsPostingListResponse,
   OzonFbsShipResponse,
   OzonFbpWarehouseListResponse,
+  OzonNotificationCheckResponse,
   OzonNotificationListResponse,
   OzonOwnWarehouseListResponse,
   OzonProductAttributesResponse,
@@ -332,6 +333,22 @@ export class OzonClient {
       endpoint: '/v1/notification/list',
       storeId,
       body: {},
+    });
+  }
+
+  /**
+   * 平台连通性体检：让 OZON 自己探测我们的回调 URL（2026-10-27）。
+   * 只探测、不改状态；这是平台自动暂停订阅前使用的同一套检查。
+   */
+  async notificationCheck(
+    auth: OzonAuth,
+    storeId: string,
+    url: string,
+  ): Promise<OzonNotificationCheckResponse> {
+    return this.request<OzonNotificationCheckResponse>(auth, {
+      endpoint: '/v1/notification/check',
+      storeId,
+      body: { url },
     });
   }
 

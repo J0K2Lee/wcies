@@ -85,6 +85,32 @@ export const NOTIFICATION_EVENTS: Record<string, NotificationEventDefinition> = 
     cardFields: ['interceptionNo', 'orderNo', 'reason'],
     linkPath: '/interceptions',
   },
+  /**
+   * Webhook 订阅健康（2026-10-27）：平台暂停了本店回调订阅，或平台体检报错。
+   * 推送属于「系统健康」类，订阅者可只盯某几家店（storeId / platform）。
+   */
+  STORE_WEBHOOK_PAUSED: {
+    type: 'STORE_WEBHOOK_PAUSED',
+    label: 'Webhook 订阅被暂停',
+    level: 'HIGH',
+    conditionFields: [
+      { key: 'storeId', label: '店铺' },
+      { key: 'platform', label: '平台' },
+    ],
+    cardFields: ['storeCode', 'platform', 'reason'],
+    linkPath: '/stores',
+  },
+  STORE_WEBHOOK_UNHEALTHY: {
+    type: 'STORE_WEBHOOK_UNHEALTHY',
+    label: 'Webhook 体检异常',
+    level: 'WARN',
+    conditionFields: [
+      { key: 'storeId', label: '店铺' },
+      { key: 'platform', label: '平台' },
+    ],
+    cardFields: ['storeCode', 'platform', 'reason'],
+    linkPath: '/stores',
+  },
 };
 
 /** 未登记的事件也能发（级别沿用发布方声明），只是没有专用卡片布局。 */

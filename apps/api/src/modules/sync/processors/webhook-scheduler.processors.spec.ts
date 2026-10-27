@@ -7,6 +7,7 @@ import { SyncContextService } from '../services/sync-context.service';
 import { SyncJobRepository } from '../repositories/sync-job.repository';
 import { StoreService } from '../../store/services/store.service';
 import { CredentialExpiryService } from '../../store/services/credential-expiry.service';
+import { WebhookHealthService } from '../services/webhook-health.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { readStoreSyncSettings } from '../sync.constants';
 
@@ -31,6 +32,9 @@ function buildProcessor(env: Record<string, string>, settings: unknown) {
       listAllActive: vi.fn().mockResolvedValue([{ id: 'store-1', settings }]),
     } as unknown as StoreService,
     { scanIfDue: vi.fn().mockResolvedValue(0) } as unknown as CredentialExpiryService,
+    {
+      scanIfDue: vi.fn().mockResolvedValue({ scanned: 0, paused: 0, unhealthy: 0 }),
+    } as unknown as WebhookHealthService,
     { warn: vi.fn(), info: vi.fn() } as unknown as AppLoggerService,
   );
   return { processor, dispatch };
@@ -48,6 +52,9 @@ describe('SyncSchedulerProcessor 坏死任务回收（2026-10-24）', () => {
       { failStaleRunning, failStalePending } as unknown as SyncJobRepository,
       { listAllActive: vi.fn().mockResolvedValue([]) } as unknown as StoreService,
       { scanIfDue: vi.fn().mockResolvedValue(0) } as unknown as CredentialExpiryService,
+      {
+        scanIfDue: vi.fn().mockResolvedValue({ scanned: 0, paused: 0, unhealthy: 0 }),
+      } as unknown as WebhookHealthService,
       { warn: vi.fn(), info: vi.fn() } as unknown as AppLoggerService,
     );
     await processor.process({ data: {} } as never);

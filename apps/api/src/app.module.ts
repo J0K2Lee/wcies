@@ -36,6 +36,7 @@ import { TransferModule } from './modules/transfer/transfer.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { IntegrationModule } from './modules/integration/integration.module';
 import { SyncModule } from './modules/sync/sync.module';
+import { SystemModule } from './modules/system/system.module';
 
 /**
  * HTTP API root module.
@@ -76,6 +77,7 @@ import { SyncModule } from './modules/sync/sync.module';
     TransferModule,
     NotificationModule,
     IntegrationModule,
+    SystemModule,
     SyncModule,
     ...(process.env.NODE_ENV !== 'production' ? [DevModule] : []),
   ],

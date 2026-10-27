@@ -49,6 +49,15 @@ export interface OzonWebhookUnsubscribeResult {
   url: string;
 }
 
+/** 平台连通性体检结果（2026-10-27）。 */
+export interface OzonWebhookCheckView {
+  url: string;
+  /** 平台探测到可用响应（拿到 200 + 标准 ack）时为 true。 */
+  isActive: boolean;
+  /** 失败类别（REQUEST_ERROR / STATUS_CODE_NOT_OK / SERVER_FAULT / WRONG_RESULT_FIELD…）。 */
+  errors: Array<{ type: string; description: string }>;
+}
+
 /**
  * WCIES 推荐订阅的事件类型：接收端 mapWebhookPayload 能分类处理的消息
  * （docs/integrations/ozon.md §6.1；TYPE_CREATE_OR_UPDATE_ITEM 与 CREATE/UPDATE
@@ -121,6 +130,23 @@ export class OzonWebhookService {
       types: [...match.types],
       expectedTypes: [...OZON_WEBHOOK_EVENT_TYPES],
       otherUrlCount: subscriptions.length - 1,
+    };
+  }
+
+  /**
+   * 连通性体检（2026-10-27）：让平台探测我们的回调 URL。这是平台自动暂停
+   * 订阅前使用的同一套检查，因此它的 errors 就是「会被暂停的原因」。
+   */
+  async check(storeId: string): Promise<OzonWebhookCheckView> {
+    const { auth, url } = await this.resolveContext(storeId);
+    const result = await this.client.notificationCheck(auth, storeId, url);
+    return {
+      url,
+      isActive: result.is_active === true,
+      errors: (result.errors ?? []).map((error) => ({
+        type: String(error.type),
+        description: String(error.description ?? ''),
+      })),
     };
   }
 

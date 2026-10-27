@@ -47,6 +47,23 @@ export function ApiOkArrayEnvelope<TItem>(dto: Type<TItem>) {
   );
 }
 
+/** `{ success: true, data: T | null }` success envelope (nullable resource). */
+export function ApiOkNullableEnvelope<TData>(dto: Type<TData>) {
+  return applyDecorators(
+    ApiExtraModels(dto),
+    ApiOkResponse({
+      schema: {
+        type: 'object',
+        required: ['success', 'data'],
+        properties: {
+          success: { type: 'boolean', enum: [true] },
+          data: { nullable: true, allOf: [{ $ref: getSchemaPath(dto) }] },
+        },
+      },
+    }),
+  );
+}
+
 /** `{ success: true, data: {} }` envelope for acknowledged actions. */
 export function ApiOkNoDataEnvelope() {
   return ApiOkResponse({

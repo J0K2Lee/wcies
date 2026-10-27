@@ -17,6 +17,7 @@ import {
 } from '../dto/ozon-webhook.dto';
 import { buildPushAck, OzonPushAck } from '../../integration/ozon/ozon.mapper';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
+import { WebhookPayloadInvalidError } from '../errors/sync-errors';
 
 /**
  * OZON webhook HTTP entry (Sprint 5 task §26/§28).
@@ -29,6 +30,11 @@ import { AppLoggerService } from '../../../common/logger/app-logger.service';
  * §6.4). The handler does NOTHING but validate the shape, persist the raw
  * event and enqueue - no order creation, no stock locking, no platform API
  * calls.
+ *
+ * 2026-10-27（订阅被平台自动停用的根因）：OZON 的连通性检查会向本 URL 发一个
+ * **不带 `message_type`** 的探测请求。此前它被当成畸形响应、沿用 mapper 的
+ * 502 返回，平台记成 SERVER_FAULT / 非 200 / 响应体不符，累计后把整个订阅
+ * 暂停。现在：探测 → 200 + 标准 ack（不落库）；真正的畸形事件 → 422（不是 5xx）。
  */
 @ApiTags('webhooks')
 @Public()
@@ -66,29 +72,42 @@ export class OzonWebhookController {
     // `time` in the ack means "when processing started" (spec), so stamp it
     // before doing any work.
     const startedAt = new Date();
+
+    // 平台连通性探测（2026-10-27）：不带 message_type 的请求不是事件，只是
+    // 平台在验证「这个 URL 会不会按模板回 200」。必须给标准 ack，且绝不能
+    // 落库或报错——否则会按 §6.5 的规则把订阅暂停。
+    if (!hasMessageType(payload)) {
+      this.logger.info('ozon webhook connectivity probe acknowledged', {
+        module: 'sync',
+        storeCode,
+        payloadKeys: payloadKeyNames(payload),
+      });
+      return buildPushAck(startedAt);
+    }
+
     try {
       await this.ingestService.ingestOzon(storeCode, payload);
       // ACCEPTED / DUPLICATE / REJECTED all answer with the success ack -
       // redelivery must not loop forever (already stored, or not trusted).
       return buildPushAck(startedAt);
     } catch (error: unknown) {
-      // Malformed payloads (PLATFORM_BAD_RESPONSE) and unknown stores get a
-      // 4xx so misconfiguration surfaces in the OZON cabinet health check.
-      if (
-        typeof error === 'object' &&
-        error !== null &&
-        'code' in error &&
-        String(error.code) === 'PLATFORM_BAD_RESPONSE'
-      ) {
-        this.logger.warn('ozon webhook payload malformed', { module: 'sync', storeCode });
-        throw error;
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String(error.code)
+          : 'UNKNOWN';
+      // 事件体坏了 = 4xx；绝不能是 5xx（平台会记成我们服务故障）。
+      if (code === 'PLATFORM_BAD_RESPONSE') {
+        this.logger.warn('ozon webhook payload malformed', {
+          module: 'sync',
+          storeCode,
+          payloadKeys: payloadKeyNames(payload),
+        });
+        throw new WebhookPayloadInvalidError(
+          'OZON',
+          error instanceof Error ? error.message : String(error),
+        );
       }
-      if (
-        typeof error === 'object' &&
-        error !== null &&
-        'code' in error &&
-        String(error.code) === 'STORE_NOT_FOUND'
-      ) {
+      if (code === 'STORE_NOT_FOUND') {
         throw error;
       }
       // Unknown transient failures: still 200 - OZON retries aggressively
@@ -101,6 +120,24 @@ export class OzonWebhookController {
       return buildPushAck(startedAt);
     }
   }
+}
+
+/** 探测/畸形事件的顶层键名（排障用；不含任何值，避免日志泄露载荷）。 */
+function payloadKeyNames(payload: unknown): string[] {
+  if (typeof payload !== 'object' || payload === null) {
+    return [];
+  }
+  return Object.keys(payload).slice(0, 8);
+}
+
+/** 是否是平台探测请求：OZON 事件体一定带 message_type（字符串）。 */
+function hasMessageType(payload: unknown): boolean {
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    typeof (payload as { message_type?: unknown }).message_type === 'string' &&
+    (payload as { message_type: string }).message_type !== ''
+  );
 }
 
 /**

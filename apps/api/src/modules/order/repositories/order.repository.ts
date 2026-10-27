@@ -473,8 +473,13 @@ export class OrderRepository {
    */
   async listPlatformRefreshCandidates(
     storeId: string,
-    options: { limit: number; fallbackHours: number },
+    options: {
+      limit: number;
+      /** 分阶段回读阈值（小时，2026-10-27）：取消多发生在 AWAITING_SHIPMENT。 */
+      hours: { awaitingShipment: number; inTransit: number; delivered: number };
+    },
   ): Promise<Array<{ id: string; platformOrderId: string }>> {
+    const due = `(o.platform_facts_checked_at IS NULL OR o.platform_facts_checked_at < now() - (:$1 || ' hours')::interval)`;
     const entities = await this.dataSource
       .getRepository(OrderEntity)
       .createQueryBuilder('o')
@@ -486,8 +491,19 @@ export class OrderRepository {
           OR (o.platform_stage = 'DELIVERED' AND o.erp_status NOT IN ('SHIPPED', 'CANCELLED')))`,
       )
       .andWhere(
-        `(o.platform_facts_checked_at IS NULL OR o.platform_facts_checked_at < now() - (:fallbackHours || ' hours')::interval)`,
-        { fallbackHours: String(options.fallbackHours) },
+        // 分阶段阈值：AWAITING_SHIPMENT 最勤（随时可能被取消），IN_TRANSIT 次之，
+        // 其余（NULL/DELIVERED 未终态）用最慢的一档。
+        `(
+          (o.platform_stage = 'AWAITING_SHIPMENT' AND ${due.replace('$1', 'awaitingHours')})
+          OR (o.platform_stage = 'IN_TRANSIT' AND ${due.replace('$1', 'inTransitHours')})
+          OR ((o.platform_stage IS NULL OR o.platform_stage = 'DELIVERED')
+              AND ${due.replace('$1', 'deliveredHours')})
+        )`,
+        {
+          awaitingHours: String(options.hours.awaitingShipment),
+          inTransitHours: String(options.hours.inTransit),
+          deliveredHours: String(options.hours.delivered),
+        },
       )
       .orderBy('o.platform_facts_checked_at', 'ASC', 'NULLS FIRST')
       .take(options.limit)

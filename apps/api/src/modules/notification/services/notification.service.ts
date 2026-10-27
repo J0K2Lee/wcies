@@ -198,6 +198,45 @@ export class NotificationService {
   }
 
   /**
+   * Webhook 订阅健康（2026-10-27）：被平台暂停或体检报错。
+   *
+   * 去重键按「店铺 + 状态 + 日期」——每天最多提醒一次，直到恢复；恢复后
+   * 不再发布（扫描侧负责在健康时停止调用）。
+   */
+  async notifyWebhookHealth(input: {
+    storeId: string;
+    storeCode: string;
+    platform: string;
+    state: 'PAUSED' | 'UNHEALTHY';
+    reason: string;
+  }): Promise<void> {
+    const paused = input.state === 'PAUSED';
+    await this.publishEvent({
+      type: paused ? 'STORE_WEBHOOK_PAUSED' : 'STORE_WEBHOOK_UNHEALTHY',
+      title: paused
+        ? `Webhook 订阅被暂停：${input.storeCode}（${input.platform}）`
+        : `Webhook 体检异常：${input.storeCode}（${input.platform}）`,
+      level: paused ? 'HIGH' : 'WARN',
+      factors: compactFactors({
+        storeId: input.storeId,
+        platform: input.platform,
+        storeCode: input.storeCode,
+      }),
+      lines: [
+        `店铺：${input.storeCode}`,
+        `平台：${input.platform}`,
+        `状态：${paused ? '平台已暂停该订阅（不再推送事件）' : '平台连通性检查报错'}`,
+        `原因：${input.reason}`,
+        '请在「店铺管理 → 订阅/对齐事件」中重新订阅或恢复；轮询同步仍在兜底。',
+      ],
+      linkPath: eventDefinition('STORE_WEBHOOK_PAUSED').linkPath,
+      dedupeKey: `webhook:${input.storeId}:${input.state}:${new Date().toISOString().slice(0, 10)}`,
+      referenceType: 'STORE',
+      referenceId: input.storeId,
+    });
+  }
+
+  /**
    * 写事件 + 解析订阅 + 生成投递。同一 (type, dedupeKey) 在 30 分钟内只记一条，
    * 避免同一拦截任务反复失败时刷屏。
    */

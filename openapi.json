@@ -6887,7 +6887,9 @@
                 "ORDER_CANCELLED_AFTER_SHIP",
                 "RETURN_ORDER_NOT_FOUND",
                 "RETURN_DIFFERENCE",
-                "ORDER_PLATFORM_SHIP_FAILED"
+                "ORDER_PLATFORM_SHIP_FAILED",
+                "WEBHOOK_PAUSED",
+                "WEBHOOK_UNHEALTHY"
               ]
             }
           },
@@ -10366,6 +10368,89 @@
         "tags": ["sync"]
       }
     },
+    "/api/v1/sync/stores/{storeId}/webhook-health": {
+      "get": {
+        "operationId": "SyncController_storeWebhookHealth",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "nullable": true,
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/WebhookHealthDto"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "最近一次 Webhook 订阅体检结果（5 分钟内复用缓存，不主动探测平台）",
+        "tags": ["sync"]
+      }
+    },
+    "/api/v1/sync/stores/{storeId}/webhook-health/check": {
+      "post": {
+        "operationId": "SyncController_checkWebhookHealth",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/WebhookHealthDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "立即体检 Webhook 订阅（平台探测回调地址；只读，不改订阅状态）",
+        "tags": ["sync"]
+      }
+    },
     "/api/v1/sync/events": {
       "get": {
         "operationId": "SyncController_listEvents",
@@ -11158,6 +11243,74 @@
         },
         "summary": "一键发货：自动建发货单+单包裹装箱封箱 → 正式出库扣减库存 → 订单 SHIPPED",
         "tags": ["orders"]
+      }
+    },
+    "/api/v1/system/settings": {
+      "get": {
+        "operationId": "SystemSettingsController_get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SystemSettingsDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "系统运行参数（当前生效值）",
+        "tags": ["system"]
+      },
+      "patch": {
+        "operationId": "SystemSettingsController_update",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSystemSettingsRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SystemSettingsDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "修改系统运行参数（管理员）",
+        "tags": ["system"]
       }
     },
     "/api/v1/finance/transactions": {
@@ -18670,7 +18823,9 @@
               "ORDER_CANCELLED_AFTER_SHIP",
               "RETURN_ORDER_NOT_FOUND",
               "RETURN_DIFFERENCE",
-              "ORDER_PLATFORM_SHIP_FAILED"
+              "ORDER_PLATFORM_SHIP_FAILED",
+              "WEBHOOK_PAUSED",
+              "WEBHOOK_UNHEALTHY"
             ]
           },
           "severity": {
@@ -21844,6 +21999,40 @@
           "listingSyncIntervalMinutes"
         ]
       },
+      "WebhookHealthDto": {
+        "type": "object",
+        "properties": {
+          "storeId": {
+            "type": "string"
+          },
+          "storeCode": {
+            "type": "string",
+            "example": "ON-003"
+          },
+          "platform": {
+            "type": "string",
+            "example": "OZON"
+          },
+          "state": {
+            "type": "string",
+            "enum": ["OK", "NOT_SUBSCRIBED", "PAUSED", "UNHEALTHY", "UNSUPPORTED", "UNKNOWN"]
+          },
+          "reason": {
+            "type": "string",
+            "description": "人可读原因（进异常详情与通知正文）"
+          },
+          "checkedAt": {
+            "type": "string",
+            "description": "本次体检完成时间（ISO，UTC）"
+          },
+          "check": {
+            "type": "object",
+            "nullable": true,
+            "description": "OZON 平台探测明细（isActive + errors），其它平台为 null"
+          }
+        },
+        "required": ["storeId", "storeCode", "platform", "state", "reason", "checkedAt", "check"]
+      },
       "RawEventDto": {
         "type": "object",
         "properties": {
@@ -22423,6 +22612,61 @@
           }
         },
         "required": ["orderId", "orderNo", "orderErpStatus", "trackingNumber", "shipments"]
+      },
+      "OrderFallbackHoursDto": {
+        "type": "object",
+        "properties": {
+          "awaitingShipment": {
+            "type": "number",
+            "example": 2,
+            "description": "AWAITING_SHIPMENT 阶段的回读间隔（小时）"
+          },
+          "inTransit": {
+            "type": "number",
+            "example": 12,
+            "description": "IN_TRANSIT 阶段的回读间隔（小时）"
+          },
+          "delivered": {
+            "type": "number",
+            "example": 24,
+            "description": "DELIVERED（未终态）的回读间隔（小时）"
+          }
+        },
+        "required": ["awaitingShipment", "inTransit", "delivered"]
+      },
+      "SystemSettingsDto": {
+        "type": "object",
+        "properties": {
+          "orderFallbackHours": {
+            "$ref": "#/components/schemas/OrderFallbackHoursDto"
+          }
+        },
+        "required": ["orderFallbackHours"]
+      },
+      "UpdateOrderFallbackHoursDto": {
+        "type": "object",
+        "properties": {
+          "awaitingShipment": {
+            "type": "number",
+            "example": 2
+          },
+          "inTransit": {
+            "type": "number",
+            "example": 12
+          },
+          "delivered": {
+            "type": "number",
+            "example": 24
+          }
+        }
+      },
+      "UpdateSystemSettingsRequestDto": {
+        "type": "object",
+        "properties": {
+          "orderFallbackHours": {
+            "$ref": "#/components/schemas/UpdateOrderFallbackHoursDto"
+          }
+        }
       },
       "FinanceTransactionDto": {
         "type": "object",

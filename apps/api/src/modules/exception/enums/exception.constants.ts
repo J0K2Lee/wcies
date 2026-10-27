@@ -59,6 +59,15 @@ export const EXCEPTION_TYPES = [
    * Reference: ORDER/orderId. Auto-resolved by the next successful prepare.
    */
   'ORDER_PLATFORM_SHIP_FAILED',
+  /**
+   * Webhook 订阅健康（2026-10-27，用户确认「暂停要进异常中心」）：
+   * 平台把本店回调订阅**暂停/停用**了（OZON 在连续投递失败后自动 disable），
+   * 或平台连通性体检报错（STATUS_CODE_NOT_OK / SERVER_FAULT / 响应体不符）。
+   * Reference: STORE/storeId，一店一条；恢复订阅且体检无错时自动关闭。
+   * 见 docs/business-rules/notifications.md §6 与 docs/integrations/ozon.md §6.7。
+   */
+  'WEBHOOK_PAUSED',
+  'WEBHOOK_UNHEALTHY',
 ] as const;
 export type ExceptionType = (typeof EXCEPTION_TYPES)[number];
 

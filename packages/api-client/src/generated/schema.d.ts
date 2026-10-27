@@ -3021,6 +3021,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sync/stores/{storeId}/webhook-health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 最近一次 Webhook 订阅体检结果（5 分钟内复用缓存，不主动探测平台） */
+        get: operations["SyncController_storeWebhookHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sync/stores/{storeId}/webhook-health/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 立即体检 Webhook 订阅（平台探测回调地址；只读，不改订阅状态） */
+        post: operations["SyncController_checkWebhookHealth"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sync/events": {
         parameters: {
             query?: never;
@@ -3278,6 +3312,24 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 系统运行参数（当前生效值） */
+        get: operations["SystemSettingsController_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** 修改系统运行参数（管理员） */
+        patch: operations["SystemSettingsController_update"];
         trace?: never;
     };
     "/api/v1/finance/transactions": {
@@ -6215,7 +6267,7 @@ export interface components {
             /** @example EXC00000001 */
             exceptionNo: string;
             /** @enum {string} */
-            exceptionType: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR" | "SYNC_FAILED" | "ORDER_TRACKING_STALLED" | "ORDER_CANCELLED_AFTER_SHIP" | "RETURN_ORDER_NOT_FOUND" | "RETURN_DIFFERENCE" | "ORDER_PLATFORM_SHIP_FAILED";
+            exceptionType: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR" | "SYNC_FAILED" | "ORDER_TRACKING_STALLED" | "ORDER_CANCELLED_AFTER_SHIP" | "RETURN_ORDER_NOT_FOUND" | "RETURN_DIFFERENCE" | "ORDER_PLATFORM_SHIP_FAILED" | "WEBHOOK_PAUSED" | "WEBHOOK_UNHEALTHY";
             /** @enum {string} */
             severity: "LOW" | "MEDIUM" | "HIGH";
             /** @enum {string} */
@@ -7344,6 +7396,21 @@ export interface components {
             /** @description 商品链接自动轮询的生效间隔（分钟）：店铺自定义优先，否则系统默认；null = 系统级关闭 */
             listingSyncIntervalMinutes: number | null;
         };
+        WebhookHealthDto: {
+            storeId: string;
+            /** @example ON-003 */
+            storeCode: string;
+            /** @example OZON */
+            platform: string;
+            /** @enum {string} */
+            state: "OK" | "NOT_SUBSCRIBED" | "PAUSED" | "UNHEALTHY" | "UNSUPPORTED" | "UNKNOWN";
+            /** @description 人可读原因（进异常详情与通知正文） */
+            reason: string;
+            /** @description 本次体检完成时间（ISO，UTC） */
+            checkedAt: string;
+            /** @description OZON 平台探测明细（isActive + errors），其它平台为 null */
+            check: Record<string, never> | null;
+        };
         RawEventDto: {
             id: string;
             /** @example OZON */
@@ -7546,6 +7613,37 @@ export interface components {
             /** @description 带入发货单的平台运单号（订单上无平台运单号时为 null） */
             trackingNumber: string | null;
             shipments: components["schemas"]["QuickShipShipmentDto"][];
+        };
+        OrderFallbackHoursDto: {
+            /**
+             * @description AWAITING_SHIPMENT 阶段的回读间隔（小时）
+             * @example 2
+             */
+            awaitingShipment: number;
+            /**
+             * @description IN_TRANSIT 阶段的回读间隔（小时）
+             * @example 12
+             */
+            inTransit: number;
+            /**
+             * @description DELIVERED（未终态）的回读间隔（小时）
+             * @example 24
+             */
+            delivered: number;
+        };
+        SystemSettingsDto: {
+            orderFallbackHours: components["schemas"]["OrderFallbackHoursDto"];
+        };
+        UpdateOrderFallbackHoursDto: {
+            /** @example 2 */
+            awaitingShipment?: number;
+            /** @example 12 */
+            inTransit?: number;
+            /** @example 24 */
+            delivered?: number;
+        };
+        UpdateSystemSettingsRequestDto: {
+            orderFallbackHours?: components["schemas"]["UpdateOrderFallbackHoursDto"];
         };
         FinanceTransactionDto: {
             id: string;
@@ -11849,7 +11947,7 @@ export interface operations {
     ExceptionController_list: {
         parameters: {
             query?: {
-                exceptionType?: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR" | "SYNC_FAILED" | "ORDER_TRACKING_STALLED" | "ORDER_CANCELLED_AFTER_SHIP" | "RETURN_ORDER_NOT_FOUND" | "RETURN_DIFFERENCE" | "ORDER_PLATFORM_SHIP_FAILED";
+                exceptionType?: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR" | "SYNC_FAILED" | "ORDER_TRACKING_STALLED" | "ORDER_CANCELLED_AFTER_SHIP" | "RETURN_ORDER_NOT_FOUND" | "RETURN_DIFFERENCE" | "ORDER_PLATFORM_SHIP_FAILED" | "WEBHOOK_PAUSED" | "WEBHOOK_UNHEALTHY";
                 status?: "OPEN" | "RESOLVED" | "IGNORED";
                 referenceType?: string;
                 referenceId?: string;
@@ -13852,6 +13950,56 @@ export interface operations {
             };
         };
     };
+    SyncController_storeWebhookHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                storeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["WebhookHealthDto"] | null;
+                    };
+                };
+            };
+        };
+    };
+    SyncController_checkWebhookHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                storeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["WebhookHealthDto"];
+                    };
+                };
+            };
+        };
+    };
     SyncController_listEvents: {
         parameters: {
             query?: {
@@ -14360,6 +14508,56 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["QuickShipResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    SystemSettingsController_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SystemSettingsDto"];
+                    };
+                };
+            };
+        };
+    };
+    SystemSettingsController_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSystemSettingsRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SystemSettingsDto"];
                     };
                 };
             };

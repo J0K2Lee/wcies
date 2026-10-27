@@ -15,6 +15,7 @@ import {
 import { StoreService } from '../../store/services/store.service';
 import { CredentialExpiryService } from '../../store/services/credential-expiry.service';
 import { SyncContextService } from '../services/sync-context.service';
+import { WebhookHealthService } from '../services/webhook-health.service';
 
 /** Consumes webhook follow-up processing (task §28: fast HTTP, slow work here). */
 @Processor(QUEUE_NAMES.webhook)
@@ -53,6 +54,7 @@ export class SyncSchedulerProcessor extends WorkerHost {
     private readonly jobRepo: SyncJobRepository,
     private readonly storeService: StoreService,
     private readonly credentialExpiry: CredentialExpiryService,
+    private readonly webhookHealth: WebhookHealthService,
     private readonly logger: AppLoggerService,
   ) {
     super();
@@ -87,6 +89,24 @@ export class SyncSchedulerProcessor extends WorkerHost {
         this.logger.warn('recovered stale PENDING sync jobs', {
           module: 'sync',
           count: stalePending,
+        });
+      }
+      // Webhook 订阅巡检（2026-10-27）：每 6 小时一轮。平台暂停订阅时此前
+      // 只有人打开店铺抽屉才能发现，导致推送静默中断数天。
+      try {
+        const health = await this.webhookHealth.scanIfDue();
+        if (health.paused > 0 || health.unhealthy > 0) {
+          this.logger.warn('webhook subscription health issues', {
+            module: 'sync',
+            scanned: health.scanned,
+            paused: health.paused,
+            unhealthy: health.unhealthy,
+          });
+        }
+      } catch (error: unknown) {
+        this.logger.warn('webhook health scan failed', {
+          module: 'sync',
+          error: error instanceof Error ? error.message : String(error),
         });
       }
 

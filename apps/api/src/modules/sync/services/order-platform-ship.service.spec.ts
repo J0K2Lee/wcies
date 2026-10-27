@@ -706,3 +706,85 @@ describe('OrderPlatformShipService.refreshFactsAfterLabel (2026-10-21)', () => {
     expect(orderService.applySyncedPlatformFacts).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * 平台已取消但 ERP 不知道（2026-10-27 实证：ORD00000746 打印时平台报 cancelled，
+ * 订单仍停在已拣货、没有拦截与通知）。组包/取面单失败后必须定向回读一次：
+ * 读到取消就落库并走取消链，而不是把事实丢掉。
+ */
+class CancelledPostingAdapter {
+  readonly platformCode = 'OZON' as const;
+
+  async prepareShipment(): Promise<never> {
+    throw Object.assign(new Error('OZON 订单当前状态（cancelled）不允许组包'), {
+      code: 'OZON_ORDER_NOT_PREPARABLE',
+      httpStatus: 409,
+    });
+  }
+
+  async fetchOrdersByPlatformIds(): Promise<unknown[]> {
+    return [
+      {
+        platformOrderId: ORDER.platformOrderId,
+        platformStatus: 'cancelled',
+        platformCancelled: true,
+        platformStage: 'CANCELLED',
+        platformStageChangedAt: new Date('2026-10-27T01:00:00Z'),
+        shipmentDeadline: null,
+        rawData: { status: 'cancelled' },
+        fulfillmentMode: 'FBS',
+      },
+    ];
+  }
+}
+
+describe('OrderPlatformShipService 平台取消事实落库', () => {
+  it('组包报错 + 回读确认已取消 → 先落库（取消链）再抛出明确错误', async () => {
+    const { service, orderService } = makeService(new CancelledPostingAdapter());
+    orderService.applySyncedPlatformFacts.mockResolvedValueOnce({
+      ...ORDER,
+      applied: true,
+      changed: true,
+      cancelled: true,
+      trackingNumberAssigned: false,
+      platformTrackingNo: 'OZ75001234',
+    } as never);
+
+    await expect(service.prepareShipment('order-1', OPERATOR)).rejects.toMatchObject({
+      code: 'ORDER_CANCELLED_ON_PLATFORM',
+    });
+    expect(orderService.applySyncedPlatformFacts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platformOrderId: ORDER.platformOrderId,
+        platformCancelled: true,
+        platformStatus: 'cancelled',
+      }),
+      OPERATOR,
+    );
+  });
+
+  it('回读不是取消 → 原样抛平台错误，不写事实', async () => {
+    class NotCancelledAdapter extends CancelledPostingAdapter {
+      override async fetchOrdersByPlatformIds(): Promise<unknown[]> {
+        return [
+          {
+            platformOrderId: ORDER.platformOrderId,
+            platformStatus: 'awaiting_packaging',
+            platformCancelled: false,
+            platformStage: 'AWAITING_SHIPMENT',
+            platformStageChangedAt: null,
+            shipmentDeadline: null,
+            rawData: {},
+            fulfillmentMode: 'FBS',
+          },
+        ];
+      }
+    }
+    const { service, orderService } = makeService(new NotCancelledAdapter());
+
+    await expect(service.prepareShipment('order-1', OPERATOR)).rejects.toMatchObject({
+      code: 'OZON_ORDER_NOT_PREPARABLE',
+    });
+    expect(orderService.applySyncedPlatformFacts).not.toHaveBeenCalled();
+  });
+});

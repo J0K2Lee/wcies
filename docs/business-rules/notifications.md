@@ -82,6 +82,13 @@
 | `ORDER_INTERCEPTION_FAILED` | HIGH | 同上 + interceptionNo | `interception:<id>:failed` |
 | `STORE_CREDENTIAL_EXPIRING` | WARN | storeId / platform / credentialType | `credential:<id>:<YYYY-MM-DD>` |
 | `STORE_CREDENTIAL_EXPIRED` | HIGH | 同上 | 同上（过期后每天一条，直到换绑） |
+| `STORE_WEBHOOK_PAUSED` | HIGH | storeId / platform | `webhook:<storeId>:PAUSED:<YYYY-MM-DD>` |
+| `STORE_WEBHOOK_UNHEALTHY` | WARN | storeId / platform | `webhook:<storeId>:UNHEALTHY:<YYYY-MM-DD>` |
+
+后两条来自推送订阅巡检（2026-10-27，用户确认「暂停要进异常中心」）：
+平台会在连续投递失败后**自动暂停整个订阅**，而暂停等于「订单状态不再更新」，
+必须让人当天就知道。对应异常类型 `WEBHOOK_PAUSED`(HIGH) / `WEBHOOK_UNHEALTHY`
+(MEDIUM)，恢复健康后自动 RESOLVE。
 
 新增事件只需在事件目录登记（级别、可过滤字段、卡片布局、跳转路径），
 订阅与投递逻辑无需改动。

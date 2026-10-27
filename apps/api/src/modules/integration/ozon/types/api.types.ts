@@ -413,3 +413,19 @@ export interface OzonNotificationListResponse {
   readonly urls?: readonly OzonNotificationSubscription[];
   readonly [key: string]: unknown;
 }
+
+/**
+ * `POST /v1/notification/check` —— 平台自己探测我们 URL 的结果（2026-10-27）。
+ * `is_active` 表示探测是否拿到可用响应；`errors` 给出具体失败类别
+ * （REQUEST_ERROR / STATUS_CODE_NOT_OK / SERVER_FAULT / WRONG_RESULT_FIELD…）。
+ */
+export interface OzonNotificationCheckError {
+  readonly type: string;
+  readonly description?: string;
+}
+
+export interface OzonNotificationCheckResponse {
+  readonly is_active: boolean;
+  readonly errors?: readonly OzonNotificationCheckError[];
+  readonly [key: string]: unknown;
+}

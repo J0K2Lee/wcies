@@ -17,6 +17,7 @@ import { ListingService } from '../../listing/services/listing.service';
 import { extractYandexOfferImageUrl } from '../../integration/yandex/yandex.mapper';
 import { extractWbCardImageUrl } from '../../integration/wildberries/wb.mapper';
 import { LabelPrefetchService } from './label-prefetch.service';
+import { SystemSettingsService } from '../../system/services/system-settings.service';
 import { ShipmentService } from '../../shipment/services/shipment.service';
 
 const SYSTEM_OPERATOR: OperatorContext = { userId: null, username: 'sync-engine' };
@@ -104,6 +105,7 @@ export class OrderSyncService {
     private readonly logger: AppLoggerService,
     private readonly labelPrefetch: LabelPrefetchService,
     private readonly shipmentService: ShipmentService,
+    private readonly systemSettings: SystemSettingsService,
   ) {}
 
   async execute(syncJob: SyncJobEntity): Promise<void> {
@@ -530,10 +532,12 @@ export class OrderSyncService {
     if (adapter.fetchOrdersByPlatformIds === undefined) {
       return { updated: 0, unchanged: 0, failed: 0 };
     }
-    const fallbackHours = this.config.get<number>('app.orderStateFallbackHours') ?? 24;
+    // 分阶段阈值（2026-10-27，系统设置可改）：AWAITING_SHIPMENT 最勤——
+    // 取消几乎都发生在"还没交给平台"的阶段，24h 一刀切会让人工等一天。
+    const hours = await this.systemSettings.getOrderFallbackHours();
     const candidates = await this.orderService.listPlatformRefreshCandidates(storeId, {
       limit: PLATFORM_REFRESH_BATCH,
-      fallbackHours,
+      hours,
     });
     let updated = 0;
     let unchanged = 0;

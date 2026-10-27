@@ -70,8 +70,17 @@ export const appConfig = registerAs('app', () => {
      * minutes; this rotation is the safety net when they are paused
      * (docs/integrations/ozon.md §6.5 auto-pause is a real risk). Fractional
      * hours are allowed so integration tests can exercise the rotation.
+     *
+     * 2026-10-27：回读频率改为按平台阶段分档、可在「系统设置」在线调整
+     * （`SystemSettingsService`）。此 ENV 只在**显式设置**时作为三档的统一
+     * 基线（兼容既有部署与集成测试的秒级窗口）；未设置时为 `null`，由代码
+     * 默认值 2h / 12h / 24h 生效。
      */
-    orderStateFallbackHours: Number.parseFloat(process.env.ORDER_STATE_FALLBACK_HOURS ?? '24'),
+    orderStateFallbackHours:
+      process.env.ORDER_STATE_FALLBACK_HOURS === undefined ||
+      process.env.ORDER_STATE_FALLBACK_HOURS === ''
+        ? null
+        : Number.parseFloat(process.env.ORDER_STATE_FALLBACK_HOURS),
     /**
      * 面单后台任务（用户指示 2026-10-21）：
      *

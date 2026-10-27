@@ -60,6 +60,14 @@ Controller（HTTP、DTO 校验）
 - **结构化日志**：Pino（`AppLoggerService` 实现 NestJS LoggerService）。自动合并上下文（requestId/userId/storeId/platform/jobId），敏感字段 redact。开发 pretty、生产 JSON。
 - **配置**：`@nestjs/config` + Joi 启动校验（`apps/api/src/config/env.validation.ts`）。缺失关键 ENV 时进程拒绝启动。
 - **凭证加密**：`CredentialEncryptionService`（AES-256-GCM），密钥来自 `CREDENTIAL_ENCRYPTION_KEY`。
+- **运行时系统设置**：`system_settings`（key → jsonb）承载需要运维在线调整的参数，
+  当前唯一的键是 `orderFallbackHours`（订单平台事实回读的分阶段阈值
+  2h/12h/24h）。读取走 `SystemSettingsService`（非法值回退默认），修改仅管理员
+  （`PATCH /api/v1/system/settings`），页面在「系统设置 → 订单回读频率」。
+  这类参数不放 ENV：改 ENV 需要重启，而回读频率是运营现场可调的。
+- **推送订阅健康巡检**：`WebhookHealthService` 随调度 tick 每 6h 扫一遍店铺，
+  平台侧订阅被暂停 → 异常 + 通知；店铺抽屉可「立即体检」（只读探测）。
+  巡检结果只进异常/通知，不改订阅状态（真实写操作仍须人工/运维脚本显式触发）。
 
 ## 5. 关键工程约束（与 AGENTS.md 对齐）
 

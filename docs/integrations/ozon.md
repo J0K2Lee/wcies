@@ -526,6 +526,67 @@ TYPE_ORDER_STATE_CHANGED / TYPE_POSTING_CANCELLED / TYPE_STATE_CHANGED
 
 `TYPE_NEW_POSTING` / `TYPE_ORDER_*` 尚无真实样本（等新订单），到达后回填 §6.1d。
 
+### 6.7 2026-10-27 事故：连通性探测被判畸形 → 平台自动暂停订阅
+
+**现象**：ON-002 / ON-003 的订阅 `enable=false`（平台侧），系统里没有任何告警；
+订单状态停在最后同步时刻，平台取消的订单（ORD00000746）在打印面单时才暴露。
+
+**根因（实证）**：平台的连通性检查会向回调 URL 发一个**不带 `message_type`**
+的探测请求（`{}`）。当时的实现把它交给 Mapper 判成畸形事件，抛出
+`PLATFORM_BAD_RESPONSE`（httpStatus **502**）。`POST /v1/notification/check`
+随后返回：
+
+```json
+{"is_active": true,
+ "errors": [{"type": "WRONG_RESULT_FIELD"}, {"type": "STATUS_CODE_NOT_OK"},
+            {"type": "SERVER_FAULT"}]}
+```
+
+按 §6.5 的监控规则累计后，平台暂停了该 Client-Id 的**全部**订阅。
+
+**修复**：
+
+1. 探测请求（无 `message_type`）→ **200 + 标准 ack**，不落库、不产生事件；
+2. 真正的畸形事件 → `WEBHOOK_PAYLOAD_INVALID`（**422**，不是 5xx），
+   不再让平台把「我们的校验失败」记成服务故障；
+3. 订阅健康巡检（`WebhookHealthService`，6h 一轮）把
+   `enable=false` → 异常 `WEBHOOK_PAUSED`(HIGH) + 通知
+   `STORE_WEBHOOK_PAUSED`；`check.errors` 非空 → `WEBHOOK_UNHEALTHY`(MEDIUM)
+   + `STORE_WEBHOOK_UNHEALTHY`；恢复健康自动关闭异常。店铺抽屉显示最近
+   体检结果并提供「立即体检」（`POST /api/v1/sync/stores/:id/webhook-health/check`）。
+
+**check 语义补充（实测）**：`is_active` 表示订阅可用；`errors` 是监控
+**滚动窗口**里累计的失败类别，修复接收端后短时间内仍会返回旧错误。
+2026-10-27 修复后新建的订阅（ON-009 #473535）立刻也报
+`WRONG_RESULT_FIELD / STATUS_CODE_NOT_OK`，而同一时刻平台探测到达我们
+入口全部 200，可证 errors 非「本次探测结果」。因此：出现 errors 只当
+**弱信号**记异常，不要据此判断当前入口有问题；以入口 200 与
+`enable` 状态为准。
+
+**改名陷阱**：订阅 URL 里含**店铺编码**（`/stores/<storeCode>`），店铺改名后
+旧订阅仍指向旧编码，真实事件打到不存在的店铺路径必然失败，而订阅还占着
+事件类型（`/v1/notification/set` 回 `Type already in use`）。ON-009 的
+Client-Id 下就留着一条指向 `…/stores/ON-001` 的停用订阅（ON-001 已不存在）。
+处理：删旧 URL 订阅 → 用新 URL `set`。改名后必须重订阅，运维脚本见
+`scripts/ops/ozon-webhook-restore-2026-10-27.ts`（默认只读盘点，`--apply`
+才写平台，写后补 `operation_logs`）。
+
+**2026-10-27 收口清单**（10 个 ACTIVE OZON 店铺，全部 `enable=true` +
+推荐 5 类型）：
+
+| 店铺 | 订阅 ID | 处理 |
+|---|---|---|
+| ON-002 | 440988 | 平台暂停 → 重新 enable |
+| ON-003 | 434843 | 平台暂停 → 重新 enable |
+| ON-004 | 457701 | 原本正常 |
+| ON-005 | 473530 | 从未订阅 → 新建 |
+| ON-006 | 455853 | 原本正常 |
+| ON-007 | 455925 | 原本正常 |
+| ON-008 | 459870 | 原本正常 |
+| ON-009 | 473535 | 只剩指向 ON-001 的失效订阅 → 删除后按新 URL 新建 |
+| ON-010 | 456081 | 原本正常 |
+| ON-011 | 456866 | 原本正常 |
+
 ## 7. 平台 ID 语义（关键）
 
 | ID | 含义 | WCIES 用法 |
