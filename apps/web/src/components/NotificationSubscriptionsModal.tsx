@@ -41,7 +41,40 @@ const CHANNEL_LABEL: Record<string, string> = {
   FEISHU_GROUP: '飞书群',
 };
 
-const LEVEL_OPTIONS = ['INFO', 'WARN', 'HIGH'];
+const LEVEL_OPTIONS = ['INFO', 'WARN', 'HIGH'] as const;
+
+interface StoreOption {
+  id: string;
+  storeCode: string;
+  name: string;
+}
+
+interface WarehouseOption {
+  id: string;
+  warehouseCode: string;
+  name: string;
+}
+
+interface ConditionOption {
+  value: string;
+  label: string;
+}
+
+/** 自由文本条件的取值拆分：逗号（中英）或空白。 */
+function splitValues(raw: string): string[] {
+  return raw
+    .split(/[,，\s]+/)
+    .map((item) => item.trim())
+    .filter((item) => item !== '');
+}
+
+/** 条件字段中文名（目录里没有的键兜底显示 key 本身）。 */
+const FALLBACK_FIELD_LABEL: Record<string, string> = {
+  level: '级别',
+  storeId: '店铺',
+  warehouseCode: '仓库',
+  skuCode: 'SKU',
+};
 
 export function NotificationSubscriptionsModal({
   open,
@@ -54,7 +87,8 @@ export function NotificationSubscriptionsModal({
   const queryClient = useQueryClient();
   const [eventType, setEventType] = useState<string | undefined>();
   const [channel, setChannel] = useState<'FEISHU_DM' | 'FEISHU_GROUP'>('FEISHU_DM');
-  const [conditionDraft, setConditionDraft] = useState<Record<string, string>>({});
+  /** 每个条件的候选值集合（多选 = 命中任一即可）。 */
+  const [conditionDraft, setConditionDraft] = useState<Record<string, string[]>>({});
   const [openId, setOpenId] = useState('');
 
   const catalog = useApiQuery<{ data: EventCatalogItem[] }>(
@@ -78,6 +112,22 @@ export function NotificationSubscriptionsModal({
     undefined,
     open,
   );
+  // 条件里的店铺/仓库从选择器里挑（用户要求 2026-10-26）：手填 UUID 既容易
+  // 写错也无法核对，所以拉真实档案做候选。规模按店铺/仓位数（远小于分页上限）。
+  const stores = useApiQuery<{ data: StoreOption[] }>(
+    '/api/v1/stores',
+    { page: 1, pageSize: 100 },
+    ['notification-condition-stores'],
+    undefined,
+    open,
+  );
+  const warehouses = useApiQuery<{ data: WarehouseOption[] }>(
+    '/api/v1/warehouses',
+    { page: 1, pageSize: 100 },
+    ['notification-condition-warehouses'],
+    undefined,
+    open,
+  );
 
   const events = catalog.data?.data ?? [];
   const rules = subscriptions.data?.data ?? [];
@@ -86,6 +136,67 @@ export function NotificationSubscriptionsModal({
     () => events.find((event) => event.type === eventType) ?? null,
     [events, eventType],
   );
+
+  const storeOptions = useMemo<ConditionOption[]>(
+    () =>
+      (stores.data?.data ?? []).map((store) => ({
+        value: store.id,
+        label: `${store.storeCode} ${store.name}`,
+      })),
+    [stores.data],
+  );
+  const warehouseOptions = useMemo<ConditionOption[]>(
+    () =>
+      (warehouses.data?.data ?? []).map((warehouse) => ({
+        value: warehouse.warehouseCode,
+        label: `${warehouse.warehouseCode} ${warehouse.name}`,
+      })),
+    [warehouses.data],
+  );
+
+  /** 当前事件可用的条件字段：级别（所有事件通用）+ 目录声明字段。 */
+  const conditionFields = useMemo(
+    () =>
+      selectedEvent === null
+        ? []
+        : [
+            { key: 'level', label: FALLBACK_FIELD_LABEL['level'] },
+            ...selectedEvent.conditionFields,
+          ],
+    [selectedEvent],
+  );
+
+  /**
+   * 字段 → 候选值。返回 null 表示该字段没有枚举（SKU/拦截任务等），仍用文本框
+   * 手填；店铺/仓库/级别一律选择。
+   */
+  const optionsFor = (key: string): ConditionOption[] | null => {
+    if (key === 'level') {
+      return LEVEL_OPTIONS.map((level) => ({ value: level, label: level }));
+    }
+    if (key === 'storeId') {
+      return storeOptions;
+    }
+    if (key === 'warehouseCode') {
+      return warehouseOptions;
+    }
+    return null;
+  };
+
+  /** 规则摘要里把 id 还原成人看得懂的编码（店铺 UUID → 店铺编码）。 */
+  const storeCodeById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const store of stores.data?.data ?? []) {
+      map.set(store.id, store.storeCode);
+    }
+    return map;
+  }, [stores.data]);
+
+  const fieldLabel = (key: string): string =>
+    conditionFields.find((field) => field.key === key)?.label ?? FALLBACK_FIELD_LABEL[key] ?? key;
+
+  const displayValue = (key: string, value: string): string =>
+    key === 'storeId' ? (storeCodeById.get(value) ?? value) : value;
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['notification-subscriptions'] });
@@ -98,15 +209,9 @@ export function NotificationSubscriptionsModal({
         channel,
         eventType,
         conditions: Object.fromEntries(
-          Object.entries(conditionDraft)
-            .map(([key, value]) => [
-              key,
-              value
-                .split(/[,，\s]+/)
-                .map((item) => item.trim())
-                .filter((item) => item !== ''),
-            ])
-            .filter(([, values]) => (values as string[]).length > 0),
+          conditionFields
+            .map((field) => [field.key, conditionDraft[field.key] ?? []] as const)
+            .filter(([, values]) => values.length > 0),
         ),
         enabled: true,
       }),
@@ -217,29 +322,49 @@ export function NotificationSubscriptionsModal({
         {selectedEvent !== null && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ fontSize: 12.5, color: colors.textTertiary }}>
-              条件（留空 = 不限制；多个值用逗号分隔，命中任一即可）
+              条件（留空 = 不限制；多选表示命中任一值即可）
             </div>
-            <Select
-              mode="multiple"
-              style={{ maxWidth: 320 }}
-              placeholder="级别（level）"
-              value={conditionDraft['level']?.split(/[,，\s]+/).filter((v) => v !== '') ?? []}
-              onChange={(values: string[]) =>
-                setConditionDraft((prev) => ({ ...prev, level: values.join(',') }))
+            {conditionFields.map((field) => {
+              const options = optionsFor(field.key);
+              if (options !== null) {
+                return (
+                  <Select
+                    key={field.key}
+                    mode="multiple"
+                    showSearch
+                    optionFilterProp="label"
+                    style={{ maxWidth: 420 }}
+                    placeholder={`${field.label}（${field.key}）`}
+                    value={conditionDraft[field.key] ?? []}
+                    onChange={(values: string[]) =>
+                      setConditionDraft((prev) => ({ ...prev, [field.key]: values }))
+                    }
+                    options={options}
+                    notFoundContent={
+                      field.key === 'storeId'
+                        ? '没有匹配的店铺'
+                        : field.key === 'warehouseCode'
+                          ? '没有匹配的仓库'
+                          : undefined
+                    }
+                  />
+                );
               }
-              options={LEVEL_OPTIONS.map((level) => ({ value: level, label: level }))}
-            />
-            {selectedEvent.conditionFields.map((field) => (
-              <Input
-                key={field.key}
-                style={{ maxWidth: 420 }}
-                placeholder={`${field.label}（${field.key}）`}
-                value={conditionDraft[field.key] ?? ''}
-                onChange={(event) =>
-                  setConditionDraft((prev) => ({ ...prev, [field.key]: event.target.value }))
-                }
-              />
-            ))}
+              return (
+                <Input
+                  key={field.key}
+                  style={{ maxWidth: 420 }}
+                  placeholder={`${field.label}（${field.key}），多个值用逗号分隔`}
+                  value={(conditionDraft[field.key] ?? []).join(',')}
+                  onChange={(event) =>
+                    setConditionDraft((prev) => ({
+                      ...prev,
+                      [field.key]: splitValues(event.target.value),
+                    }))
+                  }
+                />
+              );
+            })}
           </div>
         )}
         <div>
@@ -282,7 +407,8 @@ export function NotificationSubscriptionsModal({
                 ) : (
                   Object.entries(rule.conditions).map(([key, values]) => (
                     <Tag key={key} style={{ marginInlineEnd: 0 }}>
-                      {key} ∈ {values.join('/')}
+                      {fieldLabel(key)} ∈{' '}
+                      {values.map((value) => displayValue(key, value)).join('/')}
                     </Tag>
                   ))
                 )}
