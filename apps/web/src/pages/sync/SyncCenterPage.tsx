@@ -169,6 +169,8 @@ export function SyncCenterPage() {
   const [storeId, setStoreId] = useState<string | undefined>();
   const [syncType, setSyncType] = useState<string | undefined>();
   const [status, setStatus] = useState<string | undefined>();
+  /** 事件订阅 tab 的状态过滤（与同步任务的状态词表不同，各自独立）。 */
+  const [eventStatus, setEventStatus] = useState<string | undefined>();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'jobs' | 'events'>('jobs');
@@ -191,12 +193,23 @@ export function SyncCenterPage() {
   );
   const events = useApiQuery<Envelope<RawEventRow[]>>(
     '/api/v1/sync/events',
-    { page: eventPage, pageSize: 20, ...(storeId ? { storeId } : {}) },
-    ['sync-events', eventPage, storeId],
+    {
+      page: eventPage,
+      pageSize: 20,
+      ...(storeId ? { storeId } : {}),
+      ...(eventStatus ? { status: eventStatus } : {}),
+    },
+    ['sync-events', eventPage, storeId, eventStatus],
   );
   const stores = useApiQuery<
     Envelope<Array<{ id: string; storeCode: string; name: string; platformCode: string }>>
   >('/api/v1/stores', { page: 1, pageSize: 100 }, ['stores', 'for-sync']);
+  // 原始事件只带 storeId（多店同平台时平台列区分不出来），列表按 id 映射出
+  // 店铺编码/名称——与「同步任务」表的店铺列同一套展示。
+  const storeById = useMemo(
+    () => new Map((stores.data?.data ?? []).map((store) => [store.id, store])),
+    [stores.data],
+  );
 
   // KPI totals per status — lightweight pageSize=1 count queries (task §14).
   const runningCount = useApiQuery<Envelope<SyncJobRow[]>>(
@@ -732,37 +745,58 @@ export function SyncCenterPage() {
             label: `${store.storeCode} · ${store.name}`,
           }))}
         />
-        <Select
-          allowClear
-          placeholder="类型"
-          style={{ width: 120 }}
-          value={syncType}
-          onChange={(value) => {
-            setPage(1);
-            setSyncType(value);
-          }}
-          options={[
-            { value: 'ORDER_SYNC', label: '订单同步' },
-            { value: 'LISTING_SYNC', label: '商品同步' },
-          ]}
-        />
-        <Select
-          allowClear
-          placeholder="状态"
-          style={{ width: 130 }}
-          value={status}
-          onChange={(value) => {
-            setPage(1);
-            setStatus(value);
-          }}
-          options={[
-            { value: 'PENDING', label: '等待中' },
-            { value: 'RUNNING', label: '运行中' },
-            { value: 'SUCCESS', label: '成功' },
-            { value: 'PARTIAL', label: '部分成功' },
-            { value: 'FAILED', label: '失败' },
-          ]}
-        />
+        {/* 过滤器随 tab 切换：同步任务用「类型/任务状态」，事件订阅用「事件状态」，
+            否则会出现「选了状态但列表没变」的死控件。 */}
+        {activeTab === 'jobs' ? (
+          <>
+            <Select
+              allowClear
+              placeholder="类型"
+              style={{ width: 120 }}
+              value={syncType}
+              onChange={(value) => {
+                setPage(1);
+                setSyncType(value);
+              }}
+              options={[
+                { value: 'ORDER_SYNC', label: '订单同步' },
+                { value: 'LISTING_SYNC', label: '商品同步' },
+              ]}
+            />
+            <Select
+              allowClear
+              placeholder="状态"
+              style={{ width: 130 }}
+              value={status}
+              onChange={(value) => {
+                setPage(1);
+                setStatus(value);
+              }}
+              options={[
+                { value: 'PENDING', label: '等待中' },
+                { value: 'RUNNING', label: '运行中' },
+                { value: 'SUCCESS', label: '成功' },
+                { value: 'PARTIAL', label: '部分成功' },
+                { value: 'FAILED', label: '失败' },
+              ]}
+            />
+          </>
+        ) : (
+          <Select
+            allowClear
+            placeholder="事件状态"
+            style={{ width: 130 }}
+            value={eventStatus}
+            onChange={(value) => {
+              setEventPage(1);
+              setEventStatus(value);
+            }}
+            options={Object.entries(EVENT_STATUS_META).map(([value, meta]) => ({
+              value,
+              label: meta.label,
+            }))}
+          />
+        )}
       </FilterBar>
 
       {activeTab === 'jobs' ? (
@@ -836,17 +870,55 @@ export function SyncCenterPage() {
                 render: (value: string) => <PlatformTag code={value} />,
               },
               {
+                title: '店铺',
+                key: 'store',
+                width: 140,
+                render: (_: unknown, row: RawEventRow) => {
+                  const store = storeById.get(row.storeId);
+                  if (store === undefined) {
+                    return <span style={{ color: colors.textTertiary }}>未知店铺</span>;
+                  }
+                  return (
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {store.storeCode}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12.5,
+                          color: colors.textTertiary,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
+                        {store.name}
+                      </div>
+                    </div>
+                  );
+                },
+              },
+              {
                 title: '事件类型',
-                dataIndex: 'eventType',
                 key: 'eventType',
                 width: 150,
-                render: (value: string) => {
-                  const meta = EVENT_TYPE_META[value] ?? {
+                render: (_: unknown, row: RawEventRow) => {
+                  const meta = EVENT_TYPE_META[row.eventType] ?? {
                     tone: 'neutral' as const,
-                    label: value,
+                    label: row.eventType,
                   };
+                  // 归一化后的 UNKNOWN 会丢掉平台原始类型（如 TYPE_WRONG_PUSH），
+                  // 悬停给出原始 message_type，便于判断"未识别"到底是什么。
+                  const rawType =
+                    typeof row.payload['message_type'] === 'string'
+                      ? row.payload['message_type']
+                      : row.eventType;
                   return (
-                    <StatusBadge tone={meta.tone} label={meta.label} hint={value} showDot={false} />
+                    <StatusBadge
+                      tone={meta.tone}
+                      label={meta.label}
+                      hint={rawType}
+                      showDot={false}
+                    />
                   );
                 },
               },
