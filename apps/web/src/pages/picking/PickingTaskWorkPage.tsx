@@ -196,17 +196,16 @@ export function PickingTaskWorkPage() {
     <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
       {/* ---- Main operation area ---- */}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {/* 头部条（task §47；2026-10-27 压扁）：任务号 + 仓库 + 进度 + 操作挤在一行。
-            原来是 22px 标题 + 两条辅助信息 + 大号按钮，纵向吃掉一整块屏幕。 */}
+        {/* Header strip (task §47): id + warehouse + progress + controls */}
         <div
           style={{
             background: colors.container,
             border: `1px solid ${colors.border}`,
             borderRadius: 12,
-            padding: '8px 14px',
+            padding: '16px 20px',
             display: 'flex',
             alignItems: 'center',
-            gap: 14,
+            gap: 20,
             flexWrap: 'wrap',
           }}
         >
@@ -216,38 +215,27 @@ export function PickingTaskWorkPage() {
             icon={<ArrowLeftOutlined />}
             onClick={() => void navigate('/warehouse-ops?tab=picking')}
           />
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
-            <span style={{ fontSize: 19, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ fontSize: 22, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
               {task.pickingNo}
             </span>
-            <span style={{ fontSize: 12.5, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
+            <span style={{ fontSize: 13, color: colors.textSecondary }}>
               {task.warehouseCode} {task.warehouseName} · {task.ordersCount} 单
             </span>
           </div>
-          <div
-            style={{
-              flex: 1,
-              minWidth: 160,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              borderLeft: `1px solid ${colors.border}`,
-              paddingLeft: 14,
-            }}
-          >
-            <span style={{ fontSize: 12.5, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
-              拣货进度
-            </span>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span style={{ fontSize: 12.5, color: colors.textSecondary }}>拣货进度</span>
+              <span style={{ fontSize: 13, fontWeight: 650, fontVariantNumeric: 'tabular-nums' }}>
+                {totals.picked} / {totals.required}
+              </span>
+            </div>
             <Progress
               percent={percent}
               showInfo={false}
-              size={{ height: 6 }}
-              style={{ margin: 0, flex: 1 }}
+              size={{ height: 8 }}
               strokeColor={percent === 100 ? colors.success : colors.primary}
             />
-            <span style={{ fontSize: 13, fontWeight: 650, fontVariantNumeric: 'tabular-nums' }}>
-              {totals.picked} / {totals.required}
-            </span>
           </div>
           <StatusBadge
             tone={PICKING_STATUS_META[task.status]?.tone ?? 'neutral'}
@@ -257,6 +245,7 @@ export function PickingTaskWorkPage() {
           {task.status === 'CREATED' && (
             <Button
               type="primary"
+              size="large"
               loading={startMutation.isPending}
               onClick={() => startMutation.mutate()}
             >
@@ -272,112 +261,92 @@ export function PickingTaskWorkPage() {
               cancelText="取消"
               onConfirm={() => completeMutation.mutate()}
             >
-              <Button type="primary" loading={completeMutation.isPending}>
-                完成任务
+              <Button type="primary" size="large" loading={completeMutation.isPending}>
+                完成任务（需全部行拣完）
               </Button>
             </Popconfirm>
           )}
         </div>
 
-        {/* 作业卡（2026-10-27 合并「下一库位」与「扫码」）：左半是库位与数量，
-            右半是 SKU 身份 + 主条码 + 扫码输入。原来三张全宽卡片纵向堆叠，
-            上下留白多、横向利用率低；合并后一屏同时看到库位、商品与扫码框。 */}
-        {(inProgress || task.status === 'COMPLETED') && (
-          <div
-            style={{
-              background: colors.container,
-              border: `1px solid ${inProgress ? colors.primary : colors.border}`,
-              borderRadius: 12,
-              padding: '14px 18px',
-              display: 'flex',
-              gap: 18,
-              flexWrap: 'wrap',
-              alignItems: 'stretch',
-            }}
-          >
-            {nextItem !== undefined && nextBin !== null ? (
-              <>
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'center',
-                    gap: 6,
-                    minWidth: 210,
-                  }}
-                >
-                  <div style={{ fontSize: 12.5, color: colors.textSecondary }}>下一库位</div>
-                  <div
-                    style={{
-                      fontSize: 34,
-                      fontWeight: 750,
-                      lineHeight: '38px',
-                      color: colors.primaryActive,
-                      fontVariantNumeric: 'tabular-nums',
-                      letterSpacing: 1,
-                    }}
-                  >
-                    {nextBin.binCode}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 16 }}>
-                    <span style={{ fontSize: 12.5, color: colors.textSecondary }}>
-                      需要{' '}
-                      <span
-                        style={{
-                          fontSize: 20,
-                          fontWeight: 700,
-                          color: colors.textPrimary,
-                          fontVariantNumeric: 'tabular-nums',
-                        }}
-                      >
-                        {Number(nextItem.requiredQty)}
-                      </span>
-                    </span>
-                    <span style={{ fontSize: 12.5, color: colors.textSecondary }}>
-                      已拣{' '}
-                      <span
-                        style={{
-                          fontSize: 20,
-                          fontWeight: 700,
-                          color: colors.success,
-                          fontVariantNumeric: 'tabular-nums',
-                        }}
-                      >
-                        {Number(nextItem.pickedQty)}
-                      </span>
-                    </span>
-                  </div>
+        {/* Next bin focus card (task §47) */}
+        {(inProgress || task.status === 'COMPLETED') &&
+          nextItem !== undefined &&
+          nextBin !== null && (
+            <div
+              style={{
+                background: colors.container,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 12,
+                padding: '18px 24px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 28,
+                flexWrap: 'wrap',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 12.5, color: colors.textSecondary, marginBottom: 4 }}>
+                  下一库位
                 </div>
                 <div
-                  style={{ width: 1, background: colors.border, alignSelf: 'stretch' }}
-                  aria-hidden
-                />
-                <div
                   style={{
-                    flex: 1,
-                    minWidth: 320,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 8,
+                    fontSize: 40,
+                    fontWeight: 750,
+                    lineHeight: '44px',
+                    color: colors.primaryActive,
+                    fontVariantNumeric: 'tabular-nums',
+                    letterSpacing: 1,
                   }}
                 >
-                  <div
-                    style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}
-                  >
-                    <span style={{ fontSize: 16, fontWeight: 700 }}>{nextItem.skuCode}</span>
-                    <span style={{ fontSize: 17, fontWeight: 600, color: colors.textPrimary }}>
+                  {nextBin.binCode}
+                </div>
+              </div>
+              {/* 商品信息块（2026-10-27）：这一段右侧原本是大片空白。现在把
+                  **主条码**放到这条空白的右侧——按码找货/录单时会直接看它，
+                  并带复制按钮；SKU 编码/名称/订单保持原有层级。 */}
+              <div style={{ minWidth: 220, flex: 1 }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    justifyContent: 'space-between',
+                    gap: 24,
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 17, fontWeight: 650 }}>{nextItem.skuCode}</div>
+                    {/* 当前拣货 SKU 名称（用户指示 2026-10-21）：原 13.5px 次要色在
+                        工位屏幕上不够醒目，提升为主文本色 + 20px，与库位号形成主次。 */}
+                    <div
+                      style={{
+                        fontSize: 20,
+                        fontWeight: 650,
+                        lineHeight: '26px',
+                        color: colors.textPrimary,
+                        marginTop: 4,
+                      }}
+                    >
                       {nextItem.skuName}
-                    </span>
-                    <CopyTextButton value={nextItem.skuName} title="SKU 名称" size="middle" />
-                    {nextItem.serialTracking && (
-                      <span style={{ color: colors.warning, fontSize: 12.5 }}>SN 商品</span>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 12.5, color: colors.textSecondary }}>
+                      <CopyTextButton value={nextItem.skuName} title="SKU 名称" size="middle" />
+                      {nextItem.serialTracking && (
+                        <span style={{ color: colors.warning, marginLeft: 8, fontSize: 13 }}>
+                          SN 商品
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 13, color: colors.textTertiary, marginTop: 6 }}>
                       订单 {nextItem.orderNo}
-                    </span>
-                    <span style={{ fontSize: 12.5, color: colors.textTertiary }}>·</span>
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      flexShrink: 0,
+                      paddingTop: 2,
+                    }}
+                  >
                     <span style={{ fontSize: 12.5, color: colors.textSecondary }}>主条码</span>
                     {nextItem.primaryBarcode === null ? (
                       <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
@@ -388,11 +357,12 @@ export function PickingTaskWorkPage() {
                         <span
                           style={{
                             fontFamily: typography.monoFamily,
-                            fontSize: 20,
-                            fontWeight: 700,
+                            fontSize: 26,
+                            fontWeight: 750,
+                            lineHeight: '32px',
                             letterSpacing: 2,
-                            padding: '1px 10px',
-                            borderRadius: 6,
+                            padding: '1px 12px',
+                            borderRadius: 8,
                             background: colors.neutralBg,
                             border: `1px solid ${colors.neutralBorder}`,
                             color: colors.textPrimary,
@@ -408,50 +378,77 @@ export function PickingTaskWorkPage() {
                       </>
                     )}
                   </div>
-                  <Input
-                    id="picking-scan-input"
-                    ref={barcodeRef}
-                    size="large"
-                    placeholder={`扫描商品条码（每次 1 件，回车提交）${
-                      nextItem.primaryBarcode === null ? '' : `，如 ${nextItem.primaryBarcode}`
-                    }`}
-                    value={barcode}
-                    disabled={!inProgress}
-                    onChange={(event) => setBarcode(event.target.value)}
-                    onPressEnter={submitScan}
-                    style={{ fontSize: 19, padding: '8px 14px' }}
-                    aria-label="扫描商品条码"
-                    autoFocus
-                  />
-                  {serialItem !== undefined && (
-                    <Input
-                      size="large"
-                      placeholder={`SN 商品（${serialItem.skuCode}）请再扫序列号`}
-                      value={serialNumber}
-                      disabled={!inProgress}
-                      onChange={(event) => setSerialNumber(event.target.value)}
-                      onPressEnter={submitScan}
-                      style={{ fontSize: 16, padding: '6px 14px' }}
-                    />
-                  )}
-                  <ScanFeedback feedback={feedback} />
                 </div>
-              </>
-            ) : (
-              <div
-                style={{
-                  flex: 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 16,
-                  flexWrap: 'wrap',
-                }}
-              >
-                <span style={{ fontSize: 15, fontWeight: 600 }}>所有行已拣完，可以完成任务</span>
-                <ScanFeedback feedback={feedback} />
               </div>
+              <div style={{ display: 'flex', gap: 28 }}>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 12.5, color: colors.textSecondary }}>需要</div>
+                  <div
+                    style={{ fontSize: 28, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}
+                  >
+                    {Number(nextItem.requiredQty)}
+                  </div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 12.5, color: colors.textSecondary }}>已拣</div>
+                  <div
+                    style={{
+                      fontSize: 28,
+                      fontWeight: 700,
+                      color: colors.success,
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    {Number(nextItem.pickedQty)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+        {/* Scan sink — the visual focus (task §49) */}
+        {(inProgress || task.status === 'COMPLETED') && (
+          <div
+            style={{
+              background: colors.container,
+              border: `1px solid ${inProgress ? colors.primary : colors.border}`,
+              borderRadius: 12,
+              padding: 20,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 14,
+            }}
+          >
+            <label
+              htmlFor="picking-scan-input"
+              style={{ fontSize: 14, fontWeight: 600, color: colors.textPrimary }}
+            >
+              扫描商品条码（每次 1 件，回车提交）
+            </label>
+            <Input
+              id="picking-scan-input"
+              ref={barcodeRef}
+              size="large"
+              placeholder="扫描 SKU 条码…"
+              value={barcode}
+              disabled={!inProgress}
+              onChange={(event) => setBarcode(event.target.value)}
+              onPressEnter={submitScan}
+              style={{ fontSize: 20, padding: '10px 16px' }}
+              autoFocus
+            />
+            {serialItem !== undefined && (
+              <Input
+                size="large"
+                placeholder={`SN 商品（${serialItem.skuCode}）请再扫序列号`}
+                value={serialNumber}
+                disabled={!inProgress}
+                onChange={(event) => setSerialNumber(event.target.value)}
+                onPressEnter={submitScan}
+                style={{ fontSize: 17, padding: '8px 16px' }}
+              />
             )}
+            <ScanFeedback feedback={feedback} />
           </div>
         )}
 
@@ -534,14 +531,14 @@ export function PickingTaskWorkPage() {
                           订单 {item.orderNo} · 剩余 {remaining} 件
                         </span>
                         {item.primaryBarcode !== null && (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                            <span style={{ color: colors.textTertiary, marginRight: 4 }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                            <span style={{ color: colors.textTertiary, marginRight: 2 }}>
                               主条码
                             </span>
                             <span
                               style={{
                                 fontFamily: typography.monoFamily,
-                                fontWeight: 600,
+                                fontWeight: 650,
                                 color: colors.textPrimary,
                                 letterSpacing: 0.5,
                               }}
