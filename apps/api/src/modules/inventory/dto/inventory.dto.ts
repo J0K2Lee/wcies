@@ -128,6 +128,7 @@ export class TransactionDto {
   @ApiProperty({ enum: INVENTORY_EVENT_TYPES }) transactionType!: string;
   @ApiProperty() skuId!: string;
   @ApiProperty() skuCode!: string;
+  @ApiProperty({ description: 'SKU 名称（中文名；运营搜索与识别用）' }) skuName!: string;
   @ApiProperty() warehouseId!: string;
   @ApiProperty() warehouseCode!: string;
   @ApiProperty() binId!: string;
@@ -346,6 +347,8 @@ export class InventoryListQueryDto extends PaginationQueryDto {
 }
 
 export class TransactionListQueryDto extends PaginationQueryDto {
+  /** SKU 编码或名称搜索（2026-10-27 用户需求）。 */
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(100) keyword?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() skuId?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() warehouseId?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() binId?: string;

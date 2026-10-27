@@ -1,6 +1,6 @@
-import { Select } from 'antd';
-import { useMemo, useState } from 'react';
-import { useApiQuery } from '../../api/hooks';
+import { Input, Select } from 'antd';
+import { useEffect, useMemo, useState } from 'react';
+import { useApiQuery, useDebouncedValue } from '../../api/hooks';
 import { fmtQty } from '../../utils/format';
 import {
   ContextMetric,
@@ -26,6 +26,8 @@ interface TransactionRow {
   transactionType: string;
   skuId: string;
   skuCode: string;
+  /** SKU 名称（中文名）：运营按名称识别商品。 */
+  skuName: string;
   warehouseCode: string;
   binCode: string;
   quantityBefore: string;
@@ -45,21 +47,36 @@ interface TransactionRow {
  *
  * 双入口说明：本页是全量审计视图（跨 SKU）；「库存管理」Drawer 的流水 Tab
  * 是单 SKU 过滤视图——两者语义不同，均保留（Phase 3 T4）。
- * SKU 关键词搜索需要后端支持 keyword 参数（当前 API 仅支持 skuId 精确
- * 过滤），暂不提供搜索框。
+ *
+ * 展示取舍（用户指示 2026-10-27）：流水号 / 事件号 / 来源（`ORDER/<id>` 这种
+ * 技术引用）对运营排查没有帮助，隐藏；改为显示 SKU 名称，并支持按 SKU 编码
+ * 或名称搜索（后端 `keyword` 参数，与库存余额列表同一口径）。
  */
 export function InventoryTransactionsPage() {
   const [warehouseId, setWarehouseId] = useState<string | undefined>();
   const [transactionType, setTransactionType] = useState<string | undefined>();
+  const [keywordInput, setKeywordInput] = useState('');
+  // 890+ 条流水，逐键请求太重；输入停顿 300ms 再用。
+  const keyword = useDebouncedValue(keywordInput.trim(), 300);
   const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    setPage(1);
+  }, [keyword]);
 
   const warehouses = useApiQuery<{
     data: Array<{ id: string; warehouseCode: string; name: string }>;
   }>('/api/v1/warehouses', { page: 1, pageSize: 100 }, ['warehouses-lite']);
   const transactions = useApiQuery<{ data: TransactionRow[]; meta: { total: number } }>(
     '/api/v1/inventory/transactions',
-    { page, pageSize: 50, warehouseId, transactionType },
-    ['inventory-transactions', page, warehouseId, transactionType],
+    {
+      page,
+      pageSize: 50,
+      warehouseId,
+      transactionType,
+      ...(keyword === '' ? {} : { keyword }),
+    },
+    ['inventory-transactions', page, warehouseId, transactionType, keyword],
   );
 
   const railContent = useMemo<ContextRailContent>(
@@ -84,6 +101,14 @@ export function InventoryTransactionsPage() {
       />
 
       <FilterBar>
+        <Input.Search
+          placeholder="搜索 SKU 编码 / 名称"
+          allowClear
+          value={keywordInput}
+          onChange={(event) => setKeywordInput(event.target.value)}
+          style={{ width: 240 }}
+          aria-label="搜索 SKU"
+        />
         <Select
           placeholder="仓库"
           allowClear
@@ -154,6 +179,12 @@ export function InventoryTransactionsPage() {
               ),
             },
             { title: 'SKU', dataIndex: 'skuCode', width: 130 },
+            {
+              title: 'SKU 名称',
+              dataIndex: 'skuName',
+              width: 200,
+              ellipsis: true,
+            },
             { title: '仓库', dataIndex: 'warehouseCode', width: 90 },
             { title: '库位', dataIndex: 'binCode', width: 140 },
             {
@@ -199,14 +230,6 @@ export function InventoryTransactionsPage() {
               width: 90,
               align: 'right',
               render: (value: string | null) => (value === null ? '—' : fmtQty(value)),
-            },
-            { title: '流水号', dataIndex: 'transactionNo', width: 140 },
-            { title: '事件号', dataIndex: 'eventNo', width: 130 },
-            {
-              title: '来源',
-              dataIndex: 'referenceType',
-              width: 90,
-              render: (value: string, record) => `${value}/${record.referenceId.slice(0, 8)}`,
             },
             {
               title: '操作人',

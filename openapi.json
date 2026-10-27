@@ -3267,6 +3267,14 @@
         "operationId": "InventoryController_listTransactions",
         "parameters": [
           {
+            "name": "keyword",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "skuId",
             "required": false,
             "in": "query",
@@ -14962,6 +14970,10 @@
           "skuCode": {
             "type": "string"
           },
+          "skuName": {
+            "type": "string",
+            "description": "SKU 名称（中文名；运营搜索与识别用）"
+          },
           "warehouseId": {
             "type": "string"
           },
@@ -15047,6 +15059,7 @@
           "transactionType",
           "skuId",
           "skuCode",
+          "skuName",
           "warehouseId",
           "warehouseCode",
           "binId",

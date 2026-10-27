@@ -91,6 +91,7 @@ export interface TransactionDto {
   transactionType: string;
   skuId: string;
   skuCode: string;
+  skuName: string;
   warehouseId: string;
   warehouseCode: string;
   binId: string;
@@ -301,6 +302,7 @@ export class InventoryQueryService {
         transactionType: transaction.transactionType,
         skuId: transaction.skuId,
         skuCode: refs.skuCode,
+        skuName: refs.skuName,
         warehouseId: transaction.warehouseId,
         warehouseCode: refs.warehouseCode,
         binId: transaction.binId,

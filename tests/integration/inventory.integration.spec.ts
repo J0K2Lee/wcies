@@ -46,6 +46,9 @@ interface TransactionDto {
   transactionNo: string;
   eventNo: string;
   transactionType: string;
+  skuId: string;
+  skuCode: string;
+  skuName: string;
   binCode: string;
   quantityBefore: string;
   quantityChange: string;
@@ -227,6 +230,42 @@ describe('initialize + idempotency (task §20-§22, §88)', () => {
     );
     expect(ledger.body.data).toHaveLength(1);
     expect(ledger.body.data[0]?.quantityChange).toBe('10.000');
+  });
+
+  it('ledger 搜索：keyword 命中 SKU 编码或名称，并返回 SKU 名称（2026-10-27 用户需求）', async () => {
+    const label = `KW${randomUUID().slice(0, 6)}`;
+    const keywordSkuId = await newSku(label);
+    await initialize({
+      skuId: keywordSkuId,
+      warehouseId,
+      binId: binA01,
+      quantity: '3',
+      idempotencyKey: `kw:${PREFIX}`,
+    });
+    const sku = await client.get<{ skuCode: string; nameZh: string }>(
+      `/api/v1/skus/${keywordSkuId}`,
+    );
+
+    // 名称片段（与编码不相交）→ 只应命中这个 SKU，且行里带出名称
+    const byName = await client.get<TransactionDto[]>(
+      `/api/v1/inventory/transactions?keyword=${encodeURIComponent(label)}&pageSize=100`,
+    );
+    expect(byName.body.data.length).toBeGreaterThan(0);
+    expect(byName.body.data.every((row) => row.skuId === keywordSkuId)).toBe(true);
+    expect(byName.body.data[0]?.skuName).toBe(sku.body.data.nameZh);
+
+    // 完整编码 → 同样命中（运营两种输入都要能用）
+    const byCode = await client.get<TransactionDto[]>(
+      `/api/v1/inventory/transactions?keyword=${sku.body.data.skuCode}&pageSize=100`,
+    );
+    expect(byCode.body.data.length).toBeGreaterThan(0);
+    expect(byCode.body.data.every((row) => row.skuId === keywordSkuId)).toBe(true);
+
+    // 无匹配 → 0 条（不要退化成"忽略未知关键词"）
+    const none = await client.get<TransactionDto[]>(
+      `/api/v1/inventory/transactions?keyword=zz-no-such-sku-zz&pageSize=100`,
+    );
+    expect(none.body.data).toHaveLength(0);
   });
 
   it('rejects a mismatched payload reusing an idempotency key', async () => {

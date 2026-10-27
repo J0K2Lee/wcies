@@ -99,6 +99,7 @@ export class InventoryController {
   ): Promise<{ success: true; data: TransactionDto[]; meta: PageMeta }> {
     const { items, meta } = await this.queryService.listTransactions(
       {
+        keyword: query.keyword?.trim() || undefined,
         skuId: query.skuId,
         warehouseId: query.warehouseId,
         binId: query.binId,

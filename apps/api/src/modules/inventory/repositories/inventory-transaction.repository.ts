@@ -27,6 +27,8 @@ export interface LedgerLineInsert {
 }
 
 export interface TransactionListFilters {
+  /** SKU 编码或 SKU 名称的模糊匹配（运营侧搜索框，2026-10-27）。 */
+  keyword?: string;
   skuId?: string;
   warehouseId?: string;
   binId?: string;
@@ -40,6 +42,7 @@ export interface TransactionListFilters {
 export interface TransactionRowWithRefs {
   transaction: InventoryTransactionEntity;
   skuCode: string;
+  skuName: string;
   warehouseCode: string;
   binCode: string;
   eventNo: string;
@@ -155,12 +158,19 @@ export class InventoryTransactionRepository {
       .innerJoin('inventory_events', 'ev', 'ev.id = t.event_id')
       .leftJoin('users', 'usr', 'usr.id = t.operator_id')
       .addSelect('sku.sku_code', 'sku_code')
+      .addSelect('sku.name_zh', 'sku_name')
       .addSelect('wh.warehouse_code', 'warehouse_code')
       .addSelect('bin.bin_code', 'bin_code')
       .addSelect('ev.event_no', 'event_no')
       .addSelect('ev.event_type', 'event_type')
       .addSelect('usr.username', 'operator_name');
 
+    if (filters.keyword !== undefined && filters.keyword !== '') {
+      // 与库存余额列表同一口径：编码或中文名，大小写不敏感的部分匹配。
+      qb.andWhere('(sku.sku_code ILIKE :kw OR sku.name_zh ILIKE :kw)', {
+        kw: `%${filters.keyword}%`,
+      });
+    }
     if (filters.skuId !== undefined) {
       qb.andWhere('t.skuId = :skuId', { skuId: filters.skuId });
     }
@@ -200,6 +210,7 @@ export class InventoryTransactionRepository {
     const rows: TransactionRowWithRefs[] = entities.map((transaction, index) => ({
       transaction,
       skuCode: rawStr(rawList[index]?.['sku_code']),
+      skuName: rawStr(rawList[index]?.['sku_name']),
       warehouseCode: rawStr(rawList[index]?.['warehouse_code']),
       binCode: rawStr(rawList[index]?.['bin_code']),
       eventNo: rawStr(rawList[index]?.['event_no']),

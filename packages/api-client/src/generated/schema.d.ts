@@ -4767,6 +4767,8 @@ export interface components {
             transactionType: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "RETURN_PICKED" | "MOVE_BIN" | "MANUAL_ADJUSTMENT" | "TRANSFER_OUT" | "TRANSFER_IN";
             skuId: string;
             skuCode: string;
+            /** @description SKU 名称（中文名；运营搜索与识别用） */
+            skuName: string;
             warehouseId: string;
             warehouseCode: string;
             binId: string;
@@ -9984,6 +9986,7 @@ export interface operations {
     InventoryController_listTransactions: {
         parameters: {
             query?: {
+                keyword?: string;
                 skuId?: string;
                 warehouseId?: string;
                 binId?: string;
