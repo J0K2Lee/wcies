@@ -393,6 +393,17 @@ export class OrderRepository {
   }
 
   /**
+   * 清除加急标记（2026-10-27 用户指示：发货后移除加急）。
+   *
+   * 保留 `urgent_marked_at`（最后一次加急时间，审计用），只翻 `is_urgent`。
+   * 在订单状态机把它推进 SHIPPED 的同一条事务里执行，保证「已发货」不会
+   * 还挂着一个加急旗标。
+   */
+  async clearUrgent(manager: EntityManager, id: string): Promise<void> {
+    await manager.getRepository(OrderEntity).update({ id }, { isUrgent: false });
+  }
+
+  /**
    * Platform FACT patch (Sprint 9 T1 + dual-axis T1): platform_status /
    * shipment_deadline / raw_data / platform_stage fields only - never
    * erp_status (AGENTS.md §38). Callers keep the stored value for fields the

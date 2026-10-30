@@ -78,6 +78,7 @@ function buildService(input: {
   const orderRepo = {
     findById: vi.fn().mockResolvedValue(input.order),
     updateErpStatus: vi.fn().mockResolvedValue(undefined),
+    clearUrgent: vi.fn().mockResolvedValue(undefined),
   } as unknown as OrderRepository;
   const itemRepo = {
     findByOrderId: vi.fn().mockResolvedValue(input.items),
@@ -98,6 +99,25 @@ function buildService(input: {
   );
   return { service, insert: historyRepo.insert, orderRepo };
 }
+
+describe('OrderStatusService.transition：发货后移除加急（2026-10-27 用户指示）', () => {
+  it('转 SHIPPED 时清 is_urgent（与状态变更同一事务）', async () => {
+    const { service, orderRepo } = buildService({ order: makeOrder('PICKED'), items: [] });
+
+    await service.transition('order-1', 'SHIPPED', { userId: null, username: 't' }, '拣货完成');
+
+    expect(orderRepo.updateErpStatus).toHaveBeenCalledWith({}, 'order-1', 'SHIPPED');
+    expect(orderRepo.clearUrgent).toHaveBeenCalledWith({}, 'order-1');
+  });
+
+  it('其他状态迁移不动加急标记', async () => {
+    const { service, orderRepo } = buildService({ order: makeOrder('NEW'), items: [] });
+
+    await service.transition('order-1', 'CANCELLED', { userId: null, username: 't' }, '平台取消');
+
+    expect(orderRepo.clearUrgent).not.toHaveBeenCalled();
+  });
+});
 
 describe('OrderStatusService rollup (orders.md §7)', () => {
   it('all fulfillable lines RESERVED -> READY_TO_PICK', async () => {

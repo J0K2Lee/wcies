@@ -162,6 +162,10 @@ ORDER BY o.is_urgent DESC, p.priority ASC,
 - **入口**：订单列表「订单号」列的旗标，单击切换——**红=加急、黑白=普通**。
 - **终态限制**：`SHIPPED` / `CANCELLED` 订单不可加急（`ORDER_INVALID_STATE`）；
   幂等：已在目标状态时 no-op。
+- **发货自动移除**（用户指示 2026-10-27）：任何进入 `SHIPPED` 的状态迁移
+  （内部出库 / 平台事实发货收敛 / 标记外部履约）都在同一事务里清 `is_urgent`，
+  `urgent_marked_at` 保留（最后一次加急时间）。**取消订单暂不清除**。
+  存量「已发货仍加急」由迁移 `20261027_002` 清理。
 - API：`POST /api/v1/orders/:id/urgent`，body `{ "urgent": true|false }`。
 
 平台分配优先级（用户可设，数值小=优先）存于 `platforms.priority`，管理端在

@@ -1361,6 +1361,29 @@ describe('urgent orders: marking + allocation priority (ADR 0022)', () => {
     expect((await orderDetail(result.body.data.orderId)).erpStatus).toBe('CANCELLED');
   });
 
+  it('发货后自动移除加急标记（2026-10-27 用户指示）', async () => {
+    const skuId = await newSku('URGS');
+    await initialize({ skuId, binId: binA01, quantity: '1' });
+    await mapSku(skuId, `${PREFIX}-URGS-1`);
+    const result = await ingest({ items: [{ platformSkuId: `${PREFIX}-URGS-1`, quantity: '1' }] });
+    const orderId = result.body.data.orderId;
+
+    const on = await client.post<{ isUrgent: boolean }>(`/api/v1/orders/${orderId}/urgent`, {
+      urgent: true,
+    });
+    expect(on.body.data.isUrgent).toBe(true);
+
+    // 标记外部履约走同一个状态机转 SHIPPED（内部出库 / 平台事实发货同一条路径）。
+    const marked = await client.post(`/api/v1/orders/${orderId}/mark-external-fulfillment`, {
+      reason: '测试：发货后移除加急',
+    });
+    expect(marked.status).toBe(200);
+
+    const after = await listOne(orderId);
+    expect(after?.erpStatus).toBe('SHIPPED');
+    expect(after?.isUrgent).toBe(false);
+  });
+
   it('allocates newly-received stock to the urgent backordered order first', async () => {
     const skuId = await newSku('URGP');
     await mapSku(skuId, `${PREFIX}-URGP-1`);

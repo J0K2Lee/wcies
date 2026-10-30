@@ -104,6 +104,13 @@ export class OrderStatusService {
       const current = await this.orderRepo.findById(orderId);
       const from = fromStatus ?? current?.erpStatus ?? null;
       await this.orderRepo.updateErpStatus(runner, orderId, toStatus);
+      if (toStatus === 'SHIPPED') {
+        // 发货后移除加急（用户指示 2026-10-27）：加急只对「还没发出去」的单
+        // 有意义（列表置顶 + 缺货到货后优先分配）。内部出库、平台事实发货、
+        // 标记外部履约等所有发货路径都经过状态机，因此清标记放在同一事务里，
+        // 避免漏某条路径（AGENTS §38）。
+        await this.orderRepo.clearUrgent(runner, orderId);
+      }
       await this.historyRepo.insert(runner, {
         orderId,
         fromStatus: from,
