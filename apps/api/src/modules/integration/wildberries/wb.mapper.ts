@@ -436,6 +436,43 @@ export function isWbWebhookSecretValid(
   return timingSafeEqual(provided, expected);
 }
 
+/**
+ * 卡片是否与订单行标识精确对应（`textSearch` 检索是模糊的，必须再核一遍）：
+ * nmID = platformProductId，vendorCode = offerId/sellerSku，或任一条码 =
+ * platformSkuId。三者任一命中即算（同一商品换标识也能定位）。
+ */
+export function wbCardMatches(
+  card: WbCard,
+  identifiers: {
+    platformSkuId?: string | null;
+    offerId?: string | null;
+    platformProductId?: string | null;
+    sellerSku?: string | null;
+  },
+): boolean {
+  const nmId = String(card.nmID ?? '');
+  const productId = identifiers.platformProductId ?? null;
+  if (productId !== null && productId !== '' && productId === nmId) {
+    return true;
+  }
+  const vendor = typeof card.vendorCode === 'string' ? card.vendorCode : null;
+  for (const candidate of [identifiers.offerId, identifiers.sellerSku]) {
+    if (candidate !== null && candidate !== undefined && candidate !== '' && vendor === candidate) {
+      return true;
+    }
+  }
+  const wanted = identifiers.platformSkuId ?? null;
+  if (wanted !== null && wanted !== '') {
+    for (const size of card.sizes ?? []) {
+      const barcodes = Array.isArray(size.skus) ? size.skus : [];
+      if (barcodes.some((barcode) => String(barcode) === wanted)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // 评价 / 提问（2026-11-02，feedbacks-api 实测形状）
 // ---------------------------------------------------------------------------

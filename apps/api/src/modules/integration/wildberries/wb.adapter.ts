@@ -17,6 +17,7 @@ import { WbClient, WbAuth } from './wb.client';
 import { WB_STICKER_BATCH_LIMIT, WbShipmentService } from './wb-shipment.service';
 import {
   mapCardToListing,
+  wbCardMatches,
   mapWbFeedback,
   mapWbQuestion,
   mapFbsOrderToOrder,
@@ -67,6 +68,43 @@ const WB_FEEDBACK_MAX_PAGES = 3;
 @Injectable()
 export class WbAdapter implements PlatformAdapter {
   readonly platformCode = 'WB' as const;
+
+  /**
+   * 订单行定向读卡片（2026-11-02）。`fetchListingVariant` 此前只有 OZON 实现，
+   * 导致 WB 订单行在本地链接缺失时「打开商品链接 / 映射」两条路都走不通
+   * （实证：WS-001 的 GRAVASTAR-MH1-PRO 卡片在平台存在，但 listing sync 还没
+   * walk 到）。
+   *
+   * 做法：content `cards/list` 的 `filter.textSearch` 支持按卖家货号/nmid 检索
+   * （2026-11-02 实测返回目标卡片），拿到候选后**再精确匹配**（vendorCode /
+   * nmID / 条码），检索是模糊的，不能直接当命中（AGENTS §88）。
+   */
+  async fetchListingVariant(
+    _context: StoreContext,
+    identifiers: {
+      platformSkuId?: string | null;
+      offerId?: string | null;
+      platformProductId?: string | null;
+    },
+  ): Promise<PlatformListingRaw | null> {
+    const storeId = _context.storeId;
+    const auth = parseWbAuth(_context.credential, storeId);
+    const term =
+      firstNonEmpty([
+        identifiers.offerId,
+        identifiers.platformSkuId,
+        identifiers.platformProductId,
+      ]) ?? null;
+    if (term === null) {
+      return null;
+    }
+    const response = await this.client.cardsList(auth, storeId, {
+      settings: { cursor: { limit: LISTING_PAGE_SIZE }, filter: { textSearch: term } },
+    });
+    const cards: ReadonlyArray<WbCard> = Array.isArray(response.cards) ? response.cards : [];
+    const match = cards.find((card) => wbCardMatches(card, identifiers));
+    return match === undefined ? null : mapCardToListing(match);
+  }
 
   /**
    * 商品评价（2026-11-02 实测）：`dateFrom/dateTo` 是 Unix 秒，`take/skip` 分页。
@@ -435,4 +473,14 @@ class WbBadShape extends PlatformApiError {
       details: { reason },
     });
   }
+}
+
+/** 第一个非空字符串（定向读取的检索词优先级：货号 > 条码 > 商品 id）。 */
+function firstNonEmpty(values: ReadonlyArray<string | null | undefined>): string | null {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim() !== '') {
+      return value.trim();
+    }
+  }
+  return null;
 }

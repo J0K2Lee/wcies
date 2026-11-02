@@ -172,6 +172,24 @@ GET https://feedbacks-api.wildberries.ru/api/v1/questions?isAnswered=&take=&skip
 - 退货：`returns-api.wildberries.ru/api/v1/claims?is_archive=&limit=` 可用（实测 200），
   **但 `claims[]` 的条目结构未验证**（该账号 0 条），暂不参与提醒轮询。
 
+## 5d. 订单行定向读卡片（2026-11-02 实现）
+
+`fetchListingVariant`（订单行「打开商品链接 / 映射」的按需补链）此前只有 OZON
+实现，WB 订单行在本地链接缺失时两条路都走不通（实证：WS-001 的
+`GRAVASTAR-MH1-PRO` 卡片在平台存在，但 listing sync 还没 walk 到 →
+「未在本店铺找到该订单行对应的商品链接」）。
+
+实现：`POST /content/v2/get/cards/list` 的 `filter.textSearch` 支持按卖家货号
+检索（2026-11-02 实测），拿到候选后再用 `vendorCode` / `nmID` / `条码`
+**精确核对**（检索是模糊的，不能直接当命中）。检索词优先级：货号 > 条码 > 商品 id。
+
+实测：`offerId=GRAVASTAR-MH1-PRO` → nmID 2005318484，补链后
+`https://www.wildberries.ru/catalog/2005318484/detail.aspx` 可打开。
+
+顺带的事实：WB 该店后台 425 张卡，listing 镜像 418 张——listing sync 是「按
+updatedAt 游标全量走」，差距通常是新卡/新改动还没被下一轮同步覆盖；点一次
+「打开商品链接」会顺带把这张卡补进镜像。
+
 ## 5b. Webhook（已验证 2026-09-18，官方文档核对；已实现）
 
 - **订阅方式与 OZON/Yandex 不同：通过 API 创建**（webhooks-api.wildberries.ru），不是卖家后台 UI。鉴权 = seller token（Authorization）+ **WCIES 服务密钥**（`X-Client-Secret`，解决方案目录注册获得，env `WB_WEBHOOKS_SERVICE_SECRET`）；token 类别必须匹配事件类别。

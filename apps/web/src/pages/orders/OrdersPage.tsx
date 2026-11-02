@@ -2298,7 +2298,7 @@ export function OrdersPage() {
    * 公开商品页（OZON / WB 规则已核实；Yandex 用 listing.url，缺失时退回搜索页）。
    */
   const openPlatformProductPage = useCallback(
-    (item: OrderItem, storeId: string, platformCode: string) => {
+    async (item: OrderItem, storeId: string, platformCode: string) => {
       const skuId = item.skuId;
       const keyword = mappingSearchKeyword(item);
       if (skuId === null && (keyword === null || keyword.trim() === '')) {
@@ -2311,43 +2311,70 @@ export function OrdersPage() {
         window.open(buildOzonProductUrl(item.platformSkuId), '_blank', 'noopener');
         return;
       }
+      type ListingRow = {
+        id: string;
+        platformCode: string;
+        platformProductId: string;
+        /** Yandex 商品页 URL 需要标题拼 slug（2026-10-22）。 */
+        title: string | null;
+        url: string | null;
+      };
+      const findListing = async (): Promise<ListingRow | undefined> => {
+        const result = await apiGet<ListingRow[]>('/api/v1/listings', {
+          storeId,
+          page: 1,
+          pageSize: 20,
+          ...(skuId !== null ? { skuId } : { keyword: keyword!.trim() }),
+        });
+        return result.data.find((row) => row.platformCode === platformCode);
+      };
+
       setPlatformLinkPending(true);
-      apiGet<
-        Array<{
-          id: string;
-          platformCode: string;
-          platformProductId: string;
-          /** Yandex 商品页 URL 需要标题拼 slug（2026-10-22）。 */
-          title: string | null;
-          url: string | null;
-        }>
-      >('/api/v1/listings', {
-        storeId,
-        page: 1,
-        pageSize: 20,
-        ...(skuId !== null ? { skuId } : { keyword: keyword!.trim() }),
-      })
-        .then((result) => {
-          const listing = result.data.find((row) => row.platformCode === platformCode);
-          if (listing === undefined) {
+      try {
+        let listing = await findListing();
+        if (listing === undefined) {
+          // 本地链接镜像可能还没 walk 到这张卡（WB 实证：卡片在平台存在但
+          // listing sync 未覆盖）。按订单行标识定向读一次平台变体补链，再查一遍。
+          const listingId = await ensureVariantListing(item, storeId);
+          if (listingId === null) {
             void message.warning('未在本店铺找到该订单行对应的商品链接');
             return;
           }
-          const url =
-            listing.url ??
-            buildPlatformProductUrl(listing.platformCode, listing.platformProductId, listing.title);
-          if (url === null) {
-            void message.warning(
-              `无法生成 ${listing.platformCode} 的平台商品页地址（缺少商品标题或该平台 URL 规则未核实），可先在商品链接页维护 url`,
-            );
-            return;
+          listing = await findListing();
+          if (listing === undefined) {
+            // 兜底：补链成功但关键字没命中（例如补建时标识形状不同），按 id 直查。
+            listing = (
+              await apiGet<ListingRow[]>('/api/v1/listings', {
+                storeId,
+                page: 1,
+                pageSize: 5,
+                ...(skuId !== null ? { skuId } : {}),
+                keyword: keyword!.trim(),
+              })
+            ).data[0];
           }
-          window.open(url, '_blank', 'noopener');
-        })
-        .catch((error: Error) => void message.error(`定位商品链接失败：${error.message}`))
-        .finally(() => setPlatformLinkPending(false));
+        }
+        if (listing === undefined) {
+          void message.warning('未在本店铺找到该订单行对应的商品链接');
+          return;
+        }
+        const url =
+          listing.url ??
+          buildPlatformProductUrl(listing.platformCode, listing.platformProductId, listing.title);
+        if (url === null) {
+          void message.warning(
+            `无法生成 ${listing.platformCode} 的平台商品页地址（缺少商品标题或该平台 URL 规则未核实），可先在商品链接页维护 url`,
+          );
+          return;
+        }
+        window.open(url, '_blank', 'noopener');
+      } catch (error) {
+        void message.error(`定位商品链接失败：${(error as Error).message}`);
+      } finally {
+        setPlatformLinkPending(false);
+      }
     },
-    [message],
+    [ensureVariantListing, message],
   );
 
   // ---- Context rail: risk-first order preview (task §41-§42) ----
@@ -2480,7 +2507,7 @@ export function OrdersPage() {
                 style={{ marginTop: 8 }}
                 loading={platformLinkPending}
                 onClick={() =>
-                  openPlatformProductPage(
+                  void openPlatformProductPage(
                     selectedItem,
                     railDetail?.storeId ?? selectedRow?.storeId ?? '',
                     railDetail?.platformCode ?? selectedRow?.platformCode ?? '',

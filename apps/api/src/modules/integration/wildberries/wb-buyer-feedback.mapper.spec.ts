@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mapWbFeedback, mapWbQuestion } from './wb.mapper';
+import { mapWbFeedback, mapWbQuestion, wbCardMatches } from './wb.mapper';
 
 /**
  * WB 评价 / 提问映射（2026-11-02 实测形状：feedbacks-api）。
@@ -79,5 +79,33 @@ describe('mapWbQuestion', () => {
     expect(mapped?.answerText).toBeNull();
     expect(mapped?.answeredAt).toBeNull();
     expect(mapWbQuestion({ text: '无 id' })).toBeNull();
+  });
+});
+
+/**
+ * 定向卡片读取的精确匹配（2026-11-02）。
+ *
+ * WB `cards/list` 的 `textSearch` 是**模糊检索**（实测按货号能搜到目标卡，
+ * 但也可能带回同名系列），所以 adapter 必须再用 vendorCode / nmID / 条码
+ * 精确核对一遍，否则会把别人的链接当成这条订单行的商品页（AGENTS §88）。
+ */
+describe('wbCardMatches', () => {
+  const card = {
+    nmID: 2005318484,
+    vendorCode: 'GRAVASTAR-MH1-PRO',
+    sizes: [{ skus: ['2009259290673'] }],
+  };
+
+  it('按货号、nmID、条码任一精确命中', () => {
+    expect(wbCardMatches(card, { offerId: 'GRAVASTAR-MH1-PRO' })).toBe(true);
+    expect(wbCardMatches(card, { sellerSku: 'GRAVASTAR-MH1-PRO' })).toBe(true);
+    expect(wbCardMatches(card, { platformProductId: '2005318484' })).toBe(true);
+    expect(wbCardMatches(card, { platformSkuId: '2009259290673' })).toBe(true);
+  });
+
+  it('模糊搜到的相似卡片不算命中（避免张冠李戴）', () => {
+    expect(wbCardMatches(card, { offerId: 'GRAVASTAR-MH1' })).toBe(false);
+    expect(wbCardMatches(card, { platformSkuId: '2009259290674' })).toBe(false);
+    expect(wbCardMatches(card, {})).toBe(false);
   });
 });
