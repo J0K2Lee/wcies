@@ -4059,7 +4059,7 @@ export interface components {
         NotificationDto: {
             id: string;
             /** @enum {string} */
-            type: "ORDER_INTERCEPTION_REQUIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED";
+            type: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
             /** @enum {string} */
             channel: "SYSTEM" | "FEISHU";
             /** @example ORDER_INTERCEPTION */
@@ -4122,7 +4122,7 @@ export interface components {
             /** @enum {string} */
             channel: "FEISHU_DM" | "FEISHU_GROUP";
             /** @enum {string} */
-            eventType: "ORDER_INTERCEPTION_REQUIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED";
+            eventType: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
             /**
              * @example {
              *       "level": [
@@ -4147,7 +4147,7 @@ export interface components {
              * @example ORDER_INTERCEPTION_REQUIRED
              * @enum {string}
              */
-            eventType: "ORDER_INTERCEPTION_REQUIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED";
+            eventType: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
             /**
              * @description AND 组合的过滤条件：键为事件可过滤字段（storeId / warehouseCode / skuCode / level），值为候选集合。空对象 = 该事件全收
              * @example {
@@ -8836,7 +8836,7 @@ export interface operations {
     NotificationController_list: {
         parameters: {
             query?: {
-                type?: "ORDER_INTERCEPTION_REQUIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED";
+                type?: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
                 channel?: "SYSTEM" | "FEISHU";
                 referenceId?: string;
             };

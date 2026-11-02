@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildFeishuCard, conditionsMatch, NotificationEventData } from './notification-events';
+import {
+  buildFeishuCard,
+  conditionsMatch,
+  NOTIFICATION_EVENTS,
+  NotificationEventData,
+} from './notification-events';
+import { NOTIFICATION_TYPES } from '../enums/notification.constants';
 
 /**
  * 订阅条件与卡片（2026-10-26）。
@@ -59,5 +65,39 @@ describe('buildFeishuCard（schema 2.0）', () => {
     const card = buildFeishuCard(data, { webBaseUrl: null });
     const elements = (card['body'] as { elements: Array<Record<string, unknown>> }).elements;
     expect(elements.some((element) => element['tag'] === 'column_set')).toBe(false);
+  });
+});
+
+/**
+ * 订阅白名单必须与事件目录同源（2026-11-02 回归）。
+ *
+ * 背景：`NOTIFICATION_TYPES` 曾是手写的四个事件，新增事件只登记目录、没进
+ * 白名单，导致「我的订阅 → 新增订阅」选新事件时 400
+ * `eventType must be one of …ORDER_INTERCEPTION_REQUIRED…`。
+ */
+describe('通知事件目录 ↔ 订阅白名单', () => {
+  it('目录里的每个事件都可订阅，且白名单没有多余项', () => {
+    const catalog = Object.keys(NOTIFICATION_EVENTS);
+    expect(catalog.length).toBeGreaterThan(0);
+    expect([...NOTIFICATION_TYPES].sort()).toEqual([...catalog].sort());
+  });
+
+  it('买家侧四类提醒在白名单里（用户实测故障点）', () => {
+    expect(NOTIFICATION_TYPES).toEqual(
+      expect.arrayContaining([
+        'BUYER_MESSAGE_RECEIVED',
+        'REVIEW_CREATED',
+        'RETURN_REQUESTED',
+        'RETURN_STATE_CHANGED',
+      ]),
+    );
+  });
+
+  it('每个事件都声明了级别、可过滤字段与站内跳转路径', () => {
+    for (const definition of Object.values(NOTIFICATION_EVENTS)) {
+      expect(definition.level).toBeTruthy();
+      expect(definition.conditionFields.length).toBeGreaterThan(0);
+      expect(definition.linkPath.startsWith('/')).toBe(true);
+    }
   });
 });

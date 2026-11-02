@@ -1320,9 +1320,15 @@
               "type": "string",
               "enum": [
                 "ORDER_INTERCEPTION_REQUIRED",
-                "ORDER_INTERCEPTION_FAILED",
                 "STORE_CREDENTIAL_EXPIRING",
-                "STORE_CREDENTIAL_EXPIRED"
+                "STORE_CREDENTIAL_EXPIRED",
+                "ORDER_INTERCEPTION_FAILED",
+                "STORE_WEBHOOK_PAUSED",
+                "STORE_WEBHOOK_UNHEALTHY",
+                "BUYER_MESSAGE_RECEIVED",
+                "REVIEW_CREATED",
+                "RETURN_REQUESTED",
+                "RETURN_STATE_CHANGED"
               ]
             }
           },
@@ -13296,9 +13302,15 @@
             "type": "string",
             "enum": [
               "ORDER_INTERCEPTION_REQUIRED",
-              "ORDER_INTERCEPTION_FAILED",
               "STORE_CREDENTIAL_EXPIRING",
-              "STORE_CREDENTIAL_EXPIRED"
+              "STORE_CREDENTIAL_EXPIRED",
+              "ORDER_INTERCEPTION_FAILED",
+              "STORE_WEBHOOK_PAUSED",
+              "STORE_WEBHOOK_UNHEALTHY",
+              "BUYER_MESSAGE_RECEIVED",
+              "REVIEW_CREATED",
+              "RETURN_REQUESTED",
+              "RETURN_STATE_CHANGED"
             ]
           },
           "channel": {
@@ -13467,9 +13479,15 @@
             "type": "string",
             "enum": [
               "ORDER_INTERCEPTION_REQUIRED",
-              "ORDER_INTERCEPTION_FAILED",
               "STORE_CREDENTIAL_EXPIRING",
-              "STORE_CREDENTIAL_EXPIRED"
+              "STORE_CREDENTIAL_EXPIRED",
+              "ORDER_INTERCEPTION_FAILED",
+              "STORE_WEBHOOK_PAUSED",
+              "STORE_WEBHOOK_UNHEALTHY",
+              "BUYER_MESSAGE_RECEIVED",
+              "REVIEW_CREATED",
+              "RETURN_REQUESTED",
+              "RETURN_STATE_CHANGED"
             ]
           },
           "conditions": {
@@ -13513,9 +13531,15 @@
             "type": "string",
             "enum": [
               "ORDER_INTERCEPTION_REQUIRED",
-              "ORDER_INTERCEPTION_FAILED",
               "STORE_CREDENTIAL_EXPIRING",
-              "STORE_CREDENTIAL_EXPIRED"
+              "STORE_CREDENTIAL_EXPIRED",
+              "ORDER_INTERCEPTION_FAILED",
+              "STORE_WEBHOOK_PAUSED",
+              "STORE_WEBHOOK_UNHEALTHY",
+              "BUYER_MESSAGE_RECEIVED",
+              "REVIEW_CREATED",
+              "RETURN_REQUESTED",
+              "RETURN_STATE_CHANGED"
             ],
             "example": "ORDER_INTERCEPTION_REQUIRED"
           },
