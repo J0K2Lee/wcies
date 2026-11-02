@@ -79,6 +79,8 @@ import { LABEL_JOB } from './services/label-prefetch.service';
       { name: QUEUE_NAMES.categoryTree },
       { name: QUEUE_NAMES.enrichment },
       { name: QUEUE_NAMES.label },
+      // 买家消息 webhook 只入队（采集在 BuyerFeedbackModule，避免模块环）。
+      { name: QUEUE_NAMES.buyerFeedback },
     ),
     IntegrationModule,
     OzonModule,

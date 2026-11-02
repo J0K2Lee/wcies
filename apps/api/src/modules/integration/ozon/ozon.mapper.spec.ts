@@ -398,8 +398,13 @@ describe('mapRfbsReturn (dual-axis T5)', () => {
     expect(result.platformSkuId).toBeNull();
   });
 
-  it('rejects a record without return_number (business key)', () => {
-    expect(() => mapRfbsReturn({ return_id: 1 } as unknown as OzonRfbsReturn)).toThrow(
+  it('return_number 为空串时退回 return_id（2026-11-02 实测存在）', () => {
+    const result = mapRfbsReturn({ ...RFBS_RETURN, return_id: 36353848, return_number: '' });
+    expect(result.platformReturnId).toBe('ID36353848');
+  });
+
+  it('rejects a record without any business key', () => {
+    expect(() => mapRfbsReturn({ ...RFBS_RETURN, return_id: 0, return_number: '' })).toThrow(
       OzonMappingError,
     );
   });

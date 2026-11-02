@@ -37,6 +37,7 @@ import { NotificationModule } from './modules/notification/notification.module';
 import { IntegrationModule } from './modules/integration/integration.module';
 import { SyncModule } from './modules/sync/sync.module';
 import { SystemModule } from './modules/system/system.module';
+import { BuyerFeedbackModule } from './modules/buyer-feedback/buyer-feedback.module';
 
 /**
  * HTTP API root module.
@@ -79,6 +80,7 @@ import { SystemModule } from './modules/system/system.module';
     IntegrationModule,
     SystemModule,
     SyncModule,
+    BuyerFeedbackModule,
     ...(process.env.NODE_ENV !== 'production' ? [DevModule] : []),
   ],
   providers: [

@@ -70,6 +70,12 @@ export const OZON_WEBHOOK_EVENT_TYPES = [
   'TYPE_STATE_CHANGED',
   'TYPE_CREATE_ITEM',
   'TYPE_UPDATE_ITEM',
+  /**
+   * 买家会话新消息（2026-11-02）。平台载荷字段未公开 → 只当"去拉一次"的
+   * 信号，采集走 `/v3/chat/*`（buyer-feedback 模块）。加到推荐集合后，
+   * 下一次「订阅/对齐事件」会把该类型一起写上；存量店铺需要显式对齐一次。
+   */
+  'TYPE_NEW_MESSAGE',
 ] as const;
 
 /**

@@ -56,6 +56,7 @@ function buildService(input: {
     }),
     fetchOrdersByPlatformIds,
   };
+  const buyerFeedbackQueue = { add: vi.fn().mockResolvedValue(undefined) } as unknown as Queue;
   const service = new WebhookProcessService(
     { getAdapter: vi.fn().mockReturnValue(adapter) } as unknown as PlatformAdapterRegistry,
     {
@@ -68,9 +69,16 @@ function buildService(input: {
     { ingestPlatformOrders: ingestFn } as unknown as OrderSyncService,
     rawEventRepo,
     {} as Queue,
+    buyerFeedbackQueue,
     { error: vi.fn(), warn: vi.fn(), info: vi.fn() } as unknown as AppLoggerService,
   );
-  return { service, markStatus, ingest: ingestFn, fetchOrdersByPlatformIds };
+  return {
+    service,
+    markStatus,
+    ingest: ingestFn,
+    fetchOrdersByPlatformIds,
+    buyerFeedbackQueue,
+  };
 }
 
 describe('WebhookProcessService (dual-axis T2)', () => {
@@ -172,6 +180,7 @@ describe('WebhookProcessService (dual-axis T2)', () => {
         findById: vi.fn().mockResolvedValue({ id: 're-1', status: 'PROCESSED', payload: {} }),
         markStatus,
       } as unknown as ExternalRawEventRepository,
+      {} as Queue,
       {} as Queue,
       {} as unknown as AppLoggerService,
     );

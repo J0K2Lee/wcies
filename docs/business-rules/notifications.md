@@ -84,6 +84,10 @@
 | `STORE_CREDENTIAL_EXPIRED` | HIGH | 同上 | 同上（过期后每天一条，直到换绑） |
 | `STORE_WEBHOOK_PAUSED` | HIGH | storeId / platform | `webhook:<storeId>:PAUSED:<YYYY-MM-DD>` |
 | `STORE_WEBHOOK_UNHEALTHY` | WARN | storeId / platform | `webhook:<storeId>:UNHEALTHY:<YYYY-MM-DD>` |
+| `BUYER_MESSAGE_RECEIVED` | WARN | storeId / platform | `chat:<storeId>:<chatId>:<lastMessageId>` |
+| `REVIEW_CREATED` | WARN | storeId / platform | `review:<storeId>:<reviewId>` |
+| `RETURN_REQUESTED` | WARN | storeId / platform | `return:<storeId>:<returnNo>:created` |
+| `RETURN_STATE_CHANGED` | INFO | storeId / platform | `return:<storeId>:<returnNo>:<state>` |
 
 后两条来自推送订阅巡检（2026-10-27，用户确认「暂停要进异常中心」）：
 平台会在连续投递失败后**自动暂停整个订阅**，而暂停等于「订单状态不再更新」，
@@ -97,6 +101,17 @@
 
 新增事件只需在事件目录登记（级别、可过滤字段、卡片布局、跳转路径），
 订阅与投递逻辑无需改动。
+
+**买家侧提醒（2026-11-02）的聚合口径**：
+
+- 买家消息**按会话聚合**——一次轮询里同一会话新增 N 条只推一张卡，正文取
+  最后一条，去重键带最后一条消息 id；首次接入某店铺时只回填历史未读、不发
+  提醒（否则订阅瞬间会收到几十张卡）。
+- 评价**只推 1-3 星**（4-5 星只落库）；OZON 评价 API 需要卖家付费订阅，
+  无权限的店铺不产事件（见 `docs/integrations/ozon.md` §6.8）。
+- 退货新建与状态变化各推一次，同一退货单同一状态只推一次。
+- 四类事件都只带 `storeId` / `platform` 两个可过滤字段；卡片正文会截断到
+  约 200 字，买家消息正文不进日志（AGENTS §67）。
 
 ## 7. 接口
 

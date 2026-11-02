@@ -15,6 +15,8 @@ export const QUEUE_NAMES = {
   enrichment: 'wcies.enrichment',
   /** 面单后台任务：预取归档 + 终态清理（2026-10-21）。 */
   label: 'wcies.label',
+  /** 买家侧提醒采集：聊天/评价/退货（2026-11-02）。 */
+  buyerFeedback: 'wcies.buyer-feedback',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];

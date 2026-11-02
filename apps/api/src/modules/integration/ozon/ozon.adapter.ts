@@ -2,12 +2,15 @@ import { Injectable } from '@nestjs/common';
 import {
   PaginatedResult,
   PlatformAdapter,
+  PlatformChatMessageRaw,
+  PlatformChatSummaryRaw,
   PlatformCredentialContext,
   PlatformLabelFile,
   PlatformListingRaw,
   PlatformOrderLabelFile,
   PlatformOrderRaw,
   PlatformReturnRaw,
+  PlatformReviewRaw,
   PlatformShipmentPreparation,
   PlatformWebhookEvent,
   StoreContext,
@@ -16,9 +19,12 @@ import { OzonClient, OzonAuth } from './ozon.client';
 import { OzonShipmentService } from './ozon-shipment.service';
 import { parseOzonAuth } from './ozon-auth';
 import {
+  mapChatMessage,
+  mapChatSummaries,
   mapPostingToOrder,
   mapProductToListing,
   mapRfbsReturn,
+  mapReview,
   mapWebhookPayload,
 } from './ozon.mapper';
 import { mapProductImages } from './ozon-product-image.mapper';
@@ -53,6 +59,10 @@ const LISTING_PAGE_SIZE = 200;
 const ORDER_PAGE_SIZE = 100;
 /** Page size for /v2/returns/rfbs/list (dual-axis T5). */
 const RETURN_PAGE_SIZE = 200;
+/** /v3/chat/list 的每页会话数（平台上限 100，取 50 够用）。 */
+const CHAT_LIST_LIMIT = 50;
+/** /v2/review/list 每页条数（平台允许 20–100）。 */
+const REVIEW_PAGE_SIZE = 50;
 /** Batch size for /v3/product/info/list detail enrichment (conservative). */
 const PRODUCT_INFO_BATCH = 100;
 
@@ -65,6 +75,9 @@ const PRODUCT_INFO_BATCH = 100;
 @Injectable()
 export class OzonAdapter implements PlatformAdapter {
   readonly platformCode = 'OZON' as const;
+
+  /** 退货列表实测可用（2026-11-02）→ 参与退货提醒轮询。 */
+  readonly returnAlertsEnabled = true;
 
   constructor(
     private readonly client: OzonClient,
@@ -279,12 +292,16 @@ export class OzonAdapter implements PlatformAdapter {
   async fetchReturns(
     context: StoreContext,
     cursor?: unknown,
+    options?: { createdFrom?: Date },
   ): Promise<PaginatedResult<PlatformReturnRaw>> {
     const auth = parseAuth(context.credential, context.storeId);
     const lastReturnId = isOzonReturnCursor(cursor) ? cursor.lastReturnId : 0;
     const response = await this.client.rfbsReturnsList(auth, context.storeId, {
       lastId: lastReturnId,
       limit: RETURN_PAGE_SIZE,
+      ...(options?.createdFrom === undefined
+        ? {}
+        : { createdFrom: options.createdFrom.toISOString() }),
     });
     const rows: ReadonlyArray<OzonRfbsReturn> = Array.isArray(response?.returns)
       ? response.returns
@@ -300,6 +317,77 @@ export class OzonAdapter implements PlatformAdapter {
   }
 
   // -----------------------------------------------------------------------
+
+  /**
+   * 买家会话摘要（2026-11-02）。只读；`unreadOnly` 把范围压到还有未读的会话。
+   * chat_type 原词原样带回，过滤（只看 BUYER_SELLER）由调用方决定。
+   */
+  async fetchChats(
+    context: StoreContext,
+    options?: { unreadOnly?: boolean },
+  ): Promise<readonly PlatformChatSummaryRaw[]> {
+    const auth = parseAuth(context.credential, context.storeId);
+    const response = await this.client.chatList(auth, context.storeId, {
+      limit: CHAT_LIST_LIMIT,
+      ...(options?.unreadOnly === true ? { unreadOnly: true } : {}),
+    });
+    return mapChatSummaries(response.chats ?? []);
+  }
+
+  /**
+   * 会话消息（2026-11-02）。给出 `fromMessageId` 时取该消息之后的增量，
+   * 否则取最近 `limit` 条。平台按 message_id 升序返回增量。
+   */
+  async fetchChatMessages(
+    context: StoreContext,
+    input: { chatId: string; fromMessageId?: string; limit?: number },
+  ): Promise<readonly PlatformChatMessageRaw[]> {
+    const auth = parseAuth(context.credential, context.storeId);
+    const response = await this.client.chatHistory(auth, context.storeId, input);
+    const messages = response.messages ?? [];
+    const out: PlatformChatMessageRaw[] = [];
+    for (const item of messages) {
+      try {
+        out.push(mapChatMessage(input.chatId, item));
+      } catch {
+        // 单条畸形消息不拖垮整段会话（AGENTS.md §49）。
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 商品评价（2026-11-02）。平台要求卖家付费订阅：无权限时客户端抛
+   * PLATFORM_AUTH_ERROR（403 PermissionDenied），调用方据此停止轮询。
+   */
+  async fetchReviews(
+    context: StoreContext,
+    input: { publishedFrom: Date; limit?: number; lastId?: string },
+  ): Promise<PaginatedResult<PlatformReviewRaw>> {
+    const auth = parseAuth(context.credential, context.storeId);
+    const limit = input.limit ?? REVIEW_PAGE_SIZE;
+    const response = await this.client.reviewListV2(auth, context.storeId, {
+      limit,
+      sort_dir: 'ASC',
+      ...(input.lastId === undefined ? {} : { last_id: input.lastId }),
+      filters: { published_from: input.publishedFrom.toISOString() },
+    });
+    const rows = response.reviews ?? [];
+    const items: PlatformReviewRaw[] = [];
+    for (const row of rows) {
+      const mapped = mapReview(row);
+      if (mapped !== null) {
+        items.push(mapped);
+      }
+    }
+    const last = rows[rows.length - 1];
+    const hasMore = response.has_next === true;
+    return {
+      items,
+      nextCursor: hasMore && last?.id != null ? { lastReviewId: String(last.id) } : null,
+      hasMore,
+    };
+  }
 
   /**
    * WRITE: assemble the order on OZON (组包, awaiting_packaging ->

@@ -258,6 +258,56 @@ export interface PlatformReturnRaw {
 }
 
 // ---------------------------------------------------------------------------
+// 买家侧事实（2026-11-02）：聊天消息与评价
+// ---------------------------------------------------------------------------
+
+/** 一个买家会话的摘要（`/v3/chat/list` 的归一化结果）。 */
+export interface PlatformChatSummaryRaw {
+  readonly chatId: string;
+  /** BUYER_SELLER / SELLER_API_NOTIFICATIONS / UNSPECIFIED（平台原词）。 */
+  readonly chatType: string;
+  /** OPENED / CLOSED（平台原词）。 */
+  readonly chatStatus: string;
+  readonly unreadCount: number;
+  /** 平台消息 id（十进制字符串，避免 int64 精度问题）。 */
+  readonly lastMessageId: string | null;
+  readonly firstUnreadMessageId: string | null;
+  readonly createdAt: Date | null;
+}
+
+/** 一条会话消息（`/v3/chat/history` 的归一化结果）。 */
+export interface PlatformChatMessageRaw {
+  readonly chatId: string;
+  readonly platformMessageId: string;
+  /** IN（买家）/ OUT（卖家自己）/ SYSTEM（平台、客服、通知）。 */
+  readonly direction: 'IN' | 'OUT' | 'SYSTEM';
+  readonly senderType: string | null;
+  readonly senderId: string | null;
+  /** 消息正文（平台 data[] 按行拼接；纯图片消息可能为空）。 */
+  readonly bodyText: string | null;
+  readonly hasImage: boolean;
+  readonly orderNumber: string | null;
+  readonly platformSkuId: string | null;
+  readonly createdAt: Date;
+  readonly rawData: Record<string, unknown>;
+}
+
+/** 一条商品评价（`/v2/review/list` 的归一化结果）。 */
+export interface PlatformReviewRaw {
+  readonly platformReviewId: string;
+  readonly rating: number | null;
+  readonly bodyText: string | null;
+  readonly platformSkuId: string | null;
+  readonly publishedAt: Date | null;
+  readonly status: string | null;
+  readonly orderStatus: string | null;
+  readonly photosCount: number;
+  readonly videosCount: number;
+  readonly commentsCount: number;
+  readonly rawData: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
 // Webhooks
 // ---------------------------------------------------------------------------
 
@@ -267,6 +317,12 @@ export const PLATFORM_WEBHOOK_EVENT_TYPES = [
   'POSTING_CANCELLED',
   'POSTING_STATE_CHANGED',
   'ITEM_CHANGED',
+  /**
+   * 买家会话有新消息（2026-11-02）。平台载荷字段未公开文档，因此这里只承诺
+   * 「该店铺的聊天有变化」——处理器一律回读 `/v3/chat/*`，不解析载荷
+   * （AGENTS.md §88：不猜平台字段）。
+   */
+  'CHAT_MESSAGE',
   'PING',
   'UNKNOWN',
 ] as const;
@@ -430,7 +486,42 @@ export interface PlatformAdapter {
   fetchReturns?(
     context: StoreContext,
     cursor?: unknown,
+    options?: { readonly createdFrom?: Date },
   ): Promise<PaginatedResult<PlatformReturnRaw>>;
+
+  /**
+   * 退货提醒轮询是否可用（2026-11-02）。缺省为 false：只有**实测能稳定
+   * 返回退货列表**的平台才声明 true。Yandex 的 returns 响应当前与已验证
+   * schema 不符，先不参与提醒轮询（等修好再打开，避免每 15 分钟一条错误日志）。
+   */
+  readonly returnAlertsEnabled?: boolean;
+
+  /**
+   * 买家会话摘要（2026-11-02，只读）。`unreadOnly` 时只要还有未读的会话——
+   * 定时提醒与 webhook 触发都走这条路，避免依赖未公开的推送载荷。
+   */
+  fetchChats?(
+    context: StoreContext,
+    options?: { readonly unreadOnly?: boolean },
+  ): Promise<readonly PlatformChatSummaryRaw[]>;
+
+  /**
+   * 一个会话的消息（只读）。`fromMessageId` 给出时按「从旧到新」取该消息
+   * 之后的部分（增量）；不给出时取最近 `limit` 条。
+   */
+  fetchChatMessages?(
+    context: StoreContext,
+    input: { readonly chatId: string; readonly fromMessageId?: string; readonly limit?: number },
+  ): Promise<readonly PlatformChatMessageRaw[]>;
+
+  /**
+   * 商品评价（只读，2026-11-02）。平台可能要求付费订阅——实现方在无权限时
+   * 抛 `PlatformReviewAccessError`，调用方据此停止轮询而不是刷错误。
+   */
+  fetchReviews?(
+    context: StoreContext,
+    input: { readonly publishedFrom: Date; readonly limit?: number; readonly lastId?: string },
+  ): Promise<PaginatedResult<PlatformReviewRaw>>;
 
   /**
    * Optional WRITE: hand the order over to the platform for dispatch (OZON

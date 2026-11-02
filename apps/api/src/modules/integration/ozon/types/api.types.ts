@@ -191,6 +191,83 @@ export interface OzonRfbsReturnListResponse {
 }
 
 // ---------------------------------------------------------------------------
+// POST /v3/chat/list · POST /v3/chat/history（2026-11-02 实测）
+// ---------------------------------------------------------------------------
+
+/** 会话摘要（实测：`chat.chat_id` / `chat.chat_type` / `unread_count` …）。 */
+export interface OzonChatListItem {
+  readonly chat?: {
+    readonly chat_id?: string | null;
+    readonly chat_type?: string | null;
+    readonly chat_status?: string | null;
+    readonly created_at?: string | null;
+  } | null;
+  readonly unread_count?: number | null;
+  /** int64：bigint-safe 解析后是字符串（可能超过 2^53）。 */
+  readonly first_unread_message_id?: number | string | null;
+  readonly last_message_id?: number | string | null;
+}
+
+export interface OzonChatListResponse {
+  readonly chats?: readonly OzonChatListItem[];
+  readonly total_unread_count?: number | null;
+  readonly cursor?: string | null;
+  readonly has_next?: boolean | null;
+}
+
+/** 一条会话消息（实测：`data[]` 是 Markdown 行数组；`user.type`=Customer/Seller）。 */
+export interface OzonChatHistoryMessage {
+  /** int64：bigint-safe 解析后是字符串（可能超过 2^53）。 */
+  readonly message_id?: number | string | null;
+  readonly user?: { readonly id?: string | null; readonly type?: string | null } | null;
+  readonly created_at?: string | null;
+  readonly is_read?: boolean | null;
+  readonly data?: readonly string[] | null;
+  readonly context?: { readonly order_number?: string | null; readonly sku?: string | null } | null;
+  readonly is_image?: boolean | null;
+  readonly [key: string]: unknown;
+}
+
+export interface OzonChatHistoryResponse {
+  readonly has_next?: boolean | null;
+  readonly messages?: readonly OzonChatHistoryMessage[];
+}
+
+// ---------------------------------------------------------------------------
+// POST /v2/review/list（2026-11-02：需卖家付费订阅，403 PermissionDenied）
+// ---------------------------------------------------------------------------
+
+export interface OzonReviewListRequest {
+  readonly limit: number;
+  readonly sort_dir?: 'ASC' | 'DESC';
+  readonly last_id?: string;
+  readonly filters?: {
+    readonly published_from?: string;
+    readonly published_to?: string;
+  };
+}
+
+export interface OzonReview {
+  readonly id?: string | null;
+  readonly rating?: number | null;
+  readonly text?: string | null;
+  readonly sku?: number | null;
+  readonly published_at?: string | null;
+  readonly status?: string | null;
+  readonly order_status?: string | null;
+  readonly photos_amount?: number | null;
+  readonly videos_amount?: number | null;
+  readonly comments_amount?: number | null;
+  readonly [key: string]: unknown;
+}
+
+export interface OzonReviewListResponse {
+  readonly reviews?: readonly OzonReview[];
+  readonly has_next?: boolean | null;
+  readonly last_id?: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // POST /v3/posting/fbs/get
 // ---------------------------------------------------------------------------
 

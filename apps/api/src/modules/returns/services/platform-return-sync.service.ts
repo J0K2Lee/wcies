@@ -6,6 +6,7 @@ import { ExceptionService } from '../../exception/services/exception.service';
 import { OrderService } from '../../order/services/order.service';
 import { SyncContextService } from '../../sync/services/sync-context.service';
 import { PlatformAdapterRegistry } from '../../integration/platform-adapter.registry';
+import { NotificationService } from '../../notification/services/notification.service';
 import { PlatformReturnRepository } from '../repositories/platform-return.repository';
 import { PlatformReturnView } from '../dto/return.dto';
 
@@ -28,12 +29,22 @@ export class PlatformReturnSyncService {
     private readonly exceptionService: ExceptionService,
     private readonly platformReturnRepo: PlatformReturnRepository,
     private readonly operationLog: OperationLogService,
+    private readonly notification: NotificationService,
   ) {}
 
-  /** Manual full pull for one store (all pages, bounded by adapter cursor). */
+  /**
+   * 拉取一个店铺的退货记录。
+   *
+   * - `createdFrom`：只拉该时间之后创建的退货单（提醒轮询用，避免每次全量翻页）；
+   * - `silent`：定时轮询跳过操作日志（否则每天几十条 SYNC_RETURNS 噪音）。
+   *
+   * 新建/状态变化的退货单会发通知事件（2026-11-02，买家侧提醒），
+   * 但这里绝不写库存（退货入库仍由退货批次检验决定，returns.md §3）。
+   */
   async syncStoreReturns(
     storeId: string,
     operator: OperatorContext,
+    options?: { createdFrom?: Date; silent?: boolean; raiseUnlinkable?: boolean },
   ): Promise<{
     created: number;
     updated: number;
@@ -50,13 +61,38 @@ export class PlatformReturnSyncService {
     let unlinkable = 0;
     let cursor: unknown = undefined;
     for (;;) {
-      const page = await adapter.fetchReturns(context, cursor);
+      const page = await adapter.fetchReturns(context, cursor, options);
       for (const raw of page.items) {
-        const outcome = await this.upsertOne(store.id, raw);
+        const previous = await this.platformReturnRepo.findByStoreAndReturnId(
+          store.id,
+          raw.platformReturnId,
+        );
+        const outcome = await this.upsertOne(store.id, raw, options);
         if (outcome === 'CREATED') {
           created += 1;
+          await this.notification.notifyReturnRequested({
+            storeId: store.id,
+            storeCode: store.storeCode,
+            platform: adapter.platformCode,
+            returnNo: raw.platformReturnId,
+            orderNo: raw.platformOrderId,
+            state: raw.state,
+            quantity: raw.quantity,
+          });
         } else if (outcome === 'UPDATED') {
           updated += 1;
+          if (previous !== null && raw.state !== null && raw.state !== previous.state) {
+            await this.notification.notifyReturnStateChanged({
+              storeId: store.id,
+              storeCode: store.storeCode,
+              platform: adapter.platformCode,
+              returnNo: raw.platformReturnId,
+              orderNo: raw.platformOrderId,
+              state: raw.state,
+              previousState: previous.state,
+              quantity: raw.quantity,
+            });
+          }
         }
         if (await this.isUnlinked(store.id, raw)) {
           unlinkable += 1;
@@ -70,14 +106,16 @@ export class PlatformReturnSyncService {
         break; // Safety valve: a manual run never pages unbounded.
       }
     }
-    await this.operationLog.record({
-      entityType: 'PLATFORM_RETURN',
-      entityId: store.id,
-      entityCode: store.storeCode,
-      action: 'SYNC_RETURNS',
-      changes: { created: { from: null, to: created }, updated: { from: null, to: updated } },
-      operator,
-    });
+    if (options?.silent !== true) {
+      await this.operationLog.record({
+        entityType: 'PLATFORM_RETURN',
+        entityId: store.id,
+        entityCode: store.storeCode,
+        action: 'SYNC_RETURNS',
+        changes: { created: { from: null, to: created }, updated: { from: null, to: updated } },
+        operator,
+      });
+    }
     return { created, updated, unlinkable };
   }
 
@@ -114,6 +152,7 @@ export class PlatformReturnSyncService {
   private async upsertOne(
     storeId: string,
     raw: PlatformReturnRaw,
+    options?: { raiseUnlinkable?: boolean },
   ): Promise<'CREATED' | 'UPDATED' | 'UNCHANGED'> {
     const existing = await this.platformReturnRepo.findByStoreAndReturnId(
       storeId,
@@ -125,7 +164,9 @@ export class PlatformReturnSyncService {
         ...PlatformReturnRepository.toRow(raw, storeId),
         orderId,
       });
-      if (orderId === null && raw.platformOrderId !== null) {
+      if (orderId === null && raw.platformOrderId !== null && options?.raiseUnlinkable !== false) {
+        // 定时提醒轮询传 raiseUnlinkable=false：提醒只负责"有新退货"，不该
+        // 顺手给历史退货刷一批 RETURN_ORDER_NOT_FOUND 异常（人工同步仍会报）。
         // system_exceptions.reference_id is a uuid column, so the exception
         // must hang off the JUST-CREATED record id (insert first, raise
         // second); (type, reference) OPEN dedup keeps re-syncs single-row.

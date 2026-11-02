@@ -590,6 +590,57 @@ Client-Id 下就留着一条指向 `…/stores/ON-001` 的停用订阅（ON-001 
 | ON-010 | 456081 | 原本正常 |
 | ON-011 | 456866 | 原本正常 |
 
+### 6.8 买家侧采集：聊天 / 评价 / 退货（2026-11-02 T0 实测）
+
+**聊天（可用，推送只作触发）**
+
+| 接口 | 用途 | 实测 |
+|---|---|---|
+| `POST /v3/chat/list` | 未读会话（`filter.unread_only`） | 200；每店返回 `chat.chat_id` / `chat.chat_type` / `unread_count` / `first_unread_message_id` / `last_message_id`；首次调用冷启动 12.9s，之后 ~250ms；连发 6 次无 429 |
+| `POST /v3/chat/history` | 会话消息（`direction` Forward/Backward、`from_message_id`、limit≤1000） | 200；消息含 `message_id` / `user{id,type}` / `data[]`(Markdown 行) / `is_read` / `context{order_number,sku}` / `is_image` |
+
+⚠ **`chat_type` 必须过滤**：实测存在 `BUYER_SELLER`（买家会话）、
+`SELLER_API_NOTIFICATIONS`（平台系统通知）、`UNSPECIFIED`。不过滤会把平台自己
+的运维消息当成买家消息推给运营。
+
+⚠ **`message_id` 是 int64（19 位）**：`3000000467309489658` 超过 JS 安全整数，
+`JSON.parse` 会舍入成 `…489700`，导致增量水位与去重键错位。客户端对
+`/v3/chat/*` 启用 `quoteLongIntegers()`（≥16 位整数先加引号再解析），请求侧
+`from_message_id` 用原始数字字面量拼接（`JSON.stringify` 同样会丢精度）。
+
+⚠ 标记已读 `/v2/chat/read` 与回复 `/v1/chat/send/message` 需要卖家
+Premium Plus/Pro 订阅——**本期不做**（未验证账号是否有该订阅）。
+
+推送类型 `TYPE_NEW_MESSAGE` 的载荷字段平台未公开，因此 WCIES 只把它当
+「该店聊天有变化」的触发信号，采集一律回读 `/v3/chat/*`（§88）。
+
+**评价（当前不可用）**
+
+`/v2/review/list` 与 `/v1/review/list` 在 ON-002/003/007/009 实测返回：
+
+```text
+403 {"code":7,"message":"... CheckSellerReviewAccess: PermissionDenied
+     desc = not available with existing subscription"}
+```
+
+即评价 API 需要卖家付费订阅，这 10 家店没有。WCIES 仍实现了按
+`filters.published_from` 增量拉取的轮询，但**检测到该 403 后每店静默 6 小时**，
+不会刷错误；等账号订阅升级后自动开始产出「新差评」提醒，无需改代码。
+
+**退货**
+
+`/v2/returns/rfbs/list` 支持 `filter.created_at{from,to}`（实测 7 天窗口正常）
+与 `last_id` 分页。注意实测存在 `return_number: ""` 的记录 → 映射层退回
+`ID<return_id>` 作为业务键，避免整页报废（§49）。
+
+**轮询节奏（buyer-feedback tick 5 分钟，按店铺节流）**
+
+| 来源 | 间隔 | 说明 |
+|---|---|---|
+| 聊天 | 10 分钟 | `unread_only` → 只读有未读的会话；首次接入只回填不提醒 |
+| 评价 | 30 分钟 | 1-3 星才提醒；无权限退避 6h |
+| 退货 | 15 分钟 | 每次拉最近 7 天（upsert 幂等），定时轮询不抛 `RETURN_ORDER_NOT_FOUND` |
+
 ## 7. 平台 ID 语义（关键）
 
 | ID | 含义 | WCIES 用法 |

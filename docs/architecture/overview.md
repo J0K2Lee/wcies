@@ -65,6 +65,11 @@ Controller（HTTP、DTO 校验）
   2h/12h/24h）。读取走 `SystemSettingsService`（非法值回退默认），修改仅管理员
   （`PATCH /api/v1/system/settings`），页面在「系统设置 → 订单回读频率」。
   这类参数不放 ENV：改 ENV 需要重启，而回读频率是运营现场可调的。
+- **买家侧提醒采集**（2026-11-02）：`BuyerFeedbackModule` 独立队列
+  `wcies.buyer-feedback`（5 分钟 tick，按店铺节流 10/30/15 分钟），采集买家
+  会话消息与评价（退货复用 `PlatformReturnSyncService`），落
+  `platform_chat_messages` / `platform_reviews` 后发布通知事件。聊天 webhook
+  只入队触发，不解析未公开的载荷；评价无权限时按店铺静默 6 小时。
 - **推送订阅健康巡检**：`WebhookHealthService` 随调度 tick 每 6h 扫一遍店铺，
   平台侧订阅被暂停 → 异常 + 通知；店铺抽屉可「立即体检」（只读探测）。
   巡检结果只进异常/通知，不改订阅状态（真实写操作仍须人工/运维脚本显式触发）。

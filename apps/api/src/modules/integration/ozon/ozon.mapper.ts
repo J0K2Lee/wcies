@@ -1,18 +1,24 @@
 import {
+  PlatformChatMessageRaw,
+  PlatformChatSummaryRaw,
   PlatformListingRaw,
   PlatformListingSkuRaw,
   PlatformOrderItemRaw,
   PlatformOrderRaw,
   PlatformOrderStage,
   PlatformReturnRaw,
+  PlatformReviewRaw,
   PlatformWebhookEvent,
   PlatformWebhookEventType,
 } from '@wcies/platform-contracts';
 import {
+  OzonChatHistoryMessage,
+  OzonChatListItem,
   OzonFbsPosting,
   OzonPostingProduct,
   OzonProductInfoItem,
   OzonProductListItem,
+  OzonReview,
   OzonRfbsReturn,
 } from './types/api.types';
 import { DomainError } from '../../../common/errors/domain.error';
@@ -208,12 +214,21 @@ export function mapPostingToOrder(posting: OzonFbsPosting): PlatformOrderRaw {
  * physical batch owns that.
  */
 export function mapRfbsReturn(item: OzonRfbsReturn): PlatformReturnRaw {
-  if (typeof item.return_number !== 'string' || item.return_number === '') {
-    throw malformed('rfbs return', 'return_number missing');
+  // 2026-11-02：实测存在 `return_number: ""` 的记录（如 return_id 36353848）。
+  // 平台事实仍在，只是编号没生成——退回 return_id 作为业务键，不让整页报废
+  // （AGENTS §49：单条畸形不能拖垮整批）。
+  const returnNumber =
+    typeof item.return_number === 'string' && item.return_number !== ''
+      ? item.return_number
+      : typeof item.return_id === 'number' && item.return_id > 0
+        ? `ID${item.return_id}`
+        : null;
+  if (returnNumber === null) {
+    throw malformed('rfbs return', 'return_number and return_id both missing');
   }
   const sku = item.product?.sku;
   return {
-    platformReturnId: item.return_number,
+    platformReturnId: returnNumber,
     platformOrderId: readString(item.posting_number),
     state: readString(item.state?.state ?? null) ?? readString(item.state?.group_state ?? null),
     refundState: readString(item.state?.money_return_state_name ?? null),
@@ -224,6 +239,112 @@ export function mapRfbsReturn(item: OzonRfbsReturn): PlatformReturnRaw {
     createdAt: parseIsoDateTolerant(item.created_at),
     rawData: { ...item },
   };
+}
+
+// ---------------------------------------------------------------------------
+// 买家侧事实（2026-11-02）：聊天与评价
+// ---------------------------------------------------------------------------
+
+/** 会话摘要归一化（`chat.chat_type` 原词保留；缺 chat_id 的条目丢弃）。 */
+export function mapChatSummaries(items: readonly OzonChatListItem[]): PlatformChatSummaryRaw[] {
+  const out: PlatformChatSummaryRaw[] = [];
+  for (const item of items) {
+    const chatId = readString(item.chat?.chat_id ?? null);
+    if (chatId === null) {
+      continue;
+    }
+    out.push({
+      chatId,
+      chatType: readString(item.chat?.chat_type ?? null) ?? 'UNSPECIFIED',
+      chatStatus: readString(item.chat?.chat_status ?? null) ?? 'OPENED',
+      unreadCount: typeof item.unread_count === 'number' ? item.unread_count : 0,
+      lastMessageId: toIdString(item.last_message_id),
+      firstUnreadMessageId: toIdString(item.first_unread_message_id),
+      createdAt: parseIsoDateTolerant(item.chat?.created_at ?? null),
+    });
+  }
+  return out;
+}
+
+/**
+ * 会话消息归一化。方向由发送方类型决定（Customer=IN / Seller=OUT / 其余
+ * SYSTEM）——平台没有 direction 字段，别按消息顺序猜。
+ */
+export function mapChatMessage(
+  chatId: string,
+  item: OzonChatHistoryMessage,
+): PlatformChatMessageRaw {
+  const messageId = toIdString(item.message_id);
+  if (messageId === null) {
+    throw malformed('chat message', 'message_id missing');
+  }
+  const senderType = readString(item.user?.type ?? null);
+  const bodyText = Array.isArray(item.data)
+    ? item.data
+        .filter((line): line is string => typeof line === 'string')
+        .join('\n')
+        .trim()
+    : '';
+  return {
+    chatId,
+    platformMessageId: messageId,
+    direction: chatDirectionOf(senderType),
+    senderType,
+    senderId: readString(item.user?.id ?? null),
+    bodyText: bodyText === '' ? null : bodyText,
+    hasImage: item.is_image === true,
+    orderNumber: readString(item.context?.order_number ?? null),
+    platformSkuId: readString(item.context?.sku ?? null),
+    createdAt: parseIsoDateTolerant(item.created_at) ?? new Date(),
+    rawData: { ...item },
+  };
+}
+
+function chatDirectionOf(senderType: string | null): 'IN' | 'OUT' | 'SYSTEM' {
+  if (senderType === 'Customer') {
+    return 'IN';
+  }
+  if (senderType === 'Seller') {
+    return 'OUT';
+  }
+  return 'SYSTEM';
+}
+
+/** 评价归一化（rating 缺失保持 null，不猜 0）。 */
+export function mapReview(item: OzonReview): PlatformReviewRaw | null {
+  const reviewId = readString(item.id ?? null);
+  if (reviewId === null) {
+    return null;
+  }
+  const sku = item.sku;
+  return {
+    platformReviewId: reviewId,
+    rating: typeof item.rating === 'number' ? item.rating : null,
+    bodyText: readString(item.text ?? null),
+    platformSkuId: typeof sku === 'number' && sku > 0 ? String(sku) : null,
+    publishedAt: parseIsoDateTolerant(item.published_at ?? null),
+    status: readString(item.status ?? null),
+    orderStatus: readString(item.order_status ?? null),
+    photosCount: countOf(item.photos_amount),
+    videosCount: countOf(item.videos_amount),
+    commentsCount: countOf(item.comments_amount),
+    rawData: { ...item },
+  };
+}
+
+function countOf(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
+}
+
+/** int64 id → 十进制字符串（0 / 缺失 → null，0 是平台「无未读」的哨兵）。 */
+function toIdString(value: unknown): string | null {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return String(Math.trunc(value));
+  }
+  if (typeof value === 'string' && /^\d+$/.test(value) && value !== '0') {
+    return value;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +392,10 @@ export function mapWebhookPayload(payload: unknown): PlatformWebhookEvent[] {
       case 'TYPE_UPDATE_ITEM':
       case 'TYPE_CREATE_OR_UPDATE_ITEM':
         return 'ITEM_CHANGED';
+      // 买家会话有新消息（2026-11-02）。载荷字段平台未公开 → 只当"有变化"的
+      // 触发器，处理器一律回读 /v3/chat/*（AGENTS.md §88）。
+      case 'TYPE_NEW_MESSAGE':
+        return 'CHAT_MESSAGE';
       case 'TYPE_PING':
         return 'PING';
       default:

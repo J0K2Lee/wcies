@@ -345,6 +345,13 @@ export class WebhookProcessService {
     private readonly orderSyncService: OrderSyncService,
     private readonly rawEventRepo: ExternalRawEventRepository,
     @InjectQueue(QUEUE_NAMES.webhook) private readonly webhookQueue: Queue<WebhookJobPayload>,
+    /**
+     * 买家消息信号队列（2026-11-02）：`TYPE_NEW_MESSAGE` 载荷字段平台没有
+     * 公开文档，这里只入队「该店有新消息」，由 BuyerFeedbackModule 回读
+     * `/v3/chat/*`（AGENTS §88）。跨模块只走队列，不 import 对方服务。
+     */
+    @InjectQueue(QUEUE_NAMES.buyerFeedback)
+    private readonly buyerFeedbackQueue: Queue<{ storeId: string }>,
     private readonly logger: AppLoggerService,
   ) {}
 
@@ -377,6 +384,19 @@ export class WebhookProcessService {
           await this.orderSyncService.ingestPlatformOrders(store.id, orders, 'WEBHOOK', {
             platformChangedAt: webhookChangedStateDate(webhookEvent.payload),
           });
+          acted = true;
+        } else if (webhookEvent.eventType === 'CHAT_MESSAGE') {
+          // 聊天：载荷不解析，只当"去拉一次"的信号。jobId 带 rawEventId，
+          // 同一事件重复入队被 BullMQ 去重。
+          await this.buyerFeedbackQueue.add(
+            'chat',
+            { storeId: store.id },
+            {
+              jobId: `chat:${event.id}`,
+              removeOnComplete: { count: 50 },
+              removeOnFail: { count: 50 },
+            },
+          );
           acted = true;
         } else {
           // PING / ITEM_CHANGED / UNKNOWN types are recorded facts, not

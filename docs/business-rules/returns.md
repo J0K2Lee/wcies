@@ -43,6 +43,21 @@
   （severity=HIGH，reference=PLATFORM_RETURN）；后续人工补关联或确认后解决。
 - 重复同步 upsert 幂等：字段不变零写入；状态/退款状态变化更新事实。
 
+## 2.3 定时轮询与退货提醒（2026-11-02）
+
+平台退货记录此前只有手动同步入口（`POST /api/v1/returns/platform/sync`），
+从没定时跑过。现在由 buyer-feedback 的 5 分钟 tick 按店铺节流：
+
+- **每 15 分钟**拉一次，窗口 = 最近 7 天（`createdFrom`），
+  只拉 OZON（`adapter.returnAlertsEnabled`；Yandex 的 returns 响应当前与
+  已验证 schema 不符，先不参与，避免每 15 分钟刷错误）；
+- 新建退货单 → 通知 `RETURN_REQUESTED`；状态变化 → `RETURN_STATE_CHANGED`
+  （同一退货单同一状态只推一次）；
+- **定时轮询不产生 `RETURN_ORDER_NOT_FOUND` 异常**
+  （`raiseUnlinkable: false`）——提醒只负责告知"有新退货"，历史退货的关联
+  问题仍由人工同步暴露，避免一上线就刷一批异常；
+- 轮询不写库存：退货入库仍由退货批次的检验动作决定（§3）。
+
 # 3. 退货批次（ReturnBatch）
 
 ## 3.1 数据要素

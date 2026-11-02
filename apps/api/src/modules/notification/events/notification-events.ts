@@ -111,6 +111,57 @@ export const NOTIFICATION_EVENTS: Record<string, NotificationEventDefinition> = 
     cardFields: ['storeCode', 'platform', 'reason'],
     linkPath: '/stores',
   },
+
+  /**
+   * 买家侧提醒（2026-11-02）：买家会话有新消息 / 新差评 / 新退货申请 /
+   * 退货状态变化。四个事件都按店铺+平台过滤，运营只订阅自己盯的店。
+   *
+   * 聊天与退货按「会话/退货单」聚合，不按单条消息发——买家连发十条只提醒一次。
+   */
+  BUYER_MESSAGE_RECEIVED: {
+    type: 'BUYER_MESSAGE_RECEIVED',
+    label: '买家新消息',
+    level: 'WARN',
+    conditionFields: [
+      { key: 'storeId', label: '店铺' },
+      { key: 'platform', label: '平台' },
+    ],
+    cardFields: ['storeCode', 'orderNumber', 'excerpt', 'messageCount', 'receivedAt'],
+    linkPath: '/orders',
+  },
+  REVIEW_CREATED: {
+    type: 'REVIEW_CREATED',
+    label: '新差评（1-3 星）',
+    level: 'WARN',
+    conditionFields: [
+      { key: 'storeId', label: '店铺' },
+      { key: 'platform', label: '平台' },
+    ],
+    cardFields: ['storeCode', 'rating', 'excerpt', 'publishedAt'],
+    linkPath: '/skus',
+  },
+  RETURN_REQUESTED: {
+    type: 'RETURN_REQUESTED',
+    label: '新退货申请',
+    level: 'WARN',
+    conditionFields: [
+      { key: 'storeId', label: '店铺' },
+      { key: 'platform', label: '平台' },
+    ],
+    cardFields: ['storeCode', 'orderNo', 'returnNo', 'state', 'quantity'],
+    linkPath: '/warehouse-ops?tab=returns',
+  },
+  RETURN_STATE_CHANGED: {
+    type: 'RETURN_STATE_CHANGED',
+    label: '退货状态变化',
+    level: 'INFO',
+    conditionFields: [
+      { key: 'storeId', label: '店铺' },
+      { key: 'platform', label: '平台' },
+    ],
+    cardFields: ['storeCode', 'orderNo', 'returnNo', 'state', 'quantity'],
+    linkPath: '/warehouse-ops?tab=returns',
+  },
 };
 
 /** 未登记的事件也能发（级别沿用发布方声明），只是没有专用卡片布局。 */

@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { IntegrationModule } from '../integration/integration.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { ExceptionModule } from '../exception/exception.module';
+import { NotificationModule } from '../notification/notification.module';
 import { WarehouseModule } from '../warehouse/warehouse.module';
 import { ListingModule } from '../listing/listing.module';
 import { OrderModule } from '../order/order.module';
@@ -33,6 +34,7 @@ import { ReturnBatchItemEntity } from './entities/return-batch-item.entity';
     ListingModule,
     OrderModule,
     SyncModule,
+    NotificationModule,
     OperationLogModule,
   ],
   controllers: [ReturnsController],

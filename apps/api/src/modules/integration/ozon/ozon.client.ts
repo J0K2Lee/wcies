@@ -1,16 +1,20 @@
 import {
   OzonCategoryTreeResponse,
+  OzonChatHistoryResponse,
+  OzonChatListResponse,
   OzonErrorBody,
+  OzonFbpWarehouseListResponse,
   OzonFbsPostingGetResponse,
   OzonFbsPostingListResponse,
   OzonFbsShipResponse,
-  OzonFbpWarehouseListResponse,
   OzonNotificationCheckResponse,
   OzonNotificationListResponse,
   OzonOwnWarehouseListResponse,
   OzonProductAttributesResponse,
   OzonProductInfoListResponse,
   OzonProductListResponse,
+  OzonReviewListRequest,
+  OzonReviewListResponse,
   OzonRfbsReturnListResponse,
   OzonSellerWarehouseListResponse,
   OzonShipPackage,
@@ -77,6 +81,14 @@ interface RequestCall {
    * The transport then resolves `{}` instead of failing JSON parsing.
    */
   readonly tolerateEmptyBody?: boolean;
+  /**
+   * True for endpoints whose payload carries int64 ids > 2^53（聊天消息 id 实测
+   * 19 位）。`response.json()` 会把这些 id 四舍五入成错误数字，必须先给长整数
+   * 加引号再解析（2026-11-02）。
+   */
+  readonly preserveBigInts?: boolean;
+  /** 预序列化的请求体（含 int64 字面量时用，绕过 JSON.stringify 的精度损失）。 */
+  readonly rawBody?: string;
 }
 
 /**
@@ -192,12 +204,86 @@ export class OzonClient {
   async rfbsReturnsList(
     auth: OzonAuth,
     storeId: string,
-    input: { lastId: number; limit: number },
+    input: { lastId: number; limit: number; createdFrom?: string },
   ): Promise<OzonRfbsReturnListResponse> {
     return this.request<OzonRfbsReturnListResponse>(auth, {
       endpoint: '/v2/returns/rfbs/list',
       storeId,
-      body: { filter: {}, last_id: input.lastId, limit: input.limit },
+      body: {
+        // created_at 区间过滤（2026-11-02）：提醒轮询只看最近窗口，避免每次
+        // 都从第一条退货翻页。平台实测接受带时区的 ISO 时间。
+        filter:
+          input.createdFrom === undefined
+            ? {}
+            : { created_at: { from: input.createdFrom, to: new Date().toISOString() } },
+        last_id: input.lastId,
+        limit: input.limit,
+      },
+    });
+  }
+
+  /**
+   * 买家会话列表（2026-11-02）。`unreadOnly` 只返回还有未读的会话——提醒
+   * 轮询用它把范围压到「真的有事」的会话上。
+   */
+  async chatList(
+    auth: OzonAuth,
+    storeId: string,
+    input: { limit: number; unreadOnly?: boolean },
+  ): Promise<OzonChatListResponse> {
+    return this.request<OzonChatListResponse>(auth, {
+      endpoint: '/v3/chat/list',
+      storeId,
+      body: {
+        limit: input.limit,
+        ...(input.unreadOnly === true ? { filter: { unread_only: true } } : {}),
+      },
+      preserveBigInts: true,
+    });
+  }
+
+  /**
+   * 会话消息（2026-11-02）。`fromMessageId` 给出时按 Forward（旧→新）取增量，
+   * 否则取最近 `limit` 条（Backward）。
+   */
+  async chatHistory(
+    auth: OzonAuth,
+    storeId: string,
+    input: { chatId: string; fromMessageId?: string; limit?: number },
+  ): Promise<OzonChatHistoryResponse> {
+    const forward = input.fromMessageId !== undefined && /^[0-9]+$/.test(input.fromMessageId);
+    return this.request<OzonChatHistoryResponse>(auth, {
+      endpoint: '/v3/chat/history',
+      storeId,
+      // from_message_id 是 int64：即使用字符串发也会在 JSON.stringify 前被
+      // 转成数字而丢精度，因此这里直接拼原始数字字面量。
+      body: {
+        chat_id: input.chatId,
+        limit: input.limit ?? 20,
+        direction: forward ? 'Forward' : 'Backward',
+        ...(forward ? { from_message_id: input.fromMessageId } : {}),
+      },
+      rawBody: forward
+        ? `{"chat_id":${JSON.stringify(input.chatId)},"limit":${input.limit ?? 20},"direction":"Forward","from_message_id":${input.fromMessageId as string}}`
+        : undefined,
+      preserveBigInts: true,
+    });
+  }
+
+  /**
+   * 商品评价（2026-11-02）。需要卖家付费订阅——无权限时平台返回 403
+   * `PermissionDenied: not available with existing subscription`，客户端按
+   * PLATFORM_AUTH_ERROR 抛出（不重试），调用方据此停止轮询。
+   */
+  async reviewListV2(
+    auth: OzonAuth,
+    storeId: string,
+    input: OzonReviewListRequest,
+  ): Promise<OzonReviewListResponse> {
+    return this.request<OzonReviewListResponse>(auth, {
+      endpoint: '/v2/review/list',
+      storeId,
+      body: { ...input },
     });
   }
 
@@ -447,7 +533,7 @@ export class OzonClient {
           'Client-Id': auth.clientId,
           'Api-Key': auth.apiKey,
         },
-        body: JSON.stringify(call.body),
+        body: call.rawBody ?? JSON.stringify(call.body),
         signal: controller.signal,
       });
     } catch (error: unknown) {
@@ -565,7 +651,11 @@ export class OzonClient {
 
     let parsed: unknown;
     try {
-      parsed = await response.json();
+      if (call.preserveBigInts === true) {
+        parsed = JSON.parse(quoteLongIntegers(await response.text()));
+      } else {
+        parsed = await response.json();
+      }
     } catch (error: unknown) {
       if (call.tolerateEmptyBody === true) {
         // Documented no-content 200 (notification set/update/delete): the
@@ -695,4 +785,15 @@ function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+/**
+ * 给超过 2^53 的 JSON 整数加引号，让 `JSON.parse` 保留原值（2026-11-02）。
+ *
+ * 为什么必须这么做：OZON 聊天消息 id 是 int64（实测 `3000000467309489658`），
+ * `JSON.parse` 会把它变成 `3000000467309489700`，导致增量水位和去重键全部错位。
+ * 只匹配 16 位以上的整数——SKU、金额、订单号等都不会命中。
+ */
+export function quoteLongIntegers(text: string): string {
+  return text.replace(/([:[,]\s*)(-?\d{16,})(?=\s*[,\]}])/g, '$1"$2"');
 }

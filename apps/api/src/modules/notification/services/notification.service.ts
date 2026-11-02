@@ -237,6 +237,142 @@ export class NotificationService {
   }
 
   /**
+   * 买家新消息（2026-11-02）。一条会话一次提醒：买家连发 N 条也只推一条，
+   * 正文取最后一条，去重键带最后消息 id（同一条消息不会重复推）。
+   */
+  async notifyBuyerMessage(input: {
+    storeId: string;
+    storeCode: string;
+    platform: string;
+    chatId: string;
+    buyerId: string | null;
+    orderNumber: string | null;
+    excerpt: string | null;
+    hasImage: boolean;
+    messageCount: number;
+    lastMessageId: string;
+    receivedAt: Date;
+  }): Promise<void> {
+    const excerpt = excerptText(input.excerpt, 200);
+    await this.publishEvent({
+      type: 'BUYER_MESSAGE_RECEIVED',
+      title: `买家消息：${input.storeCode}（${input.messageCount} 条）`,
+      level: 'WARN',
+      factors: compactFactors({
+        storeId: input.storeId,
+        platform: input.platform,
+        chatId: input.chatId,
+      }),
+      lines: [
+        `店铺：${input.storeCode}（${input.platform}）`,
+        `买家：${input.buyerId ?? '未知'}`,
+        input.orderNumber === null ? '关联订单：—' : `关联订单：${input.orderNumber}`,
+        excerpt === null ? '内容：（图片消息）' : `内容：${excerpt}`,
+        `本次新增 ${input.messageCount} 条，最近一条 ${input.receivedAt.toISOString()}`,
+      ],
+      linkPath:
+        input.orderNumber === null
+          ? eventDefinition('BUYER_MESSAGE_RECEIVED').linkPath
+          : `/orders?keyword=${encodeURIComponent(input.orderNumber)}`,
+      dedupeKey: `chat:${input.storeId}:${input.chatId}:${input.lastMessageId}`,
+      referenceType: 'STORE',
+      referenceId: input.storeId,
+    });
+  }
+
+  /** 新差评（1-3 星，2026-11-02）。4-5 星只落库不推送。 */
+  async notifyReviewCreated(input: {
+    storeId: string;
+    storeCode: string;
+    platform: string;
+    reviewId: string;
+    rating: number;
+    excerpt: string | null;
+    platformSkuId: string | null;
+    hasMedia: boolean;
+    publishedAt: Date | null;
+  }): Promise<void> {
+    const excerpt = excerptText(input.excerpt, 200);
+    await this.publishEvent({
+      type: 'REVIEW_CREATED',
+      title: `新差评：${input.storeCode} ${input.rating} 星`,
+      level: 'WARN',
+      factors: compactFactors({ storeId: input.storeId, platform: input.platform }),
+      lines: [
+        `店铺：${input.storeCode}（${input.platform}）`,
+        `评分：${input.rating} 星`,
+        `SKU：${input.platformSkuId ?? '—'}`,
+        excerpt === null ? '内容：（无文字）' : `内容：${excerpt}`,
+        input.hasMedia ? '含图片/视频' : '无图片/视频',
+      ],
+      linkPath: eventDefinition('REVIEW_CREATED').linkPath,
+      dedupeKey: `review:${input.storeId}:${input.reviewId}`,
+      referenceType: 'STORE',
+      referenceId: input.storeId,
+    });
+  }
+
+  /** 新退货申请（2026-11-02，rFBS 退货单首次出现）。 */
+  async notifyReturnRequested(input: {
+    storeId: string;
+    storeCode: string;
+    platform: string;
+    returnNo: string;
+    orderNo: string | null;
+    state: string | null;
+    quantity: string;
+  }): Promise<void> {
+    await this.publishEvent({
+      type: 'RETURN_REQUESTED',
+      title: `新退货申请：${input.storeCode} ${input.returnNo}`,
+      level: 'WARN',
+      factors: compactFactors({ storeId: input.storeId, platform: input.platform }),
+      lines: [
+        `店铺：${input.storeCode}（${input.platform}）`,
+        `订单：${input.orderNo ?? '—'}`,
+        `退货单：${input.returnNo}`,
+        `状态：${input.state ?? '—'}`,
+        `数量：${formatQtyText(input.quantity)}`,
+        '处理入口：仓库作业 → 退货（平台记录需人工建批次并检验）',
+      ],
+      linkPath: eventDefinition('RETURN_REQUESTED').linkPath,
+      dedupeKey: `return:${input.storeId}:${input.returnNo}:created`,
+      referenceType: 'STORE',
+      referenceId: input.storeId,
+    });
+  }
+
+  /** 退货状态变化（2026-11-02）：同一退货单同一状态只推一次。 */
+  async notifyReturnStateChanged(input: {
+    storeId: string;
+    storeCode: string;
+    platform: string;
+    returnNo: string;
+    orderNo: string | null;
+    state: string | null;
+    previousState: string | null;
+    quantity: string;
+  }): Promise<void> {
+    await this.publishEvent({
+      type: 'RETURN_STATE_CHANGED',
+      title: `退货状态变化：${input.storeCode} ${input.returnNo}`,
+      level: 'INFO',
+      factors: compactFactors({ storeId: input.storeId, platform: input.platform }),
+      lines: [
+        `店铺：${input.storeCode}（${input.platform}）`,
+        `订单：${input.orderNo ?? '—'}`,
+        `退货单：${input.returnNo}`,
+        `状态：${input.previousState ?? '—'} → ${input.state ?? '—'}`,
+        `数量：${formatQtyText(input.quantity)}`,
+      ],
+      linkPath: eventDefinition('RETURN_STATE_CHANGED').linkPath,
+      dedupeKey: `return:${input.storeId}:${input.returnNo}:${input.state ?? 'UNKNOWN'}`,
+      referenceType: 'STORE',
+      referenceId: input.storeId,
+    });
+  }
+
+  /**
    * 写事件 + 解析订阅 + 生成投递。同一 (type, dedupeKey) 在 30 分钟内只记一条，
    * 避免同一拦截任务反复失败时刷屏。
    */
@@ -693,4 +829,19 @@ function compactFactors(input: Record<string, string | null | undefined>): Recor
     }
   }
   return out;
+}
+
+/**
+ * 通知正文摘要：压成单行、截断到 `max` 字（飞书卡片正文过长会被截断/折叠）。
+ * 买家消息属个人信息，只进正文、不进日志（AGENTS §67）。
+ */
+function excerptText(text: string | null, max: number): string | null {
+  if (text === null) {
+    return null;
+  }
+  const flat = text.replace(/\s+/g, ' ').trim();
+  if (flat === '') {
+    return null;
+  }
+  return flat.length <= max ? flat : `${flat.slice(0, max)}…`;
 }
