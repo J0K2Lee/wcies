@@ -48,14 +48,16 @@
 平台退货记录此前只有手动同步入口（`POST /api/v1/returns/platform/sync`），
 从没定时跑过。现在由 buyer-feedback 的 5 分钟 tick 按店铺节流：
 
-- **每 15 分钟**拉一次，窗口 = 最近 7 天（`createdFrom`），
-  只拉 OZON（`adapter.returnAlertsEnabled`；Yandex 的 returns 响应当前与
-  已验证 schema 不符，先不参与，避免每 15 分钟刷错误）；
+- **每 15 分钟**拉一次，窗口 = 最近 7 天（`createdFrom`），只拉声明了
+  `adapter.returnAlertsEnabled` 的平台（OZON + Yandex；WB 的 claims 条目结构
+  未验证，暂不参与）。Yandex 的信封 bug（读顶层 `returns`）已于 2026-11-02
+  修复为 `result.returns`，修好前它每次同步都报 `returns array missing`；
 - 新建退货单 → 通知 `RETURN_REQUESTED`；状态变化 → `RETURN_STATE_CHANGED`
   （同一退货单同一状态只推一次）；
 - **定时轮询不产生 `RETURN_ORDER_NOT_FOUND` 异常**
   （`raiseUnlinkable: false`）——提醒只负责告知"有新退货"，历史退货的关联
   问题仍由人工同步暴露，避免一上线就刷一批异常；
+- **首次同步（该店还没有任何退货记录）只回填、不推送**；
 - 轮询不写库存：退货入库仍由退货批次的检验动作决定（§3）。
 
 # 3. 退货批次（ReturnBatch）

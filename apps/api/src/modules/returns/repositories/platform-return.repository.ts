@@ -21,6 +21,15 @@ export class PlatformReturnRepository {
       .findOneBy({ storeId, platformReturnId });
   }
 
+  /** 该店已落库的退货条数（0 = 首次同步，用来跳过一次提醒风暴）。 */
+  async countByStore(storeId: string): Promise<number> {
+    const rows = await this.dataSource.query<Array<{ total: string }>>(
+      `SELECT COUNT(*)::text AS total FROM platform_returns WHERE store_id = $1`,
+      [storeId],
+    );
+    return Number(rows[0]?.total ?? '0');
+  }
+
   async insert(
     row: {
       storeId: string;

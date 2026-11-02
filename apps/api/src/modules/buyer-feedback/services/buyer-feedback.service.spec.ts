@@ -3,6 +3,7 @@ import { PlatformChatMessageRaw, StoreContext } from '@wcies/platform-contracts'
 import { BuyerFeedbackService, isReviewAccessDenied } from './buyer-feedback.service';
 import { ChatMessageRepository } from '../repositories/chat-message.repository';
 import { PlatformReviewRepository } from '../repositories/platform-review.repository';
+import { BuyerQuestionRepository } from '../repositories/buyer-question.repository';
 import { NotificationService } from '../../notification/services/notification.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 
@@ -49,12 +50,24 @@ function build(options: {
     latestPublishedAt: vi.fn().mockResolvedValue(null),
     insertIfNew: vi.fn().mockResolvedValue(true),
   } as unknown as PlatformReviewRepository;
+  const questionRepo = {
+    latestAskedAt: vi.fn().mockResolvedValue(null),
+    countByStore: vi.fn().mockResolvedValue(0),
+    insertIfNew: vi.fn().mockResolvedValue(true),
+  } as unknown as BuyerQuestionRepository;
   const notification = {
     notifyBuyerMessage: vi.fn().mockResolvedValue(undefined),
     notifyReviewCreated: vi.fn().mockResolvedValue(undefined),
+    notifyBuyerQuestion: vi.fn().mockResolvedValue(undefined),
   } as unknown as NotificationService;
   const logger = { info: vi.fn(), warn: vi.fn() } as unknown as AppLoggerService;
-  const service = new BuyerFeedbackService(chatRepo, reviewRepo, notification, logger);
+  const service = new BuyerFeedbackService(
+    chatRepo,
+    reviewRepo,
+    questionRepo,
+    notification,
+    logger,
+  );
 
   const adapter = {
     fetchChats: vi.fn().mockResolvedValue(

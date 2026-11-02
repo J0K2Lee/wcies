@@ -88,6 +88,7 @@
 | `REVIEW_CREATED` | WARN | storeId / platform | `review:<storeId>:<reviewId>` |
 | `RETURN_REQUESTED` | WARN | storeId / platform | `return:<storeId>:<returnNo>:created` |
 | `RETURN_STATE_CHANGED` | INFO | storeId / platform | `return:<storeId>:<returnNo>:<state>` |
+| `BUYER_QUESTION_RECEIVED` | WARN | storeId / platform / skuCode | `question:<storeId>:<questionId>` |
 
 后两条来自推送订阅巡检（2026-10-27，用户确认「暂停要进异常中心」）：
 平台会在连续投递失败后**自动暂停整个订阅**，而暂停等于「订单状态不再更新」，
@@ -109,7 +110,10 @@
   提醒（否则订阅瞬间会收到几十张卡）。
 - 评价**只推 1-3 星**（4-5 星只落库）；OZON 评价 API 需要卖家付费订阅，
   无权限的店铺不产事件（见 `docs/integrations/ozon.md` §6.8）。
-- 退货新建与状态变化各推一次，同一退货单同一状态只推一次。
+- 退货新建与状态变化各推一次，同一退货单同一状态只推一次；**首次同步某店铺时
+  只回填、不推送**（否则历史退货会在订阅瞬间变成几十张卡）。
+- 提问（`BUYER_QUESTION_RECEIVED`）覆盖 WB 与 Yandex：**WB 没有聊天 API**，提问
+  就是那边最主要的买家触达渠道；已回复的提问不提醒（没有待办），只落库。
 - 四类事件都只带 `storeId` / `platform` 两个可过滤字段；卡片正文会截断到
   约 200 字，买家消息正文不进日志（AGENTS §67）。
 

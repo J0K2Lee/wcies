@@ -1,15 +1,28 @@
 import {
+  PlatformBuyerQuestionRaw,
+  PlatformChatMessageRaw,
+  PlatformChatSummaryRaw,
   PlatformListingRaw,
   PlatformListingSkuRaw,
   PlatformOrderItemRaw,
   PlatformOrderRaw,
   PlatformOrderStage,
   PlatformReturnRaw,
+  PlatformReviewRaw,
   PlatformWebhookEvent,
   PlatformWebhookEventType,
 } from '@wcies/platform-contracts';
 import { DomainError } from '../../../common/errors/domain.error';
-import { YxOfferMapping, YxOrder, YxOrderItem, YxReturnItem } from './types/api.types';
+import {
+  YxChatInfo,
+  YxChatMessage,
+  YxGoodsFeedback,
+  YxGoodsQuestion,
+  YxOfferMapping,
+  YxOrder,
+  YxOrderItem,
+  YxReturnItem,
+} from './types/api.types';
 
 /**
  * Yandex Market DTO -> WCIES unified model mapper (2026-09-18).
@@ -396,6 +409,103 @@ export function mapReturnToReturn(item: YxReturnItem): PlatformReturnRaw {
 }
 
 // ---------------------------------------------------------------------------
+// 买家侧事实（2026-11-02）：聊天 / 评价 / 提问
+// ---------------------------------------------------------------------------
+
+/** 会话摘要：只关心买家会话（type=CHAT），ARBITRAGE 由调用方决定是否处理。 */
+export function mapChatSummaries(items: readonly YxChatInfo[]): PlatformChatSummaryRaw[] {
+  const out: PlatformChatSummaryRaw[] = [];
+  for (const item of items) {
+    const chatId = readString(item.chatId ?? null);
+    if (chatId === null) {
+      continue;
+    }
+    // Yandex 没有「未读数」字段；WAITING_FOR_PARTNER 就是「等着我们回」。
+    const waitingForPartner = readString(item.status ?? null) === 'WAITING_FOR_PARTNER';
+    out.push({
+      chatId,
+      chatType: readString(item.type ?? null) ?? 'CHAT',
+      chatStatus: readString(item.status ?? null) ?? 'NEW',
+      unreadCount: waitingForPartner ? 1 : 0,
+      lastMessageId: null,
+      firstUnreadMessageId: null,
+      createdAt: parseTolerantDate(item.createdAt),
+    });
+  }
+  return out;
+}
+
+/** 消息方向：CUSTOMER=买家；PARTNER=我们；MARKET/SUPPORT=平台系统。 */
+export function mapChatMessage(chatId: string, item: YxChatMessage): PlatformChatMessageRaw {
+  const messageId = readString(item.messageId ?? null);
+  if (messageId === null) {
+    throw malformed('chat message', 'messageId missing');
+  }
+  const sender = readString(item.sender ?? null);
+  const text = readString(item.message ?? null);
+  const hasAttachment = Array.isArray(item.payload) && item.payload.length > 0;
+  return {
+    chatId,
+    platformMessageId: messageId,
+    direction: sender === 'CUSTOMER' ? 'IN' : sender === 'PARTNER' ? 'OUT' : 'SYSTEM',
+    senderType: sender,
+    senderId: null,
+    bodyText: text === null || text.trim() === '' ? null : text.trim(),
+    hasImage: hasAttachment,
+    orderNumber: null,
+    platformSkuId: null,
+    createdAt: parseTolerantDate(item.createdAt) ?? new Date(),
+    rawData: { ...item },
+  };
+}
+
+/** 评价：rating 1-5；正文由 advantages/disadvantages/comment 拼装。 */
+export function mapGoodsFeedback(item: YxGoodsFeedback): PlatformReviewRaw | null {
+  const reviewId = readString(item.feedbackId ?? null);
+  if (reviewId === null) {
+    return null;
+  }
+  const parts = [
+    readString(item.description?.comment ?? null),
+    readString(item.description?.advantages ?? null),
+    readString(item.description?.disadvantages ?? null),
+  ].filter((part): part is string => part !== null && part !== '');
+  const rating = item.statistics?.rating;
+  return {
+    platformReviewId: reviewId,
+    rating: typeof rating === 'number' ? rating : null,
+    bodyText: parts.length === 0 ? null : parts.join(' / '),
+    platformSkuId: readString(item.identifiers?.offerId ?? null),
+    publishedAt: parseTolerantDate(item.createdAt),
+    status: item.needReaction === true ? 'NEED_REACTION' : null,
+    orderStatus: null,
+    photosCount: 0,
+    videosCount: 0,
+    commentsCount:
+      typeof item.statistics?.commentsCount === 'number' ? item.statistics.commentsCount : 0,
+    rawData: { ...item },
+  };
+}
+
+/** 提问：Yandex 的答案在独立接口，这里 answer 恒为 null。 */
+export function mapGoodsQuestion(item: YxGoodsQuestion): PlatformBuyerQuestionRaw | null {
+  const questionId = readString(item.questionIdentifiers?.id ?? null);
+  if (questionId === null) {
+    return null;
+  }
+  return {
+    platformQuestionId: questionId,
+    bodyText: readString(item.text ?? null),
+    answerText: null,
+    platformSkuId: readString(item.questionIdentifiers?.offerId ?? null),
+    askedAt: parseTolerantDate(item.createdAt),
+    answeredAt: null,
+    wasViewed: null,
+    rawData: { ...item },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Webhooks (docs §4: notificationType vocabulary, no signature)
 // ---------------------------------------------------------------------------
 
@@ -454,6 +564,19 @@ function classify(notificationType: string): PlatformWebhookEventType {
     case 'ORDER_UPDATED':
     case 'ORDER_CANCELLATION_REQUEST':
       return 'POSTING_STATE_CHANGED';
+    // 买家侧推送（2026-11-02）：载荷只有 id + 时间戳，作为「去拉一次」的信号。
+    case 'CHAT_CREATED':
+    case 'CHAT_MESSAGE_SENT':
+    case 'CHAT_ARBITRAGE_STARTED':
+    case 'CHAT_ARBITRAGE_FINISHED':
+      return 'CHAT_MESSAGE';
+    case 'GOODS_FEEDBACK_CREATED':
+    case 'GOODS_FEEDBACK_COMMENT_CREATED':
+      return 'GOODS_FEEDBACK';
+    case 'QUESTION_CREATED':
+    case 'QUESTION_ANSWER_CREATED':
+    case 'QUESTION_COMMENT_CREATED':
+      return 'BUYER_QUESTION';
     default:
       return 'UNKNOWN';
   }

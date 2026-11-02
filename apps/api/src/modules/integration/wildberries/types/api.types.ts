@@ -342,3 +342,70 @@ export interface WbV3CrossBorderSticker {
 export interface WbV3CrossBorderStickersResponse {
   readonly stickers: readonly WbV3CrossBorderSticker[];
 }
+
+// ---------------------------------------------------------------------------
+// 评价 / 提问（feedbacks-api，2026-11-02 实测返回形状）
+// ---------------------------------------------------------------------------
+
+export interface WbFeedbacksResponse {
+  readonly data?: {
+    readonly countUnanswered?: number | null;
+    readonly countArchive?: number | null;
+    readonly feedbacks?: readonly WbFeedback[];
+  } | null;
+  readonly error?: boolean | null;
+  readonly errorText?: string | null;
+  readonly [key: string]: unknown;
+}
+
+export interface WbFeedback {
+  readonly id?: string | null;
+  readonly text?: string | null;
+  readonly pros?: string | null;
+  readonly cons?: string | null;
+  /** 1-5（WB 字段名 productValuation）。 */
+  readonly productValuation?: number | null;
+  readonly createdDate?: string | null;
+  readonly updatedDate?: string | null;
+  readonly userName?: string | null;
+  readonly orderStatus?: string | null;
+  readonly wasViewed?: boolean | null;
+  readonly photoLinks?: readonly unknown[] | null;
+  readonly video?: unknown;
+  readonly answer?: { readonly text?: string | null; readonly state?: string | null } | null;
+  readonly productDetails?: {
+    readonly nmId?: number | null;
+    readonly imtId?: number | null;
+    readonly supplierArticle?: string | null;
+    readonly brandName?: string | null;
+    readonly productName?: string | null;
+  } | null;
+  readonly [key: string]: unknown;
+}
+
+export interface WbQuestionsResponse {
+  readonly data?: {
+    readonly countUnanswered?: number | null;
+    readonly countArchive?: number | null;
+    readonly questions?: readonly WbQuestion[];
+  } | null;
+  readonly error?: boolean | null;
+  readonly errorText?: string | null;
+  readonly [key: string]: unknown;
+}
+
+export interface WbQuestion {
+  readonly id?: string | null;
+  readonly text?: string | null;
+  readonly createdDate?: string | null;
+  readonly updatedDate?: string | null;
+  readonly wasViewed?: boolean | null;
+  readonly answer?: { readonly text?: string | null; readonly createDate?: string | null } | null;
+  readonly productDetails?: {
+    readonly nmId?: number | null;
+    readonly supplierArticle?: string | null;
+    readonly brandName?: string | null;
+    readonly productName?: string | null;
+  } | null;
+  readonly [key: string]: unknown;
+}

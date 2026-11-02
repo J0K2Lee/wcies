@@ -163,8 +163,14 @@ export interface YxReturnItem {
 }
 
 export interface YxReturnsResponse {
+  /** 官方信封：`{status, result:{returns, paging}}`（2026-11-02 核对）。 */
+  readonly result?: {
+    readonly returns?: readonly YxReturnItem[];
+    readonly paging?: { readonly nextPageToken?: string | null };
+  };
+  /** 兼容分支：历史实现按顶层读取。 */
   readonly returns?: readonly YxReturnItem[];
-  readonly paging?: { readonly nextPageToken?: string };
+  readonly paging?: { readonly nextPageToken?: string | null };
   readonly [key: string]: unknown;
 }
 
@@ -224,5 +230,100 @@ export interface YxUpdateOrderStatusRequest {
 /** 200 body: the updated order (same shape as the read path). */
 export interface YxUpdateOrderStatusResponse {
   readonly order?: YxOrder;
+  readonly [key: string]: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// 聊天 / 评价 / 提问（2026-11-02，官方 openapi 核对）
+// ---------------------------------------------------------------------------
+
+export interface YxChatsResponse {
+  readonly result?: {
+    readonly chats?: readonly YxChatInfo[];
+    readonly paging?: { readonly nextPageToken?: string | null };
+  };
+  readonly [key: string]: unknown;
+}
+
+export interface YxChatInfo {
+  /** int64（不是 uuid，按字符串处理避免精度问题）。 */
+  readonly chatId?: number | string | null;
+  /** CHAT = 买家会话；ARBITRAGE = 争议。 */
+  readonly type?: string | null;
+  /** NEW / WAITING_FOR_CUSTOMER / WAITING_FOR_PARTNER / … / FINISHED。 */
+  readonly status?: string | null;
+  readonly context?: Record<string, unknown> | null;
+  readonly createdAt?: string | null;
+  readonly updatedAt?: string | null;
+  readonly [key: string]: unknown;
+}
+
+export interface YxChatHistoryResponse {
+  readonly result?: {
+    readonly context?: Record<string, unknown> | null;
+    readonly messages?: readonly YxChatMessage[];
+    readonly paging?: { readonly nextPageToken?: string | null };
+  };
+  readonly [key: string]: unknown;
+}
+
+export interface YxChatMessage {
+  readonly messageId?: number | string | null;
+  readonly createdAt?: string | null;
+  /** PARTNER / CUSTOMER / MARKET / SUPPORT。 */
+  readonly sender?: string | null;
+  readonly message?: string | null;
+  readonly payload?: readonly unknown[] | null;
+  readonly [key: string]: unknown;
+}
+
+export interface YxGoodsFeedbackResponse {
+  readonly result?: {
+    readonly feedbacks?: readonly YxGoodsFeedback[];
+    readonly paging?: { readonly nextPageToken?: string | null };
+  };
+  readonly [key: string]: unknown;
+}
+
+export interface YxGoodsFeedback {
+  readonly feedbackId?: string | null;
+  readonly createdAt?: string | null;
+  readonly needReaction?: boolean | null;
+  readonly author?: string | null;
+  readonly description?: {
+    readonly advantages?: string | null;
+    readonly disadvantages?: string | null;
+    readonly comment?: string | null;
+  } | null;
+  readonly statistics?: {
+    readonly rating?: number | null;
+    readonly commentsCount?: number | null;
+    readonly recommended?: boolean | null;
+  } | null;
+  readonly identifiers?: {
+    readonly orderId?: number | null;
+    readonly offerId?: string | null;
+  } | null;
+  readonly [key: string]: unknown;
+}
+
+export interface YxGoodsQuestionsResponse {
+  readonly result?: {
+    readonly questions?: readonly YxGoodsQuestion[];
+    readonly paging?: { readonly nextPageToken?: string | null };
+    readonly totalCount?: number | null;
+  };
+  readonly [key: string]: unknown;
+}
+
+export interface YxGoodsQuestion {
+  readonly questionIdentifiers?: {
+    readonly id?: number | string | null;
+    readonly offerId?: string | null;
+    readonly categoryId?: number | null;
+  } | null;
+  readonly text?: string | null;
+  readonly createdAt?: string | null;
+  readonly author?: Record<string, unknown> | null;
   readonly [key: string]: unknown;
 }

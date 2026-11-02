@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PlatformAdapter, PlatformChatMessageRaw, StoreContext } from '@wcies/platform-contracts';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { NotificationService } from '../../notification/services/notification.service';
+import { BuyerQuestionRepository } from '../repositories/buyer-question.repository';
 import { ChatMessageRepository } from '../repositories/chat-message.repository';
 import { PlatformReviewRepository } from '../repositories/platform-review.repository';
 
@@ -15,12 +16,21 @@ const FIRST_LOOKBACK = 20;
 const MAX_REVIEW_PAGES = 5;
 /** 评价增量窗口的向前重叠：平台发布时间可能延迟/乱序，多读一段防漏。 */
 const REVIEW_OVERLAP_MS = 6 * 60 * 60 * 1000;
+/** 提问轮询的首次回看窗口（首次接入只回填、不提醒，见 collectBuyerQuestions）。 */
+const QUESTION_INITIAL_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+/** 提问单次轮询最多翻几页（每页 100）。 */
+const MAX_QUESTION_PAGES = 3;
 /** 店铺之间的最小间隔（平台聊天/评价接口限速未知，保守串行）。 */
 export const FEEDBACK_STORE_GAP_MS = 600;
 
 export interface ChatCollectResult {
   chatsScanned: number;
   messagesInserted: number;
+  notified: number;
+}
+
+export interface QuestionCollectResult {
+  questionsInserted: number;
   notified: number;
 }
 
@@ -47,6 +57,7 @@ export class BuyerFeedbackService {
   constructor(
     private readonly chatRepo: ChatMessageRepository,
     private readonly reviewRepo: PlatformReviewRepository,
+    private readonly questionRepo: BuyerQuestionRepository,
     private readonly notification: NotificationService,
     private readonly logger: AppLoggerService,
   ) {}
@@ -206,6 +217,77 @@ export class BuyerFeedbackService {
       );
     }
     return { reviewsInserted, notified, accessDenied: false };
+  }
+  /**
+   * 采集买家提问（2026-11-02）。WB 没有聊天 API，提问是那边最主要的买家
+   * 触达渠道；Yandex 的 goods-questions 也走这里。
+   *
+   * 与聊天一致：首次接入（库里 0 条）只回填、不提醒，避免历史提问刷屏；
+   * 已回复的提问不提醒（运营没有待办），只落库留痕。
+   */
+  async collectBuyerQuestions(input: {
+    storeId: string;
+    storeCode: string;
+    platform: string;
+    adapter: PlatformAdapter;
+    context: StoreContext;
+  }): Promise<QuestionCollectResult> {
+    const { adapter, context } = input;
+    if (adapter.fetchBuyerQuestions === undefined) {
+      return { questionsInserted: 0, notified: 0 };
+    }
+    const watermark = await this.questionRepo.latestAskedAt(input.storeId);
+    const createdFrom =
+      watermark === null
+        ? new Date(Date.now() - QUESTION_INITIAL_LOOKBACK_MS)
+        : new Date(watermark.getTime() - REVIEW_OVERLAP_MS);
+    const bootstrap = (await this.questionRepo.countByStore(input.storeId)) === 0;
+
+    let questionsInserted = 0;
+    let notified = 0;
+    let cursor: unknown;
+    for (let page = 0; page < MAX_QUESTION_PAGES; page += 1) {
+      const result = await adapter.fetchBuyerQuestions(context, {
+        createdFrom,
+        // 50 是 Yandex goods-questions 的实测上限（100 会 400）；WB 也接受。
+        limit: 50,
+        ...(cursor === undefined ? {} : { cursor }),
+      });
+      for (const question of result.items) {
+        const isNew = await this.questionRepo.insertIfNew(input.storeId, question);
+        if (!isNew) {
+          continue;
+        }
+        questionsInserted += 1;
+        if (bootstrap || question.answerText !== null) {
+          continue;
+        }
+        await this.notification.notifyBuyerQuestion({
+          storeId: input.storeId,
+          storeCode: input.storeCode,
+          platform: input.platform,
+          questionId: question.platformQuestionId,
+          skuCode: question.platformSkuId,
+          excerpt: question.bodyText,
+          askedAt: question.askedAt,
+        });
+        notified += 1;
+      }
+      if (!result.hasMore) {
+        break;
+      }
+      cursor = result.nextCursor ?? undefined;
+      if (cursor === undefined) {
+        break;
+      }
+    }
+    if (questionsInserted > 0) {
+      this.logger.info(
+        `buyer questions collected store=${input.storeCode} inserted=${questionsInserted} notified=${notified}`,
+        { module: 'buyer-feedback' },
+      );
+    }
+    return { questionsInserted, notified };
   }
 }
 

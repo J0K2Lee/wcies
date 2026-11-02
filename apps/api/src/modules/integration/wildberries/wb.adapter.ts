@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import {
   PaginatedResult,
   PlatformAdapter,
+  PlatformBuyerQuestionRaw,
+  PlatformReviewRaw,
   PlatformCredentialContext,
   PlatformLabelFile,
   PlatformListingRaw,
@@ -15,6 +17,8 @@ import { WbClient, WbAuth } from './wb.client';
 import { WB_STICKER_BATCH_LIMIT, WbShipmentService } from './wb-shipment.service';
 import {
   mapCardToListing,
+  mapWbFeedback,
+  mapWbQuestion,
   mapFbsOrderToOrder,
   mapStatsRowToOrder,
   mapWebhookEnvelope,
@@ -36,6 +40,8 @@ import {
 /** Page sizes: cards/list <= 100/页 (docs §4); v3 orders <= 1000 (docs §3a). */
 const LISTING_PAGE_SIZE = 100;
 const ORDER_PAGE_SIZE = 1000;
+/** 评价单次轮询每类（已回复/未回复）最多翻几页，防止异常账号拖垮 tick。 */
+const WB_FEEDBACK_MAX_PAGES = 3;
 
 /**
  * Wildberries implementation of the platform adapter contract (2026-09-18).
@@ -61,6 +67,86 @@ const ORDER_PAGE_SIZE = 1000;
 @Injectable()
 export class WbAdapter implements PlatformAdapter {
   readonly platformCode = 'WB' as const;
+
+  /**
+   * 商品评价（2026-11-02 实测）：`dateFrom/dateTo` 是 Unix 秒，`take/skip` 分页。
+   * 增量水位由调用方按发布时间维护；这里按 `order=dateAsc` 拉窗口内的数据。
+   */
+  async fetchReviews(
+    context: StoreContext,
+    input: { publishedFrom: Date; limit?: number; lastId?: string },
+  ): Promise<PaginatedResult<PlatformReviewRaw>> {
+    const auth = parseWbAuth(context.credential, context.storeId);
+    const take = input.limit ?? 100;
+    const dateFrom = Math.floor(input.publishedFrom.getTime() / 1000);
+    const dateTo = Math.floor(Date.now() / 1000);
+    // `isAnswered` 是必填参数（省略会 400），而它只能二选一：未回复 / 已回复。
+    // 两遍都拉——只拉未回复会漏掉「客服已回复过的差评」，而提醒恰恰要覆盖它们。
+    // 量级很小（每家店每 30 分钟最多几百条），值得多一次请求。
+    const items: PlatformReviewRaw[] = [];
+    for (const isAnswered of [false, true]) {
+      for (let page = 0; page < WB_FEEDBACK_MAX_PAGES; page += 1) {
+        const response = await this.client.feedbacks(auth, context.storeId, {
+          take,
+          skip: page * take,
+          order: 'dateAsc',
+          dateFrom,
+          dateTo,
+          isAnswered,
+        });
+        const rows = response.data?.feedbacks ?? [];
+        for (const row of rows) {
+          const mapped = mapWbFeedback(row);
+          if (mapped !== null) {
+            items.push(mapped);
+          }
+        }
+        if (rows.length < take) {
+          break;
+        }
+      }
+    }
+    return { items, nextCursor: null, hasMore: false };
+  }
+
+  /**
+   * 买家提问（2026-11-02 实测）。WB 没有聊天 API——提问就是这边最主要的买家
+   * 触达渠道，提醒按这份数据出。分页同样是 take/skip。
+   */
+  async fetchBuyerQuestions(
+    context: StoreContext,
+    input: { createdFrom: Date; limit?: number; cursor?: unknown },
+  ): Promise<PaginatedResult<PlatformBuyerQuestionRaw>> {
+    const auth = parseWbAuth(context.credential, context.storeId);
+    const take = input.limit ?? 100;
+    const skip =
+      typeof input.cursor === 'object' &&
+      input.cursor !== null &&
+      typeof (input.cursor as { skip?: unknown }).skip === 'number'
+        ? ((input.cursor as { skip: number }).skip ?? 0)
+        : 0;
+    const response = await this.client.questions(auth, context.storeId, {
+      take,
+      skip,
+      order: 'dateAsc',
+      dateFrom: Math.floor(input.createdFrom.getTime() / 1000),
+      dateTo: Math.floor(Date.now() / 1000),
+    });
+    const rows = response.data?.questions ?? [];
+    const items: PlatformBuyerQuestionRaw[] = [];
+    for (const row of rows) {
+      const mapped = mapWbQuestion(row);
+      if (mapped !== null) {
+        items.push(mapped);
+      }
+    }
+    const hasMore = rows.length >= take;
+    return {
+      items,
+      nextCursor: hasMore ? { skip: skip + take } : null,
+      hasMore,
+    };
+  }
 
   /**
    * 入供应单（`confirm`）后贴纸立即可取，不依赖平台先分配运单号——预取门槛

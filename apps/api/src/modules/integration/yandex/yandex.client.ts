@@ -2,7 +2,11 @@ import { PlatformErrorDetail } from '@wcies/platform-contracts';
 import { PlatformApiError, PlatformMalformedResponseError } from '../platform-error';
 import {
   YxCampaignsResponse,
+  YxChatHistoryResponse,
+  YxChatsResponse,
   YxErrorBody,
+  YxGoodsFeedbackResponse,
+  YxGoodsQuestionsResponse,
   YxOfferMappingsResponse,
   YxOrdersResponse,
   YxReturnsResponse,
@@ -155,6 +159,81 @@ export class YandexClient {
       storeId,
       method: 'GET',
       query: { limit: input.limit, ...(input.pageToken ? { page_token: input.pageToken } : {}) },
+    });
+  }
+
+  /** 买家聊天列表（2026-11-02）：type=CHAT 是买家会话，ARBITRAGE 是争议。 */
+  async businessChats(
+    auth: YxAuth,
+    storeId: string,
+    input: {
+      businessId: string;
+      limit: number;
+      pageToken?: string;
+      body?: Record<string, unknown>;
+    },
+  ): Promise<YxChatsResponse> {
+    return this.request<YxChatsResponse>(auth, {
+      endpoint: `/v2/businesses/${encodeURIComponent(input.businessId)}/chats`,
+      storeId,
+      method: 'POST',
+      query: { limit: input.limit, ...(input.pageToken ? { page_token: input.pageToken } : {}) },
+      body: input.body ?? {},
+    });
+  }
+
+  /** 会话消息（2026-11-02）：`messageIdFrom` 是增量起点（int64）。 */
+  async chatHistory(
+    auth: YxAuth,
+    storeId: string,
+    input: { businessId: string; chatId: string; limit: number; messageIdFrom?: string },
+  ): Promise<YxChatHistoryResponse> {
+    return this.request<YxChatHistoryResponse>(auth, {
+      endpoint: `/v2/businesses/${encodeURIComponent(input.businessId)}/chats/history`,
+      storeId,
+      method: 'POST',
+      query: { chat_id: input.chatId, limit: input.limit },
+      body: input.messageIdFrom === undefined ? {} : { messageIdFrom: input.messageIdFrom },
+    });
+  }
+
+  /** 商品评价（2026-11-02）：`dateTimeFrom/To` ≤6 个月，可按星级过滤。 */
+  async goodsFeedbacks(
+    auth: YxAuth,
+    storeId: string,
+    input: {
+      businessId: string;
+      limit: number;
+      pageToken?: string;
+      body: Record<string, unknown>;
+    },
+  ): Promise<YxGoodsFeedbackResponse> {
+    return this.request<YxGoodsFeedbackResponse>(auth, {
+      endpoint: `/v2/businesses/${encodeURIComponent(input.businessId)}/goods-feedback`,
+      storeId,
+      method: 'POST',
+      query: { limit: input.limit, ...(input.pageToken ? { page_token: input.pageToken } : {}) },
+      body: input.body,
+    });
+  }
+
+  /** 商品提问（2026-11-02，v1）：`dateFrom/dateTo` 是日期（≤1 个月窗口）。 */
+  async goodsQuestions(
+    auth: YxAuth,
+    storeId: string,
+    input: {
+      businessId: string;
+      limit: number;
+      pageToken?: string;
+      body: Record<string, unknown>;
+    },
+  ): Promise<YxGoodsQuestionsResponse> {
+    return this.request<YxGoodsQuestionsResponse>(auth, {
+      endpoint: `/v1/businesses/${encodeURIComponent(input.businessId)}/goods-questions`,
+      storeId,
+      method: 'POST',
+      query: { limit: input.limit, ...(input.pageToken ? { page_token: input.pageToken } : {}) },
+      body: input.body,
     });
   }
 

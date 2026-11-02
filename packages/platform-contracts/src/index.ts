@@ -307,6 +307,21 @@ export interface PlatformReviewRaw {
   readonly rawData: Record<string, unknown>;
 }
 
+/** 买家提问（WB questions / Yandex goods-questions，2026-11-02）。 */
+export interface PlatformBuyerQuestionRaw {
+  readonly platformQuestionId: string;
+  readonly bodyText: string | null;
+  /** 卖家已回复的文本；未回复为 null。 */
+  readonly answerText: string | null;
+  /** 卖家自己的商品标识（WB supplierArticle / Yandex offerId / nmId 兜底）。 */
+  readonly platformSkuId: string | null;
+  readonly askedAt: Date | null;
+  readonly answeredAt: Date | null;
+  /** 平台是否已读（WB wasViewed）；没有该概念的平台为 null。 */
+  readonly wasViewed: boolean | null;
+  readonly rawData: Record<string, unknown>;
+}
+
 // ---------------------------------------------------------------------------
 // Webhooks
 // ---------------------------------------------------------------------------
@@ -323,6 +338,10 @@ export const PLATFORM_WEBHOOK_EVENT_TYPES = [
    * （AGENTS.md §88：不猜平台字段）。
    */
   'CHAT_MESSAGE',
+  /** 买家提问（WB/Yandex 的「问题」；WB 无聊天 API，提问就是主要买家消息）。 */
+  'BUYER_QUESTION',
+  /** 商品评价（Yandex 推送 GOODS_FEEDBACK_CREATED；OZON 无此推送）。 */
+  'GOODS_FEEDBACK',
   'PING',
   'UNKNOWN',
 ] as const;
@@ -522,6 +541,15 @@ export interface PlatformAdapter {
     context: StoreContext,
     input: { readonly publishedFrom: Date; readonly limit?: number; readonly lastId?: string },
   ): Promise<PaginatedResult<PlatformReviewRaw>>;
+
+  /**
+   * 买家提问（2026-11-02，只读）。WB 没有聊天 API，提问是那边最主要的买家
+   * 触达渠道；Yandex 的 goods-questions 也走这里。`createdFrom` 是增量水位。
+   */
+  fetchBuyerQuestions?(
+    context: StoreContext,
+    input: { readonly createdFrom: Date; readonly limit?: number; readonly cursor?: unknown },
+  ): Promise<PaginatedResult<PlatformBuyerQuestionRaw>>;
 
   /**
    * Optional WRITE: hand the order over to the platform for dispatch (OZON

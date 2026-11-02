@@ -43,6 +43,42 @@
 - 安全：无签名；官方建议按来源 IP 段白名单校验：`5.45.207.0/25, 141.8.142.0/25, 5.255.253.0/25`。
 - 映射到现有链路：新增 `POST /api/v1/webhooks/yandex/stores/:storeCode`（PING 应答 + 其余事件存 `external_raw_events` + 入队 + `fetchOrdersByPlatformIds` 定向回读 `orderIds`）——与 OZON 链路逐环节对应。
 
+## 4b. 买家侧：聊天 / 评价 / 提问（2026-11-02 核对 + 实测）
+
+**推送类型**（`notificationType`，官方 push-notifications 文档 18 种；买家侧 7 种）：
+
+```text
+CHAT_CREATED            {businessId, chatId, createdAt}
+CHAT_MESSAGE_SENT       {businessId, chatId, messageId, sentAt}
+CHAT_ARBITRAGE_STARTED  {businessId, chatId, startedAt}
+CHAT_ARBITRAGE_FINISHED {businessId, chatId, finishedAt}
+GOODS_FEEDBACK_CREATED  {businessId, feedbackId, createdAt, publishedAt}
+GOODS_FEEDBACK_COMMENT_CREATED
+QUESTION_CREATED（另有 QUESTION_ANSWER_CREATED / QUESTION_COMMENT_CREATED）
+```
+
+载荷只有 id + 时间戳 → WCIES 一律当「去拉一次」的触发器，回读下列接口取事实。
+接收器复用现有 `POST /api/v1/webhooks/yandex/stores/:storeCode`（IP 白名单 +
+`{version,name,time}` 应答），**不需要新建入口**；只需在柜面「API 通知」勾选这些
+类型（柜面操作，不是平台写接口）。
+
+| 能力 | 端点 | 关键事实（实测/规范） |
+|---|---|---|
+| 会话列表 | `POST /v2/businesses/{businessId}/chats?limit=` | **limit 上限 20**（50 会 400 `Parameter limit must be less than or equal to 20`）；`type=CHAT|ARBITRAGE`；`status=WAITING_FOR_PARTNER` 即「等我们回复」；`chatId` 是 **int64** |
+| 会话消息 | `POST /v2/businesses/{businessId}/chats/history?chat_id=&limit=` | body `{messageIdFrom}` 增量（int64）；消息 `{messageId, createdAt, sender: PARTNER|CUSTOMER|MARKET|SUPPORT, message, payload[]}` |
+| 评价 | `POST /v2/businesses/{businessId}/goods-feedback?limit=` | body `{dateTimeFrom, dateTimeTo}`（≤6 个月）；`ratingValues` 是**整数数组 1-5**（不是字符串）；`reactionStatus=NEED_REACTION` 可只看未反应；返回 `result.feedbacks[]`（`feedbackId/createdAt/needReaction/author/description{advantages,disadvantages,comment}/statistics{rating,commentsCount}`） |
+| 提问 | `POST /v1/businesses/{businessId}/goods-questions?limit=` | body `{dateFrom, dateTo}` 是**日期**且窗口 ≤1 个月；`result.questions[]`（`questionIdentifiers{id,offerId}`、`text`、`createdAt`）；答案在独立接口 |
+| 退货 | `GET /v2/campaigns/{campaignId}/returns?limit=` | **信封是 `{status, result:{returns, paging}}`**——2026-11-02 修掉了「读顶层 returns」的 bug（此前每次同步都报 `returns array missing`，退货提醒空跑） |
+
+`businessId` 在 `/v2/campaigns` 里是 `campaign.business.id`（嵌套，不是平铺 `businessId`）。
+
+映射约定（`yandex.mapper.ts`）：`CUSTOMER` → IN、`PARTNER` → OUT、`MARKET/SUPPORT` → SYSTEM；
+`WAITING_FOR_PARTNER` 映射为 `unreadCount=1`（Yandex 没有未读数字段）；评价正文由
+comment/advantages/disadvantages 拼装，`parentSku` 取 `identifiers.offerId`。
+
+WCIES 侧：轮询兜底（聊天 10 分钟 / 评价 30 分钟 / 提问 10 分钟 / 退货 15 分钟）+
+推送触发；评价只提醒 1-3 星，4-5 星只落库。
+
 ## 5. 商品 / Listing（已验证）
 
 - `POST /v2/businesses/{businessId}/offer-mappings`：query `limit`（1–100，默认 50）+ `pageToken`；body `offerIds[]`（≤100，指定时不允许分页参数）、`cardStatuses[]`（`HAS_CARD_*`/`NO_CARD_*` 枚举）、`archived` 等。

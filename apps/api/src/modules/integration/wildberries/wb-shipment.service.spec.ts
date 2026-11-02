@@ -121,6 +121,7 @@ function build(script: Script) {
       marketplace: 'https://marketplace-api.wb.test',
       statistics: 'https://statistics-api.wb.test',
       webhooks: 'https://webhooks-api.wb.test',
+      feedbacks: 'https://feedbacks-api.wb.test',
     },
     timeoutMs: 1000,
     maxRetries: 0,

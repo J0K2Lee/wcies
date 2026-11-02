@@ -1,15 +1,24 @@
 import {
+  PlatformBuyerQuestionRaw,
   PlatformListingRaw,
   PlatformListingSkuRaw,
   PlatformOrderItemRaw,
   PlatformOrderRaw,
   PlatformOrderStage,
+  PlatformReviewRaw,
   PlatformWebhookEvent,
   PlatformWebhookEventType,
 } from '@wcies/platform-contracts';
 import { timingSafeEqual } from 'node:crypto';
 import { DomainError } from '../../../common/errors/domain.error';
-import { WbCard, WbCardSize, WbStatsOrderRow, WbV3Order } from './types/api.types';
+import {
+  WbCard,
+  WbCardSize,
+  WbFeedback,
+  WbQuestion,
+  WbStatsOrderRow,
+  WbV3Order,
+} from './types/api.types';
 
 /**
  * Wildberries DTO -> WCIES unified model mapper (2026-09-18).
@@ -425,6 +434,90 @@ export function isWbWebhookSecretValid(
     return false;
   }
   return timingSafeEqual(provided, expected);
+}
+
+// ---------------------------------------------------------------------------
+// 评价 / 提问（2026-11-02，feedbacks-api 实测形状）
+// ---------------------------------------------------------------------------
+
+/**
+ * WB 评价 -> 统一评价模型。
+ *
+ * `productValuation` 是 1-5 星；正文由 text + pros/cons 拼装（WB 把优点/缺点
+ * 单独放字段，客服阅读时需要完整语义）。商品标识优先用 supplierArticle
+ * （卖家自己的货号，运营认这个），没有时退回 nmId。
+ * `wasViewed` 是 WB 的「已读」事实，只作为 raw 里的观察，不参与提醒判断。
+ */
+export function mapWbFeedback(item: WbFeedback): PlatformReviewRaw | null {
+  const reviewId = typeof item.id === 'string' && item.id !== '' ? item.id : null;
+  if (reviewId === null) {
+    return null;
+  }
+  const text = joinNonEmpty([item.text, item.pros, item.cons]);
+  const rating = item.productValuation;
+  const article =
+    typeof item.productDetails?.supplierArticle === 'string'
+      ? item.productDetails.supplierArticle
+      : null;
+  const nmId = item.productDetails?.nmId;
+  return {
+    platformReviewId: reviewId,
+    rating: typeof rating === 'number' ? rating : null,
+    bodyText: text,
+    platformSkuId:
+      article !== null && article !== '' ? article : typeof nmId === 'number' ? String(nmId) : null,
+    publishedAt: parseWbDate(item.createdDate),
+    status: item.wasViewed === true ? 'VIEWED' : 'NEW',
+    orderStatus: typeof item.orderStatus === 'string' ? item.orderStatus : null,
+    photosCount: Array.isArray(item.photoLinks) ? item.photoLinks.length : 0,
+    videosCount: item.video === null || item.video === undefined ? 0 : 1,
+    commentsCount: 0,
+    rawData: { ...item },
+  };
+}
+
+/**
+ * WB 提问 -> 统一提问模型。`answer.text` 是卖家回复；`wasViewed` 表示运营是否
+ * 已读（WB 的未读判断就是这个字段）。
+ */
+export function mapWbQuestion(item: WbQuestion): PlatformBuyerQuestionRaw | null {
+  const questionId = typeof item.id === 'string' && item.id !== '' ? item.id : null;
+  if (questionId === null) {
+    return null;
+  }
+  const article =
+    typeof item.productDetails?.supplierArticle === 'string'
+      ? item.productDetails.supplierArticle
+      : null;
+  const nmId = item.productDetails?.nmId;
+  const answerText =
+    typeof item.answer?.text === 'string' && item.answer.text !== '' ? item.answer.text : null;
+  return {
+    platformQuestionId: questionId,
+    bodyText: typeof item.text === 'string' && item.text !== '' ? item.text : null,
+    answerText,
+    platformSkuId:
+      article !== null && article !== '' ? article : typeof nmId === 'number' ? String(nmId) : null,
+    askedAt: parseWbDate(item.createdDate),
+    answeredAt: answerText === null ? null : parseWbDate(item.answer?.createDate),
+    wasViewed: typeof item.wasViewed === 'boolean' ? item.wasViewed : null,
+    rawData: { ...item },
+  };
+}
+
+function joinNonEmpty(parts: readonly (string | null | undefined)[]): string | null {
+  const kept = parts.filter(
+    (part): part is string => typeof part === 'string' && part.trim() !== '',
+  );
+  return kept.length === 0 ? null : kept.map((part) => part.trim()).join(' / ');
+}
+
+function parseWbDate(value: string | null | undefined): Date | null {
+  if (typeof value !== 'string' || value === '') {
+    return null;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 /**

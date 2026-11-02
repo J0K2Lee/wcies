@@ -56,6 +56,9 @@ export class PlatformReturnSyncService {
     }
     const context: StoreContext = await this.contextService.buildStoreContext(store);
 
+    // 首次同步（该店还没有任何退货记录）只回填、不发提醒：否则一个店几十条
+    // 历史退货会在订阅瞬间变成几十张卡（与聊天/提问的回填策略一致）。
+    const bootstrap = (await this.platformReturnRepo.countByStore(store.id)) === 0;
     let created = 0;
     let updated = 0;
     let unlinkable = 0;
@@ -70,18 +73,25 @@ export class PlatformReturnSyncService {
         const outcome = await this.upsertOne(store.id, raw, options);
         if (outcome === 'CREATED') {
           created += 1;
-          await this.notification.notifyReturnRequested({
-            storeId: store.id,
-            storeCode: store.storeCode,
-            platform: adapter.platformCode,
-            returnNo: raw.platformReturnId,
-            orderNo: raw.platformOrderId,
-            state: raw.state,
-            quantity: raw.quantity,
-          });
+          if (!bootstrap) {
+            await this.notification.notifyReturnRequested({
+              storeId: store.id,
+              storeCode: store.storeCode,
+              platform: adapter.platformCode,
+              returnNo: raw.platformReturnId,
+              orderNo: raw.platformOrderId,
+              state: raw.state,
+              quantity: raw.quantity,
+            });
+          }
         } else if (outcome === 'UPDATED') {
           updated += 1;
-          if (previous !== null && raw.state !== null && raw.state !== previous.state) {
+          if (
+            !bootstrap &&
+            previous !== null &&
+            raw.state !== null &&
+            raw.state !== previous.state
+          ) {
             await this.notification.notifyReturnStateChanged({
               storeId: store.id,
               storeCode: store.storeCode,

@@ -312,6 +312,43 @@ export class NotificationService {
     });
   }
 
+  /**
+   * 买家提问（2026-11-02）。WB 没有聊天 API，提问是那边最主要的买家触达
+   * 渠道；Yandex 的 goods-questions 也走这里。一条提问一张卡（去重键按提问 id）。
+   */
+  async notifyBuyerQuestion(input: {
+    storeId: string;
+    storeCode: string;
+    platform: string;
+    questionId: string;
+    skuCode: string | null;
+    excerpt: string | null;
+    askedAt: Date | null;
+  }): Promise<void> {
+    const excerpt = excerptText(input.excerpt, 200);
+    await this.publishEvent({
+      type: 'BUYER_QUESTION_RECEIVED',
+      title: `买家提问：${input.storeCode}`,
+      level: 'WARN',
+      factors: compactFactors({
+        storeId: input.storeId,
+        platform: input.platform,
+        skuCode: input.skuCode,
+      }),
+      lines: [
+        `店铺：${input.storeCode}（${input.platform}）`,
+        `商品：${input.skuCode ?? '—'}`,
+        excerpt === null ? '内容：（无文字）' : `内容：${excerpt}`,
+        input.askedAt === null ? '提问时间：—' : `提问时间：${input.askedAt.toISOString()}`,
+        '处理入口：平台后台「问题」回复（WCIES 暂不代回复）',
+      ],
+      linkPath: eventDefinition('BUYER_QUESTION_RECEIVED').linkPath,
+      dedupeKey: `question:${input.storeId}:${input.questionId}`,
+      referenceType: 'STORE',
+      referenceId: input.storeId,
+    });
+  }
+
   /** 新退货申请（2026-11-02，rFBS 退货单首次出现）。 */
   async notifyReturnRequested(input: {
     storeId: string;

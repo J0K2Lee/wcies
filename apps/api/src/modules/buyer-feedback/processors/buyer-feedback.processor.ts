@@ -13,6 +13,8 @@ const CHAT_INTERVAL_MS = 10 * 60 * 1000;
 const REVIEW_INTERVAL_MS = 30 * 60 * 1000;
 /** 退货轮询间隔：15 分钟。 */
 const RETURN_INTERVAL_MS = 15 * 60 * 1000;
+/** 提问轮询间隔：10 分钟（WB 没有聊天，提问就是买家消息）。 */
+const QUESTION_INTERVAL_MS = 10 * 60 * 1000;
 /** 评价无权限后的静默期：6 小时内不再试（避免每轮 403 刷日志）。 */
 const REVIEW_DENIED_BACKOFF_MS = 6 * 60 * 60 * 1000;
 /** 退货增量窗口：每次拉最近 7 天（upsert 幂等，重复拉安全）。 */
@@ -20,8 +22,11 @@ const RETURN_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const BUYER_FEEDBACK_TICK_MS = 5 * 60 * 1000;
 
-interface ChatJob {
+/** webhook 触发的一次采集：只带店铺与要拉哪一类。 */
+interface CollectJob {
   storeId: string;
+  /** chat = 会话消息；reviews = 评价；questions = 提问。 */
+  kind: 'chat' | 'reviews' | 'questions';
 }
 
 /**
@@ -36,6 +41,7 @@ interface ChatJob {
 @Processor(QUEUE_NAMES.buyerFeedback)
 export class BuyerFeedbackProcessor extends WorkerHost {
   private readonly lastChatAt = new Map<string, number>();
+  private readonly lastQuestionAt = new Map<string, number>();
   private readonly lastReviewAt = new Map<string, number>();
   private readonly lastReturnAt = new Map<string, number>();
   /** storeId → 静默到什么时候（评价无权限）。 */
@@ -66,13 +72,13 @@ export class BuyerFeedbackProcessor extends WorkerHost {
     );
   }
 
-  async process(job: Job<ChatJob | Record<string, never>>): Promise<string> {
-    if (job.name === 'chat') {
-      const storeId = (job.data as ChatJob).storeId;
-      if (typeof storeId === 'string') {
-        await this.collectChat(storeId, 'WEBHOOK');
+  async process(job: Job<CollectJob | Record<string, never>>): Promise<string> {
+    if (job.name === 'chat' || job.name === 'reviews' || job.name === 'questions') {
+      const data = job.data as CollectJob;
+      if (typeof data.storeId === 'string') {
+        await this.collectOne(data.storeId, job.name);
       }
-      return 'chat-collected';
+      return `${job.name}-collected`;
     }
     await this.pollAll();
     return 'ticked';
@@ -98,11 +104,14 @@ export class BuyerFeedbackProcessor extends WorkerHost {
     const now = Date.now();
     const chatDue = now - (this.lastChatAt.get(storeId) ?? 0) >= CHAT_INTERVAL_MS;
     const reviewDue = now - (this.lastReviewAt.get(storeId) ?? 0) >= REVIEW_INTERVAL_MS;
+    const questionDue =
+      adapter.fetchBuyerQuestions !== undefined &&
+      now - (this.lastQuestionAt.get(storeId) ?? 0) >= QUESTION_INTERVAL_MS;
     const returnDue =
       adapter.returnAlertsEnabled === true && adapter.fetchReturns !== undefined
         ? now - (this.lastReturnAt.get(storeId) ?? 0) >= RETURN_INTERVAL_MS
         : false;
-    if (!chatDue && !reviewDue && !returnDue) {
+    if (!chatDue && !reviewDue && !questionDue && !returnDue) {
       return;
     }
     const context = await this.contextService.buildStoreContext(store);
@@ -140,6 +149,17 @@ export class BuyerFeedbackProcessor extends WorkerHost {
       }
     }
 
+    if (questionDue) {
+      this.lastQuestionAt.set(storeId, now);
+      await this.buyerFeedback.collectBuyerQuestions({
+        storeId,
+        storeCode: store.storeCode,
+        platform: adapter.platformCode,
+        adapter,
+        context,
+      });
+    }
+
     if (returnDue) {
       this.lastReturnAt.set(storeId, now);
       await this.returnSync.syncStoreReturns(
@@ -154,20 +174,51 @@ export class BuyerFeedbackProcessor extends WorkerHost {
     }
   }
 
-  private async collectChat(storeId: string, trigger: 'WEBHOOK' | 'SCHEDULED'): Promise<void> {
+  /** webhook 触发：按事件种类只拉对应的那类数据（Yandex 推送载荷只给 id）。 */
+  private async collectOne(storeId: string, kind: CollectJob['kind']): Promise<void> {
     const { store, adapter } = await this.contextService.resolveSyncableStore(storeId);
-    if (adapter.fetchChats === undefined) {
+    const context = await this.contextService.buildStoreContext(store);
+    if (kind === 'chat') {
+      if (adapter.fetchChats === undefined) {
+        return;
+      }
+      this.lastChatAt.set(storeId, Date.now());
+      await this.buyerFeedback.collectChatMessages({
+        storeId,
+        storeCode: store.storeCode,
+        platform: adapter.platformCode,
+        adapter,
+        context,
+        trigger: 'WEBHOOK',
+      });
       return;
     }
-    const context = await this.contextService.buildStoreContext(store);
-    this.lastChatAt.set(storeId, Date.now());
-    await this.buyerFeedback.collectChatMessages({
+    if (kind === 'reviews') {
+      if (adapter.fetchReviews === undefined) {
+        return;
+      }
+      const result = await this.buyerFeedback.collectReviews({
+        storeId,
+        storeCode: store.storeCode,
+        platform: adapter.platformCode,
+        adapter,
+        context,
+      });
+      if (result.accessDenied) {
+        this.reviewDeniedUntil.set(storeId, Date.now() + REVIEW_DENIED_BACKOFF_MS);
+      }
+      return;
+    }
+    if (adapter.fetchBuyerQuestions === undefined) {
+      return;
+    }
+    this.lastQuestionAt.set(storeId, Date.now());
+    await this.buyerFeedback.collectBuyerQuestions({
       storeId,
       storeCode: store.storeCode,
       platform: adapter.platformCode,
       adapter,
       context,
-      trigger,
     });
   }
 }

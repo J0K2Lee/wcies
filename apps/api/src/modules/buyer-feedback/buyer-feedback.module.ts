@@ -7,8 +7,10 @@ import { NotificationModule } from '../notification/notification.module';
 import { ReturnsModule } from '../returns/returns.module';
 import { StoreModule } from '../store/store.module';
 import { SyncModule } from '../sync/sync.module';
+import { PlatformBuyerQuestionEntity } from './entities/platform-buyer-question.entity';
 import { PlatformChatMessageEntity } from './entities/platform-chat-message.entity';
 import { PlatformReviewEntity } from './entities/platform-review.entity';
+import { BuyerQuestionRepository } from './repositories/buyer-question.repository';
 import { ChatMessageRepository } from './repositories/chat-message.repository';
 import { PlatformReviewRepository } from './repositories/platform-review.repository';
 import { BuyerFeedbackService } from './services/buyer-feedback.service';
@@ -27,7 +29,11 @@ import {
  */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([PlatformChatMessageEntity, PlatformReviewEntity]),
+    TypeOrmModule.forFeature([
+      PlatformChatMessageEntity,
+      PlatformReviewEntity,
+      PlatformBuyerQuestionEntity,
+    ]),
     BullModule.registerQueue({ name: QUEUE_NAMES.buyerFeedback }),
     IntegrationModule,
     StoreModule,
@@ -38,6 +44,7 @@ import {
   providers: [
     ChatMessageRepository,
     PlatformReviewRepository,
+    BuyerQuestionRepository,
     BuyerFeedbackService,
     BuyerFeedbackProcessor,
   ],

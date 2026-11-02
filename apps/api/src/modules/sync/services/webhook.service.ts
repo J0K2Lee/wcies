@@ -351,7 +351,10 @@ export class WebhookProcessService {
      * `/v3/chat/*`（AGENTS §88）。跨模块只走队列，不 import 对方服务。
      */
     @InjectQueue(QUEUE_NAMES.buyerFeedback)
-    private readonly buyerFeedbackQueue: Queue<{ storeId: string }>,
+    private readonly buyerFeedbackQueue: Queue<{
+      storeId: string;
+      kind: 'chat' | 'reviews' | 'questions';
+    }>,
     private readonly logger: AppLoggerService,
   ) {}
 
@@ -385,14 +388,24 @@ export class WebhookProcessService {
             platformChangedAt: webhookChangedStateDate(webhookEvent.payload),
           });
           acted = true;
-        } else if (webhookEvent.eventType === 'CHAT_MESSAGE') {
-          // 聊天：载荷不解析，只当"去拉一次"的信号。jobId 带 rawEventId，
-          // 同一事件重复入队被 BullMQ 去重。
+        } else if (
+          webhookEvent.eventType === 'CHAT_MESSAGE' ||
+          webhookEvent.eventType === 'GOODS_FEEDBACK' ||
+          webhookEvent.eventType === 'BUYER_QUESTION'
+        ) {
+          // 买家侧推送（2026-11-02）：载荷只给 id + 时间戳，不解析——按事件
+          // 种类只去拉对应数据（jobId 带 rawEventId，BullMQ 去重）。
+          const kind =
+            webhookEvent.eventType === 'CHAT_MESSAGE'
+              ? 'chat'
+              : webhookEvent.eventType === 'GOODS_FEEDBACK'
+                ? 'reviews'
+                : 'questions';
           await this.buyerFeedbackQueue.add(
-            'chat',
-            { storeId: store.id },
+            kind,
+            { storeId: store.id, kind },
             {
-              jobId: `chat:${event.id}`,
+              jobId: `${kind}:${event.id}`,
               removeOnComplete: { count: 50 },
               removeOnFail: { count: 50 },
             },

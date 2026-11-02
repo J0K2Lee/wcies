@@ -3,17 +3,19 @@ import { PlatformApiError, PlatformMalformedResponseError } from '../platform-er
 import {
   WbCardsListRequest,
   WbCardsListResponse,
+  WbFeedbacksResponse,
+  WbQuestionsResponse,
   WbSellerInfoResponse,
   WbStatsOrderRow,
   WbV3CreateSupplyResponse,
-  WbV3OrderStatusesResponse,
   WbV3CrossBorderStickersResponse,
+  WbV3OrderStatusesResponse,
   WbV3OrdersResponse,
   WbV3StickersResponse,
   WbWebhookCreateResponse,
   WbWebhookResource,
-  extractWebhookRows,
   extractStatsRows,
+  extractWebhookRows,
 } from './types/api.types';
 
 /**
@@ -43,7 +45,14 @@ import {
  */
 
 /** WB module domains with distinct hosts and rate budgets. */
-export type WbDomain = 'common' | 'content' | 'marketplace' | 'statistics' | 'webhooks';
+export type WbDomain =
+  | 'common'
+  | 'content'
+  | 'marketplace'
+  | 'statistics'
+  | 'webhooks'
+  /** 评价/提问（feedbacks-api，2026-11-02）——与 marketplace 不同主机。 */
+  | 'feedbacks';
 
 export interface WbClientOptions {
   readonly baseUrls: Readonly<Record<WbDomain, string>>;
@@ -94,6 +103,7 @@ export const WB_DEFAULT_BASE_URLS: Readonly<Record<WbDomain, string>> = {
   marketplace: 'https://marketplace-api.wildberries.ru',
   statistics: 'https://statistics-api.wildberries.ru',
   webhooks: 'https://webhooks-api.wildberries.ru',
+  feedbacks: 'https://feedbacks-api.wildberries.ru',
 };
 
 interface RequestCall {
@@ -165,6 +175,53 @@ export class WbClient {
       storeId,
       method: 'GET',
       query,
+    });
+  }
+
+  /**
+   * 商品评价（2026-11-02 实测）：`dateFrom/dateTo` 是 Unix 秒，`take/skip` 分页，
+   * `order=dateAsc|dateDesc`。返回 `data.feedbacks[]`。
+   */
+  async feedbacks(
+    auth: WbAuth,
+    storeId: string,
+    query: {
+      take: number;
+      skip: number;
+      order: 'dateAsc' | 'dateDesc';
+      dateFrom: number;
+      dateTo: number;
+      /** 必填（2026-11-02 实测：省略会被 400 `Плохой формат isAnswered`）。 */
+      isAnswered: boolean;
+    },
+  ): Promise<WbFeedbacksResponse> {
+    return this.request<WbFeedbacksResponse>(auth, {
+      domain: 'feedbacks',
+      endpoint: '/api/v1/feedbacks',
+      storeId,
+      method: 'GET',
+      query: { ...query, isAnswered: query.isAnswered ? 'true' : 'false' },
+    });
+  }
+
+  /** 买家提问（2026-11-02 实测）：与评价同一主机与分页参数。 */
+  async questions(
+    auth: WbAuth,
+    storeId: string,
+    query: {
+      take: number;
+      skip: number;
+      order: 'dateAsc' | 'dateDesc';
+      dateFrom: number;
+      dateTo: number;
+    },
+  ): Promise<WbQuestionsResponse> {
+    return this.request<WbQuestionsResponse>(auth, {
+      domain: 'feedbacks',
+      endpoint: '/api/v1/questions',
+      storeId,
+      method: 'GET',
+      query: { ...query, isAnswered: 'false' },
     });
   }
 

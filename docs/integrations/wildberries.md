@@ -144,6 +144,34 @@ WB API 按**模块分域名**（与 OZON 单域名不同，client 需支持多 b
 | webhook | **已验证 + 已实现（2026-09-18）**：官方 webhooks-api 文档核对，见 §5b | 已实现 |
 | **发货流程平台写** | **官方 swagger 已核对并落盘（2026-09-18，见 §9 与 docs/wb-orders-fbs-openapi.yaml）**：发货写操作按**供应单**走——建供应单 → 加订单（→`confirm`）→ 供应单转交付（→`complete`）；面单 `POST /api/v3/orders/stickers`（仅 `confirm`/`complete` 可取，JSON 内 base64） | **已实现（2026-09-18，T0 待实测）**：`prepareShipment`=建专属供应单(WCIES-<订单号>)+加单（→`confirm`，先读后写保证幂等，不调 deliver——`complete` 由平台收货扫码产生）；`fetchShippingLabel`=58×40 png 贴纸。映射经用户确认，见 §9.4 |
 
+## 5a. 买家侧：评价 / 提问（2026-11-02 实测；**WB 没有聊天 API**）
+
+WB 的公共 API 里没有买家聊天/IM：运营口径的「买家消息」在 WB 上就是**提问**与
+**评价**（feedbacks-api）。推送同样不可用（webhook 仅服务令牌，见 §5b），所以
+只能轮询。
+
+```text
+GET https://feedbacks-api.wildberries.ru/api/v1/feedbacks?isAnswered=&take=&skip=&order=&dateFrom=&dateTo=
+GET https://feedbacks-api.wildberries.ru/api/v1/questions?isAnswered=&take=&skip=&order=&dateFrom=&dateTo=
+```
+
+实测（2026-11-02，WS-001 真实 token，只读）：
+
+- `isAnswered` **是必填参数**——省略会 400 `Плохой формат isAnswered`，且只能二选一
+  （未回复 / 已回复）。WCIES 对评价**两遍都拉**（避免漏掉「客服已回复过的差评」），
+  对提问只拉未回复（已回复的没有待办）。
+- `dateFrom/dateTo` 是 Unix **秒**；`take/skip` 分页；`order=dateAsc|dateDesc`。
+- 响应：`{data:{countUnanswered,countArchive,feedbacks[]|questions[]}, error, errorText}`。
+- 评价字段：`id, text, pros, cons, productValuation(1-5), createdDate, userName,
+  wasViewed, orderStatus, photoLinks[], answer{text,state}, productDetails{nmId,
+  supplierArticle, brandName, productName}`。
+- 提问字段：`id, text, createdDate, wasViewed, answer{text,createDate}, productDetails{...}`。
+- 商品标识：优先 `productDetails.supplierArticle`（卖家货号，运营认这个），缺失时退回 `nmId`。
+- 该账号 7 天内评价/提问均为 0（90 天窗口有 12 条评价、19 条提问），所以 dev 库里
+  WB 侧暂无数据——不是链路问题。
+- 退货：`returns-api.wildberries.ru/api/v1/claims?is_archive=&limit=` 可用（实测 200），
+  **但 `claims[]` 的条目结构未验证**（该账号 0 条），暂不参与提醒轮询。
+
 ## 5b. Webhook（已验证 2026-09-18，官方文档核对；已实现）
 
 - **订阅方式与 OZON/Yandex 不同：通过 API 创建**（webhooks-api.wildberries.ru），不是卖家后台 UI。鉴权 = seller token（Authorization）+ **WCIES 服务密钥**（`X-Client-Secret`，解决方案目录注册获得，env `WB_WEBHOOKS_SERVICE_SECRET`）；token 类别必须匹配事件类别。

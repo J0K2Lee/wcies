@@ -140,6 +140,17 @@ export const NOTIFICATION_EVENTS: Record<string, NotificationEventDefinition> = 
     cardFields: ['storeCode', 'rating', 'excerpt', 'publishedAt'],
     linkPath: '/skus',
   },
+  BUYER_QUESTION_RECEIVED: {
+    type: 'BUYER_QUESTION_RECEIVED',
+    label: '买家提问',
+    level: 'WARN',
+    conditionFields: [
+      { key: 'storeId', label: '店铺' },
+      { key: 'platform', label: '平台' },
+    ],
+    cardFields: ['storeCode', 'platform', 'skuCode', 'excerpt', 'askedAt'],
+    linkPath: '/skus',
+  },
   RETURN_REQUESTED: {
     type: 'RETURN_REQUESTED',
     label: '新退货申请',

@@ -2,10 +2,14 @@ import { Injectable } from '@nestjs/common';
 import {
   PaginatedResult,
   PlatformAdapter,
+  PlatformBuyerQuestionRaw,
+  PlatformChatMessageRaw,
+  PlatformChatSummaryRaw,
   PlatformCredentialContext,
   PlatformLabelFile,
   PlatformListingRaw,
   PlatformOrderRaw,
+  PlatformReviewRaw,
   PlatformShipmentPreparation,
   PlatformReturnRaw,
   PlatformWebhookEvent,
@@ -16,6 +20,10 @@ import { parseYxAuth } from './yandex-auth';
 import { YandexShipmentService } from './yandex-shipment.service';
 export { parseYxAuth };
 import {
+  mapChatMessage,
+  mapChatSummaries,
+  mapGoodsFeedback,
+  mapGoodsQuestion,
   mapOfferMappingToListing,
   mapOrderToOrder,
   mapReturnToReturn,
@@ -41,6 +49,12 @@ const LISTING_PAGE_SIZE = 100;
 const ORDER_PAGE_SIZE = 50;
 /** Returns limit <= 100 (docs §6). */
 const RETURN_PAGE_SIZE = 100;
+/**
+ * 会话列表单页大小。实测（2026-11-02 live）：`/v2/businesses/{id}/chats`
+ * 的 limit **上限是 20**（50 会 400 `Parameter limit must be less than or
+ * equal to 20`）；评价接口是另一套上限，这里分开常量。
+ */
+const CHAT_PAGE_SIZE = 20;
 /** business orders accepts up to 50 orderIds per targeted read (docs §3). */
 const TARGETED_IDS_BATCH = 50;
 
@@ -61,6 +75,12 @@ const TARGETED_IDS_BATCH = 50;
 @Injectable()
 export class YandexAdapter implements PlatformAdapter {
   readonly platformCode = 'YANDEX' as const;
+
+  /**
+   * 退货提醒轮询（2026-11-02）。信封 bug 修好后实测 `/v2/campaigns/{id}/returns`
+   * 返回 `result.returns[]`（YX-001 一页 20 条），所以打开该能力。
+   */
+  readonly returnAlertsEnabled = true;
 
   /**
    * READY_TO_SHIP 后平台即生成面单（不依赖运单号先回传），所以组包成功就能
@@ -177,6 +197,140 @@ export class YandexAdapter implements PlatformAdapter {
   }
 
   /**
+   * 买家会话摘要（2026-11-02）：只取 type=CHAT 的会话；`unreadOnly` 时按
+   * `WAITING_FOR_PARTNER`（等我们回复）过滤——Yandex 没有未读数字段。
+   */
+  async fetchChats(
+    context: StoreContext,
+    options?: { unreadOnly?: boolean },
+  ): Promise<readonly PlatformChatSummaryRaw[]> {
+    const auth = parseYxAuth(context.credential, context.storeId);
+    const identity = await this.resolveIdentity(auth, context.storeId, context.credential);
+    const out: PlatformChatSummaryRaw[] = [];
+    let pageToken: string | undefined;
+    for (let page = 0; page < 5; page += 1) {
+      const response = await this.client.businessChats(auth, context.storeId, {
+        businessId: identity.businessId,
+        limit: CHAT_PAGE_SIZE,
+        ...(pageToken === undefined ? {} : { pageToken }),
+        body: {
+          types: ['CHAT'],
+          statuses: options?.unreadOnly === true ? ['WAITING_FOR_PARTNER'] : undefined,
+        },
+      });
+      const chats = response.result?.chats ?? [];
+      out.push(...mapChatSummaries(chats));
+      const next = readStringOrNull(response.result?.paging?.nextPageToken);
+      if (next === null) {
+        break;
+      }
+      pageToken = next;
+    }
+    return out;
+  }
+
+  /** 会话消息（2026-11-02）：给出 `fromMessageId` 时只取之后的增量。 */
+  async fetchChatMessages(
+    context: StoreContext,
+    input: { chatId: string; fromMessageId?: string; limit?: number },
+  ): Promise<readonly PlatformChatMessageRaw[]> {
+    const auth = parseYxAuth(context.credential, context.storeId);
+    const identity = await this.resolveIdentity(auth, context.storeId, context.credential);
+    const response = await this.client.chatHistory(auth, context.storeId, {
+      businessId: identity.businessId,
+      chatId: input.chatId,
+      limit: input.limit ?? 50,
+      ...(input.fromMessageId === undefined ? {} : { messageIdFrom: input.fromMessageId }),
+    });
+    const messages = response.result?.messages ?? [];
+    const out: PlatformChatMessageRaw[] = [];
+    for (const item of messages) {
+      try {
+        out.push(mapChatMessage(input.chatId, item));
+      } catch {
+        // 单条畸形不拖垮整段会话（AGENTS §49）。
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 商品评价（2026-11-02）：`dateTimeFrom` 为增量水位，`ratingValues: ['1','2','3']`
+   * 只拉差评（平台侧过滤，省请求）。分页用 `page_token`。
+   */
+  async fetchReviews(
+    context: StoreContext,
+    input: { publishedFrom: Date; limit?: number; lastId?: string },
+  ): Promise<PaginatedResult<PlatformReviewRaw>> {
+    const auth = parseYxAuth(context.credential, context.storeId);
+    const identity = await this.resolveIdentity(auth, context.storeId, context.credential);
+    const response = await this.client.goodsFeedbacks(auth, context.storeId, {
+      businessId: identity.businessId,
+      limit: input.limit ?? 50,
+      ...(input.lastId === undefined ? {} : { pageToken: input.lastId }),
+      body: {
+        dateTimeFrom: input.publishedFrom.toISOString(),
+        dateTimeTo: new Date(Date.now() + 60_000).toISOString(),
+        // 不在平台侧按星级过滤：4-5 星也要落库（只提醒 1-3 星由业务层判断），
+        // 否则事后想统计评分分布就没有数据。
+      },
+    });
+    const rows = response.result?.feedbacks ?? [];
+    const items: PlatformReviewRaw[] = [];
+    for (const row of rows) {
+      const mapped = mapGoodsFeedback(row);
+      if (mapped !== null) {
+        items.push(mapped);
+      }
+    }
+    const next = readStringOrNull(response.result?.paging?.nextPageToken);
+    return {
+      items,
+      nextCursor: next === null ? null : { pageToken: next },
+      hasMore: next !== null,
+    };
+  }
+
+  /**
+   * 买家提问（2026-11-02，v1 goods-questions）：`dateFrom/dateTo` 只接受日期且
+   * 窗口 ≤1 个月，所以按 30 天切片由调用方（采集器）负责；这里只取一页。
+   */
+  async fetchBuyerQuestions(
+    context: StoreContext,
+    input: { createdFrom: Date; limit?: number; cursor?: unknown },
+  ): Promise<PaginatedResult<PlatformBuyerQuestionRaw>> {
+    const auth = parseYxAuth(context.credential, context.storeId);
+    const identity = await this.resolveIdentity(auth, context.storeId, context.credential);
+    const pageToken =
+      typeof input.cursor === 'object' && input.cursor !== null
+        ? readStringOrNull((input.cursor as { pageToken?: unknown }).pageToken ?? null)
+        : null;
+    const response = await this.client.goodsQuestions(auth, context.storeId, {
+      businessId: identity.businessId,
+      limit: input.limit ?? 50,
+      ...(pageToken === null ? {} : { pageToken }),
+      body: {
+        dateFrom: toDateOnly(input.createdFrom),
+        dateTo: toDateOnly(new Date()),
+      },
+    });
+    const rows = response.result?.questions ?? [];
+    const items: PlatformBuyerQuestionRaw[] = [];
+    for (const row of rows) {
+      const mapped = mapGoodsQuestion(row);
+      if (mapped !== null) {
+        items.push(mapped);
+      }
+    }
+    const next = readStringOrNull(response.result?.paging?.nextPageToken);
+    return {
+      items,
+      nextCursor: next === null ? null : { pageToken: next },
+      hasMore: next !== null,
+    };
+  }
+
+  /**
    * WRITE: the one seller transition on the Yandex order lifecycle -
    * `PROCESSING/STARTED -> PROCESSING/READY_TO_SHIP` (组包/可发货). No-op
    * (read-only) when the order already passed that step. Never exercised
@@ -247,12 +401,16 @@ export class YandexAdapter implements PlatformAdapter {
       limit: RETURN_PAGE_SIZE,
       pageToken,
     });
-    if (typeof response !== 'object' || response === null || !Array.isArray(response.returns)) {
+    // 2026-11-02 修复：官方信封是 `{status, result:{returns, paging}}`，此前读
+    // 顶层 `returns` 导致每次同步都报 "returns array missing"（Yandex 退货
+    // 提醒因此一直空跑）。顶层字段作为兼容分支保留。
+    const payload = response.result ?? response;
+    if (typeof payload !== 'object' || payload === null || !Array.isArray(payload.returns)) {
       throw malformedReturnsResponse(context.storeId);
     }
-    const rows: ReadonlyArray<YxReturnItem> = response.returns;
+    const rows: ReadonlyArray<YxReturnItem> = payload.returns;
     const items = rows.map(mapReturnToReturn);
-    const nextToken = readStringOrNull(response.paging?.nextPageToken);
+    const nextToken = readStringOrNull(payload.paging?.nextPageToken);
     return {
       items,
       nextCursor:
@@ -431,4 +589,9 @@ class YxBadShape extends PlatformApiError {
       details: { reason },
     });
   }
+}
+
+/** `YYYY-MM-DD`（Yandex 提问接口只接受日期，不带时间）。 */
+function toDateOnly(value: Date): string {
+  return value.toISOString().slice(0, 10);
 }
