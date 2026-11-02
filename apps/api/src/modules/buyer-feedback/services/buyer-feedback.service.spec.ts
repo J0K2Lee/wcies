@@ -6,6 +6,7 @@ import { PlatformReviewRepository } from '../repositories/platform-review.reposi
 import { BuyerQuestionRepository } from '../repositories/buyer-question.repository';
 import { NotificationService } from '../../notification/services/notification.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
+import { OrderService } from '../../order/services/order.service';
 
 /**
  * 买家侧采集（2026-11-02）：
@@ -43,6 +44,7 @@ function build(options: {
 }) {
   const chatRepo = {
     maxMessageId: vi.fn().mockResolvedValue(null),
+    latestOrderNumber: vi.fn().mockResolvedValue(null),
     countByStore: vi.fn().mockResolvedValue(options.existingMessages ?? 0),
     insertNew: vi.fn().mockResolvedValue(options.inserted ?? options.messages ?? [chatMessage()]),
   } as unknown as ChatMessageRepository;
@@ -60,12 +62,16 @@ function build(options: {
     notifyReviewCreated: vi.fn().mockResolvedValue(undefined),
     notifyBuyerQuestion: vi.fn().mockResolvedValue(undefined),
   } as unknown as NotificationService;
+  const orderService = {
+    firstItemImageForPlatformOrder: vi.fn().mockResolvedValue('https://cdn.example/img.jpg'),
+  } as unknown as OrderService;
   const logger = { info: vi.fn(), warn: vi.fn() } as unknown as AppLoggerService;
   const service = new BuyerFeedbackService(
     chatRepo,
     reviewRepo,
     questionRepo,
     notification,
+    orderService,
     logger,
   );
 
@@ -111,6 +117,7 @@ function build(options: {
     service.collectChatMessages({
       storeId: 'store-1',
       storeCode: 'ON-002',
+      storeName: 'ON-002 香港店',
       platform: 'OZON',
       adapter: adapter as never,
       context: CONTEXT,
@@ -165,6 +172,31 @@ describe('BuyerFeedbackService 聊天采集', () => {
         excerpt: '第二条',
         lastMessageId: '3000000467309489659',
         orderNumber: 'ORD-1',
+      }),
+    );
+  });
+
+  it('正文原样传递（含换行）、订单号回退到会话历史、带店铺名与商品图', async () => {
+    const longText = 'line1' + String.fromCharCode(10) + 'line2 ' + 'x'.repeat(800);
+    const message = chatMessage({ bodyText: longText, orderNumber: null });
+    const { collectChats, notification, chatRepo } = build({
+      existingMessages: 100,
+      messages: [message],
+      inserted: [message],
+    });
+    // 本轮新增没有订单号 → 回查历史
+    (
+      chatRepo.latestOrderNumber as unknown as { mockResolvedValue: (v: unknown) => void }
+    ).mockResolvedValue('0137229425-0008');
+
+    await collectChats();
+
+    expect(notification.notifyBuyerMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderNumber: '0137229425-0008',
+        excerpt: longText,
+        imageUrl: 'https://cdn.example/img.jpg',
+        storeName: 'ON-002 香港店',
       }),
     );
   });

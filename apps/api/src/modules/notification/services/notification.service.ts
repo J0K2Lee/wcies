@@ -243,20 +243,30 @@ export class NotificationService {
   async notifyBuyerMessage(input: {
     storeId: string;
     storeCode: string;
+    /** 店铺名称（可读性，2026-11-02 用户要求：卡片显示名称而不是编码）。 */
+    storeName?: string | null;
     platform: string;
     chatId: string;
     buyerId: string | null;
     orderNumber: string | null;
+    /** 最近一条买家消息的完整正文（卡片尽量显示全，见 chatExcerpt）。 */
     excerpt: string | null;
     hasImage: boolean;
     messageCount: number;
     lastMessageId: string;
     receivedAt: Date;
+    /** 关联订单商品的图片 URL（卡片显示主图，上传失败则忽略）。 */
+    imageUrl?: string | null;
   }): Promise<void> {
-    const excerpt = excerptText(input.excerpt, 200);
+    const excerpt = chatExcerpt(input.excerpt);
+    // 商品主图先上传成 image_key（失败不影响发卡）。
+    const imageKey =
+      input.imageUrl === null || input.imageUrl === undefined || input.imageUrl === ''
+        ? null
+        : await this.feishu.uploadImageFromUrl(input.imageUrl);
     await this.publishEvent({
       type: 'BUYER_MESSAGE_RECEIVED',
-      title: `买家消息：${input.storeCode}（${input.messageCount} 条）`,
+      title: `买家消息：${storeLabel(input.storeCode, input.storeName)}（${input.messageCount} 条）`,
       level: 'WARN',
       factors: compactFactors({
         storeId: input.storeId,
@@ -264,12 +274,13 @@ export class NotificationService {
         chatId: input.chatId,
       }),
       lines: [
-        `店铺：${input.storeCode}（${input.platform}）`,
+        `店铺：${storeLabel(input.storeCode, input.storeName, input.platform)}`,
         `买家：${input.buyerId ?? '未知'}`,
         input.orderNumber === null ? '关联订单：—' : `关联订单：${input.orderNumber}`,
-        excerpt === null ? '内容：（图片消息）' : `内容：${excerpt}`,
+        excerpt === null ? '内容：（仅图片/附件）' : `内容：\n${excerpt}`,
         `本次新增 ${input.messageCount} 条，最近一条 ${input.receivedAt.toISOString()}`,
-      ],
+      ].filter((line): line is string => line !== ''),
+      imageKey,
       linkPath:
         input.orderNumber === null
           ? eventDefinition('BUYER_MESSAGE_RECEIVED').linkPath
@@ -284,6 +295,7 @@ export class NotificationService {
   async notifyReviewCreated(input: {
     storeId: string;
     storeCode: string;
+    storeName?: string | null;
     platform: string;
     reviewId: string;
     rating: number;
@@ -299,7 +311,7 @@ export class NotificationService {
       level: 'WARN',
       factors: compactFactors({ storeId: input.storeId, platform: input.platform }),
       lines: [
-        `店铺：${input.storeCode}（${input.platform}）`,
+        `店铺：${storeLabel(input.storeCode, input.storeName, input.platform)}`,
         `评分：${input.rating} 星`,
         `SKU：${input.platformSkuId ?? '—'}`,
         excerpt === null ? '内容：（无文字）' : `内容：${excerpt}`,
@@ -319,6 +331,7 @@ export class NotificationService {
   async notifyBuyerQuestion(input: {
     storeId: string;
     storeCode: string;
+    storeName?: string | null;
     platform: string;
     questionId: string;
     skuCode: string | null;
@@ -336,7 +349,7 @@ export class NotificationService {
         skuCode: input.skuCode,
       }),
       lines: [
-        `店铺：${input.storeCode}（${input.platform}）`,
+        `店铺：${storeLabel(input.storeCode, input.storeName, input.platform)}`,
         `商品：${input.skuCode ?? '—'}`,
         excerpt === null ? '内容：（无文字）' : `内容：${excerpt}`,
         input.askedAt === null ? '提问时间：—' : `提问时间：${input.askedAt.toISOString()}`,
@@ -353,6 +366,7 @@ export class NotificationService {
   async notifyReturnRequested(input: {
     storeId: string;
     storeCode: string;
+    storeName?: string | null;
     platform: string;
     returnNo: string;
     orderNo: string | null;
@@ -365,7 +379,7 @@ export class NotificationService {
       level: 'WARN',
       factors: compactFactors({ storeId: input.storeId, platform: input.platform }),
       lines: [
-        `店铺：${input.storeCode}（${input.platform}）`,
+        `店铺：${storeLabel(input.storeCode, input.storeName, input.platform)}`,
         `订单：${input.orderNo ?? '—'}`,
         `退货单：${input.returnNo}`,
         `状态：${input.state ?? '—'}`,
@@ -383,6 +397,7 @@ export class NotificationService {
   async notifyReturnStateChanged(input: {
     storeId: string;
     storeCode: string;
+    storeName?: string | null;
     platform: string;
     returnNo: string;
     orderNo: string | null;
@@ -396,7 +411,7 @@ export class NotificationService {
       level: 'INFO',
       factors: compactFactors({ storeId: input.storeId, platform: input.platform }),
       lines: [
-        `店铺：${input.storeCode}（${input.platform}）`,
+        `店铺：${storeLabel(input.storeCode, input.storeName, input.platform)}`,
         `订单：${input.orderNo ?? '—'}`,
         `退货单：${input.returnNo}`,
         `状态：${input.previousState ?? '—'} → ${input.state ?? '—'}`,
@@ -882,4 +897,32 @@ function excerptText(text: string | null, max: number): string | null {
     return null;
   }
   return flat.length <= max ? flat : `${flat.slice(0, max)}…`;
+}
+
+/**
+ * 店铺可读名（用户要求 2026-11-02）：卡片写「ON-002 香港店」而不是只有编码。
+ * 编码始终保留——运营对编码更敏感，名称是为了让不认识编码的人也看得懂。
+ */
+function storeLabel(code: string, name?: string | null, platform?: string | null): string {
+  const core = name === null || name === undefined || name === '' ? code : `${code} ${name}`;
+  return platform === null || platform === undefined || platform === ''
+    ? core
+    : `${core}（${platform}）`;
+}
+
+/**
+ * 买家消息正文（用户要求 2026-11-02「消息尽量显示完全」）：
+ * - 保留换行（飞书 lark_md 支持 \n，压成一行反而难读）；
+ * - 上限 1500 字（OZON 单条消息本身最长 1000 字，正常不会被截断；
+ *   仅防止异常长文把卡片撑爆）。
+ */
+function chatExcerpt(text: string | null, max = 1500): string | null {
+  if (text === null) {
+    return null;
+  }
+  const trimmed = text.trim();
+  if (trimmed === '') {
+    return null;
+  }
+  return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max)}…`;
 }

@@ -75,6 +75,17 @@ describe('buildFeishuCard（schema 2.0）', () => {
     expect(elements.some((element) => element['tag'] === 'action')).toBe(false);
   });
 
+  it('带 imageKey 时渲染 img 元素（卡片主图，2026-11-02）', () => {
+    const card = buildFeishuCard({ ...data, imageKey: 'img_v2_abc' }, { webBaseUrl: null });
+    const elements = (card['body'] as { elements: Array<Record<string, unknown>> }).elements;
+    const image = elements.find((element) => element['tag'] === 'img');
+    expect(image).toBeDefined();
+    expect(image?.['img_key']).toBe('img_v2_abc');
+    // 图片在最上方，正文紧随其后
+    expect(elements[0]?.['tag']).toBe('img');
+    expect(elements[1]?.['tag']).toBe('div');
+  });
+
   it('没有 webBaseUrl 时不出按钮', () => {
     const card = buildFeishuCard(data, { webBaseUrl: null });
     const elements = (card['body'] as { elements: Array<Record<string, unknown>> }).elements;

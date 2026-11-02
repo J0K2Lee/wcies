@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { QUEUE_NAMES } from '../../infrastructure/queue/queue.constants';
 import { IntegrationModule } from '../integration/integration.module';
 import { NotificationModule } from '../notification/notification.module';
+import { OrderModule } from '../order/order.module';
 import { ReturnsModule } from '../returns/returns.module';
 import { StoreModule } from '../store/store.module';
 import { SyncModule } from '../sync/sync.module';
@@ -40,6 +41,8 @@ import {
     SyncModule,
     ReturnsModule,
     NotificationModule,
+    // 买家消息卡片取关联订单的首个商品图（OrderService 公开方法）。
+    OrderModule,
   ],
   providers: [
     ChatMessageRepository,

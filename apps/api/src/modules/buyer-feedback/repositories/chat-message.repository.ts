@@ -78,6 +78,25 @@ export class ChatMessageRepository {
     return Number(rows[0]?.total ?? '0');
   }
 
+  /**
+   * 该会话最近一条带订单号的消息里的订单号（2026-11-02）。
+   *
+   * 平台只在部分消息上带 `context.order_number`（实测 39/262），通常是会话
+   * 开头那条；提醒只取「本轮新增」会漏掉它，卡片就显示「关联订单：—」。
+   */
+  async latestOrderNumber(storeId: string, platformChatId: string): Promise<string | null> {
+    const rows = await this.dataSource.query<Array<{ order_number: string | null }>>(
+      `SELECT order_number
+         FROM platform_chat_messages
+        WHERE store_id = $1 AND platform_chat_id = $2
+              AND order_number IS NOT NULL AND order_number <> ''
+        ORDER BY platform_created_at DESC
+        LIMIT 1`,
+      [storeId, platformChatId],
+    );
+    return rows[0]?.order_number ?? null;
+  }
+
   /** 最近消息（供后续站内页面/排障使用；不做业务判断）。 */
   async listRecent(
     storeId: string,

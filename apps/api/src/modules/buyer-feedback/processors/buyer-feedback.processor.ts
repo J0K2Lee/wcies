@@ -121,6 +121,7 @@ export class BuyerFeedbackProcessor extends WorkerHost {
       await this.buyerFeedback.collectChatMessages({
         storeId,
         storeCode: store.storeCode,
+        storeName: store.name ?? null,
         platform: adapter.platformCode,
         adapter,
         context,
@@ -135,6 +136,7 @@ export class BuyerFeedbackProcessor extends WorkerHost {
         const result = await this.buyerFeedback.collectReviews({
           storeId,
           storeCode: store.storeCode,
+          storeName: store.name ?? null,
           platform: adapter.platformCode,
           adapter,
           context,
@@ -154,6 +156,7 @@ export class BuyerFeedbackProcessor extends WorkerHost {
       await this.buyerFeedback.collectBuyerQuestions({
         storeId,
         storeCode: store.storeCode,
+        storeName: store.name ?? null,
         platform: adapter.platformCode,
         adapter,
         context,
@@ -186,6 +189,7 @@ export class BuyerFeedbackProcessor extends WorkerHost {
       await this.buyerFeedback.collectChatMessages({
         storeId,
         storeCode: store.storeCode,
+        storeName: store.name ?? null,
         platform: adapter.platformCode,
         adapter,
         context,
@@ -200,6 +204,7 @@ export class BuyerFeedbackProcessor extends WorkerHost {
       const result = await this.buyerFeedback.collectReviews({
         storeId,
         storeCode: store.storeCode,
+        storeName: store.name ?? null,
         platform: adapter.platformCode,
         adapter,
         context,
@@ -216,6 +221,7 @@ export class BuyerFeedbackProcessor extends WorkerHost {
     await this.buyerFeedback.collectBuyerQuestions({
       storeId,
       storeCode: store.storeCode,
+      storeName: store.name ?? null,
       platform: adapter.platformCode,
       adapter,
       context,

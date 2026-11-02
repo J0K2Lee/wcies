@@ -28,6 +28,11 @@ interface CachedToken {
 export class FeishuProvider {
   private readonly logger = new Logger(FeishuProvider.name);
   private token: CachedToken | null = null;
+  /**
+   * 图片 URL → image_key 缓存（2026-11-02）。卡片里的 `img` 元素只认 image_key，
+   * 必须先上传；同一张商品图会被多条提醒复用，缓存避免重复上传。
+   */
+  private readonly imageKeys = new Map<string, { key: string; expiresAt: number }>();
 
   constructor(private readonly config: ConfigService) {}
 
@@ -100,6 +105,60 @@ export class FeishuProvider {
     const ttlMs = Math.max(((body.expire ?? 7200) - 300) * 1000, 60_000);
     this.token = { value: body.tenant_access_token, expiresAt: now + ttlMs };
     return this.token.value;
+  }
+
+  /**
+   * 把外链图片上传成飞书 image_key（卡片 `img` 元素用）。失败返回 null：
+   * 卡片没有图也要能发出去，不能因为图片问题丢掉整条提醒。
+   *
+   * 同一 URL 缓存 6 小时（商品图不会变）；下载走 10 秒超时，图片超过 10MB
+   * 直接放弃（飞书上限 10MB）。
+   */
+  async uploadImageFromUrl(url: string): Promise<string | null> {
+    const cached = this.imageKeys.get(url);
+    if (cached !== undefined && cached.expiresAt > Date.now()) {
+      return cached.key;
+    }
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+      if (!response.ok) {
+        return null;
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.byteLength === 0 || bytes.byteLength > 10 * 1024 * 1024) {
+        return null;
+      }
+      const contentType = response.headers.get('content-type') ?? 'image/jpeg';
+      const form = new FormData();
+      form.append('image_type', 'message');
+      form.append('image', new Blob([bytes], { type: contentType }), 'image');
+      const token = await this.tenantToken();
+      const uploaded = await fetch('https://open.feishu.cn/open-apis/im/v1/images', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+        signal: AbortSignal.timeout(15_000),
+      });
+      const body = (await uploaded.json().catch(() => null)) as {
+        code?: number;
+        msg?: string;
+        data?: { image_key?: string };
+      } | null;
+      const key = body?.data?.image_key;
+      if (!uploaded.ok || body === null || body.code !== 0 || key === undefined) {
+        this.logger.warn(
+          `feishu image upload failed: HTTP ${uploaded.status} code=${String(body?.code)}`,
+        );
+        return null;
+      }
+      this.imageKeys.set(url, { key, expiresAt: Date.now() + 6 * 60 * 60 * 1000 });
+      return key;
+    } catch (error: unknown) {
+      this.logger.warn(
+        `feishu image upload error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
   }
 
   private async sendMessage(openId: string, card: Record<string, unknown>): Promise<void> {

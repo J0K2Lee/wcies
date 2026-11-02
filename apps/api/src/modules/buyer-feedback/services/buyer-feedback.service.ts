@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PlatformAdapter, PlatformChatMessageRaw, StoreContext } from '@wcies/platform-contracts';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { NotificationService } from '../../notification/services/notification.service';
+import { OrderService } from '../../order/services/order.service';
 import { BuyerQuestionRepository } from '../repositories/buyer-question.repository';
 import { ChatMessageRepository } from '../repositories/chat-message.repository';
 import { PlatformReviewRepository } from '../repositories/platform-review.repository';
@@ -59,6 +60,7 @@ export class BuyerFeedbackService {
     private readonly reviewRepo: PlatformReviewRepository,
     private readonly questionRepo: BuyerQuestionRepository,
     private readonly notification: NotificationService,
+    private readonly orderService: OrderService,
     private readonly logger: AppLoggerService,
   ) {}
 
@@ -69,6 +71,8 @@ export class BuyerFeedbackService {
   async collectChatMessages(input: {
     storeId: string;
     storeCode: string;
+    /** 店铺名称：卡片上要能直接看懂是哪家店（2026-11-02 用户要求）。 */
+    storeName?: string | null;
     platform: string;
     adapter: PlatformAdapter;
     context: StoreContext;
@@ -112,18 +116,30 @@ export class BuyerFeedbackService {
         if (latest === undefined) {
           continue;
         }
+        // 订单号：本轮新增里没有就回查该会话历史上带过的那条（平台通常只在
+        // 会话开头一条上带 order_number，实测 39/262）。
+        const orderNumber =
+          latestPick(incoming, (message) => message.orderNumber) ??
+          (await this.chatRepo.latestOrderNumber(input.storeId, chat.chatId));
+        // 主图：消息本身很少带 sku，用关联订单的首个商品图（订单行已存平台图）。
+        const imageUrl =
+          orderNumber === null
+            ? null
+            : await this.orderService.firstItemImageForPlatformOrder(input.storeId, orderNumber);
         await this.notification.notifyBuyerMessage({
           storeId: input.storeId,
           storeCode: input.storeCode,
+          storeName: input.storeName ?? null,
           platform: input.platform,
           chatId: chat.chatId,
           buyerId: latest.senderId,
-          orderNumber: latestPick(incoming, (message) => message.orderNumber),
+          orderNumber,
           excerpt: latest.bodyText,
           hasImage: latest.hasImage,
           messageCount: incoming.length,
           lastMessageId: latest.platformMessageId,
           receivedAt: latest.createdAt,
+          imageUrl,
         });
         notified += 1;
       } catch (error: unknown) {
@@ -150,6 +166,7 @@ export class BuyerFeedbackService {
   async collectReviews(input: {
     storeId: string;
     storeCode: string;
+    storeName?: string | null;
     platform: string;
     adapter: PlatformAdapter;
     context: StoreContext;
@@ -184,6 +201,7 @@ export class BuyerFeedbackService {
             await this.notification.notifyReviewCreated({
               storeId: input.storeId,
               storeCode: input.storeCode,
+              storeName: input.storeName ?? null,
               platform: input.platform,
               reviewId: review.platformReviewId,
               rating: review.rating,
@@ -228,6 +246,7 @@ export class BuyerFeedbackService {
   async collectBuyerQuestions(input: {
     storeId: string;
     storeCode: string;
+    storeName?: string | null;
     platform: string;
     adapter: PlatformAdapter;
     context: StoreContext;
@@ -265,6 +284,7 @@ export class BuyerFeedbackService {
         await this.notification.notifyBuyerQuestion({
           storeId: input.storeId,
           storeCode: input.storeCode,
+          storeName: input.storeName ?? null,
           platform: input.platform,
           questionId: question.platformQuestionId,
           skuCode: question.platformSkuId,

@@ -20,6 +20,11 @@ export interface NotificationEventData {
   lines: string[];
   /** 站内处理入口（相对路径）。 */
   linkPath: string;
+  /**
+   * 已上传到飞书的图片 key（2026-11-02）：买家消息带商品主图时由发送方先
+   * 上传再填这里；卡片在最上方渲染 `img` 元素。站内展示不使用。
+   */
+  imageKey?: string | null;
   /** 去重键：同类型 + 同键在窗口内只记一条。 */
   dedupeKey: string | null;
   referenceType: string;
@@ -241,9 +246,18 @@ export function buildFeishuCard(
       ? null
       : `${options.webBaseUrl.replace(/\/$/, '')}${data.linkPath}`;
 
-  const elements: Array<Record<string, unknown>> = [
-    { tag: 'div', text: { tag: 'lark_md', content: data.lines.join('\n') } },
-  ];
+  const elements: Array<Record<string, unknown>> = [];
+  if (typeof data.imageKey === 'string' && data.imageKey !== '') {
+    // 商品主图（2026-11-02）：飞书卡片只认 image_key，不能直接放外链 URL。
+    elements.push({
+      tag: 'img',
+      img_key: data.imageKey,
+      alt: { tag: 'plain_text', content: '商品主图' },
+      mode: 'fit_horizontal',
+      preview: true,
+    });
+  }
+  elements.push({ tag: 'div', text: { tag: 'lark_md', content: data.lines.join('\n') } });
   if (link !== null) {
     elements.push({
       tag: 'column_set',

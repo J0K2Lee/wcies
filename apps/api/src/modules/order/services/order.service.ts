@@ -1632,6 +1632,30 @@ export class OrderService {
   }
 
   /**
+   * 关联订单的首个商品图（2026-11-02，买家消息卡片显示主图）。
+   *
+   * 消息本身常常没有 sku（OZON `context.sku` 多数为空），但会话一旦带上
+   * `order_number`，就能从订单行取平台商品图（`order_items.platform_image_url`，
+   * 摄入时已落库）。只读、store-scoped；无订单/无图片返回 null。
+   */
+  async firstItemImageForPlatformOrder(
+    storeId: string,
+    platformOrderId: string,
+  ): Promise<string | null> {
+    const orderId = await this.findIdByStoreAndPlatformOrder(storeId, platformOrderId);
+    if (orderId === null) {
+      return null;
+    }
+    const items = await this.itemRepo.findByOrderId(orderId);
+    for (const item of items) {
+      if (item.platformImageUrl !== null && item.platformImageUrl !== '') {
+        return item.platformImageUrl;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Which order-fulfillment capabilities the store's platform exposes
    * (2026-09-18). Pure capability lookup - no platform call, no platform
    * vocabulary; a platform that has not implemented a capability reports
