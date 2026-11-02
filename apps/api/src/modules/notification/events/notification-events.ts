@@ -205,7 +205,13 @@ export function conditionsMatch(
     if (!Array.isArray(allowed) || allowed.length === 0) {
       continue;
     }
-    const actual = key === 'level' ? data.level : data.factors[key];
+    // `level` 过滤器已废弃（2026-11-02）：每个事件级别是固定的，选了不匹配的
+    // 级别等于永远收不到——WB 用户实测「订阅了买家消息却没有投递」就是它。
+    // 存量条件里的 level 在这里直接忽略，老订阅立刻恢复。
+    if (key === 'level') {
+      continue;
+    }
+    const actual = data.factors[key];
     if (actual === undefined || actual === '' || !allowed.includes(actual)) {
       return false;
     }

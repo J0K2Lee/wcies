@@ -750,7 +750,8 @@ export class NotificationService {
       throw new NotificationInvalidInputError(`暂不支持的订阅通道：${channel}`);
     }
     const definition = eventDefinition(eventType);
-    const allowed = new Set(['level', ...definition.conditionFields.map((field) => field.key)]);
+    // 事件级别是固定的，不提供 level 过滤（2026-11-02）：见 conditionsMatch 注释。
+    const allowed = new Set(definition.conditionFields.map((field) => field.key));
     for (const key of Object.keys(conditions)) {
       if (!allowed.has(key)) {
         throw new NotificationInvalidInputError(

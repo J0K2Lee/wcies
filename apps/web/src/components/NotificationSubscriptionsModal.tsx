@@ -8,8 +8,11 @@ import { colors, NOTIFICATION_TYPE_META, StatusBadge } from '../design-system';
  * 我的通知订阅（2026-10-26）。
  *
  * 订阅模型：**用户 × 通道 × 事件 × 条件（AND）**。条件只能按事件目录声明的
- * 字段过滤（storeId / warehouseCode / skuCode / level），每个字段给一组候选值，
+ * 字段过滤（storeId / warehouseCode / skuCode…），每个字段给一组候选值，
  * payload 命中任一即满足；不提供 OR 树与脚本——规则必须一眼能解释「为什么收到」。
+ *
+ * 2026-11-02：不再提供「级别」条件——事件级别固定（如买家消息固定 WARN），
+ * 选错级别会让订阅永远收不到（用户实测）。存量条件里的 level 由服务端忽略。
  *
  * 默认全不订阅：不建规则就不会收到任何推送；站内事件流不受影响。
  */
@@ -41,8 +44,6 @@ const CHANNEL_LABEL: Record<string, string> = {
   FEISHU_GROUP: '飞书群',
 };
 
-const LEVEL_OPTIONS = ['INFO', 'WARN', 'HIGH'] as const;
-
 interface StoreOption {
   id: string;
   storeCode: string;
@@ -70,7 +71,6 @@ function splitValues(raw: string): string[] {
 
 /** 条件字段中文名（目录里没有的键兜底显示 key 本身）。 */
 const FALLBACK_FIELD_LABEL: Record<string, string> = {
-  level: '级别',
   storeId: '店铺',
   warehouseCode: '仓库',
   skuCode: 'SKU',
@@ -154,15 +154,13 @@ export function NotificationSubscriptionsModal({
     [warehouses.data],
   );
 
-  /** 当前事件可用的条件字段：级别（所有事件通用）+ 目录声明字段。 */
+  /**
+   * 当前事件可用的条件字段：只用目录声明的字段。
+   * 2026-11-02 去掉了「级别」：事件级别固定，选错就等于订阅永不触发
+   * （用户实测订阅买家消息却没收到）。存量条件里的 level 由服务端忽略。
+   */
   const conditionFields = useMemo(
-    () =>
-      selectedEvent === null
-        ? []
-        : [
-            { key: 'level', label: FALLBACK_FIELD_LABEL['level'] },
-            ...selectedEvent.conditionFields,
-          ],
+    () => (selectedEvent === null ? [] : selectedEvent.conditionFields),
     [selectedEvent],
   );
 
@@ -171,9 +169,6 @@ export function NotificationSubscriptionsModal({
    * 手填；店铺/仓库/级别一律选择。
    */
   const optionsFor = (key: string): ConditionOption[] | null => {
-    if (key === 'level') {
-      return LEVEL_OPTIONS.map((level) => ({ value: level, label: level }));
-    }
     if (key === 'storeId') {
       return storeOptions;
     }

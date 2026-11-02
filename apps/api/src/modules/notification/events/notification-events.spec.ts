@@ -37,11 +37,25 @@ describe('conditionsMatch', () => {
 
   it('任一键不命中即整体不命中（AND）', () => {
     expect(conditionsMatch({ storeId: ['store-1'], warehouseCode: ['ZG-02'] }, data)).toBe(false);
-    expect(conditionsMatch({ level: ['WARN'] }, data)).toBe(false);
+    expect(conditionsMatch({ storeId: ['store-2'] }, data)).toBe(false);
   });
 
   it('规则里有、payload 没有的字段视为不匹配（不误发）', () => {
     expect(conditionsMatch({ unknownField: ['x'] }, data)).toBe(false);
+  });
+
+  it('遗留的 level 条件被忽略（2026-11-02：选错级别导致订阅永不触发）', () => {
+    // wbs 实测：订阅「买家消息」(WARN) 时带了 level=['INFO']，此前一条投递都没有。
+    expect(
+      conditionsMatch({ level: ['INFO'] }, { level: 'WARN', factors: { storeId: 's1' } }),
+    ).toBe(true);
+    // 其它条件仍然生效（AND 语义不变）。
+    expect(
+      conditionsMatch(
+        { level: ['INFO'], storeId: ['other'] },
+        { level: 'WARN', factors: { storeId: 's1' } },
+      ),
+    ).toBe(false);
   });
 });
 
