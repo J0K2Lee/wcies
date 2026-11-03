@@ -361,6 +361,48 @@ describe('return batch inspection (T5, returns.md §3)', () => {
     expect(linkedLine).toBeDefined();
     expect(manualLine).toBeDefined();
 
+    // 列表可读性（2026-11-03）：平台退货记录带内部 SKU 明细与已入批次号，
+    // 并支持按平台订单/SKU 编码搜索；批次列表带待处理行数、支持按 SKU 搜索。
+    const allRecords = await client.get<
+      Array<{ id: string; platformReturnId: string; platformOrderId: string | null }>
+    >(`/api/v1/returns/platform?storeId=${storeId}&pageSize=50`);
+    const sourceRecord = allRecords.body.data.find((row) => row.id === pendingReturn!.id);
+    expect(sourceRecord?.platformOrderId).toBeTruthy();
+
+    const enriched = await client.get<
+      Array<{
+        id: string;
+        skuCode: string | null;
+        skuName: string | null;
+        batchNo: string | null;
+      }>
+    >(
+      `/api/v1/returns/platform?storeId=${storeId}&keyword=${encodeURIComponent(
+        sourceRecord!.platformOrderId as string,
+      )}&pageSize=50`,
+    );
+    expect(enriched.status, JSON.stringify(enriched.body)).toBe(200);
+    const linkedRecord = enriched.body.data.find((row) => row.id === pendingReturn!.id);
+    expect(linkedRecord?.skuCode).toBeTruthy();
+    expect(linkedRecord?.skuName).toBeTruthy();
+    expect(linkedRecord?.batchNo).toBe(batch.batchNo);
+
+    // 入批状态过滤（linked 三态）：已入批次能筛出来，待入批次里不再出现。
+    const linkedOnly = await client.get<Array<{ id: string }>>(
+      `/api/v1/returns/platform?storeId=${storeId}&linked=true&pageSize=50`,
+    );
+    expect(linkedOnly.body.data.some((row) => row.id === pendingReturn!.id)).toBe(true);
+    const unlinkedOnly = await client.get<Array<{ id: string }>>(
+      `/api/v1/returns/platform?storeId=${storeId}&linked=false&pageSize=50`,
+    );
+    expect(unlinkedOnly.body.data.some((row) => row.id === pendingReturn!.id)).toBe(false);
+
+    const batchSearch = await client.get<Array<{ id: string; pendingItems: number }>>(
+      `/api/v1/returns/batches?keyword=${batch.batchNo}&pageSize=20`,
+    );
+    expect(batchSearch.body.data[0]?.id).toBe(batch.id);
+    expect(batchSearch.body.data[0]?.pendingItems).toBe(2);
+
     // Receive locks the line set.
     const received = await client.post(`/api/v1/returns/batches/${batch.id}/receive`, {});
     expect(received.status).toBe(200);

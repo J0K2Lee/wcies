@@ -7345,6 +7345,12 @@ export interface components {
             refundState: string | null;
             platformSkuId: string | null;
             offerId: string | null;
+            /** @description 店铺内解析的内部 SKU 编码 */
+            skuCode?: string | null;
+            /** @description 内部 SKU 名称（中文） */
+            skuName?: string | null;
+            /** @description 已消费该记录的对账批次号 */
+            batchNo?: string | null;
             /** @example 1 */
             quantity: string;
             /** Format: date-time */
@@ -7371,6 +7377,8 @@ export interface components {
             status: "DRAFT" | "RECEIVED" | "COMPLETED" | "CANCELLED";
             sourceNote: string | null;
             itemCount: number;
+            /** @description 待检验（还未回库处理）的行数 */
+            pendingItems: number;
             /** Format: date-time */
             createdAt: string;
         };
@@ -7400,6 +7408,8 @@ export interface components {
             status: "DRAFT" | "RECEIVED" | "COMPLETED" | "CANCELLED";
             sourceNote: string | null;
             itemCount: number;
+            /** @description 待检验（还未回库处理）的行数 */
+            pendingItems: number;
             /** Format: date-time */
             createdAt: string;
             items: components["schemas"]["ReturnBatchItemDto"][];
@@ -13703,6 +13713,8 @@ export interface operations {
                 orderId?: string;
                 /** @description linked=false：待收货对账视图（尚无退货批次行关联的平台退货记录） */
                 linked?: "true" | "false";
+                /** @description 搜索：平台退货单号 / 平台订单号 / Offer ID / 平台 SKU */
+                keyword?: string;
             };
             header?: never;
             path?: never;
@@ -13761,6 +13773,8 @@ export interface operations {
             query?: {
                 status?: "DRAFT" | "RECEIVED" | "COMPLETED" | "CANCELLED";
                 warehouseId?: string;
+                /** @description 搜索：批次号 / 平台退货单号 / 内部 SKU 编码（模糊匹配） */
+                keyword?: string;
             };
             header?: never;
             path?: never;

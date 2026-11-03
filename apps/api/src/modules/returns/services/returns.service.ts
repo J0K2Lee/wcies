@@ -48,7 +48,7 @@ export class ReturnsService {
   // --------------------------------------------------------------------------
 
   async listBatches(
-    filters: { status?: string; warehouseId?: string },
+    filters: { status?: string; warehouseId?: string; keyword?: string },
     page: { page: number; pageSize: number },
   ): Promise<{ items: ReturnBatchView[]; meta: PageMeta }> {
     const { rows, total } = await this.batchRepo.list({
@@ -64,6 +64,7 @@ export class ReturnsService {
         status: row.batch.status,
         sourceNote: row.batch.sourceNote,
         itemCount: row.itemCount,
+        pendingItems: row.pendingItems,
         createdAt: row.batch.createdAt,
       })),
       meta: { page: page.page, pageSize: page.pageSize, total },
@@ -103,6 +104,7 @@ export class ReturnsService {
       status: batch.status,
       sourceNote: batch.sourceNote,
       itemCount: items.length,
+      pendingItems: items.filter((item) => item.condition === 'PENDING').length,
       createdAt: batch.createdAt,
       items: items.map((item) => ({
         id: item.id,

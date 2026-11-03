@@ -39,7 +39,8 @@ export class ReturnsController {
       {
         storeId: query.storeId,
         orderId: query.orderId,
-        linked: query.linked === undefined ? undefined : query.linked === 'false',
+        linked: query.linked === undefined ? undefined : query.linked === 'false' ? false : true,
+        keyword: query.keyword,
       },
       { page: query.page, pageSize: query.pageSize },
     );
@@ -68,7 +69,7 @@ export class ReturnsController {
   @ApiOkPagedEnvelope(ReturnBatchDto)
   async listBatches(@Query() query: ReturnBatchListQueryDto) {
     const result = await this.returnsService.listBatches(
-      { status: query.status, warehouseId: query.warehouseId },
+      { status: query.status, warehouseId: query.warehouseId, keyword: query.keyword },
       { page: query.page, pageSize: query.pageSize },
     );
     return okPage(result.items, result.meta);

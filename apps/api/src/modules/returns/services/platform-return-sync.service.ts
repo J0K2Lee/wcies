@@ -130,10 +130,10 @@ export class PlatformReturnSyncService {
   }
 
   async list(
-    filters: { storeId?: string; orderId?: string; linked?: boolean },
+    filters: { storeId?: string; orderId?: string; linked?: boolean; keyword?: string },
     page: { page: number; pageSize: number },
   ): Promise<{ items: PlatformReturnView[]; meta: PageMeta }> {
-    const { rows, total } = await this.platformReturnRepo.list({
+    const { rows, total, enrichment } = await this.platformReturnRepo.list({
       ...filters,
       limit: page.pageSize,
       offset: (page.page - 1) * page.pageSize,
@@ -149,6 +149,9 @@ export class PlatformReturnSyncService {
         refundState: row.refundState,
         platformSkuId: row.platformSkuId,
         offerId: row.offerId,
+        skuCode: enrichment.get(row.id)?.skuCode ?? null,
+        skuName: enrichment.get(row.id)?.skuName ?? null,
+        batchNo: enrichment.get(row.id)?.batchNo ?? null,
         quantity: row.quantity,
         platformCreatedAt: row.platformCreatedAt,
         createdAt: row.createdAt,

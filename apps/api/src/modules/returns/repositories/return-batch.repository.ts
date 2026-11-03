@@ -15,21 +15,45 @@ export class ReturnBatchRepository {
   async list(filters: {
     status?: string;
     warehouseId?: string;
+    keyword?: string;
     limit: number;
     offset: number;
-  }): Promise<{ rows: Array<{ batch: ReturnBatchEntity; itemCount: number }>; total: number }> {
+  }): Promise<{
+    rows: Array<{ batch: ReturnBatchEntity; itemCount: number; pendingItems: number }>;
+    total: number;
+  }> {
     const qb = this.dataSource
       .getRepository(ReturnBatchEntity)
       .createQueryBuilder('b')
       .addSelect(
         `(SELECT COUNT(*) FROM return_batch_items i WHERE i.batch_id = b.id)`,
         'item_count',
+      )
+      .addSelect(
+        `(SELECT COUNT(*) FROM return_batch_items i WHERE i.batch_id = b.id AND i.condition = 'PENDING')`,
+        'pending_count',
       );
     if (filters.status !== undefined) {
       qb.andWhere('b.status = :status', { status: filters.status });
     }
     if (filters.warehouseId !== undefined) {
       qb.andWhere('b.warehouse_id = :warehouseId', { warehouseId: filters.warehouseId });
+    }
+    if (filters.keyword !== undefined && filters.keyword.trim() !== '') {
+      // 批次号 / 来源说明 / 关联的平台退货单号 / 行上的内部 SKU 编码。
+      qb.andWhere(
+        `(b.batch_no ILIKE :kw
+          OR COALESCE(b.source_note, '') ILIKE :kw
+          OR EXISTS (
+            SELECT 1
+              FROM return_batch_items i
+              LEFT JOIN platform_returns pr ON pr.id = i.platform_return_id
+              LEFT JOIN skus s ON s.id = i.sku_id
+             WHERE i.batch_id = b.id
+               AND (pr.platform_return_id ILIKE :kw OR s.sku_code ILIKE :kw OR s.name_zh ILIKE :kw)
+          ))`,
+        { kw: `%${filters.keyword.trim()}%` },
+      );
     }
     qb.orderBy('b.createdAt', 'DESC').skip(filters.offset).take(filters.limit);
     const [{ raw: rawRows, entities }, total] = await Promise.all([
@@ -41,6 +65,7 @@ export class ReturnBatchRepository {
       rows: entities.map((batch, index) => ({
         batch,
         itemCount: Number(rawList[index]?.['item_count'] ?? 0),
+        pendingItems: Number(rawList[index]?.['pending_count'] ?? 0),
       })),
       total,
     };

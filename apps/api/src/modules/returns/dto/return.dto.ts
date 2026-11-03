@@ -24,6 +24,8 @@ export interface ReturnBatchView {
   status: string;
   sourceNote: string | null;
   itemCount: number;
+  /** 检验结论仍为 PENDING 的行数（「还需要回库处理」的量化指标）。 */
+  pendingItems: number;
   createdAt: Date;
 }
 
@@ -52,6 +54,11 @@ export interface PlatformReturnView {
   refundState: string | null;
   platformSkuId: string | null;
   offerId: string | null;
+  /** 店铺内解析出的内部 SKU（未映射为 null）。 */
+  skuCode: string | null;
+  skuName: string | null;
+  /** 已被哪个退货批次消费（对账锚点），未入批次为 null。 */
+  batchNo: string | null;
   quantity: string;
   platformCreatedAt: Date | null;
   createdAt: Date;
@@ -71,6 +78,12 @@ export class PlatformReturnDto {
   @ApiProperty({ nullable: true, type: String }) refundState!: string | null;
   @ApiProperty({ nullable: true, type: String }) platformSkuId!: string | null;
   @ApiProperty({ nullable: true, type: String }) offerId!: string | null;
+  @ApiPropertyOptional({ nullable: true, type: String, description: '店铺内解析的内部 SKU 编码' })
+  skuCode!: string | null;
+  @ApiPropertyOptional({ nullable: true, type: String, description: '内部 SKU 名称（中文）' })
+  skuName!: string | null;
+  @ApiPropertyOptional({ nullable: true, type: String, description: '已消费该记录的对账批次号' })
+  batchNo!: string | null;
   @ApiProperty({ example: '1' }) quantity!: string;
   @ApiPropertyOptional({ nullable: true, type: String, format: 'date-time' })
   platformCreatedAt!: Date | null;
@@ -84,6 +97,7 @@ export class ReturnBatchDto {
   @ApiProperty({ enum: RETURN_BATCH_STATUSES }) status!: string;
   @ApiProperty({ nullable: true, type: String }) sourceNote!: string | null;
   @ApiProperty() itemCount!: number;
+  @ApiProperty({ description: '待检验（还未回库处理）的行数' }) pendingItems!: number;
   @ApiProperty({ type: Date }) createdAt!: Date;
 }
 
@@ -128,6 +142,14 @@ export class ReturnBatchListQueryDto extends PaginationQueryDto {
   status?: string;
 
   @ApiPropertyOptional() @IsOptional() @IsUUID() warehouseId?: string;
+
+  @ApiPropertyOptional({
+    description: '搜索：批次号 / 平台退货单号 / 内部 SKU 编码（模糊匹配）',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  keyword?: string;
 }
 
 export class PlatformReturnListQueryDto extends PaginationQueryDto {
@@ -142,6 +164,14 @@ export class PlatformReturnListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsIn(['true', 'false'])
   linked?: string;
+
+  @ApiPropertyOptional({
+    description: '搜索：平台退货单号 / 平台订单号 / Offer ID / 平台 SKU',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  keyword?: string;
 }
 
 // ---------------------------------------------------------------------------

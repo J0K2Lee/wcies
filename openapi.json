@@ -9808,6 +9808,15 @@
               "type": "string",
               "enum": ["true", "false"]
             }
+          },
+          {
+            "name": "keyword",
+            "required": false,
+            "in": "query",
+            "description": "搜索：平台退货单号 / 平台订单号 / Offer ID / 平台 SKU",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -9914,6 +9923,15 @@
             "name": "warehouseId",
             "required": false,
             "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "keyword",
+            "required": false,
+            "in": "query",
+            "description": "搜索：批次号 / 平台退货单号 / 内部 SKU 编码（模糊匹配）",
             "schema": {
               "type": "string"
             }
@@ -21836,6 +21854,21 @@
             "type": "string",
             "nullable": true
           },
+          "skuCode": {
+            "type": "string",
+            "nullable": true,
+            "description": "店铺内解析的内部 SKU 编码"
+          },
+          "skuName": {
+            "type": "string",
+            "nullable": true,
+            "description": "内部 SKU 名称（中文）"
+          },
+          "batchNo": {
+            "type": "string",
+            "nullable": true,
+            "description": "已消费该记录的对账批次号"
+          },
           "quantity": {
             "type": "string",
             "example": "1"
@@ -21917,6 +21950,10 @@
           "itemCount": {
             "type": "number"
           },
+          "pendingItems": {
+            "type": "number",
+            "description": "待检验（还未回库处理）的行数"
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -21929,6 +21966,7 @@
           "status",
           "sourceNote",
           "itemCount",
+          "pendingItems",
           "createdAt"
         ]
       },
@@ -22016,6 +22054,10 @@
           "itemCount": {
             "type": "number"
           },
+          "pendingItems": {
+            "type": "number",
+            "description": "待检验（还未回库处理）的行数"
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -22034,6 +22076,7 @@
           "status",
           "sourceNote",
           "itemCount",
+          "pendingItems",
           "createdAt",
           "items"
         ]

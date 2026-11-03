@@ -12,10 +12,11 @@ import {
   Tabs,
   Tooltip,
 } from 'antd';
-import { CloudSyncOutlined, PlusOutlined } from '@ant-design/icons';
+import { CloudSyncOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiPost, useApiQuery } from '../../api/hooks';
 import {
+  ActionIsland,
   ContextAction,
   ContextMetric,
   ContextSection,
@@ -57,6 +58,12 @@ interface PlatformReturnRow {
   state: string | null;
   refundState: string | null;
   platformSkuId: string | null;
+  offerId: string | null;
+  /** 店铺内解析出的内部 SKU（未映射为 null）。 */
+  skuCode: string | null;
+  skuName: string | null;
+  /** 已消费该记录的对账批次号。 */
+  batchNo: string | null;
   quantity: string;
   platformCreatedAt: string | null;
   createdAt: string;
@@ -82,6 +89,8 @@ interface ReturnBatchRow {
   status: string;
   sourceNote: string | null;
   itemCount: number;
+  /** 待检验（还没回库处理）的行数。 */
+  pendingItems: number;
   createdAt: string;
 }
 
@@ -111,6 +120,14 @@ export function ReturnsPage() {
   /** 平台退货记录选中态：右栏承载「用此记录建批次」，主表行内不放按钮。 */
   const [selectedReturnId, setSelectedReturnId] = useState<string | null>(null);
   const [skuKeyword, setSkuKeyword] = useState('');
+  /** 平台退货记录：搜索 / 入批状态筛选 / 多选批量建批（2026-11-03）。 */
+  const [platformKeyword, setPlatformKeyword] = useState('');
+  const [linkedFilter, setLinkedFilter] = useState<'false' | 'true' | undefined>();
+  const [selectedReturnIds, setSelectedReturnIds] = useState<string[]>([]);
+  /** 退货批次：搜索 / 状态筛选 / 多选批量确认收货。 */
+  const [batchKeyword, setBatchKeyword] = useState('');
+  const [batchStatus, setBatchStatus] = useState<string | undefined>();
+  const [selectedBatchIds, setSelectedBatchIds] = useState<string[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm] = Form.useForm<{
     warehouseId: string;
@@ -128,8 +145,14 @@ export function ReturnsPage() {
 
   const platformReturns = useApiQuery<Envelope<PlatformReturnRow[]>>(
     '/api/v1/returns/platform',
-    { page: platformPage, pageSize: 50, ...(storeId ? { storeId } : {}) },
-    ['platform-returns', platformPage, storeId],
+    {
+      page: platformPage,
+      pageSize: 50,
+      ...(storeId ? { storeId } : {}),
+      ...(linkedFilter === undefined ? {} : { linked: linkedFilter }),
+      ...(platformKeyword.trim() === '' ? {} : { keyword: platformKeyword.trim() }),
+    },
+    ['platform-returns', platformPage, storeId, linkedFilter, platformKeyword],
   );
 
   /** Pending reconciliation: records no batch line consumed yet. */
@@ -141,8 +164,13 @@ export function ReturnsPage() {
 
   const batches = useApiQuery<Envelope<ReturnBatchRow[]>>(
     '/api/v1/returns/batches',
-    { page, pageSize: 20 },
-    ['return-batches', page],
+    {
+      page,
+      pageSize: 20,
+      ...(batchStatus === undefined ? {} : { status: batchStatus }),
+      ...(batchKeyword.trim() === '' ? {} : { keyword: batchKeyword.trim() }),
+    },
+    ['return-batches', page, batchStatus, batchKeyword],
   );
 
   /** SKU master feed: resolves batch-line skuId (UUID) to seller-facing codes. */
@@ -211,24 +239,34 @@ export function ReturnsPage() {
       // 创建后直接落到批次详情，避免运营在页签之间找单据（2026-11-03）。
       setActiveTab('batches');
       setSelectedReturnId(null);
+      setSelectedReturnIds([]);
       setDetailId(result.id);
     },
     onError: (error: Error) => message.error(`创建失败：${error.message}`),
   });
 
-  /** 打开建批弹窗：从平台退货记录进入时自动带入该行（SKU 由后端按店铺解析）。 */
+  /**
+   * 打开建批弹窗：从平台退货记录（单条或勾选多条）进入时自动带入明细；
+   * SKU 由后端按店铺解析平台 SKU（对账锚点单次消费）。
+   */
   const openCreateBatch = useCallback(
-    (prefill?: PlatformReturnRow): void => {
+    (prefill?: PlatformReturnRow | PlatformReturnRow[]): void => {
+      const records = prefill === undefined ? [] : Array.isArray(prefill) ? prefill : [prefill];
       createForm.setFieldsValue({
         warehouseId: warehousesQuery.data?.data[0]?.id,
         sourceNote:
-          prefill === undefined
+          records.length === 0
             ? undefined
-            : `平台退货 ${prefill.platformReturnId}（${prefill.platformOrderId ?? '无订单号'}）`,
+            : records.length === 1
+              ? `平台退货 ${records[0]!.platformReturnId}（${records[0]!.platformOrderId ?? '无订单号'}）`
+              : `平台退货批量：${records.length} 条`,
         items:
-          prefill === undefined
+          records.length === 0
             ? [{ quantity: '1' }]
-            : [{ platformReturnId: prefill.id, quantity: prefill.quantity || '1' }],
+            : records.map((row) => ({
+                platformReturnId: row.id,
+                quantity: row.quantity || '1',
+              })),
       });
       setCreateOpen(true);
     },
@@ -243,6 +281,35 @@ export function ReturnsPage() {
       invalidateAll();
     },
     onError: (error: Error) => message.error(`收货失败：${error.message}`),
+  });
+
+  /** 批量确认收货（2026-11-03）：逐张推进，单张失败不影响其它，最后汇总结果。 */
+  const receiveManyMutation = useMutation({
+    mutationFn: async (ids: string[]): Promise<{ done: number; failed: string[] }> => {
+      const failed: string[] = [];
+      let done = 0;
+      for (const id of ids) {
+        try {
+          await apiPost<ReturnBatchRow>(`/api/v1/returns/batches/{id}/receive`, {}, { id });
+          done += 1;
+        } catch (error: unknown) {
+          failed.push(error instanceof Error ? error.message : String(error));
+        }
+      }
+      return { done, failed };
+    },
+    onSuccess: (result) => {
+      if (result.failed.length === 0) {
+        message.success(`已确认收货 ${result.done} 个批次，可开始检验`);
+      } else {
+        message.warning(
+          `确认收货 ${result.done} 个，失败 ${result.failed.length} 个：${result.failed[0] ?? ''}`,
+        );
+      }
+      setSelectedBatchIds([]);
+      invalidateAll();
+    },
+    onError: (error: Error) => message.error(`批量收货失败：${error.message}`),
   });
 
   const cancelMutation = useMutation({
@@ -455,7 +522,9 @@ export function ReturnsPage() {
               setPlatformPage(1);
               setActiveTab(key);
               setSelectedReturnId(null);
+              setSelectedReturnIds([]);
               setSelectedBatchId(null);
+              setSelectedBatchIds([]);
             }}
             items={[
               { key: 'platform', label: `平台退货记录 (${platformReturns.data?.meta.total ?? 0})` },
@@ -486,6 +555,15 @@ export function ReturnsPage() {
 
       {activeTab === 'platform' && (
         <FilterBar>
+          <Input.Search
+            allowClear
+            placeholder="退货单号 / 平台订单号 / Offer / 平台 SKU"
+            style={{ width: 320 }}
+            value={platformKeyword}
+            onChange={(event) => setPlatformKeyword(event.target.value)}
+            onSearch={() => setPlatformPage(1)}
+            onClear={() => setPlatformPage(1)}
+          />
           <Select
             allowClear
             placeholder="店铺"
@@ -502,6 +580,27 @@ export function ReturnsPage() {
               setStoreId(value);
             }}
           />
+          <Select
+            allowClear
+            placeholder="入批状态"
+            style={{ width: 150 }}
+            options={[
+              { value: 'false', label: '待入批次' },
+              { value: 'true', label: '已入批次' },
+            ]}
+            value={linkedFilter}
+            onChange={(value) => {
+              setPlatformPage(1);
+              setLinkedFilter(value);
+            }}
+          />
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => void platformReturns.refetch()}
+            loading={platformReturns.isFetching}
+          >
+            刷新
+          </Button>
         </FilterBar>
       )}
 
@@ -523,6 +622,11 @@ export function ReturnsPage() {
             }}
             emptyTitle="暂无平台退货记录"
             emptyDescription="选择店铺后点「同步退货记录」拉取平台 rFBS 退货。"
+            rowSelection={{
+              selectedRowKeys: selectedReturnIds,
+              onChange: (keys) => setSelectedReturnIds(keys as string[]),
+              getCheckboxProps: (record) => ({ disabled: record.batchNo !== null }),
+            }}
             onRow={(record) => ({
               onClick: () => setSelectedReturnId(record.id === selectedReturnId ? null : record.id),
               style: {
@@ -538,10 +642,39 @@ export function ReturnsPage() {
                 width: 160,
               },
               {
+                title: '商品',
+                key: 'product',
+                width: 240,
+                render: (_: unknown, row: PlatformReturnRow) =>
+                  row.skuCode === null ? (
+                    <span style={{ color: colors.danger }} title="平台 SKU 未映射到内部 SKU">
+                      {row.offerId ?? row.platformSkuId ?? '未映射'} ⚠
+                    </span>
+                  ) : (
+                    <span>
+                      <span style={{ fontWeight: 550 }}>{row.skuCode}</span>{' '}
+                      <span style={{ color: colors.textSecondary, fontSize: 12.5 }}>
+                        {row.skuName ?? ''}
+                      </span>
+                      <div style={{ fontSize: 12, color: colors.textTertiary }}>
+                        {row.offerId ?? ''}
+                      </div>
+                    </span>
+                  ),
+              },
+              {
+                title: '数量',
+                dataIndex: 'quantity',
+                key: 'quantity',
+                width: 70,
+                align: 'right' as const,
+                render: (value: string) => fmtQty(value),
+              },
+              {
                 title: '平台订单',
                 dataIndex: 'platformOrderId',
                 key: 'platformOrderId',
-                width: 180,
+                width: 170,
                 render: (value: string | null, row: PlatformReturnRow) =>
                   value === null ? (
                     '—'
@@ -595,8 +728,20 @@ export function ReturnsPage() {
                 title: '退货时间',
                 dataIndex: 'platformCreatedAt',
                 key: 'platformCreatedAt',
-                width: 160,
+                width: 150,
                 render: (value: string | null) => <RelativeTime value={value} fallback="—" />,
+              },
+              {
+                title: '已入批次',
+                dataIndex: 'batchNo',
+                key: 'batchNo',
+                width: 120,
+                render: (value: string | null) =>
+                  value === null ? (
+                    <StatusBadge tone="warning" label="待入批次" showDot={false} />
+                  ) : (
+                    <span style={{ fontFamily: 'monospace' }}>{value}</span>
+                  ),
               },
             ]}
           />
@@ -606,8 +751,38 @@ export function ReturnsPage() {
       {activeTab === 'batches' && (
         <>
           <FilterBar>
+            <Input.Search
+              allowClear
+              placeholder="批次号 / 退货单号 / SKU 编码"
+              style={{ width: 300 }}
+              value={batchKeyword}
+              onChange={(event) => setBatchKeyword(event.target.value)}
+              onSearch={() => setPage(1)}
+              onClear={() => setPage(1)}
+            />
+            <Select
+              allowClear
+              placeholder="批次状态"
+              style={{ width: 140 }}
+              options={Object.entries(BATCH_STATUS_META).map(([value, meta]) => ({
+                value,
+                label: meta.label,
+              }))}
+              value={batchStatus}
+              onChange={(value) => {
+                setPage(1);
+                setBatchStatus(value);
+              }}
+            />
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => void batches.refetch()}
+              loading={batches.isFetching}
+            >
+              刷新
+            </Button>
             <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
-              待收货平台记录 {pendingList.length} 条可在建批时直接带入（对账锚点单次消费）
+              待收货平台记录 {pendingList.length} 条可在建批时直接带入
             </span>
           </FilterBar>
           <SectionCard flush>
@@ -626,6 +801,11 @@ export function ReturnsPage() {
               }}
               emptyTitle="暂无退货批次"
               emptyDescription="新建批次登记一批退回实物，收货后逐行检验回库。"
+              rowSelection={{
+                selectedRowKeys: selectedBatchIds,
+                onChange: (keys) => setSelectedBatchIds(keys as string[]),
+                getCheckboxProps: (record) => ({ disabled: record.status !== 'DRAFT' }),
+              }}
               onRow={(record) => ({
                 onClick: () => setSelectedBatchId(record.id === selectedBatchId ? null : record.id),
                 onDoubleClick: () => setDetailId(record.id),
@@ -666,6 +846,19 @@ export function ReturnsPage() {
                   key: 'itemCount',
                   width: 70,
                   align: 'right' as const,
+                },
+                {
+                  title: '待处理行',
+                  dataIndex: 'pendingItems',
+                  key: 'pendingItems',
+                  width: 100,
+                  align: 'right' as const,
+                  render: (value: number) =>
+                    value > 0 ? (
+                      <StatusBadge tone="warning" label={`${value} 行待检验`} showDot={false} />
+                    ) : (
+                      <span style={{ color: colors.textTertiary }}>—</span>
+                    ),
                 },
                 {
                   title: '来源说明',
@@ -1014,6 +1207,71 @@ export function ReturnsPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* 底部动作浮岛（复用采购页同款）：勾选后出现批量动作，列表再长也不用回顶部。 */}
+      <ActionIsland
+        hidden={
+          activeTab === 'platform' ? selectedReturnIds.length === 0 : selectedBatchIds.length === 0
+        }
+        summary={
+          activeTab === 'platform' ? (
+            <>
+              <span style={{ fontSize: 13, fontWeight: 550 }}>
+                已选 {selectedReturnIds.length} 条退货记录
+              </span>
+              <span style={{ fontSize: 12, color: colors.textTertiary }}>
+                （已入批次的记录不可重复选择）
+              </span>
+            </>
+          ) : (
+            <span style={{ fontSize: 13, fontWeight: 550 }}>
+              已选 {selectedBatchIds.length} 个草稿批次
+            </span>
+          )
+        }
+        actions={
+          activeTab === 'platform' ? (
+            <>
+              <Button
+                type="primary"
+                disabled={selectedReturnIds.length === 0}
+                onClick={() => {
+                  const rows = platformRows.filter((row) => selectedReturnIds.includes(row.id));
+                  if (rows.length > 0) {
+                    openCreateBatch(rows);
+                  }
+                }}
+              >
+                用所选记录建退货批次
+              </Button>
+              <Button type="text" onClick={() => setSelectedReturnIds([])}>
+                清空选择
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                loading={receiveManyMutation.isPending}
+                onClick={() => {
+                  modal.confirm({
+                    title: `批量确认收货 ${selectedBatchIds.length} 个批次？`,
+                    content: '实物已到退货仓并清点完毕；确认后行不可增删，可开始逐行检验。',
+                    okText: '确认收货',
+                    okButtonProps: { danger: true },
+                    cancelText: '返回',
+                    onOk: () => receiveManyMutation.mutate(selectedBatchIds),
+                  });
+                }}
+              >
+                批量确认收货
+              </Button>
+              <Button type="text" onClick={() => setSelectedBatchIds([])}>
+                清空选择
+              </Button>
+            </>
+          )
+        }
+      />
     </div>
   );
 }

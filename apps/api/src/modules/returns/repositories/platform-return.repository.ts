@@ -73,9 +73,17 @@ export class PlatformReturnRepository {
     storeId?: string;
     orderId?: string;
     linked?: boolean;
+    keyword?: string;
     limit: number;
     offset: number;
-  }): Promise<{ rows: PlatformReturnEntity[]; total: number }> {
+  }): Promise<{
+    rows: PlatformReturnEntity[];
+    total: number;
+    enrichment: Map<
+      string,
+      { skuCode: string | null; skuName: string | null; batchNo: string | null }
+    >;
+  }> {
     const qb = this.dataSource
       .getRepository(PlatformReturnEntity)
       .createQueryBuilder('r')
@@ -91,10 +99,81 @@ export class PlatformReturnRepository {
       qb.andWhere(
         `NOT EXISTS (SELECT 1 FROM return_batch_items i WHERE i.platform_return_id = r.id)`,
       );
+    } else if (filters.linked === true) {
+      // 已入批次（2026-11-03）：被某个批次行消费过的记录。
+      qb.andWhere(`EXISTS (SELECT 1 FROM return_batch_items i WHERE i.platform_return_id = r.id)`);
+    }
+    if (filters.keyword !== undefined && filters.keyword.trim() !== '') {
+      const kw = `%${filters.keyword.trim()}%`;
+      qb.andWhere(
+        `(r.platform_return_id ILIKE :kw
+          OR COALESCE(r.platform_order_id, '') ILIKE :kw
+          OR COALESCE(r.offer_id, '') ILIKE :kw
+          OR COALESCE(r.platform_sku_id, '') ILIKE :kw)`,
+        { kw },
+      );
     }
     qb.orderBy('r.createdAt', 'DESC').skip(filters.offset).take(filters.limit);
     const [rows, total] = await qb.getManyAndCount();
-    return { rows, total };
+    return { rows, total, enrichment: await this.enrich(rows) };
+  }
+
+  /**
+   * 商品明细与对账进度（2026-11-03）：列表上只显示订单号时运营无法判断
+   * 「这条退货是什么货、还要不要处理」。内部 SKU 按店铺解析平台 SKU
+   * （与下单同源规则），已入批次取最近一条消费该记录的批次号。
+   */
+  private async enrich(
+    rows: PlatformReturnEntity[],
+  ): Promise<
+    Map<string, { skuCode: string | null; skuName: string | null; batchNo: string | null }>
+  > {
+    const map = new Map<
+      string,
+      { skuCode: string | null; skuName: string | null; batchNo: string | null }
+    >();
+    if (rows.length === 0) {
+      return map;
+    }
+    const result = await this.dataSource.query<
+      Array<{
+        id: string;
+        sku_code: string | null;
+        sku_name: string | null;
+        batch_no: string | null;
+      }>
+    >(
+      `SELECT r.id,
+              sku.sku_code,
+              sku.name_zh AS sku_name,
+              bt.batch_no
+         FROM platform_returns r
+         LEFT JOIN LATERAL (
+                SELECT s.sku_code, s.name_zh
+                  FROM platform_listing_skus pls
+                  JOIN platform_listings pl ON pl.id = pls.listing_id
+                  JOIN skus s ON s.id = pls.sku_id
+                 WHERE pl.store_id = r.store_id
+                   AND pls.platform_sku_id = r.platform_sku_id
+                 LIMIT 1) sku ON TRUE
+         LEFT JOIN LATERAL (
+                SELECT b.batch_no
+                  FROM return_batch_items i
+                  JOIN return_batches b ON b.id = i.batch_id
+                 WHERE i.platform_return_id = r.id
+                 ORDER BY b.created_at DESC
+                 LIMIT 1) bt ON TRUE
+        WHERE r.id = ANY($1::uuid[])`,
+      [rows.map((row) => row.id)],
+    );
+    for (const row of result) {
+      map.set(row.id, {
+        skuCode: row.sku_code,
+        skuName: row.sku_name,
+        batchNo: row.batch_no,
+      });
+    }
+    return map;
   }
 
   async findById(id: string): Promise<PlatformReturnEntity | null> {
