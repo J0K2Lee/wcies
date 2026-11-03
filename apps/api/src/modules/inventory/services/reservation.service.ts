@@ -347,6 +347,146 @@ export class ReservationService {
     return this.lifecycle('PICK', reservationId, input);
   }
 
+  /**
+   * 释放「未拣余量」（2026-11-03，拣货中订单取消）。
+   *
+   * 场景：一行要 5 件、已拣 2 件时订单被取消。业务口径是「已拣的全部进拦截、
+   * 剩余不再拣」——所以要把剩下 3 件从 Reserved 退回可售，同时**不动**已拣的
+   * 2 件（它们由拦截任务负责找回入库）。
+   *
+   * 为什么不能用 `releaseReservation`：RELEASE 按整行 `quantity` 扣 reserved，
+   * 部分拣的行 reserved 只剩 3，再减 5 会变负 → 不变量直接炸。
+   */
+  async releaseRemainder(reservationId: string, input: LifecycleInput): Promise<ReservationDto> {
+    const eventKey = `RELEASE_REMAINDER:${reservationId}:${input.idempotencyKey ?? randomUUID()}`;
+    if (input.idempotencyKey !== undefined) {
+      const existing = await this.ledgerRepo.findEventByIdempotencyKey(eventKey);
+      if (existing !== null) {
+        const reservation = await this.reservationRepo.findById(reservationId);
+        if (reservation === null) {
+          throw new ReservationNotFoundError(reservationId);
+        }
+        return this.buildDtoWithCodes(reservation, true);
+      }
+    }
+
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    let finished: InventoryReservationEntity | undefined;
+    try {
+      const reservation = await this.reservationRepo.lockById(runner, reservationId);
+      if (reservation === null) {
+        throw new ReservationNotFoundError(reservationId);
+      }
+      // 订单来源预约只能走订单域入口（与 lifecycle 同一条纪律）。
+      if (reservation.referenceType === 'ORDER' && input.orderDomain !== true) {
+        throw new OrderOwnedReservationError({
+          reservationId,
+          attemptedAction: 'RELEASE_REMAINDER',
+        });
+      }
+      // 已经释放/消耗：幂等重放（余量本来就没了）。
+      if (reservation.status === 'RELEASED' || reservation.status === 'CONSUMED') {
+        await runner.commitTransaction();
+        finished = reservation;
+      } else {
+        const lines = await this.reservationRepo.findLinesLocked(runner, reservationId);
+        const orderedLines = await sortLinesByBinCodeOnRunner(runner, lines);
+        const serials = await this.serialRepo.findByReservationIdTx(
+          runner,
+          reservationId,
+          'RESERVED',
+        );
+
+        const ledgerLines: LedgerLineInsert[] = [];
+        for (const line of orderedLines) {
+          const remaining = parseQty(line.quantity) - parseQty(line.pickedQty);
+          if (remaining <= 0n) {
+            continue; // 该行已全部拣走：没有余量可释放
+          }
+          const balance = await this.balanceRepo.lockByDim(runner, {
+            skuId: reservation.skuId,
+            warehouseId: reservation.warehouseId,
+            binId: line.binId,
+            condition: 'SELLABLE',
+          });
+          if (balance === null) {
+            throw new BalanceMissingInvariantError({
+              skuId: reservation.skuId,
+              warehouseId: reservation.warehouseId,
+              binId: line.binId,
+            });
+          }
+          const reserved = qtyFromDb(balance.reservedQty);
+          const patch = {
+            onHandQty: balance.onHandQty,
+            reservedQty: formatQty(reserved - remaining),
+            pickedQty: balance.pickedQty, // 已拣部分不动（拦截负责找回）
+            version: nextVersionOf(balance),
+          };
+          assertBalanceInvariants(patch);
+          await this.balanceRepo.saveQuantities(runner, balance.id, patch);
+          ledgerLines.push({
+            skuId: reservation.skuId,
+            warehouseId: reservation.warehouseId,
+            binId: line.binId,
+            transactionType: 'RELEASE_REMAINDER',
+            quantityBefore: balance.onHandQty,
+            quantityChange: '0.000',
+            quantityAfter: balance.onHandQty,
+            reservedBefore: balance.reservedQty,
+            reservedChange: formatQty(-remaining),
+            reservedAfter: patch.reservedQty,
+            pickedBefore: null,
+            pickedChange: null,
+            pickedAfter: null,
+            remark: `reservation=${reservation.reservationNo}${suffixRemark(input.remark)}`,
+          });
+          await this.reservationRepo.updateLine(runner, line.id, { status: 'RELEASED' });
+        }
+
+        // 未拣的序列号回到可售；已拣（PICKED）的保持不动。
+        if (serials.length > 0) {
+          await this.serialRepo.updateMany(
+            runner,
+            serials.map((serial) => serial.id),
+            { status: 'IN_STOCK', reservationId: null },
+          );
+        }
+
+        const headerPatch: Partial<InventoryReservationEntity> = {
+          status: 'RELEASED',
+          releasedAt: new Date(),
+        };
+        await this.reservationRepo.updateStatus(runner, reservationId, headerPatch);
+        if (ledgerLines.length > 0) {
+          await this.ledgerRepo.insertEventWithLines(
+            runner,
+            {
+              eventType: 'RELEASE_REMAINDER',
+              referenceType: reservation.referenceType,
+              referenceId: reservation.referenceId,
+              idempotencyKey: eventKey,
+              operatorId: input.operator.userId,
+              remark: `reservation=${reservation.reservationNo}${suffixRemark(input.remark)}`,
+            },
+            ledgerLines,
+          );
+        }
+        await runner.commitTransaction();
+        finished = { ...reservation, ...headerPatch };
+      }
+    } catch (error: unknown) {
+      await runner.rollbackTransaction();
+      throw error;
+    } finally {
+      await runner.release();
+    }
+
+    return this.buildDtoWithCodes(finished, false);
+  }
+
   async unpickStock(reservationId: string, input: LifecycleInput): Promise<ReservationDto> {
     return this.lifecycle('UNPICK', reservationId, input);
   }

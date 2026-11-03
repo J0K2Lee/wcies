@@ -156,6 +156,14 @@ export const NOTIFICATION_EVENTS: Record<string, NotificationEventDefinition> = 
     cardFields: ['storeCode', 'platform', 'skuCode', 'excerpt', 'askedAt'],
     linkPath: '/skus',
   },
+  PICKING_ORDER_CANCELLED: {
+    type: 'PICKING_ORDER_CANCELLED',
+    label: '拣货中订单取消',
+    level: 'WARN',
+    conditionFields: [{ key: 'storeId', label: '店铺' }],
+    cardFields: ['storeCode', 'orderNo', 'cancelledQty', 'pickedQty'],
+    linkPath: '/warehouse-ops?tab=picking',
+  },
   RETURN_REQUESTED: {
     type: 'RETURN_REQUESTED',
     label: '新退货申请',

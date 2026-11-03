@@ -696,9 +696,48 @@ OrderItem = PICKED
 OrderItem 保持 PICKED，Picked 库存保持
 ```
 
-## 拣货中取消（部分拣货）
+## 拣货中取消（撤行：已拣进拦截、剩余不再拣）
 
-订单存在**未完成**且已产生扫码进度的拣货（关联 PickingTaskItem pickedQty > 0 且任务状态为 CREATED/IN_PROGRESS）时：拒绝取消并创建 `ORDER_INVALID_STATE` 异常；需先完成或取消拣货任务。已完成拣货的 PICKED 行走上文拦截流程。零进度拣货任务在取消订单时一并置 CANCELLED（无库存影响）。
+> 2026-11-03 用户确认口径，取代此前「有任何扫码进度就整单拒绝取消」的做法。
+> 旧做法在平台取消后仍要求拣货员把剩下的全部拣完再拦截，产生大量无效劳动。
+
+订单在拣货任务进行中被取消时，按**订单行**撤出，不再整单拒绝：
+
+```text
+PickingTaskItem（任务状态 CREATED / IN_PROGRESS，行状态 PENDING）
+↓
+剩余 = requiredQty - pickedQty（> 0 才处理）
+├─ pickedQty = 0 → 整笔释放预约（RELEASE，OrderItem → RELEASED）
+└─ pickedQty > 0 → 只释放未拣余量（RELEASE_REMAINDER，Reserved - 剩余，
+                   Picked 不变）
+↓
+行置 CANCELLED，记 cancelled_qty / cancelled_at / cancel_reason
+↓
+OrderItem：已拣行 → PICKED（事实是「已拣这些」）→ 走 §Picked 取消 建拦截
+         未拣行 → RELEASED
+```
+
+口径要点：
+
+1. **已拣 N 件全部进拦截**：拦截数量取预约行里真实的 `picked_qty`
+   （不是订购数量），实物已在拣货车/暂存区，必须按 §9 找回。
+2. **剩余不再拣**：未拣余量立即释放回可售，任务里该行不再出现在待拣列表。
+3. **按行撤出**：部分拣的行只撤未拣的差量（订购 5、已拣 2 → 撤 3）；
+   一次取消只影响本订单的行。
+4. **合并任务不整单作废**：同任务里其他订单的行照常拣；被撤订单的行置
+   CANCELLED 并从进度统计中剔除（任务汇总按 `required_qty - cancelled_qty`、
+   行数剔除 CANCELLED）。
+5. **任务收口**：任务已无 PENDING 行时——有拣过的行（`picked_qty > 0`）→
+   COMPLETED（工作确实发生了，实物待拦截）；一件都没拣 → CANCELLED。
+6. **窗口期兜底**：订单已落 CANCELLED 但撤行还没执行时，扫码直接返回
+   `PICKING_ORDER_CANCELLED`（409），拣货员不会继续白拣。
+7. 仓库通知：`PICKING_ORDER_CANCELLED`（订阅驱动，SYSTEM/FEISHU），内容含
+   店铺、订单号、撤出行数/件数、已拣待拦截件数。
+
+拣货侧实现见 `apps/api/src/modules/picking/services/picking.service.ts`
+`cancelOrderItemsForOrder`（行级撤出 + 任务收口）与
+`apps/api/src/modules/inventory/services/reservation.service.ts`
+`releaseRemainder`（余量释放）。
 
 ---
 

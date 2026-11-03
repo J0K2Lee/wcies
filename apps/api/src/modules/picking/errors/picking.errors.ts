@@ -103,3 +103,22 @@ export class PickingBinNotFoundError extends DomainError {
     super('库位条码不属于该拣货任务仓库', details);
   }
 }
+
+/**
+ * 订单已取消时继续拣货（2026-11-03）。
+ *
+ * 取消链路会把该订单在任务里的未拣行撤出（部分拣的行保留已拣部分），正常情况
+ * 下拣货员根本扫不到这些行；这个错误是**兜底**：覆盖「平台取消已落库、撤行还
+ * 没执行」的那几秒窗口，让拣货员下一次扫码就立刻停手，而不是把剩下的拣完。
+ */
+export class PickingOrderCancelledError extends DomainError {
+  readonly code = 'PICKING_ORDER_CANCELLED';
+  readonly httpStatus = 409;
+
+  constructor(input: { orderNo: string | null; pickingTaskItemId: string }) {
+    super(
+      `订单${input.orderNo === null ? '' : ` ${input.orderNo}`} 已取消，请停止拣货（已拣部分将进入拦截）`,
+      input,
+    );
+  }
+}

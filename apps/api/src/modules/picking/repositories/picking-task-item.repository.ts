@@ -136,6 +136,68 @@ export class PickingTaskItemRepository {
   }
 
   /** Active (CREATED / IN_PROGRESS) tasks that contain lines of this order. */
+  /**
+   * 该订单在活跃任务里还没拣完的行（2026-11-03，取消分流用）。
+   * 返回 picked_qty 以便调用方决定「整笔释放」还是「只释放未拣余量」。
+   */
+  async findOpenRowsOfOrderInActiveTasks(orderId: string): Promise<
+    Array<{
+      id: string;
+      pickingTaskId: string;
+      orderItemId: string;
+      reservationId: string;
+      requiredQty: string;
+      pickedQty: string;
+    }>
+  > {
+    return this.dataSource.query(
+      `SELECT i.id, i.picking_task_id AS "pickingTaskId", i.order_item_id AS "orderItemId",
+              i.reservation_id AS "reservationId", i.required_qty AS "requiredQty",
+              i.picked_qty AS "pickedQty"
+         FROM picking_task_items i
+         JOIN picking_tasks t ON t.id = i.picking_task_id
+        WHERE i.order_id = $1::uuid
+          AND i.status = 'PENDING'
+          AND t.status IN ('CREATED', 'IN_PROGRESS')
+        ORDER BY i.created_at, i.id`,
+      [orderId],
+    );
+  }
+
+  /** 把一行置为 CANCELLED 并记录撤出数量（幂等：只对 PENDING 生效）。 */
+  async markCancelled(
+    pickingTaskItemId: string,
+    cancelledQty: string,
+    reason: string,
+  ): Promise<number> {
+    const result = await this.dataSource.query<unknown>(
+      `UPDATE picking_task_items
+          SET status = 'CANCELLED',
+              cancelled_qty = $2::numeric,
+              cancelled_at = now(),
+              cancel_reason = $3,
+              updated_at = now()
+        WHERE id = $1
+          AND status = 'PENDING'
+        RETURNING id`,
+      [pickingTaskItemId, cancelledQty, reason],
+    );
+    return unwrapReturningRows<{ id: string }>(result).length;
+  }
+
+  /** 任务里是否还有已拣过的行（决定任务收口为 COMPLETED 还是 CANCELLED）。 */
+  async countPickedOfTask(pickingTaskId: string): Promise<number> {
+    // 按「真的拣过」统计，而不是只数 status = PICKED：拣了一半就被订单取消
+    // 的行已是 CANCELLED，但实物确实从货架取出来了（要走拦截），任务因此
+    // 算「已完成工作」，不应被记成整单取消。
+    const rows = await this.dataSource.query<Array<{ cnt: string }>>(
+      `SELECT COUNT(*) AS cnt FROM picking_task_items
+        WHERE picking_task_id = $1::uuid AND picked_qty > 0`,
+      [pickingTaskId],
+    );
+    return Number(rows[0]?.cnt ?? 0);
+  }
+
   async findActiveTaskIdsOfOrder(orderId: string): Promise<string[]> {
     const rows = await this.dataSource.query<Array<{ task_id: string }>>(
       `SELECT DISTINCT t.id AS task_id

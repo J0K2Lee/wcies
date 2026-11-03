@@ -107,6 +107,12 @@
 | `RETURN_REQUESTED` | WARN | storeId / platform | `return:<storeId>:<returnNo>:created` |
 | `RETURN_STATE_CHANGED` | INFO | storeId / platform | `return:<storeId>:<returnNo>:<state>` |
 | `BUYER_QUESTION_RECEIVED` | WARN | storeId / platform / skuCode | `question:<storeId>:<questionId>` |
+| `PICKING_ORDER_CANCELLED` | WARN | storeId / orderNo | `picking-cancel:<storeId>:<orderNo>` |
+
+`PICKING_ORDER_CANCELLED`（2026-11-03）：拣货进行中订单被取消时通知仓库——
+内容含店铺、订单号、撤出的未拣行数/件数、已拣待拦截件数，跳转
+`/warehouse-ops?tab=picking`。口径见 `orders.md` §8「拣货中取消」。
+关联对象是订单 UUID（`notifications.reference_id` 为 uuid 列，不能放订单号）。
 
 后两条来自推送订阅巡检（2026-10-27，用户确认「暂停要进异常中心」）：
 平台会在连续投递失败后**自动暂停整个订阅**，而暂停等于「订单状态不再更新」，

@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { PageMeta } from '@wcies/shared';
+import { PickingCancelOutcome } from '../../order/ports/order-picking-state.port';
+import { PickingOrderCancelledError } from '../errors/picking.errors';
+import { orderReleaseKey } from '../../order/enums/order.constants';
 import { OperatorContext, OperationLogService } from '../../operation-log/operation-log.service';
 import { BarcodeService } from '../../product/services/barcode.service';
 import { SkuService } from '../../product/services/sku.service';
@@ -407,6 +410,15 @@ export class PickingService implements OrderPickingStatePort {
       throw new PickingSkuMismatchError({ scannedSkuId: sku.id, scannedBarcode: barcode });
     }
 
+    // 2b. 订单已取消 → 立即停手（2026-11-03）：覆盖「取消已落库、撤行还没执行」
+    // 的窗口期。正常路径下未拣行已被置 CANCELLED，扫不到；这里是兜底。
+    if (await this.orderService.isOrderCancelled(target.orderId)) {
+      throw new PickingOrderCancelledError({
+        orderNo: null,
+        pickingTaskItemId: target.id,
+      });
+    }
+
     // 3. Serial / bin pre-validation (early, read-only).
     if (sku.serialTracking) {
       const serialNumber = input.serialNumber?.trim();
@@ -579,32 +591,123 @@ export class PickingService implements OrderPickingStatePort {
     return this.itemRepo.hasPickedProgress(orderId);
   }
 
+  /**
+   * 订单取消：按行撤出拣货任务（2026-11-03，用户确认口径）。
+   *
+   * 关键语义：
+   * - **已拣的全部进拦截**（行保持 PICKED 或返回给订单域生成拦截）；
+   * - **剩余不再拣**：未拣行/部分拣行的未拣部分置 CANCELLED，并从预约释放；
+   * - 合并任务只动该订单的行，同任务其他订单继续；任务删空才收口。
+   *
+   * 为什么需要 RELEASE_REMAINDER：部分拣的行 reserved 只剩未拣部分，整笔
+   * RELEASE 会把它减成负数。整笔释放只用于 picked_qty = 0 的行。
+   */
+  async cancelOrderItemsForOrder(
+    orderId: string,
+    operator: OperatorContext,
+    reason: string,
+  ): Promise<PickingCancelOutcome> {
+    const rows = await this.itemRepo.findOpenRowsOfOrderInActiveTasks(orderId);
+    const outcome: PickingCancelOutcome = {
+      cancelledRows: 0,
+      cancelledQty: '0.000',
+      pickedRows: [],
+      handledOrderItemIds: [],
+      cancelledTaskIds: [],
+      completedTaskIds: [],
+    };
+    if (rows.length === 0) {
+      return outcome;
+    }
+
+    let cancelledTotal = 0n;
+    const touchedTaskIds = new Set<string>();
+    for (const row of rows) {
+      const required = parseQty(row.requiredQty);
+      const picked = parseQty(row.pickedQty);
+      const remaining = required - picked;
+      if (remaining <= 0n) {
+        continue;
+      }
+      // 先释放库存（订单来源预约必须显式 orderDomain），再撤行：
+      // 行的 cancelled_qty 与库存释放必须一致，任一步失败都停在行仍可拣的状态。
+      if (picked <= 0n) {
+        await this.reservationService.releaseReservation(row.reservationId, {
+          operator,
+          idempotencyKey: orderReleaseKey(row.orderItemId),
+          remark: `cancel order=${orderId}${reason ? `; ${reason}` : ''}`,
+          orderDomain: true,
+        });
+      } else {
+        await this.reservationService.releaseRemainder(row.reservationId, {
+          operator,
+          idempotencyKey: `ORDER_CANCEL_REMAINDER:${row.orderItemId}`,
+          remark: `cancel order=${orderId}（已拣 ${formatQty(picked)} 件进拦截）${
+            reason ? `; ${reason}` : ''
+          }`,
+          orderDomain: true,
+        });
+        outcome.pickedRows.push({
+          orderItemId: row.orderItemId,
+          reservationId: row.reservationId,
+          pickedQty: formatQty(picked),
+        });
+      }
+      const affected = await this.itemRepo.markCancelled(
+        row.id,
+        formatQty(remaining),
+        reason.slice(0, 500),
+      );
+      if (affected === 0) {
+        continue; // 并发已被处理（幂等）
+      }
+      outcome.cancelledRows += 1;
+      cancelledTotal += remaining;
+      outcome.handledOrderItemIds.push(row.orderItemId);
+      touchedTaskIds.add(row.pickingTaskId);
+    }
+    outcome.cancelledQty = formatQty(cancelledTotal);
+
+    // 任务收口：没有待拣行了 → 有已拣行算完成，否则整任务取消。
+    for (const taskId of touchedTaskIds) {
+      const pending = await this.itemRepo.countPendingOfTask(taskId);
+      if (pending > 0) {
+        continue; // 同任务其他订单/其他行继续拣
+      }
+      const task = await this.taskRepo.findById(taskId);
+      if (task === null || task.status === 'COMPLETED' || task.status === 'CANCELLED') {
+        continue;
+      }
+      const picked = await this.itemRepo.countPickedOfTask(taskId);
+      if (picked > 0) {
+        await this.markTaskCompleted(task, operator);
+        outcome.completedTaskIds.push(taskId);
+      } else {
+        await this.dataSource.transaction(async (runner) => {
+          await this.taskRepo.updateStatus(runner, taskId, { status: 'CANCELLED' });
+        });
+        outcome.cancelledTaskIds.push(taskId);
+        await this.operationLog.record({
+          entityType: 'PICKING_TASK',
+          entityId: taskId,
+          entityCode: task.pickingNo,
+          action: 'CANCEL',
+          changes: { reason: { from: null, to: `订单取消，全部行撤出：${reason}` } },
+          operator,
+        });
+      }
+    }
+
+    return outcome;
+  }
+
+  /** @deprecated 2026-11-03 起统一走 cancelOrderItemsForOrder（按行分流）。 */
   async cancelZeroProgressTasksForOrder(
     orderId: string,
     operator: OperatorContext,
   ): Promise<string[]> {
-    const taskIds = await this.itemRepo.findActiveTaskIdsOfOrder(orderId);
-    const cancelledTaskIds: string[] = [];
-    for (const taskId of taskIds) {
-      await this.dataSource.transaction(async (runner) => {
-        // 合并任务（2026-10-15）：只摘除该订单的零进度行，同任务其他订单
-        // 继续拣；任务删空才取消。
-        const removed = await this.itemRepo.deleteZeroProgressItemsOfOrderInTask(taskId, orderId);
-        if (removed > 0 && (await this.itemRepo.countItemsOfTask(taskId)) === 0) {
-          await this.taskRepo.updateStatus(runner, taskId, { status: 'CANCELLED' });
-          cancelledTaskIds.push(taskId);
-        }
-      });
-      await this.operationLog.record({
-        entityType: 'PICKING_TASK',
-        entityId: taskId,
-        entityCode: taskId,
-        action: 'CANCEL',
-        changes: { reason: { from: null, to: '订单取消，摘除其零进度拣货行' } },
-        operator,
-      });
-    }
-    return cancelledTaskIds;
+    const outcome = await this.cancelOrderItemsForOrder(orderId, operator, '订单取消');
+    return [...outcome.cancelledTaskIds];
   }
 
   async listTasksForOrder(orderId: string): Promise<
@@ -744,6 +847,8 @@ export class PickingService implements OrderPickingStatePort {
       requiredQty: item.requiredQty,
       pickedQty: item.pickedQty,
       status: item.status,
+      cancelledQty: item.cancelledQty ?? '0.000',
+      cancelReason: item.cancelReason ?? null,
       binLines: reservation.lines
         .filter((line) => parseQty(line.quantity) > 0n)
         .map((line) => ({

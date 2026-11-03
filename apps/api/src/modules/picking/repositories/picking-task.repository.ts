@@ -81,8 +81,11 @@ export class PickingTaskRepository {
         `(SELECT COUNT(DISTINCT i.order_id) FROM picking_task_items i WHERE i.picking_task_id = t.id)`,
         'orders_count',
       )
+      // 统计口径（2026-11-03）：已取消的行不再计入「商品行」与需求数量——
+      // 订单取消后剩余不再拣，任务进度必须跟着降下来。
       .addSelect(
-        `(SELECT COUNT(*) FROM picking_task_items i WHERE i.picking_task_id = t.id)`,
+        `(SELECT COUNT(*) FROM picking_task_items i
+           WHERE i.picking_task_id = t.id AND i.status <> 'CANCELLED')`,
         'items_total',
       )
       .addSelect(
@@ -90,7 +93,8 @@ export class PickingTaskRepository {
         'items_picked',
       )
       .addSelect(
-        `(SELECT COALESCE(SUM(i.required_qty), 0) FROM picking_task_items i WHERE i.picking_task_id = t.id)`,
+        `(SELECT COALESCE(SUM(i.required_qty - i.cancelled_qty), 0)
+           FROM picking_task_items i WHERE i.picking_task_id = t.id)`,
         'required_total',
       )
       .addSelect(

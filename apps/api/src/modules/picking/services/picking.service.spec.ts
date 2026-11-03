@@ -45,6 +45,9 @@ function makeItem(overrides: Partial<PickingTaskItemEntity> = {}): PickingTaskIt
     requiredQty: '2.000',
     pickedQty: '0.000',
     status: 'PENDING',
+    cancelledQty: '0.000',
+    cancelledAt: null,
+    cancelReason: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -59,6 +62,7 @@ function build(input: {
   reservationSerials?: Array<{ serialNumber: string; status: string }>;
   incrementResult?: string | null;
   pickError?: Error;
+  orderCancelled?: boolean;
 }) {
   const task = input.task ?? makeTask();
   const itemsAfterScan = input.items.map((item) =>
@@ -138,6 +142,7 @@ function build(input: {
     listReservedItemsForPicking: vi.fn(),
     listReadyToPickOrders: vi.fn().mockResolvedValue([]),
     getOrderOrThrow: vi.fn().mockResolvedValue({ id: 'order-1', orderNo: 'ORD1' }),
+    isOrderCancelled: vi.fn().mockResolvedValue(input.orderCancelled === true),
     markItemPickedInTx,
     recomputeAfterPick,
   } as unknown as OrderService;
@@ -234,6 +239,14 @@ describe('PickingService.scan (task §35-§41/§74-§77; Sprint 4 P0 single-tran
     });
     await expect(service.scan('task-1', { barcode: 'B' }, OPERATOR)).rejects.toMatchObject({
       code: 'PICKING_SKU_MISMATCH',
+    });
+    expect(reservationService.pickStockPartialInTx).not.toHaveBeenCalled();
+  });
+
+  it('订单已取消 -> PICKING_ORDER_CANCELLED，未动库存（窗口期兜底，2026-11-03）', async () => {
+    const { service, reservationService } = build({ items: [makeItem()], orderCancelled: true });
+    await expect(service.scan('task-1', { barcode: 'B' }, OPERATOR)).rejects.toMatchObject({
+      code: 'PICKING_ORDER_CANCELLED',
     });
     expect(reservationService.pickStockPartialInTx).not.toHaveBeenCalled();
   });
@@ -543,21 +556,51 @@ describe('PickingService.autoCreateForReadyOrders (2026-10-15 合并语义：一
   });
 });
 
-describe('PickingService.cancelZeroProgressTasksForOrder (2026-10-15 合并任务摘行)', () => {
+describe('PickingService.cancelOrderItemsForOrder（2026-11-03 拣货中取消）', () => {
+  const TASK = {
+    id: 'task-1',
+    pickingNo: 'PCK00000001',
+    warehouseId: 'wh-1',
+    status: 'IN_PROGRESS',
+    ordersCount: 1,
+    itemsPicked: 0,
+    requiredTotal: '5.000',
+    pickedTotal: '0.000',
+    createdAt: new Date(),
+    startedAt: new Date(),
+    completedAt: null,
+  };
+
   function buildCancel(options: {
-    taskIds: string[];
-    removedPerTask?: number;
-    remainingAfterDelete?: number;
+    rows: Array<{ requiredQty: string; pickedQty: string }>;
+    pendingAfter?: number;
+    pickedCount?: number;
   }) {
     const dataSource = {
       transaction: vi.fn(async (work: (m: unknown) => Promise<unknown>) => work({})),
     } as unknown as DataSource;
+    const rows = options.rows.map((row, index) => ({
+      id: `pt-item-${index + 1}`,
+      pickingTaskId: 'task-1',
+      orderItemId: `oi-${index + 1}`,
+      reservationId: `rsv-${index + 1}`,
+      requiredQty: row.requiredQty,
+      pickedQty: row.pickedQty,
+    }));
     const itemRepo = {
-      findActiveTaskIdsOfOrder: vi.fn().mockResolvedValue(options.taskIds),
-      deleteZeroProgressItemsOfOrderInTask: vi.fn().mockResolvedValue(options.removedPerTask ?? 1),
-      countItemsOfTask: vi.fn().mockResolvedValue(options.remainingAfterDelete ?? 1),
+      findOpenRowsOfOrderInActiveTasks: vi.fn().mockResolvedValue(rows),
+      markCancelled: vi.fn().mockResolvedValue(1),
+      countPendingOfTask: vi.fn().mockResolvedValue(options.pendingAfter ?? 0),
+      countPickedOfTask: vi.fn().mockResolvedValue(options.pickedCount ?? 0),
     };
-    const taskRepo = { updateStatus: vi.fn().mockResolvedValue(undefined) };
+    const taskRepo = {
+      findById: vi.fn().mockResolvedValue(TASK),
+      updateStatus: vi.fn().mockResolvedValue(undefined),
+    };
+    const reservationService = {
+      releaseReservation: vi.fn().mockResolvedValue({}),
+      releaseRemainder: vi.fn().mockResolvedValue({}),
+    };
     const service = new PickingService(
       dataSource,
       taskRepo as never,
@@ -567,40 +610,81 @@ describe('PickingService.cancelZeroProgressTasksForOrder (2026-10-15 合并任�
       {} as never,
       {} as never,
       {} as never,
-      {} as never,
+      reservationService as never,
       {} as never,
       { record: vi.fn() } as never,
       { log: vi.fn(), info: vi.fn(), warn: vi.fn() } as never,
     );
-    return { service, itemRepo, taskRepo };
+    return { service, itemRepo, taskRepo, reservationService };
   }
 
-  it('removes only the cancelled order lines and keeps the merged task alive', async () => {
-    const { service, itemRepo, taskRepo } = buildCancel({
-      taskIds: ['task-1'],
-      removedPerTask: 2,
-      remainingAfterDelete: 3,
+  it('未拣行：整笔释放预约并把行置 CANCELLED（撤出全部数量）', async () => {
+    const { service, itemRepo, reservationService } = buildCancel({
+      rows: [{ requiredQty: '5.000', pickedQty: '0.000' }],
     });
 
-    const cancelled = await service.cancelZeroProgressTasksForOrder('order-A', OPERATOR);
+    const outcome = await service.cancelOrderItemsForOrder('order-A', OPERATOR, '平台取消');
 
-    expect(itemRepo.deleteZeroProgressItemsOfOrderInTask).toHaveBeenCalledWith('task-1', 'order-A');
-    expect(taskRepo.updateStatus).not.toHaveBeenCalled();
-    expect(cancelled).toEqual([]);
+    expect(reservationService.releaseReservation).toHaveBeenCalledTimes(1);
+    expect(reservationService.releaseRemainder).not.toHaveBeenCalled();
+    expect(itemRepo.markCancelled).toHaveBeenCalledWith('pt-item-1', '5.000', '平台取消');
+    expect(outcome.cancelledRows).toBe(1);
+    expect(outcome.cancelledQty).toBe('5.000');
+    expect(outcome.pickedRows).toEqual([]);
+    expect(outcome.handledOrderItemIds).toEqual(['oi-1']);
   });
 
-  it('cancels the task only when the last lines were removed', async () => {
-    const { service, taskRepo } = buildCancel({
-      taskIds: ['task-1'],
-      removedPerTask: 3,
-      remainingAfterDelete: 0,
+  it('部分拣的行：只释放未拣余量、保留已拣（已拣进拦截）', async () => {
+    const { service, reservationService, itemRepo } = buildCancel({
+      rows: [{ requiredQty: '5.000', pickedQty: '2.000' }],
+      pickedCount: 0,
     });
 
-    const cancelled = await service.cancelZeroProgressTasksForOrder('order-A', OPERATOR);
+    const outcome = await service.cancelOrderItemsForOrder('order-A', OPERATOR, '平台取消');
 
-    expect(taskRepo.updateStatus).toHaveBeenCalledWith(expect.anything(), 'task-1', {
+    // 整笔释放会把 reserved 减成负数 → 必须走 RELEASE_REMAINDER
+    expect(reservationService.releaseRemainder).toHaveBeenCalledTimes(1);
+    expect(reservationService.releaseReservation).not.toHaveBeenCalled();
+    expect(itemRepo.markCancelled).toHaveBeenCalledWith('pt-item-1', '3.000', '平台取消');
+    expect(outcome.cancelledQty).toBe('3.000');
+    expect(outcome.pickedRows).toEqual([
+      { orderItemId: 'oi-1', reservationId: 'rsv-1', pickedQty: '2.000' },
+    ]);
+  });
+
+  it('合并任务里还有别的待拣行 → 任务不动（其他订单继续拣）', async () => {
+    const { service, taskRepo } = buildCancel({
+      rows: [{ requiredQty: '2.000', pickedQty: '0.000' }],
+      pendingAfter: 3,
+    });
+
+    await service.cancelOrderItemsForOrder('order-A', OPERATOR, '平台取消');
+
+    expect(taskRepo.updateStatus).not.toHaveBeenCalled();
+  });
+
+  it('任务已无待拣行：有已拣行 → COMPLETED；没有 → CANCELLED', async () => {
+    const completed = buildCancel({
+      rows: [{ requiredQty: '2.000', pickedQty: '0.000' }],
+      pendingAfter: 0,
+      pickedCount: 1,
+    });
+    const a = await completed.service.cancelOrderItemsForOrder('order-A', OPERATOR, '平台取消');
+    expect(completed.taskRepo.updateStatus).toHaveBeenCalledWith(expect.anything(), 'task-1', {
+      status: 'COMPLETED',
+      completedAt: expect.any(Date),
+    });
+    expect(a.completedTaskIds).toEqual(['task-1']);
+
+    const cancelled = buildCancel({
+      rows: [{ requiredQty: '2.000', pickedQty: '0.000' }],
+      pendingAfter: 0,
+      pickedCount: 0,
+    });
+    const b = await cancelled.service.cancelOrderItemsForOrder('order-A', OPERATOR, '平台取消');
+    expect(cancelled.taskRepo.updateStatus).toHaveBeenCalledWith(expect.anything(), 'task-1', {
       status: 'CANCELLED',
     });
-    expect(cancelled).toEqual(['task-1']);
+    expect(b.cancelledTaskIds).toEqual(['task-1']);
   });
 });

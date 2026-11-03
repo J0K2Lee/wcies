@@ -288,6 +288,7 @@ SCRAP
 | 采购入库 / 初始入库 / 收货入库 | +N | 0 | 0 | RECEIVE / INITIAL_STOCK |
 | 新订单锁库存 | 0 | +N | 0 | RESERVE |
 | 释放未拣订单 | 0 | -N | 0 | RELEASE |
+| 拣货中订单取消（撤余量，2026-11-03） | 0 | -剩余 | 0（不变） | RELEASE_REMAINDER |
 | 拣货（逐件） | 0 | -N | +N | PICK |
 | 正式出库（Sprint 4） | -N | 0 | -N | SHIP |
 | 拦截回库（Sprint 4） | 0（不变） | 0 | -N | RETURN_PICKED |
@@ -1696,7 +1697,7 @@ SELLABLE / DEFECTIVE / REPAIR / SCRAPPED
 - 新增 `ReservationService.pickStockPartial(reservationId, { quantity, serialNumbers?, operator, idempotencyKey?, remark? })`：一次从 Reserved → Picked 移动 ≤ 全量的数量。
 - 实现方式与整单 PICK 相同：行按 `bin_code` 排序、逐行 FOR UPDATE、贪心扣除 `line.pickedQty`（`picked_qty` 字段即为此预留）；行拣满 → 行状态 PICKED；全部行拣满 → Header PICKED（部分拣货期间 Header 保持 ACTIVE，`pickedAt` 在首次拣货时记录）。
 - 事件类型仍为 `PICK`；事件幂等键 `PICK:<reservationId>:<clientKey>`。Picking 模块的 scanKey 为 `PTI<pickingTaskItemId>#<结果计数>`，保证同一扫码重放幂等、并发不超卖。
-- UNPICK / RELEASE / SHIP 仍为整单操作；部分拣货后的 Reservation 处于 ACTIVE 且存在已拣行时，RELEASE 被状态机拒绝（先由上层业务约束：部分拣货中的订单禁止取消）。
+- UNPICK / RELEASE / SHIP 仍为整单操作；部分拣货后的 Reservation 处于 ACTIVE 且存在已拣行时，RELEASE 被状态机拒绝。拣货中订单取消改走 **RELEASE_REMAINDER**（2026-11-03）：只释放 `quantity - pickedQty` 的未拣余量，已拣数量保持不变并交给拦截流程；若直接 RELEASE 会把 Reserved 打到负数。
 
 ## 61.2 InventorySerial（单件追踪明细）
 

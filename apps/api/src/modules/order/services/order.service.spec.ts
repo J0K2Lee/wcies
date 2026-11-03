@@ -18,6 +18,7 @@ import { SkuImageService } from '../../product/services/sku-image.service';
 import { OperationLogService } from '../../operation-log/operation-log.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { OrderPickingStatePort } from '../ports/order-picking-state.port';
+import { NotificationService } from '../../notification/services/notification.service';
 import { OrderInterceptionPort } from '../ports/order-interception.port';
 import { OrderProcurementPort } from '../ports/order-procurement.port';
 import { OrderInvalidStateError, OrderNotFoundError } from '../errors/order.errors';
@@ -90,6 +91,7 @@ describe('OrderService.applySyncedPlatformFacts - fulfillmentMode', () => {
       {} as StoreService,
       {} as SkuImageService,
       {} as OperationLogService,
+      { notifyPickingOrderCancelled: vi.fn() } as unknown as NotificationService,
       {} as AppLoggerService,
       {} as OrderPickingStatePort,
       {} as OrderInterceptionPort,
@@ -326,6 +328,7 @@ describe('OrderService.retryAllocation - mapped line without stock', () => {
       {} as StoreService,
       {} as SkuImageService,
       { record: vi.fn() } as unknown as OperationLogService,
+      { notifyPickingOrderCancelled: vi.fn() } as unknown as NotificationService,
       { log: vi.fn(), warn: vi.fn() } as unknown as AppLoggerService,
       {} as OrderPickingStatePort,
       {} as OrderInterceptionPort,
@@ -453,6 +456,7 @@ describe('OrderService.markExternalFulfillmentBatch (2026-10-14 订单页多选�
       {} as StoreService,
       {} as SkuImageService,
       {} as OperationLogService,
+      { notifyPickingOrderCancelled: vi.fn() } as unknown as NotificationService,
       {} as AppLoggerService,
       {} as OrderPickingStatePort,
       {} as OrderInterceptionPort,
@@ -539,6 +543,7 @@ describe('OrderService.setUrgent (2026-10-16 加急标记，决策 0022)', () =>
       {} as StoreService,
       {} as SkuImageService,
       operationLog as unknown as OperationLogService,
+      { notifyPickingOrderCancelled: vi.fn() } as unknown as NotificationService,
       {} as AppLoggerService,
       {} as OrderPickingStatePort,
       {} as OrderInterceptionPort,
@@ -630,6 +635,7 @@ describe('OrderService.markLabelPrinted (2026-10-19 面单已打印)', () => {
       {} as StoreService,
       {} as SkuImageService,
       operationLog as unknown as OperationLogService,
+      { notifyPickingOrderCancelled: vi.fn() } as unknown as NotificationService,
       {} as AppLoggerService,
       {} as OrderPickingStatePort,
       {} as OrderInterceptionPort,
@@ -700,6 +706,7 @@ describe('OrderService markExternalFulfillment（释放占用）', () => {
       {} as StoreService,
       {} as SkuImageService,
       { record: vi.fn() } as unknown as OperationLogService,
+      { notifyPickingOrderCancelled: vi.fn() } as unknown as NotificationService,
       {} as AppLoggerService,
       {} as OrderPickingStatePort,
       {} as OrderInterceptionPort,
@@ -796,6 +803,7 @@ describe('OrderService.cancelExternalFulfillment（2026-10-23）', () => {
       {} as StoreService,
       {} as SkuImageService,
       { record: vi.fn() } as unknown as OperationLogService,
+      { notifyPickingOrderCancelled: vi.fn() } as unknown as NotificationService,
       {} as AppLoggerService,
       {} as OrderPickingStatePort,
       {} as OrderInterceptionPort,
@@ -903,6 +911,7 @@ describe('OrderService.releaseItemReservation', () => {
       {} as StoreService,
       {} as SkuImageService,
       operationLog as unknown as OperationLogService,
+      { notifyPickingOrderCancelled: vi.fn() } as unknown as NotificationService,
       {} as AppLoggerService,
       pickingState,
       {} as OrderInterceptionPort,

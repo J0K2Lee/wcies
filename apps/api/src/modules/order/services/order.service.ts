@@ -6,6 +6,8 @@ import { ReservationService } from '../../inventory/services/reservation.service
 import { InventoryQueryService } from '../../inventory/services/inventory-query.service';
 import { ExceptionService } from '../../exception/services/exception.service';
 import { StoreService } from '../../store/services/store.service';
+import { NotificationService } from '../../notification/services/notification.service';
+import { formatQty, parseQty } from '../../../common/utils/quantity';
 import { SkuImageService } from '../../product/services/sku-image.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
 import { OrderEntity } from '../entities/order.entity';
@@ -73,6 +75,7 @@ export class OrderService {
     private readonly storeService: StoreService,
     private readonly skuImageService: SkuImageService,
     private readonly operationLog: OperationLogService,
+    private readonly notification: NotificationService,
     private readonly logger: AppLoggerService,
     @Inject(forwardRef(() => ORDER_PICKING_STATE_PORT))
     private readonly pickingState: OrderPickingStatePort,
@@ -727,22 +730,19 @@ export class OrderService {
     }
     const items = await this.itemRepo.findByOrderId(order.id);
 
-    // Block cancel while any picking item already moved stock (orders.md §8).
-    if (await this.pickingState.hasPickedProgress(order.id)) {
-      await this.exceptionService.create({
-        exceptionType: 'ORDER_INVALID_STATE',
-        severity: 'HIGH',
-        referenceType: 'ORDER',
-        referenceId: order.id,
-        storeId: order.storeId,
-        message: `订单 ${order.orderNo} 拣货进行中（已产生拣货库存移动），取消被拒绝`,
-        details: { orderNo: order.orderNo },
-      });
-      throw new OrderInvalidStateError('订单拣货进行中，需先完成或取消拣货任务', {
-        orderId: order.id,
-      });
-    }
-    await this.pickingState.cancelZeroProgressTasksForOrder(orderId, operator);
+    // 拣货中取消（2026-11-03 用户确认口径）：**已拣的全部进拦截、剩余不再拣**。
+    // 此前只要有扫码进度就整单拒绝取消，平台取消后拣货员继续把剩下的拣完再做
+    // 拦截——大量无效劳动。现在由拣货域按行撤出：未拣/部分拣行置 CANCELLED 并
+    // 释放未拣余量，已拣行返回给这里生成拦截。
+    const pickingOutcome = await this.pickingState.cancelOrderItemsForOrder(
+      order.id,
+      operator,
+      reason ?? '订单取消',
+    );
+    const handledByPicking = new Set(pickingOutcome.handledOrderItemIds);
+    const pickedByItem = new Map(
+      pickingOutcome.pickedRows.map((row) => [row.orderItemId, row.pickedQty]),
+    );
 
     let released = 0;
     let interceptionNos = 0;
@@ -753,7 +753,27 @@ export class OrderService {
         // recovery belongs to the future Return / Logistics flow.
         continue;
       }
-      if (item.fulfillmentStatus === 'RESERVED' && item.reservationId !== null) {
+      // 本地跟随最新的行状态：拣了部分就被取消的行会被改成 PICKED，后面的
+      // 分流必须按「已拣」走拦截，不能还按内存里的旧 RESERVED 去释放。
+      let fulfillmentStatus = item.fulfillmentStatus;
+      const partiallyPickedQty = pickedByItem.get(item.id) ?? null;
+      if (partiallyPickedQty !== null && fulfillmentStatus !== 'PICKED') {
+        // 拣了一半就被取消：行转 PICKED（事实是「已拣这些」），拦截数量由预约
+        // 里真实的 picked_qty 决定（itemFacts），不会用订购数量充数。
+        await this.dataSource.transaction(async (manager) => {
+          await this.itemRepo.updateFulfillment(manager, item.id, {
+            fulfillmentStatus: 'PICKED',
+          });
+        });
+        fulfillmentStatus = 'PICKED';
+      }
+      if (fulfillmentStatus === 'RESERVED' && handledByPicking.has(item.id)) {
+        // 拣货域已释放该行预约（整笔或余量），这里只同步行状态。
+        await this.setItemReleased(item);
+        released += 1;
+        continue;
+      }
+      if (fulfillmentStatus === 'RESERVED' && item.reservationId !== null) {
         await this.reservationService.releaseReservation(item.reservationId, {
           operator,
           idempotencyKey: orderReleaseKey(item.id),
@@ -764,7 +784,7 @@ export class OrderService {
         });
         await this.setItemReleased(item);
         released += 1;
-      } else if (item.fulfillmentStatus === 'PICKED') {
+      } else if (fulfillmentStatus === 'PICKED') {
         // NEVER unpick / release / restore availability (task §55/§81) - the
         // interception module owns finding the physical unit and returning it.
         await this.interceptionPort.createForCancelledPickedItem({
@@ -790,6 +810,34 @@ export class OrderService {
     }
 
     await this.statusService.transition(orderId, 'CANCELLED', operator, reason ?? '订单取消');
+    // 拣货中取消的仓库通知（2026-11-03）：撤出了哪些未拣行、多少已拣待拦截。
+    // 通知失败绝不影响取消本身（publishEvent 内部已兜底，这里再包一层取店铺信息）。
+    if (pickingOutcome.cancelledRows > 0 || pickingOutcome.pickedRows.length > 0) {
+      try {
+        const store = await this.storeService.getEntityById(order.storeId);
+        const pickedTotal = pickingOutcome.pickedRows.reduce(
+          (sum, row) => sum + parseQty(row.pickedQty),
+          0n,
+        );
+        await this.notification.notifyPickingOrderCancelled({
+          storeId: order.storeId,
+          storeCode: store?.storeCode ?? order.storeId,
+          storeName: store?.name ?? null,
+          orderId: order.id,
+          orderNo: order.orderNo,
+          cancelledRows: pickingOutcome.cancelledRows,
+          cancelledQty: pickingOutcome.cancelledQty,
+          pickedQty: formatQty(pickedTotal),
+        });
+      } catch (error: unknown) {
+        this.logger.warn(
+          `picking cancel notification failed order=${order.orderNo}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          'OrderService',
+        );
+      }
+    }
     // A cancelled order will never ship: its deadline alert (if any) is done,
     // and the out-of-stock exceptions of its never-reserved lines are moot -
     // a platform-cancelled BACKORDERED order must not keep nagging for stock
@@ -1476,6 +1524,12 @@ export class OrderService {
    * picking increment, the inventory pick and this status change commit or
    * roll back together). The order rollup runs AFTER commit.
    */
+  /** 订单是否已取消（拣货扫码兜底校验用，2026-11-03）。 */
+  async isOrderCancelled(orderId: string): Promise<boolean> {
+    const order = await this.orderRepo.findById(orderId);
+    return order !== null && order.erpStatus === 'CANCELLED';
+  }
+
   async markItemPickedInTx(manager: EntityManager, orderItemId: string): Promise<void> {
     const item = await this.itemRepo.findByIdTx(manager, orderItemId);
     if (item === null || item.fulfillmentStatus !== 'RESERVED') {

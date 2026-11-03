@@ -36,6 +36,9 @@ interface PickingItem {
   requiredQty: string;
   pickedQty: string;
   status: string;
+  /** 订单取消撤出的数量（2026-11-03）：该行剩余不再拣，已拣部分走拦截。 */
+  cancelledQty: string;
+  cancelReason: string | null;
   binLines: Array<{ binCode: string; quantity: string; pickedQty: string }>;
   serialTracking: boolean;
   pendingSerialNumbers: string[];
@@ -125,18 +128,24 @@ export function PickingTaskWorkPage() {
 
   const totals = useMemo(() => {
     if (task === undefined) {
-      return { required: 0, picked: 0, lines: 0, doneLines: 0 };
+      return { required: 0, picked: 0, lines: 0, doneLines: 0, cancelledLines: 0 };
     }
+    // 2026-11-03：订单取消撤出的数量不计入需求（剩余不再拣），也不计入行数。
+    const active = task.items.filter((item) => item.status !== 'CANCELLED');
     return {
-      required: task.items.reduce((sum, item) => sum + Number(item.requiredQty), 0),
-      picked: task.items.reduce((sum, item) => sum + Number(item.pickedQty), 0),
-      lines: task.items.length,
-      doneLines: task.items.filter((item) => item.status === 'PICKED').length,
+      required: active.reduce(
+        (sum, item) => sum + Number(item.requiredQty) - Number(item.cancelledQty ?? 0),
+        0,
+      ),
+      picked: active.reduce((sum, item) => sum + Number(item.pickedQty), 0),
+      lines: active.length,
+      doneLines: active.filter((item) => item.status === 'PICKED').length,
+      cancelledLines: task.items.length - active.length,
     };
   }, [task]);
 
   // Next focus: first unfinished item's first unfinished bin (task §47).
-  const nextItem = useMemo(() => task?.items.find((item) => item.status !== 'PICKED'), [task]);
+  const nextItem = useMemo(() => task?.items.find((item) => item.status === 'PENDING'), [task]);
   const nextBin = useMemo(() => {
     if (nextItem === undefined) {
       return null;
@@ -153,7 +162,7 @@ export function PickingTaskWorkPage() {
     }
     const seen = new Set<string>();
     for (const item of task.items) {
-      if (item.status === 'PICKED') {
+      if (item.status !== 'PENDING') {
         continue;
       }
       for (const line of item.binLines) {
@@ -164,6 +173,19 @@ export function PickingTaskWorkPage() {
     }
     return [...seen];
   }, [task]);
+
+  // 订单可能在拣货途中被取消（2026-11-03）：进行中的任务每 25s 静默刷新，
+  // 让「订单已取消」的行及时出现在工位屏幕上，避免继续白拣。
+  const taskStatus = task?.status;
+  useEffect(() => {
+    if (taskStatus !== 'IN_PROGRESS') {
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      void queryClient.invalidateQueries({ queryKey: ['picking-task', id] });
+    }, 25_000);
+    return () => window.clearInterval(timer);
+  }, [taskStatus, id, queryClient]);
 
   if (task === undefined) {
     return (
@@ -470,13 +492,20 @@ export function PickingTaskWorkPage() {
             }}
           >
             待拣行（{totals.doneLines} / {totals.lines} 完成）
+            {totals.cancelledLines > 0 && (
+              <span style={{ fontSize: 13, fontWeight: 400, color: colors.textTertiary }}>
+                {' '}
+                · {totals.cancelledLines} 行因订单取消撤出
+              </span>
+            )}
           </div>
           {task.items.length === 0 ? (
             <EmptyState title="暂无待拣行" />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {task.items.map((item) => {
-                const remaining = Number(item.requiredQty) - Number(item.pickedQty);
+                const cancelled = item.status === 'CANCELLED';
+                const remaining = cancelled ? 0 : Number(item.requiredQty) - Number(item.pickedQty);
                 const done = item.status === 'PICKED';
                 return (
                   <div
@@ -487,7 +516,7 @@ export function PickingTaskWorkPage() {
                       gap: 16,
                       padding: '12px 20px',
                       borderBottom: `1px solid ${colors.borderSoft}`,
-                      opacity: done ? 0.6 : 1,
+                      opacity: done || cancelled ? 0.6 : 1,
                       background:
                         nextItem !== undefined && item.id === nextItem.id && !done
                           ? colors.primarySoft
@@ -515,6 +544,9 @@ export function PickingTaskWorkPage() {
                         {item.serialTracking && (
                           <StatusBadge tone="warning" label="SN" showDot={false} />
                         )}
+                        {cancelled && (
+                          <StatusBadge tone="neutral" label="订单已取消" showDot={false} />
+                        )}
                       </div>
                       <div
                         style={{
@@ -528,7 +560,10 @@ export function PickingTaskWorkPage() {
                         }}
                       >
                         <span>
-                          订单 {item.orderNo} · 剩余 {remaining} 件
+                          订单 {item.orderNo} ·{' '}
+                          {cancelled
+                            ? `订单已取消（撤出 ${Number(item.cancelledQty)} 件，剩余不再拣）`
+                            : `剩余 ${remaining} 件`}
                         </span>
                         {item.primaryBarcode !== null && (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
@@ -603,6 +638,16 @@ export function PickingTaskWorkPage() {
           <ContextMetric label="订单数" value={task.ordersCount} />
           <ContextMetric label="商品行" value={`${totals.doneLines} / ${totals.lines}`} />
           <ContextMetric label="总件数" value={totals.required} strong />
+          {totals.cancelledLines > 0 && (
+            <ContextMetric
+              label="订单取消撤出"
+              value={
+                <span style={{ color: colors.warning, fontWeight: 650 }}>
+                  {totals.cancelledLines} 行
+                </span>
+              }
+            />
+          )}
         </ContextSection>
         <ContextSection title="当前进度">
           <ContextMetric

@@ -1328,6 +1328,7 @@
                 "BUYER_MESSAGE_RECEIVED",
                 "REVIEW_CREATED",
                 "BUYER_QUESTION_RECEIVED",
+                "PICKING_ORDER_CANCELLED",
                 "RETURN_REQUESTED",
                 "RETURN_STATE_CHANGED"
               ]
@@ -3320,6 +3321,7 @@
                 "UNPICK",
                 "SHIP",
                 "RETURN_PICKED",
+                "RELEASE_REMAINDER",
                 "MOVE_BIN",
                 "MANUAL_ADJUSTMENT",
                 "TRANSFER_OUT",
@@ -13360,6 +13362,7 @@
               "BUYER_MESSAGE_RECEIVED",
               "REVIEW_CREATED",
               "BUYER_QUESTION_RECEIVED",
+              "PICKING_ORDER_CANCELLED",
               "RETURN_REQUESTED",
               "RETURN_STATE_CHANGED"
             ]
@@ -13538,6 +13541,7 @@
               "BUYER_MESSAGE_RECEIVED",
               "REVIEW_CREATED",
               "BUYER_QUESTION_RECEIVED",
+              "PICKING_ORDER_CANCELLED",
               "RETURN_REQUESTED",
               "RETURN_STATE_CHANGED"
             ]
@@ -13591,6 +13595,7 @@
               "BUYER_MESSAGE_RECEIVED",
               "REVIEW_CREATED",
               "BUYER_QUESTION_RECEIVED",
+              "PICKING_ORDER_CANCELLED",
               "RETURN_REQUESTED",
               "RETURN_STATE_CHANGED"
             ],
@@ -15018,6 +15023,7 @@
               "UNPICK",
               "SHIP",
               "RETURN_PICKED",
+              "RELEASE_REMAINDER",
               "MOVE_BIN",
               "MANUAL_ADJUSTMENT",
               "TRANSFER_OUT",
@@ -15035,6 +15041,7 @@
               "UNPICK",
               "SHIP",
               "RETURN_PICKED",
+              "RELEASE_REMAINDER",
               "MOVE_BIN",
               "MANUAL_ADJUSTMENT",
               "TRANSFER_OUT",
@@ -19230,7 +19237,16 @@
           },
           "status": {
             "type": "string",
-            "enum": ["PENDING", "PICKED"]
+            "enum": ["PENDING", "PICKED", "CANCELLED"]
+          },
+          "cancelledQty": {
+            "type": "string",
+            "example": "0.000",
+            "description": "因订单取消撤出的数量（2026-11-03）：> 0 时该行不再拣，已拣部分走拦截"
+          },
+          "cancelReason": {
+            "type": "string",
+            "nullable": true
           },
           "binLines": {
             "description": "目标库位分配（多 Bin 分别展示）",
@@ -19263,6 +19279,7 @@
           "requiredQty",
           "pickedQty",
           "status",
+          "cancelledQty",
           "binLines",
           "serialTracking",
           "pendingSerialNumbers"
@@ -19350,7 +19367,7 @@
           },
           "itemStatus": {
             "type": "string",
-            "enum": ["PENDING", "PICKED"]
+            "enum": ["PENDING", "PICKED", "CANCELLED"]
           },
           "taskStatus": {
             "type": "string",

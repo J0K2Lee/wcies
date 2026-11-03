@@ -4076,7 +4076,7 @@ export interface components {
         NotificationDto: {
             id: string;
             /** @enum {string} */
-            type: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
+            type: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "PICKING_ORDER_CANCELLED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
             /** @enum {string} */
             channel: "SYSTEM" | "FEISHU";
             /** @example ORDER_INTERCEPTION */
@@ -4139,7 +4139,7 @@ export interface components {
             /** @enum {string} */
             channel: "FEISHU_DM" | "FEISHU_GROUP";
             /** @enum {string} */
-            eventType: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
+            eventType: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "PICKING_ORDER_CANCELLED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
             /**
              * @example {
              *       "level": [
@@ -4164,7 +4164,7 @@ export interface components {
              * @example ORDER_INTERCEPTION_REQUIRED
              * @enum {string}
              */
-            eventType: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
+            eventType: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "PICKING_ORDER_CANCELLED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
             /**
              * @description AND 组合的过滤条件：键为事件可过滤字段（storeId / warehouseCode / skuCode / level），值为候选集合。空对象 = 该事件全收
              * @example {
@@ -4779,9 +4779,9 @@ export interface components {
             /** @example IEV00000042 */
             eventNo: string;
             /** @enum {string} */
-            eventType: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "RETURN_PICKED" | "MOVE_BIN" | "MANUAL_ADJUSTMENT" | "TRANSFER_OUT" | "TRANSFER_IN";
+            eventType: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "RETURN_PICKED" | "RELEASE_REMAINDER" | "MOVE_BIN" | "MANUAL_ADJUSTMENT" | "TRANSFER_OUT" | "TRANSFER_IN";
             /** @enum {string} */
-            transactionType: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "RETURN_PICKED" | "MOVE_BIN" | "MANUAL_ADJUSTMENT" | "TRANSFER_OUT" | "TRANSFER_IN";
+            transactionType: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "RETURN_PICKED" | "RELEASE_REMAINDER" | "MOVE_BIN" | "MANUAL_ADJUSTMENT" | "TRANSFER_OUT" | "TRANSFER_IN";
             skuId: string;
             skuCode: string;
             /** @description SKU 名称（中文名；运营搜索与识别用） */
@@ -6402,7 +6402,13 @@ export interface components {
             /** @example 1.000 */
             pickedQty: string;
             /** @enum {string} */
-            status: "PENDING" | "PICKED";
+            status: "PENDING" | "PICKED" | "CANCELLED";
+            /**
+             * @description 因订单取消撤出的数量（2026-11-03）：> 0 时该行不再拣，已拣部分走拦截
+             * @example 0.000
+             */
+            cancelledQty: string;
+            cancelReason?: string | null;
             /** @description 目标库位分配（多 Bin 分别展示） */
             binLines: components["schemas"]["PickingBinLineDto"][];
             serialTracking: boolean;
@@ -6437,7 +6443,7 @@ export interface components {
             /** @example 2.000 */
             requiredQty: string;
             /** @enum {string} */
-            itemStatus: "PENDING" | "PICKED";
+            itemStatus: "PENDING" | "PICKED" | "CANCELLED";
             /** @enum {string} */
             taskStatus: "CREATED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
             /** @description 本次扫描的 SN */
@@ -8901,7 +8907,7 @@ export interface operations {
     NotificationController_list: {
         parameters: {
             query?: {
-                type?: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
+                type?: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "PICKING_ORDER_CANCELLED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
                 channel?: "SYSTEM" | "FEISHU";
                 referenceId?: string;
             };
@@ -10055,7 +10061,7 @@ export interface operations {
                 skuId?: string;
                 warehouseId?: string;
                 binId?: string;
-                transactionType?: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "RETURN_PICKED" | "MOVE_BIN" | "MANUAL_ADJUSTMENT" | "TRANSFER_OUT" | "TRANSFER_IN";
+                transactionType?: "INITIAL_STOCK" | "RECEIVE" | "RESERVE" | "RELEASE" | "PICK" | "UNPICK" | "SHIP" | "RETURN_PICKED" | "RELEASE_REMAINDER" | "MOVE_BIN" | "MANUAL_ADJUSTMENT" | "TRANSFER_OUT" | "TRANSFER_IN";
                 referenceType?: "MANUAL" | "TEST" | "ORDER" | "IMPORT" | "PURCHASE_RECEIPT" | "RETURN_RECEIPT" | "TRANSFER";
                 referenceId?: string;
                 createdFrom?: string;

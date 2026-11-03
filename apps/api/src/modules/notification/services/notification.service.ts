@@ -362,6 +362,40 @@ export class NotificationService {
     });
   }
 
+  /**
+   * 拣货中订单取消（2026-11-03）：订单在该行拣完前被取消，系统已把未拣余量
+   * 撤出任务、已拣部分转入拦截。仓库需要知道「哪张任务少了哪些货、有没有
+   * 已拣的东西要送回」——这正是取消被静默处理时最容易丢的一条信息。
+   */
+  async notifyPickingOrderCancelled(input: {
+    storeId: string;
+    storeCode: string;
+    storeName?: string | null;
+    /** 关联对象必须是 UUID（notifications.reference_id 是 uuid 列）。 */
+    orderId: string;
+    orderNo: string;
+    cancelledRows: number;
+    cancelledQty: string;
+    pickedQty: string;
+  }): Promise<void> {
+    await this.publishEvent({
+      type: 'PICKING_ORDER_CANCELLED',
+      title: `拣货中订单取消：${input.orderNo}`,
+      level: 'WARN',
+      factors: compactFactors({ storeId: input.storeId, orderNo: input.orderNo }),
+      lines: [
+        `店铺：${storeLabel(input.storeCode, input.storeName)}`,
+        `订单：${input.orderNo}`,
+        `已撤出未拣行：${input.cancelledRows} 行 / ${formatQtyText(input.cancelledQty)} 件`,
+        `已拣待拦截：${formatQtyText(input.pickedQty)} 件（去拦截中心处理）`,
+      ],
+      linkPath: eventDefinition('PICKING_ORDER_CANCELLED').linkPath,
+      dedupeKey: `picking-cancel:${input.storeId}:${input.orderNo}`,
+      referenceType: 'ORDER',
+      referenceId: input.orderId,
+    });
+  }
+
   /** 新退货申请（2026-11-02，rFBS 退货单首次出现）。 */
   async notifyReturnRequested(input: {
     storeId: string;

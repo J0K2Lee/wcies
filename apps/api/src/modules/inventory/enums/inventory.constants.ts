@@ -60,6 +60,12 @@ export const INVENTORY_EVENT_TYPES = [
   'UNPICK',
   'SHIP',
   'RETURN_PICKED',
+  /**
+   * 未拣余量释放（2026-11-03，拣货中取消）：只把预约里「还没拣」的数量退回
+   * 可售，已拣部分保持 Picked（由拦截任务找回）。与 RELEASE 的区别：RELEASE
+   * 释放整行数量，对部分拣的行会把 reserved 减成负数。
+   */
+  'RELEASE_REMAINDER',
   'MOVE_BIN',
   'MANUAL_ADJUSTMENT',
   /**

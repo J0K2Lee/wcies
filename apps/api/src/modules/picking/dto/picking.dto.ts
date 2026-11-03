@@ -155,6 +155,12 @@ export class PickingItemDto {
   @ApiProperty({ example: '2.000' }) requiredQty!: string;
   @ApiProperty({ example: '1.000' }) pickedQty!: string;
   @ApiProperty({ enum: PICKING_ITEM_STATUSES }) status!: string;
+  @ApiProperty({
+    example: '0.000',
+    description: '因订单取消撤出的数量（2026-11-03）：> 0 时该行不再拣，已拣部分走拦截',
+  })
+  cancelledQty!: string;
+  @ApiPropertyOptional({ nullable: true, type: String }) cancelReason!: string | null;
   @ApiProperty({ type: [PickingBinLineDto], description: '目标库位分配（多 Bin 分别展示）' })
   binLines!: PickingBinLineDto[];
   @ApiProperty() serialTracking!: boolean;

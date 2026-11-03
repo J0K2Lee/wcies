@@ -51,6 +51,16 @@ export class PickingTaskItemEntity {
   @Column({ type: 'varchar', length: 20, default: 'PENDING' })
   status!: PickingItemStatus;
 
+  /** 因订单取消而撤出的数量（required − picked）；未取消的行恒为 0。 */
+  @Column({ type: 'numeric', precision: 18, scale: 3, name: 'cancelled_qty', default: '0' })
+  cancelledQty!: string;
+
+  @Column({ type: 'timestamptz', name: 'cancelled_at', nullable: true })
+  cancelledAt!: Date | null;
+
+  @Column({ type: 'varchar', length: 500, name: 'cancel_reason', nullable: true })
+  cancelReason!: string | null;
+
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;
 

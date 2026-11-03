@@ -793,7 +793,8 @@ describe('cancellation (task §79-§82)', () => {
     expect(detail.interceptions[0]?.orderItemId).toBe(item.orderItemId);
   });
 
-  it('cancel while picking has progress is rejected with ORDER_INVALID_STATE', async () => {
+  it('cancel while picking has progress withdraws the remainder and intercepts picked units', async () => {
+    // 2026-11-03 口径：已拣进拦截、剩余不再拣（旧行为是整单拒绝取消）。
     const skuId = await newSku('CXM');
     await addBarcode(skuId, `${PREFIX}-CXM-BAR`);
     await initialize({ skuId, binId: binA01, quantity: '5' });
@@ -807,11 +808,27 @@ describe('cancellation (task §79-§82)', () => {
     await client.post(`/api/v1/picking-tasks/${taskId}/start`, {});
     await client.post(`/api/v1/picking-tasks/${taskId}/scan`, { barcode: `${PREFIX}-CXM-BAR` });
 
-    const cancel = await client.post(`/api/v1/orders/${result.body.data.orderId}/cancel`, {
-      reason: 'mid-picking',
-    });
-    expect(cancel.status).toBe(409);
-    expect(cancel.body.error?.code).toBe('ORDER_INVALID_STATE');
+    const cancel = await client.post<{ interceptions: number; erpStatus: string }>(
+      `/api/v1/orders/${result.body.data.orderId}/cancel`,
+      { reason: 'mid-picking' },
+    );
+    expect(cancel.status).toBe(200);
+    expect(cancel.body.data.erpStatus).toBe('CANCELLED');
+    expect(cancel.body.data.interceptions).toBe(1);
+
+    // 已拣 1 件保持 Picked 等拦截，未拣的 1 件释放回可售。
+    const balances = await balanceOf(skuId);
+    expect(balances[0]?.pickedQty).toBe('1.000');
+    expect(balances[0]?.reservedQty).toBe('0.000');
+    expect(balances[0]?.onHandQty).toBe('5.000');
+
+    const taskDetail = await client.get<{
+      status: string;
+      items: Array<{ status: string; pickedQty: string; cancelledQty: string }>;
+    }>(`/api/v1/picking-tasks/${taskId}`);
+    expect(taskDetail.body.data.items[0]!.status).toBe('CANCELLED');
+    expect(taskDetail.body.data.items[0]!.pickedQty).toBe('1.000');
+    expect(taskDetail.body.data.items[0]!.cancelledQty).toBe('1.000');
   });
 
   it('every major transition leaves order_status_history rows (§82)', async () => {
