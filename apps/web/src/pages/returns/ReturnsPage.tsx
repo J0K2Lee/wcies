@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { fmtQty } from '../../utils/format';
 import {
   App as AntdApp,
@@ -71,6 +71,7 @@ interface ReturnBatchItemRow {
   quantity: string;
   condition: string;
   binId: string | null;
+  binCode: string | null;
   remark: string | null;
 }
 
@@ -88,6 +89,13 @@ interface ReturnBatchDetail extends ReturnBatchRow {
   items: ReturnBatchItemRow[];
 }
 
+/** 建批弹窗的明细草稿：平台记录行或人工行（skuId 必填）。 */
+interface BatchItemDraft {
+  platformReturnId?: string;
+  skuId?: string;
+  quantity: string;
+}
+
 const BATCH_STATUS_META = RETURN_BATCH_STATUS_META;
 const CONDITION_META = RETURN_CONDITION_META;
 
@@ -100,6 +108,9 @@ export function ReturnsPage() {
   const [platformPage, setPlatformPage] = useState(1);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
+  /** 平台退货记录选中态：右栏承载「用此记录建批次」，主表行内不放按钮。 */
+  const [selectedReturnId, setSelectedReturnId] = useState<string | null>(null);
+  const [skuKeyword, setSkuKeyword] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm] = Form.useForm<{
     warehouseId: string;
@@ -143,6 +154,19 @@ export function ReturnsPage() {
   const skuCodeOf = (skuId: string): string =>
     (skusLite.data?.data ?? []).find((sku) => sku.id === skuId)?.skuCode ?? '—';
 
+  /** 人工行录入用：按编码/名称/条码搜索（弹窗打开时才请求）。 */
+  const skuSearch = useApiQuery<Envelope<Array<{ id: string; skuCode: string; nameZh: string }>>>(
+    '/api/v1/skus',
+    { page: 1, pageSize: 20, ...(skuKeyword === '' ? {} : { keyword: skuKeyword }) },
+    ['sku-search-for-returns', skuKeyword],
+    undefined,
+    createOpen,
+  );
+  const skuOptions = (skuSearch.data?.data ?? []).map((sku) => ({
+    value: sku.id,
+    label: `${sku.skuCode} · ${sku.nameZh}`,
+  }));
+
   const detailQuery = useApiQuery<Envelope<ReturnBatchDetail>>(
     '/api/v1/returns/batches/{id}',
     {},
@@ -180,13 +204,36 @@ export function ReturnsPage() {
       items: Array<{ platformReturnId?: string; skuId?: string; quantity: string }>;
     }) => apiPost<ReturnBatchDetail>('/api/v1/returns/batches', values),
     onSuccess: (result) => {
-      message.success(`退货批次已创建：${result.batchNo}`);
+      message.success(`退货批次已创建：${result.batchNo}，请确认收货后逐行检验`);
       setCreateOpen(false);
       createForm.resetFields();
       invalidateAll();
+      // 创建后直接落到批次详情，避免运营在页签之间找单据（2026-11-03）。
+      setActiveTab('batches');
+      setSelectedReturnId(null);
+      setDetailId(result.id);
     },
     onError: (error: Error) => message.error(`创建失败：${error.message}`),
   });
+
+  /** 打开建批弹窗：从平台退货记录进入时自动带入该行（SKU 由后端按店铺解析）。 */
+  const openCreateBatch = useCallback(
+    (prefill?: PlatformReturnRow): void => {
+      createForm.setFieldsValue({
+        warehouseId: warehousesQuery.data?.data[0]?.id,
+        sourceNote:
+          prefill === undefined
+            ? undefined
+            : `平台退货 ${prefill.platformReturnId}（${prefill.platformOrderId ?? '无订单号'}）`,
+        items:
+          prefill === undefined
+            ? [{ quantity: '1' }]
+            : [{ platformReturnId: prefill.id, quantity: prefill.quantity || '1' }],
+      });
+      setCreateOpen(true);
+    },
+    [createForm, warehousesQuery.data],
+  );
 
   const receiveMutation = useMutation({
     mutationFn: (id: string) =>
@@ -223,12 +270,66 @@ export function ReturnsPage() {
   });
 
   const pendingList = pendingReturns.data?.data ?? [];
+  const platformRows = platformReturns.data?.data ?? [];
+  const selectedReturn =
+    selectedReturnId === null
+      ? null
+      : (platformRows.find((row) => row.id === selectedReturnId) ?? null);
+  const platformReturnNoOf = (id: string): string =>
+    platformRows.find((row) => row.id === id)?.platformReturnId ??
+    pendingList.find((row) => row.id === id)?.platformReturnId ??
+    `${id.slice(0, 8)}…`;
   const batchList = batches.data?.data ?? [];
   const selectedBatch =
     selectedBatchId !== null ? (batchList.find((row) => row.id === selectedBatchId) ?? null) : null;
 
   // ---- Context rail: batch workbench (entity type when a row is selected) ----
   const railContent = useMemo<ContextRailContent>(() => {
+    // 平台退货记录选中态：唯一入口「用此记录建批次」（主表行内不放按钮）。
+    if (activeTab === 'platform' && selectedReturn !== null) {
+      const store = storesQuery.data?.data.find((row) => row.id === selectedReturn.storeId);
+      return {
+        defaultCollapsed: false,
+        header: (
+          <EntitySummary
+            title={selectedReturn.platformReturnId}
+            subtitle={
+              store === undefined ? selectedReturn.storeId : `${store.storeCode} · ${store.name}`
+            }
+            badge={
+              <StatusBadge
+                tone="neutral"
+                label={selectedReturn.state ?? '状态未知'}
+                hint="平台原文状态"
+                showDot={false}
+              />
+            }
+          />
+        ),
+        children: (
+          <>
+            <ContextSection title="退货记录">
+              <ContextMetric label="平台订单" value={selectedReturn.platformOrderId ?? '—'} />
+              <ContextMetric label="平台 SKU" value={selectedReturn.platformSkuId ?? '—'} />
+              <ContextMetric label="数量" value={fmtQty(selectedReturn.quantity)} />
+              <ContextMetric label="退款状态" value={selectedReturn.refundState ?? '—'} />
+              <ContextMetric
+                label="退货时间"
+                value={<RelativeTime value={selectedReturn.platformCreatedAt} fallback="—" />}
+              />
+            </ContextSection>
+            <ContextAction>
+              <Button type="primary" block onClick={() => openCreateBatch(selectedReturn)}>
+                用此记录建退货批次
+              </Button>
+            </ContextAction>
+            <RailHint>
+              实物到仓后在「退货批次」确认收货，再逐行检验（合格回库才产生库存）。
+            </RailHint>
+          </>
+        ),
+      };
+    }
     if (selectedBatch === null) {
       return {
         defaultCollapsed: true,
@@ -325,6 +426,10 @@ export function ReturnsPage() {
     };
     // mutation 对象以 isPending / mutate（稳定引用）承载依赖（规范 §4.4）。
   }, [
+    activeTab,
+    selectedReturn,
+    storesQuery.data,
+    openCreateBatch,
     selectedBatch,
     pendingList.length,
     batches.data,
@@ -349,6 +454,8 @@ export function ReturnsPage() {
               setPage(1);
               setPlatformPage(1);
               setActiveTab(key);
+              setSelectedReturnId(null);
+              setSelectedBatchId(null);
             }}
             items={[
               { key: 'platform', label: `平台退货记录 (${platformReturns.data?.meta.total ?? 0})` },
@@ -370,17 +477,7 @@ export function ReturnsPage() {
               </Button>
             </Tooltip>
           ) : (
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => {
-                createForm.setFieldsValue({
-                  warehouseId: warehousesQuery.data?.data[0]?.id,
-                  items: [{ quantity: '1' }],
-                });
-                setCreateOpen(true);
-              }}
-            >
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => openCreateBatch()}>
               新建退货批次
             </Button>
           )
@@ -426,6 +523,13 @@ export function ReturnsPage() {
             }}
             emptyTitle="暂无平台退货记录"
             emptyDescription="选择店铺后点「同步退货记录」拉取平台 rFBS 退货。"
+            onRow={(record) => ({
+              onClick: () => setSelectedReturnId(record.id === selectedReturnId ? null : record.id),
+              style: {
+                cursor: 'pointer',
+                background: record.id === selectedReturnId ? colors.primarySoft : undefined,
+              },
+            })}
             columns={[
               {
                 title: '退货单号',
@@ -604,6 +708,22 @@ export function ReturnsPage() {
                 {detail.sourceNote ?? ''}
               </span>
             </div>
+            {detail.status === 'DRAFT' && (
+              <div
+                style={{
+                  marginBottom: 12,
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  background: colors.neutralBg,
+                  border: `1px solid ${colors.neutralBorder}`,
+                  fontSize: 12.5,
+                  color: colors.textSecondary,
+                }}
+              >
+                草稿批次：实物到仓后先在「退货批次」列表选中该批次，右栏点「确认收货」，
+                然后才能逐行检验回库。
+              </div>
+            )}
             <DataTable<ReturnBatchItemRow>
               rowKey="id"
               dataSource={detail.items}
@@ -641,6 +761,13 @@ export function ReturnsPage() {
                   width: 80,
                   align: 'right' as const,
                   render: (value: string) => fmtQty(value),
+                },
+                {
+                  title: '回库库位',
+                  dataIndex: 'binCode',
+                  key: 'binCode',
+                  width: 130,
+                  render: (value: string | null) => value ?? '—',
                 },
                 {
                   title: '检验结论',
@@ -718,7 +845,24 @@ export function ReturnsPage() {
         open={createOpen}
         onCancel={() => setCreateOpen(false)}
         onOk={() => {
-          void createForm.validateFields().then((values) => createMutation.mutate(values));
+          void createForm.validateFields().then((values) => {
+            // items 不是注册字段（Form.Item 无 name），validateFields 不会带上它
+            // —— 此前直接提交 values 会丢明细，后端 400（2026-11-03 修复）。
+            const items = (createForm.getFieldValue('items') as BatchItemDraft[] | undefined) ?? [];
+            if (items.length === 0) {
+              message.error('至少需要一行明细');
+              return;
+            }
+            const badIndex = items.findIndex(
+              (row) =>
+                row.platformReturnId === undefined && (row.skuId === undefined || row.skuId === ''),
+            );
+            if (badIndex >= 0) {
+              message.error(`第 ${badIndex + 1} 行未选择内部 SKU`);
+              return;
+            }
+            createMutation.mutate({ ...values, items });
+          });
         }}
         okText="创建"
         cancelText="取消"
@@ -781,9 +925,7 @@ export function ReturnsPage() {
                       size="small"
                       onClick={() => {
                         const items =
-                          (createForm.getFieldValue('items') as
-                            Array<{ platformReturnId?: string; quantity: string }> | undefined) ??
-                          [];
+                          (createForm.getFieldValue('items') as BatchItemDraft[] | undefined) ?? [];
                         if (items.some((item) => item.platformReturnId === row.id)) {
                           message.info('该记录已在明细中');
                           return;
@@ -804,34 +946,65 @@ export function ReturnsPage() {
           <Form.Item noStyle shouldUpdate={(prev, next) => prev.items !== next.items}>
             {() => {
               const items =
-                (createForm.getFieldValue('items') as
-                  | Array<{ platformReturnId?: string; skuId?: string; quantity: string }>
-                  | undefined) ?? [];
+                (createForm.getFieldValue('items') as BatchItemDraft[] | undefined) ?? [];
+              const setItems = (next: BatchItemDraft[]): void => {
+                createForm.setFieldsValue({ items: next });
+              };
               return (
-                <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
-                    批次明细 {items.length} 行；人工行需填内部 SKU
-                    ID（从平台记录带入的行自动解析平台 SKU）
+                    批次明细 {items.length} 行；平台记录行自动解析 SKU，人工行需选择内部 SKU
                   </span>
                   {items.map((item, index) => (
-                    <span key={index} style={{ fontSize: 12.5, color: colors.textSecondary }}>
-                      第 {index + 1} 行：
-                      {item.platformReturnId !== undefined
-                        ? `平台记录 ${item.platformReturnId.slice(0, 8)}…`
-                        : `人工行 SKU ${item.skuId ?? '未填'}`}
-                      ×{item.quantity}
-                    </span>
+                    <div key={index} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <span style={{ width: 28, color: colors.textTertiary, fontSize: 12.5 }}>
+                        {index + 1}
+                      </span>
+                      {item.platformReturnId !== undefined ? (
+                        <span style={{ flex: 1, fontSize: 12.5, color: colors.textSecondary }}>
+                          平台记录 {platformReturnNoOf(item.platformReturnId)}（SKU 自动解析）
+                        </span>
+                      ) : (
+                        <Select
+                          showSearch
+                          allowClear
+                          value={item.skuId}
+                          placeholder="搜索 SKU 编码 / 名称"
+                          style={{ flex: 1 }}
+                          filterOption={false}
+                          onSearch={setSkuKeyword}
+                          options={skuOptions}
+                          notFoundContent={skuSearch.isLoading ? '搜索中…' : '无匹配 SKU'}
+                          onChange={(value?: string) => {
+                            const next = [...items];
+                            next[index] = { ...item, skuId: value };
+                            setItems(next);
+                          }}
+                        />
+                      )}
+                      <Input
+                        style={{ width: 96 }}
+                        placeholder="数量"
+                        value={item.quantity}
+                        onChange={(event) => {
+                          const next = [...items];
+                          next[index] = { ...item, quantity: event.target.value };
+                          setItems(next);
+                        }}
+                      />
+                      <Button
+                        type="text"
+                        danger
+                        onClick={() => setItems(items.filter((_, i) => i !== index))}
+                      >
+                        移除
+                      </Button>
+                    </div>
                   ))}
                   <Button
                     size="small"
                     style={{ width: 120 }}
-                    onClick={() => {
-                      const current =
-                        (createForm.getFieldValue('items') as
-                          | Array<{ platformReturnId?: string; skuId?: string; quantity: string }>
-                          | undefined) ?? [];
-                      createForm.setFieldsValue({ items: [...current, { quantity: '1' }] });
-                    }}
+                    onClick={() => setItems([...items, { quantity: '1' }])}
                   >
                     添加人工行
                   </Button>

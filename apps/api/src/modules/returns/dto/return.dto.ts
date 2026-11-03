@@ -36,6 +36,8 @@ export interface ReturnBatchItemView {
   quantity: string;
   condition: string;
   binId: string | null;
+  /** 回库库位编码（检验后可见；未检验/缺失为 null）。 */
+  binCode: string | null;
   remark: string | null;
   createdAt: Date;
 }
@@ -94,6 +96,12 @@ export class ReturnBatchItemDto {
   @ApiProperty({ example: '1.000' }) quantity!: string;
   @ApiProperty({ enum: RETURN_ITEM_CONDITIONS }) condition!: string;
   @ApiProperty({ nullable: true, type: String }) binId!: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: '回库库位编码（检验合格/不合格时的落库位置；未检验或缺失为 null）',
+  })
+  binCode!: string | null;
   @ApiProperty({ nullable: true, type: String }) remark!: string | null;
   @ApiProperty({ type: Date }) createdAt!: Date;
 }

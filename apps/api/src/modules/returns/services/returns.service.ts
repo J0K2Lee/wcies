@@ -86,6 +86,16 @@ export class ReturnsService {
         .filter((row): row is NonNullable<typeof row> => row !== null)
         .map((row) => [row.id, row]),
     );
+    // 回库库位编码（检验后可见）：运营要能确认这批货到底落到哪个库位。
+    const binCodes = new Map<string, string>();
+    for (const binId of [
+      ...new Set(items.map((item) => item.binId).filter((v): v is string => v !== null)),
+    ]) {
+      const bin = await this.binService.getEntityById(binId);
+      if (bin !== null) {
+        binCodes.set(binId, bin.binCode);
+      }
+    }
     return {
       id: batch.id,
       batchNo: batch.batchNo,
@@ -105,6 +115,7 @@ export class ReturnsService {
         quantity: item.quantity,
         condition: item.condition,
         binId: item.binId,
+        binCode: item.binId === null ? null : (binCodes.get(item.binId) ?? null),
         remark: item.remark,
         createdAt: item.createdAt,
       })),
@@ -421,6 +432,7 @@ export class ReturnsService {
       operator,
     });
     const fresh = await this.batchRepo.findItemById(item.id);
+    const bin = fresh!.binId === null ? null : await this.binService.getEntityById(fresh!.binId);
     return {
       id: fresh!.id,
       batchId: fresh!.batchId,
@@ -430,6 +442,7 @@ export class ReturnsService {
       quantity: fresh!.quantity,
       condition: fresh!.condition,
       binId: fresh!.binId,
+      binCode: bin?.binCode ?? null,
       remark: fresh!.remark,
       createdAt: fresh!.createdAt,
     };

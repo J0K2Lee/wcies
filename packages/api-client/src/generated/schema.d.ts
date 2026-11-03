@@ -7385,6 +7385,8 @@ export interface components {
             /** @enum {string} */
             condition: "PENDING" | "SELLABLE" | "DEFECTIVE" | "LOST";
             binId: string | null;
+            /** @description 回库库位编码（检验合格/不合格时的落库位置；未检验或缺失为 null） */
+            binCode: string | null;
             remark: string | null;
             /** Format: date-time */
             createdAt: string;

@@ -21964,6 +21964,11 @@
             "type": "string",
             "nullable": true
           },
+          "binCode": {
+            "type": "string",
+            "nullable": true,
+            "description": "回库库位编码（检验合格/不合格时的落库位置；未检验或缺失为 null）"
+          },
           "remark": {
             "type": "string",
             "nullable": true
@@ -21982,6 +21987,7 @@
           "quantity",
           "condition",
           "binId",
+          "binCode",
           "remark",
           "createdAt"
         ]

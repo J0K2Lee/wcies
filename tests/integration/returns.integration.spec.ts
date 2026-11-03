@@ -380,6 +380,14 @@ describe('return batch inspection (T5, returns.md §3)', () => {
     expect(returnTx?.referenceId).toBe(linkedLine!.id);
     expect(returnTx?.eventType).toBe('RECEIVE');
 
+    // 批次详情回显回库库位编码（2026-11-03：运营要能确认货落到哪个库位）。
+    const detailAfter = await client.get<{
+      items: Array<{ id: string; binId: string | null; binCode: string | null }>;
+    }>(`/api/v1/returns/batches/${batch.id}`);
+    const inspectedLine = detailAfter.body.data.items.find((row) => row.id === linkedLine!.id);
+    expect(inspectedLine?.binId).toBe(binId);
+    expect(inspectedLine?.binCode).toBeTruthy();
+
     // DEFECTIVE without a bin: STAGING fallback + quarantine condition +
     // RETURN_DIFFERENCE raised (the line is platform-linked).
     const inspectDefective = await client.post(`/api/v1/returns/items/${manualLine!.id}/inspect`, {
