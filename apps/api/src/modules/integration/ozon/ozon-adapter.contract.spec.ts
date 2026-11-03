@@ -32,6 +32,8 @@ const AWAITING_DELIVER = 'awaiting_deliver';
 
 /** Scripted shipping-label PDF bytes (never a real label). */
 const LABEL_PDF = '%PDF-1.4 scripted label';
+/** Scripted CDN address the label task hands back. */
+const LABEL_FILE_URL = 'https://cdn.example/scripted-label.pdf';
 
 function makeOzonHarness(): AdapterContractHarness {
   // Route-based fake server: adapters may fan one contract call out to
@@ -147,14 +149,27 @@ function makeOzonHarness(): AdapterContractHarness {
         postingStatus = AWAITING_PACKAGING;
       },
       scriptLabel: () => {
-        routes.set('/v2/posting/fbs/package-label', {
-          endpoint: '/v2/posting/fbs/package-label',
+        // 异步面单三步（2026-11-03）：建任务 → 取 file_url → 下载文件。
+        routes.set('/v3/posting/fbs/package-label/create', {
+          endpoint: '/v3/posting/fbs/package-label/create',
+          status: 200,
+          body: { tasks: [{ task_id: 550490555, task_type: 'small_label' }] },
+        });
+        routes.set('/v2/posting/fbs/package-label/get', {
+          endpoint: '/v2/posting/fbs/package-label/get',
+          status: 200,
+          body: {
+            file_url: LABEL_FILE_URL,
+            status: { code: 'completed', postings_count: 1, printed_postings_count: 1 },
+          },
+        });
+        routes.set(LABEL_FILE_URL, {
+          endpoint: LABEL_FILE_URL,
           status: 200,
           body: null,
-          // The spec declares application/pdf while documenting a JSON
-          // envelope; the contract suite only cares that A file comes back.
+          // 平台返回 octet-stream 的多页 PDF（T0 2026-11-03 实测）。
           rawBody: LABEL_PDF,
-          headers: { 'Content-Type': 'application/pdf' },
+          headers: { 'Content-Type': 'application/octet-stream' },
         });
       },
     },

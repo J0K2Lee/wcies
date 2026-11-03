@@ -708,8 +708,8 @@ SKU 与数量**，让人自己决定。这是"给人信息"而不是"替人决�
 
 | 接口 | 用途 |
 |---|---|
-| `POST /v2/posting/fbs/package-label` | **同步**返回 PDF（≤20 个发货单/次）。仅限 `awaiting_deliver` 状态；任一单失败则全部不生成；建议打包后 45–60 秒再请求 |
-| `POST /v2/posting/fbs/package-label/create` + `/get` | **异步**批量生成，返回多个任务（大/小标签分开） |
+| ~~`POST /v2/posting/fbs/package-label`~~ | **已停用**（2026-11-02 官方关闭，调用只回误导性 429）。见 `docs/integrations/ozon.md` §9② |
+| `POST /v3/posting/fbs/package-label/create` + `POST /v2/posting/fbs/package-label/get` | **异步**批量生成任务，再按 task_id 取 `file_url` 下载 PDF（2026-11-03 已接入） |
 
 **结论**：OZON 的面单是**平台生成 PDF**，我们只需下载并打印。
 所以「打单系统」对我们而言不是"生成面单"，而是"**把 PDF 送到标签打印机**"。

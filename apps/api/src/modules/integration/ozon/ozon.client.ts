@@ -10,6 +10,8 @@ import {
   OzonNotificationCheckResponse,
   OzonNotificationListResponse,
   OzonOwnWarehouseListResponse,
+  OzonPackageLabelCreateResponse,
+  OzonPackageLabelGetResponse,
   OzonProductAttributesResponse,
   OzonProductInfoListResponse,
   OzonProductListResponse,
@@ -70,12 +72,6 @@ interface RequestCall {
   readonly storeId: string;
   readonly body: Record<string, unknown>;
   /**
-   * True for endpoints that may answer with a NON-JSON body (the package
-   * label spec declares `application/pdf` while documenting a JSON envelope).
-   * The transport then hands back the raw bytes instead of parsing.
-   */
-  readonly raw?: boolean;
-  /**
    * True for endpoints whose 200 response may carry an EMPTY body (the
    * notification set/update/delete endpoints declare no response content).
    * The transport then resolves `{}` instead of failing JSON parsing.
@@ -89,17 +85,6 @@ interface RequestCall {
   readonly preserveBigInts?: boolean;
   /** 预序列化的请求体（含 int64 字面量时用，绕过 JSON.stringify 的精度损失）。 */
   readonly rawBody?: string;
-}
-
-/**
- * Raw HTTP outcome for binary-capable endpoints. `text` is the UTF-8 decoding
- * of `bytes` so a JSON-envelope variant can be parsed by the caller without a
- * second read of the response.
- */
-export interface OzonRawResponse {
-  readonly contentType: string | null;
-  readonly bytes: Uint8Array;
-  readonly text: string;
 }
 
 /** Per-store serialized rate limiting state. */
@@ -386,22 +371,79 @@ export class OzonClient {
   }
 
   /**
-   * `POST /v2/posting/fbs/package-label` - generates the shipping label PDF
-   * for postings in `awaiting_deliver`. Served as raw bytes: the live body is
-   * either the PDF itself or a JSON envelope with base64 `file_content`
-   * (the spec contradicts itself), so decoding is the caller's job.
+   * `POST /v3/posting/fbs/package-label/create` - 创建异步面单任务
+   * （2026-11-03 迁移：旧的同步接口 `/v2/posting/fbs/package-label` 自
+   * 2026-11-02 起被官方停用，调用只回误导性的 429 code 8）。
+   *
+   * 一页一单的正确性由调用方按页数校验，传输层不做任何推断。
    */
-  async packageLabel(
+  async packageLabelCreate(
     auth: OzonAuth,
     storeId: string,
     postingNumbers: readonly string[],
-  ): Promise<OzonRawResponse> {
-    return this.request<OzonRawResponse>(auth, {
-      endpoint: '/v2/posting/fbs/package-label',
+  ): Promise<OzonPackageLabelCreateResponse> {
+    return this.request<OzonPackageLabelCreateResponse>(auth, {
+      endpoint: '/v3/posting/fbs/package-label/create',
       storeId,
-      body: { posting_number: [...postingNumbers] },
-      raw: true,
+      body: { posting_numbers: [...postingNumbers] },
+      // task_id 是 int64：超过 2^53 时 JSON.parse 会静默改值。
+      preserveBigInts: true,
     });
+  }
+
+  /** `POST /v2/posting/fbs/package-label/get` - 读取任务状态 / 取 file_url。 */
+  async packageLabelGet(
+    auth: OzonAuth,
+    storeId: string,
+    taskId: number | string,
+  ): Promise<OzonPackageLabelGetResponse> {
+    return this.request<OzonPackageLabelGetResponse>(auth, {
+      endpoint: '/v2/posting/fbs/package-label/get',
+      storeId,
+      body: { task_id: taskId },
+    });
+  }
+
+  /**
+   * 下载平台给出的文件地址（面单 `file_url` 指向 ozonstatic.cn，无需鉴权头）。
+   * 只做传输：超时、错误归一化；字节形态由调用方校验。
+   */
+  async downloadFile(
+    url: string,
+    context: { storeId: string; endpoint: string },
+  ): Promise<{ contentType: string | null; bytes: Uint8Array }> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.options.timeoutMs);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, { method: 'GET', signal: controller.signal });
+    } catch (error: unknown) {
+      const timedOut = error instanceof Error && error.name === 'AbortError';
+      throw this.error(
+        context,
+        timedOut ? 'PLATFORM_TIMEOUT' : 'PLATFORM_NETWORK_ERROR',
+        null,
+        null,
+        timedOut
+          ? `Timeout after ${this.options.timeoutMs}ms downloading ${context.endpoint}`
+          : networkMessage(error),
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!response.ok) {
+      throw this.error(
+        context,
+        'PLATFORM_API_ERROR',
+        response.status,
+        response.headers.get('x-o3-trace-id'),
+        `File download responded HTTP ${response.status}`,
+      );
+    }
+    return {
+      contentType: response.headers.get('content-type'),
+      bytes: new Uint8Array(await response.arrayBuffer()),
+    };
   }
 
   // -----------------------------------------------------------------------
@@ -580,13 +622,21 @@ export class OzonClient {
     if (response.status === 429) {
       const retryAfterHeader = response.headers.get('retry-after');
       const retryAfterMs = parseRetryAfterMs(retryAfterHeader);
+      // 平台自述必须保留：方法下线同样伪装成 429 code 8（2026-11-02 面单接口），
+      // 丢掉 body 会让「真限流」与「方法停用」无法区分（AGENTS §88）。
+      const platformMessage = await safeErrorMessage(response);
       return {
         ok: false,
         retryable: true,
         retryAfterMs,
-        error: this.error(call, 'PLATFORM_RATE_LIMITED', 429, requestId, 'Rate limited by OZON', {
-          retryAfterMs,
-        }),
+        error: this.error(
+          call,
+          'PLATFORM_RATE_LIMITED',
+          429,
+          requestId,
+          `Rate limited by OZON (${platformMessage})`,
+          { retryAfterMs, ratelimitRemaining: response.headers.get('ratelimit-remaining') },
+        ),
       };
     }
     if (response.status >= 500) {
@@ -615,37 +665,6 @@ export class OzonClient {
           requestId,
           await safeErrorMessage(response),
         ),
-      };
-    }
-
-    if (call.raw === true) {
-      let buffer: ArrayBuffer;
-      try {
-        buffer = await response.arrayBuffer();
-      } catch (error: unknown) {
-        return {
-          ok: false,
-          retryable: false,
-          retryAfterMs: null,
-          error: new PlatformMalformedResponseError({
-            httpStatus: response.status,
-            requestId,
-            endpoint: call.endpoint,
-            storeId: call.storeId,
-            message: `Response body could not be read (${String(error)})`,
-          }),
-        };
-      }
-      const bytes = new Uint8Array(buffer);
-      return {
-        ok: true,
-        value: {
-          contentType: response.headers.get('content-type'),
-          bytes,
-          // Tolerant by construction: a binary body decodes to replacement
-          // characters, which the caller ignores unless the type says JSON.
-          text: new TextDecoder().decode(bytes),
-        } as TResponse,
       };
     }
 
@@ -721,7 +740,7 @@ export class OzonClient {
   }
 
   private error(
-    call: RequestCall,
+    call: { readonly endpoint: string; readonly storeId: string },
     code: PlatformErrorDetail['code'],
     httpStatus: number | null,
     requestId: string | null,

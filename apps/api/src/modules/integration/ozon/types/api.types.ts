@@ -436,19 +436,49 @@ export interface OzonFbsShipResponse {
 }
 
 /**
- * Response of `POST /v2/posting/fbs/package-label`.
+ * Response of `POST /v3/posting/fbs/package-label/create`.
  *
- * The spec is self-contradictory here: it declares the 200 content type as
- * `application/pdf` while the documented schema is this JSON envelope with a
- * base64 `file_content`. Both shapes are handled at runtime by inspecting the
- * actual Content-Type (see OzonClient.packageLabel) - the live shape is a T0
- * item (docs/integrations/ozon.md 平台写操作).
+ * 官方于 2026-11-02 停用同步面单接口 `POST /v2/posting/fbs/package-label`
+ * （停用后仍返回误导性的 429 code 8），替代流程是「create 建任务 → get 取
+ * file_url」。T0 实测（2026-11-03，ON-002/ON-003）：`tasks` 在响应**顶层**，
+ * 单次请求多个 posting 只返回一个任务，`task_type` 为 `small_label`（店铺
+ * 面单格式设置决定；文档称 `big_label` 为普通面单）。
  */
-export interface OzonPackageLabelResponse {
-  readonly content_type?: string | null;
-  readonly file_name?: string | null;
-  /** Base64-encoded PDF bytes (schema: `format: byte`). */
-  readonly file_content?: string | null;
+export interface OzonPackageLabelTask {
+  /** 类型声明为 int64：解析时按长整数保护，可能以字符串形式到达。 */
+  readonly task_id?: number | string;
+  readonly task_type?: string;
+  readonly [key: string]: unknown;
+}
+
+export interface OzonPackageLabelCreateResponse {
+  readonly tasks?: readonly OzonPackageLabelTask[];
+  readonly [key: string]: unknown;
+}
+
+/**
+ * Response of `POST /v2/posting/fbs/package-label/get`（按 task_id 取面单）。
+ *
+ * `status.code`：`pending` / `in_progress` / `completed` / `error`。
+ * T0 实测：任务通常 2–7 秒内 completed；`file_url` 指向 ozonstatic.cn 的
+ * 一次性下载地址（无签名参数、无需鉴权头），Content-Type 为
+ * `application/octet-stream`，内容为多页 PDF（一页一单）。
+ */
+export interface OzonPackageLabelGetResponse {
+  readonly error?: {
+    readonly code?: string;
+    readonly message?: string;
+  };
+  readonly file_url?: string;
+  readonly status?: {
+    readonly code?: string;
+    readonly postings_count?: number;
+    readonly printed_postings_count?: number;
+    readonly unprinted_postings?: readonly {
+      readonly posting_number?: string;
+      readonly message?: string;
+    }[];
+  };
   readonly [key: string]: unknown;
 }
 

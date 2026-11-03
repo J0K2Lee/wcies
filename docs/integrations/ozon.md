@@ -237,6 +237,14 @@ posting/fbs/list` 的请求过滤器存在，`changed_state_date` 只在 webhook
   间隔 4 秒、20 秒 33 次全失败，而 `get`/`product` 正常）——该方法已下线，已迁移到
   `/v4/posting/fbs/list`。教训：**"限流"错误码不能当作调用太快的结论**，需用同凭据
   的其他方法与不同节奏的调用做对照，并优先怀疑方法版本下线。
+- **2026-11-03 同类第二次**：`/v2/posting/fbs/package-label` 停用后同样回
+  `429 code 8`（`ratelimit-remaining: 0`、`retry-after: 0`），隔 30 秒/换店铺都不变，
+  而同凭据 `fbs/get` 正常（remaining 49）。见 §9② 的面单迁移。
+- 429 的错误消息现在**保留平台自述**：`Rate limited by OZON (OZON error 8: ...)`，
+  并把 `ratelimit-remaining` 放进 details——丢掉 body 会让「真限流」与「方法停用」
+  无法区分。
+- 打单链路：**429 不降级逐单**（`isLabelBatchFallbackWorthy`）。逐单重试只会把同一个
+  限流放大成 N 倍；2026-11-03 的 15 单批量因此变成 60 次请求，把限流窗口一直撑满。
 
 ## 5. 重试与错误归一化
 
@@ -804,29 +812,55 @@ master-data.md §7）。平台仓库分类与履约模式对应：
 - 同日真实链路还暴露过一处本地 bug（`requireCapability` 返回解绑方法导致
   `this===undefined` 500，已于当日修复并补回归测试），与平台行为无关。
 
-### ② 面单 `POST /v2/posting/fbs/package-label`
+### ② 面单（2026-11-03 迁移到异步接口）
 
-| 项 | 事实 | 来源 |
+> ⚠ **旧同步接口 `POST /v2/posting/fbs/package-label` 已被官方停用**
+> （官方公告：**2026-11-02 起关闭**）。停用后它的返回是**误导性的 429**：
+> `{"code":8,"message":"You have reached request rate limit per second"}`，
+> `ratelimit-remaining: 0`、`retry-after: 0`，且**隔 30 秒、换店铺、换方法都不变**
+> ——同凭据的 `/v3/posting/fbs/get` 同时返回 200（`ratelimit-remaining: 49`）。
+> 这与 2026-10-20 `/v3/posting/fbs/list` 的教训完全一致：
+> **「限流」错误码不能当作调用太快的结论**，必须用同凭据的其他方法做对照。
+> 实际影响：2026-11-03 全店打单失败（OZON 面单归档为 0），异常日志里只有
+> 「Rate limited by OZON」。
+
+现状流程（替代旧接口）：
+
+| 步骤 | 端点 | 事实（T0 实测 2026-11-03） |
 |---|---|---|
-| 语义 | 生成指定发货单的标签 PDF；**仅限 `awaiting_deliver`** | 规范描述段 |
-| 请求 | `{ posting_number: string[] }`（描述称 ≤20 个/次，schema 无 maxItems） | 规范 |
-| 前置 | 建议组包后 **45–60 秒**再请求 | 规范描述段 |
-| ⚠ 坑 | 规范**自相矛盾**：200 声明 `application/pdf`，schema 却是
-  `{content_type,file_name,file_content(base64)}` JSON 信封 | 规范 200 段 vs schema |
-| 错误 | 至少一个单失败则**全部不生成**；`The next postings aren't ready` = 面单未就绪；
-  `INVALID_ARGUMENT` / `label not allowed for delivered postings` = 状态不符 | 规范 Errors 表 |
+| 建任务 | `POST /v3/posting/fbs/package-label/create` `{ posting_numbers: string[] }` | 200，`tasks` 在**响应顶层**：`[{task_id, task_type}]`；多 posting 一次请求只返回**一个**任务 |
+| 取任务 | `POST /v2/posting/fbs/package-label/get` `{ task_id }` | `status.code` = `pending` → `in_progress` → `completed` / `error`；`completed` 时给 `file_url` |
+| 下载 | `file_url`（`ozonstatic.cn`） | **无需鉴权头/无签名参数**，`Content-Type: application/octet-stream`，内容为多页 PDF |
 
-**实现**：传输层新增**原始字节模式**（`OzonClient.packageLabel`），按实际
-`Content-Type` 判定——JSON 信封则 base64 解码，其余按 PDF 字节直通。两种都接，
-因此**规范矛盾不影响上线**，但仍需真实测一次确认实际形态（见下）。
+- `task_type`：`big_label`（普通面单）/ `small_label`（小面单）。实测
+  `small_label` 的 PDF 页尺寸为 **57.9×40 mm**（热敏小面单）；ON-002 / ON-003
+  默认只返回 `small_label`，但 2026-11-03 的批量预取里出现过**一次同时返回
+  `big_label` + `small_label`**。若同时返回两个任务，只取**一个**（否则一份
+  PDF 每单两页、页序映射失效）；当前取 `small_label`
+  （`PREFERRED_LABEL_TASK_TYPE`），改口径前必须有真实两格式样本。
+- 时延：任务 2–7 秒完成；`OzonShipmentService` 轮询 6 次 × 1.5s（约 9s），
+  超窗按「未就绪」返回（`PLATFORM_LABEL_NOT_READY`），不是失败。
+- 部分成功：`status.unprinted_postings` 非空或 `printed_postings_count` ≠ 请求数
+  时，**不猜**文件里是哪几单、页序如何——抛 `PlatformBatchShapeError` 让调用方
+  逐单重取。已实测：11 单一批只打印了 2 单，其余 9 单的原因是
+  `postings is not ready. Label is available for awaiting delivery postings`
+  （本地 `platform_stage` 可能比平台旧；这类单不是故障）。
+- 错误：`NO_POSTINGS_FOR_BATCH_DOWNLOAD`（HTTP 400 code 3）= 这些 posting 当前
+  不在 `awaiting_deliver`，按「未就绪」处理（不是故障）。
+- 前置仍是 **`awaiting_deliver`**；建议组包后 45–60 秒再取（预取任务默认延迟 60s）。
 
-**批量取单（2026-10-21）**：`OzonShipmentService.fetchShippingLabels` 把多个
-posting 放进**一次**请求（调用方按 20 单切块），平台返回**一个** PDF。实现假定
-「一页 = 一单、页序 = 请求顺序」，因此只有 `页数 === 单数` 时才拆页归档；页数
-不符或返回不可解析（例如 ZIP）时抛 `PlatformBatchShapeError`，由 sync 层降级为
-逐单请求。平台以 4xx 拒绝（全或无）同样降级逐单，把不可取的 posting 隔离出来。
-**该「一页一单」假设仍待真实两单验证**（见 T0 第 4 项）——它只影响提速，
-不影响正确性。
+**实现**：`OzonClient.packageLabelCreate` / `packageLabelGet` / `downloadFile`；
+`OzonShipmentService.fetchShippingLabel(s)` 负责「建任务 → 轮询 → 下载 → 校验
+PDF 魔数」。旧的传输层「原始字节模式」（`raw`）随旧接口一起删除。
+
+**批量取单（2026-10-21 引入，2026-11-03 迁移）**：多个 posting 一次 create，
+平台仍返回**一个** PDF，**一页一单、页序 = 请求顺序**（已用两单实测：
+2 单 → 2 页，`printed_postings_count=2`）。只有页数 = 单数时才拆页归档。
+调用方仍按 20 单切块。
+
+**⚠ 离线规范快照已过期**：`docs/ozon-seller-api-eng-version-3.json` 里只有
+`/v1` `/v2 .../package-label/create` + `/v1/.../get`，**没有** `/v3 create` 与
+`/v2 get`。以本表（实测）为准，不要把快照当作可用接口清单。
 
 **状态事件的盲区（2026-10-21 实测）**：`TYPE_STATE_CHANGED` 只推送投递流程
 状态（`transferring_to_delivery` / `awaiting_registration` / `on_way_to_city` /
@@ -843,10 +877,12 @@ posting 放进**一次**请求（调用方按 20 单切块），平台返回**�
 2. `substatus = ship_failed` 的传播时机（异步组包需多久）——`ship_pending` 中间态
    已实测，失败态未遇到；
 3. `integration_type_flow = aggregator`（rFBS，本店 146/183 单）是否同样走本端点组包；
-4. `/v2/posting/fbs/package-label` 真实响应体是 PDF 字节还是 JSON base64；
-   以及**两单一次请求**的返回是否为「每单一页、页序=请求顺序」（批量取单的
-   拆页假设，2026-10-21 新增）；
-5. `available_actions` 在真实 `/v3/posting/fbs/get` 响应中是否出现、取值集合。
+4. ~~`/v2/posting/fbs/package-label` 真实响应体是 PDF 字节还是 JSON base64；
+   以及**两单一次请求**的返回是否为「每单一页、页序=请求顺序」~~ ✅ 2026-11-03：
+   旧接口已停用；新异步流程 2 单 → 单文件 2 页、页序 = 请求顺序已实测；
+5. `available_actions` 在真实 `/v3/posting/fbs/get` 响应中是否出现、取值集合；
+6. 同一店铺是否会同时返回 `big_label` + `small_label` 两个任务（若有，需确定
+   打印哪一种；当前取 `small_label`）。
 
 ## 10. 已知限制 / 坑
 

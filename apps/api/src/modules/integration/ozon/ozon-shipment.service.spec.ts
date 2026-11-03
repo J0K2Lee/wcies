@@ -36,12 +36,22 @@ interface Script {
   readonly availableActions?: readonly string[];
   /** Response of /v4/posting/fbs/ship; omit to make the call fail the test. */
   readonly shipResponse?: { status: number; body: unknown };
-  readonly label?: { status: number; contentType: string; body: string };
+  /**
+   * 异步面单三步（2026-11-03）：create 建任务 → get 取 file_url → 下载文件。
+   * 省略即「平台没有可打印的面单」。
+   */
+  readonly label?: {
+    readonly create?: { status: number; body: unknown };
+    readonly get?: readonly { status: number; body: unknown }[];
+    readonly file?: { status: number; contentType: string; body: string };
+  };
 }
 
 function build(script: Script) {
   const shipCalls: unknown[] = [];
+  const labelGetCalls: unknown[] = [];
   let readIndex = 0;
+  let labelGetIndex = 0;
   const fetchImpl = vi.fn(async (input: string, init?: RequestInit) => {
     const url = String(input);
     if (url.includes('/v4/posting/fbs/ship')) {
@@ -53,11 +63,42 @@ function build(script: Script) {
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    if (url.includes('/v2/posting/fbs/package-label')) {
-      const label = script.label ?? { status: 404, contentType: 'application/json', body: '{}' };
-      return new Response(label.body, {
-        status: label.status,
-        headers: { 'Content-Type': label.contentType },
+    if (url.includes('/v3/posting/fbs/package-label/create')) {
+      const create = script.label?.create ?? {
+        status: 200,
+        body: { tasks: [{ task_id: 550490555, task_type: 'small_label' }] },
+      };
+      return new Response(JSON.stringify(create.body), {
+        status: create.status,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (url.includes('/v2/posting/fbs/package-label/get')) {
+      const rawBody = typeof init?.body === 'string' ? init.body : null;
+      labelGetCalls.push(rawBody === null ? null : (JSON.parse(rawBody) as unknown));
+      const scripted = script.label?.get ?? [];
+      const entry = scripted[Math.min(labelGetIndex, scripted.length - 1)] ?? {
+        status: 200,
+        body: {
+          file_url: 'https://cdn.example/ozon-label.pdf',
+          status: { code: 'completed', postings_count: 1, printed_postings_count: 1 },
+        },
+      };
+      labelGetIndex += 1;
+      return new Response(JSON.stringify(entry.body), {
+        status: entry.status,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (url.startsWith('https://cdn.example/')) {
+      const file = script.label?.file ?? {
+        status: 200,
+        contentType: 'application/octet-stream',
+        body: '%PDF-1.4 downloaded',
+      };
+      return new Response(file.body, {
+        status: file.status,
+        headers: { 'Content-Type': file.contentType },
       });
     }
     const status = script.statuses[Math.min(readIndex, script.statuses.length - 1)] ?? 'unknown';
@@ -95,7 +136,10 @@ function build(script: Script) {
     fetchImpl: fetchImpl as unknown as typeof fetch,
     sleep: async () => undefined,
   });
-  return { service: new OzonShipmentService(client, LOGGER), shipCalls };
+  const service = new OzonShipmentService(client, LOGGER);
+  // 面单任务轮询等待：测试里立即返回，避免真的等 9 秒。
+  (service as unknown as { wait: (ms: number) => Promise<void> }).wait = async () => undefined;
+  return { service, shipCalls, labelGetCalls };
 }
 
 describe('OzonShipmentService.prepareShipment', () => {
@@ -213,47 +257,105 @@ describe('OzonShipmentService.prepareShipment', () => {
 });
 
 describe('OzonShipmentService.fetchShippingLabel', () => {
-  it('decodes the JSON base64 envelope variant', async () => {
-    const pdf = Buffer.from('%PDF-1.4 envelope');
-    const { service } = build({
+  it('建任务 → 轮询 → 下载 file_url，返回 PDF 字节', async () => {
+    const { service, labelGetCalls } = build({
       statuses: ['awaiting_deliver'],
       label: {
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          content_type: 'application/pdf',
-          file_name: 'ticket.pdf',
-          file_content: pdf.toString('base64'),
-        }),
+        get: [
+          {
+            status: 200,
+            body: { status: { code: 'pending' } },
+          },
+          {
+            status: 200,
+            body: {
+              file_url: 'https://cdn.example/ozon-label.pdf',
+              status: { code: 'completed', postings_count: 1, printed_postings_count: 1 },
+            },
+          },
+        ],
       },
     });
     const file = await service.fetchShippingLabel(CONTEXT, { platformOrderId: POSTING });
-    expect(file?.fileName).toBe('ticket.pdf');
+    expect(file?.fileName).toBe(`ozon-label-${POSTING}.pdf`);
     expect(file?.mimeType).toBe('application/pdf');
-    expect(Buffer.from(file!.bytes).toString()).toBe('%PDF-1.4 envelope');
+    expect(Buffer.from(file!.bytes).toString()).toBe('%PDF-1.4 downloaded');
+    expect(labelGetCalls).toEqual([{ task_id: 550490555 }, { task_id: 550490555 }]);
   });
 
-  it('passes raw PDF bytes through untouched', async () => {
+  it('create 返回空任务 → null（平台还没给面单）', async () => {
     const { service } = build({
       statuses: ['awaiting_deliver'],
-      label: { status: 200, contentType: 'application/pdf', body: '%PDF-1.4 raw' },
+      label: { create: { status: 200, body: { tasks: [] } } },
     });
-    const file = await service.fetchShippingLabel(CONTEXT, { platformOrderId: POSTING });
-    expect(file?.mimeType).toBe('application/pdf');
-    expect(Buffer.from(file!.bytes).toString()).toBe('%PDF-1.4 raw');
+    await expect(
+      service.fetchShippingLabel(CONTEXT, { platformOrderId: POSTING }),
+    ).resolves.toBeNull();
   });
 
-  it('returns null when the platform says the label is not generated yet', async () => {
+  it('轮询窗口内始终 pending → null（未就绪，不是失败）', async () => {
     const { service } = build({
       statuses: ['awaiting_deliver'],
       label: {
-        status: 400,
-        contentType: 'application/json',
-        body: JSON.stringify({ code: 5, message: "The next postings aren't ready" }),
+        get: [
+          { status: 200, body: { status: { code: 'pending' } } },
+          { status: 200, body: { status: { code: 'in_progress' } } },
+        ],
       },
     });
     await expect(
       service.fetchShippingLabel(CONTEXT, { platformOrderId: POSTING }),
     ).resolves.toBeNull();
+  });
+
+  it('平台答「这些单现在取不到面单」→ null（未就绪）', async () => {
+    const { service } = build({
+      statuses: ['awaiting_deliver'],
+      label: {
+        create: {
+          status: 400,
+          body: { code: 3, message: 'NO_POSTINGS_FOR_BATCH_DOWNLOAD' },
+        },
+      },
+    });
+    await expect(
+      service.fetchShippingLabel(CONTEXT, { platformOrderId: POSTING }),
+    ).resolves.toBeNull();
+  });
+
+  it('任务 error 状态 → 带平台原因的失败', async () => {
+    const { service } = build({
+      statuses: ['awaiting_deliver'],
+      label: {
+        get: [
+          {
+            status: 200,
+            body: {
+              status: {
+                code: 'error',
+                unprinted_postings: [
+                  { posting_number: POSTING, message: 'posting is not in awaiting_deliver' },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    });
+    await expect(service.fetchShippingLabel(CONTEXT, { platformOrderId: POSTING })).rejects.toThrow(
+      /posting is not in awaiting_deliver/,
+    );
+  });
+
+  it('下载到的不是 PDF（例如 CDN 错误页）→ 失败，不归档坏文件', async () => {
+    const { service } = build({
+      statuses: ['awaiting_deliver'],
+      label: {
+        file: { status: 200, contentType: 'text/html', body: '<html>oops</html>' },
+      },
+    });
+    await expect(service.fetchShippingLabel(CONTEXT, { platformOrderId: POSTING })).rejects.toThrow(
+      /不是 PDF/,
+    );
   });
 });

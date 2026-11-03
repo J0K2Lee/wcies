@@ -16,7 +16,7 @@ import {
   PlatformLabelNotReadyError,
 } from './order-platform-ship.service';
 import { PlatformCapabilityUnsupportedError } from '../../integration/integration.errors';
-import { PlatformBatchShapeError } from '../../integration/platform-error';
+import { PlatformApiError, PlatformBatchShapeError } from '../../integration/platform-error';
 import { LabelPrefetchService } from './label-prefetch.service';
 
 /**
@@ -540,6 +540,40 @@ describe('OrderPlatformShipService 批量取单 (2026-10-21)', () => {
 
     expect(single).toHaveBeenCalledTimes(2);
     expect(result).toMatchObject({ succeeded: 2, failed: 0 });
+  });
+
+  it('平台限流（429）不降级逐单——逐单重试只会把限流放大', async () => {
+    const rateLimited = new PlatformApiError({
+      code: 'PLATFORM_RATE_LIMITED',
+      httpStatus: 429,
+      requestId: null,
+      endpoint: '/v3/posting/fbs/package-label/create',
+      storeId: 'store-1',
+      message:
+        'Rate limited by OZON (OZON error 8: You have reached request rate limit per second)',
+    });
+    class RateLimitedAdapter extends BatchLabelAdapter {
+      override async fetchShippingLabels(): Promise<never> {
+        throw rateLimited;
+      }
+    }
+    const { service, orderService } = makeService(new RateLimitedAdapter());
+    orderService.getOrderOrThrow.mockImplementation(async (id: string) => orderById(id));
+    const single = vi.spyOn(service, 'fetchShippingLabel');
+
+    const result = await service.fetchShippingLabelBatch(
+      ['o1', 'o2'],
+      { refresh: false },
+      OPERATOR,
+    );
+
+    // 一次批量调用失败后直接给出逐单原因：不再补 2 次（更不补 2×4 次重试）。
+    expect(single).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ succeeded: 0, failed: 2 });
+    expect(result.results.map((item) => item.code)).toEqual([
+      'PLATFORM_RATE_LIMITED',
+      'PLATFORM_RATE_LIMITED',
+    ]);
   });
 
   it('终态订单被跳过并计入 notPrintable，其余照常取单', async () => {

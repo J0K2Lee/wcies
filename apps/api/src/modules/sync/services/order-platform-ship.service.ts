@@ -1031,9 +1031,13 @@ function groupByStore(
 /**
  * 批量取单是否应降级为逐单：
  * - 返回形状无法与订单一一对应（`PlatformBatchShapeError`）；
- * - 平台以 4xx 拒绝（OZON 批量接口「一个单不可取则整批不成」，逐单才能
- *   把坏单隔离出来）。
- * 5xx / 鉴权 / 网络错误不降级：逐单重试只会把同一个失败放大 20 倍。
+ * - 平台以 4xx 业务错误拒绝（OZON「一个单不可取则整批不成」，逐单才能把坏单
+ *   隔离出来）。
+ *
+ * 5xx / 鉴权 / 网络 / 限流（429）一律不降级：它们是「整条链路暂时不可用」，
+ * 逐单重试只会把同一个失败放大成 N 倍并继续消耗平台配额。2026-11-03 的 429
+ * 事故就是这样放大的——1 单的批量失败后又原样重试了一次，15 单的批量则变成
+ * 60 次请求，把限流窗口一直撑满。
  */
 function isLabelBatchFallbackWorthy(error: unknown): boolean {
   if (error instanceof PlatformBatchShapeError) {
@@ -1041,7 +1045,13 @@ function isLabelBatchFallbackWorthy(error: unknown): boolean {
   }
   if (error instanceof PlatformApiError) {
     const status = error.platformError.httpStatus;
-    return typeof status === 'number' && status >= 400 && status < 500;
+    return (
+      typeof status === 'number' &&
+      status >= 400 &&
+      status < 500 &&
+      status !== 429 &&
+      status !== 408
+    );
   }
   return false;
 }
