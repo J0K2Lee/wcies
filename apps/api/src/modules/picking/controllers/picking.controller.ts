@@ -9,6 +9,7 @@ import {
   CreatePickingTaskRequestDto,
   AutoCreatePickingTasksRequestDto,
   AutoCreatePickingTasksResultDto,
+  CancelPickingItemRequestDto,
   CreatePickingTaskResultDto,
   PickingScanRequestDto,
   PickingScanResultDto,
@@ -91,6 +92,23 @@ export class PickingController {
     @CurrentOperator() operator: OperatorContext,
   ) {
     return ok<PickingScanResultDto>(await this.pickingService.scan(id, request, operator));
+  }
+
+  @Post(':id/items/:itemId/cancel')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '取消单个拣货行（未拣的行可取消：释放占用、订单行回待分配；已拣行拒绝）',
+  })
+  @ApiOkEnvelope(PickingTaskDetailDto)
+  async cancelItem(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body() request: CancelPickingItemRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ) {
+    return ok<PickingTaskDetailDto>(
+      await this.pickingService.cancelItem(id, itemId, operator, request.reason),
+    );
   }
 
   @Post(':id/complete')

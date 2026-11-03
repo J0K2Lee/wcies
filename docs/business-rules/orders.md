@@ -739,6 +739,43 @@ OrderItem：已拣行 → PICKED（事实是「已拣这些」）→ 走 §Picke
 `apps/api/src/modules/inventory/services/reservation.service.ts`
 `releaseRemainder`（余量释放）。
 
+## 取消单个拣货行（订单不取消）
+
+> 2026-11-03 用户口径：**以拣货行为单位取消，未拣的行可以取消**。
+> 订单不能因此被取消，也不能被卡住——此前只有「取消订单」一个出口，而订单侧
+> 手工释放库存又要求「先取消拣货任务」，形成死结。
+
+`POST /picking-tasks/:id/items/:itemId/cancel`（任务 CREATED / IN_PROGRESS）
+
+```text
+行 status = PENDING 且 pickedQty = 0
+↓
+释放该行预约（ORDER_RELEASE:<orderItemId>，orderDomain=true）
+↓
+订单行 → PENDING（reservationId / warehouseId 清空）——订单不取消
+↓
+拣货行 → CANCELLED，cancelled_qty = required_qty，记 cancel_reason
+↓
+任务收口（无 PENDING 行 → 有拣过 COMPLETED / 全空 CANCELLED）
+↓
+重算订单状态（放在撤行+收口之后，否则会算成 PICKING 卡住）
+```
+
+规则：
+
+1. **未拣的行才可取消**：`pickedQty > 0`（含部分拣）或已 `PICKED` → 422
+   `PICKING_ITEM_NOT_CANCELLABLE`，提示「已拣货的行不能取消（请拣完发货或取消
+   订单走拦截）」。已拣货物必须按 §9 拦截或正常发货，不能凭空释放。
+2. 订单不取消、平台状态不动；行回到待分配后可重新分配 / 重新生成拣货任务。
+3. 取消后的订单汇总可能显示 `BACKORDERED`（没有占用行），与手工「释放库存」
+   一致；需要继续拣时重新分配或重新生成任务。
+4. 幂等：重复取消同一行直接返回当前任务详情；并发下 `mark_cancelled` 影响 0 行
+   也按已处理返回。
+5. 与「取消订单」的区别：取消订单连订单一起取消、已拣行走拦截；取消行只让这一
+   行不拣了，订单继续履约。
+6. 前端：拣货工位页点击待拣行 → 右栏「所选行」→「取消该行（未拣）」（行内不放
+   按钮，见 UI 规范 §4.1）。
+
 ---
 
 # 9. Order Interception（拦截）

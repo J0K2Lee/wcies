@@ -556,6 +556,131 @@ describe('PickingService.autoCreateForReadyOrders (2026-10-15 合并语义：一
   });
 });
 
+describe('PickingService.cancelItem（2026-11-03 行级取消：未拣的行可取消）', () => {
+  function buildItemCancel(options: {
+    status?: string;
+    pickedQty?: string;
+    pendingAfter?: number;
+    pickedCount?: number;
+  }) {
+    const dataSource = {
+      transaction: vi.fn(async (work: (m: unknown) => Promise<unknown>) => work({})),
+    } as unknown as DataSource;
+    const item = {
+      id: 'pt-item-1',
+      pickingTaskId: 'task-1',
+      orderId: 'order-1',
+      orderItemId: 'oi-1',
+      reservationId: 'rsv-1',
+      skuId: 'sku-A',
+      requiredQty: '3.000',
+      pickedQty: options.pickedQty ?? '0.000',
+      status: options.status ?? 'PENDING',
+    };
+    const task = {
+      id: 'task-1',
+      pickingNo: 'PCK00000001',
+      warehouseId: 'wh-1',
+      status: 'IN_PROGRESS',
+      createdAt: new Date(),
+      startedAt: new Date(),
+      completedAt: null,
+    };
+    const itemRepo = {
+      findByTaskId: vi.fn().mockResolvedValue([item]),
+      markCancelled: vi.fn().mockResolvedValue(1),
+      countPendingOfTask: vi.fn().mockResolvedValue(options.pendingAfter ?? 0),
+      countPickedOfTask: vi.fn().mockResolvedValue(options.pickedCount ?? 0),
+    };
+    const taskRepo = {
+      findById: vi.fn().mockResolvedValue(task),
+      updateStatus: vi.fn().mockResolvedValue(undefined),
+    };
+    const reservationService = { releaseReservation: vi.fn().mockResolvedValue({}) };
+    const orderService = {
+      releaseItemAfterPickingCancel: vi.fn().mockResolvedValue({
+        orderId: 'order-1',
+        orderNo: 'ORD1',
+        fulfillmentStatus: 'PENDING',
+        orderErpStatus: null,
+      }),
+      recomputeAfterPickingItemCancel: vi.fn().mockResolvedValue('BACKORDERED'),
+    };
+    const operationLog = { record: vi.fn().mockResolvedValue(undefined) };
+    const service = new PickingService(
+      dataSource,
+      taskRepo as never,
+      itemRepo as never,
+      orderService as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      reservationService as never,
+      {} as never,
+      operationLog as never,
+      { log: vi.fn(), info: vi.fn(), warn: vi.fn() } as never,
+    );
+    vi.spyOn(service, 'getDetail').mockResolvedValue({ id: 'task-1' } as never);
+    return { service, itemRepo, taskRepo, reservationService, orderService, operationLog };
+  }
+
+  it('未拣行：释放占用 → 订单行回待分配 → 行 CANCELLED（订单不取消）', async () => {
+    const { service, itemRepo, reservationService, orderService, taskRepo } = buildItemCancel({
+      pendingAfter: 0,
+      pickedCount: 0,
+    });
+
+    await service.cancelItem('task-1', 'pt-item-1', OPERATOR, '不拣了');
+
+    expect(reservationService.releaseReservation).toHaveBeenCalledWith(
+      'rsv-1',
+      expect.objectContaining({
+        orderDomain: true,
+        idempotencyKey: 'ORDER_RELEASE:oi-1',
+      }),
+    );
+    expect(orderService.releaseItemAfterPickingCancel).toHaveBeenCalledWith(
+      'oi-1',
+      OPERATOR,
+      expect.stringContaining('不拣了'),
+      { recompute: false },
+    );
+    // 订单状态在「撤行 + 任务收口」之后才重算。
+    expect(orderService.recomputeAfterPickingItemCancel).toHaveBeenCalledWith(
+      'order-1',
+      OPERATOR,
+      expect.stringContaining('不拣了'),
+    );
+    expect(itemRepo.markCancelled).toHaveBeenCalledWith('pt-item-1', '3.000', '不拣了');
+    // 一件都没拣 → 任务整单取消（没有已拣行可收口为 COMPLETED）。
+    expect(taskRepo.updateStatus).toHaveBeenCalledWith(expect.anything(), 'task-1', {
+      status: 'CANCELLED',
+    });
+  });
+
+  it('已有拣货进度 → PICKING_ITEM_NOT_CANCELLABLE，库存与订单都不动', async () => {
+    const { service, itemRepo, reservationService, orderService } = buildItemCancel({
+      pickedQty: '1.000',
+    });
+
+    await expect(
+      service.cancelItem('task-1', 'pt-item-1', OPERATOR, '不拣了'),
+    ).rejects.toMatchObject({ code: 'PICKING_ITEM_NOT_CANCELLABLE' });
+    expect(reservationService.releaseReservation).not.toHaveBeenCalled();
+    expect(orderService.releaseItemAfterPickingCancel).not.toHaveBeenCalled();
+    expect(itemRepo.markCancelled).not.toHaveBeenCalled();
+  });
+
+  it('任务里还有其他待拣行 → 任务状态不动（其他行继续拣）', async () => {
+    const { service, taskRepo } = buildItemCancel({ pendingAfter: 2 });
+
+    await service.cancelItem('task-1', 'pt-item-1', OPERATOR);
+
+    expect(taskRepo.updateStatus).not.toHaveBeenCalled();
+  });
+});
+
 describe('PickingService.cancelOrderItemsForOrder（2026-11-03 拣货中取消）', () => {
   const TASK = {
     id: 'task-1',

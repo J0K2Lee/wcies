@@ -104,6 +104,18 @@ export class PickingScanRequestDto {
   itemId?: string;
 }
 
+/**
+ * 取消单个拣货行（2026-11-03）：以行为单位取消，未拣的行可取消。
+ * 订单不取消，行回到待分配；已拣行拒绝（只能拣完或走订单取消的拦截）。
+ */
+export class CancelPickingItemRequestDto {
+  @ApiPropertyOptional({ description: '取消原因（写入拣货行与操作日志）', maxLength: 500 })
+  @IsOptional()
+  @IsString()
+  @Length(1, 500)
+  reason?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Responses
 // ---------------------------------------------------------------------------

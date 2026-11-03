@@ -332,3 +332,79 @@ describe('拣货中订单取消：已拣进拦截、剩余不再拣', () => {
     expect(afterScanAttempt.items[0]!.pickedQty).toBe('0.000');
   });
 });
+
+describe('行级取消（订单不取消，未拣的行可取消）', () => {
+  it('取消未拣行：释放占用、订单行回待分配，任务可重新生成', async () => {
+    const skuId = await newSku('PC4');
+    const barcode = `${PREFIX}-PC4-BAR`;
+    await addBarcode(skuId, barcode);
+    await initialize(skuId, '5');
+    await mapSku(skuId, `${PREFIX}-PC4`);
+    const order = await ingestOrder([{ platformSkuId: `${PREFIX}-PC4`, quantity: '2' }]);
+
+    const created = await client.post<{ tasks: Array<{ id: string }> }>('/api/v1/picking-tasks', {
+      orderId: order.orderId,
+    });
+    const taskId = created.body.data.tasks[0]!.id;
+    await client.post(`/api/v1/picking-tasks/${taskId}/start`, {});
+    const itemId = (await taskDetail(taskId)).items[0]!.id;
+
+    const cancelled = await client.post<{
+      status: string;
+      items: Array<{ status: string; cancelledQty: string; cancelReason: string | null }>;
+    }>(`/api/v1/picking-tasks/${taskId}/items/${itemId}/cancel`, { reason: '这一行不拣了' });
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.body.data.status).toBe('CANCELLED');
+    expect(cancelled.body.data.items[0]!.status).toBe('CANCELLED');
+    expect(cancelled.body.data.items[0]!.cancelledQty).toBe('2.000');
+    expect(cancelled.body.data.items[0]!.cancelReason).toBe('这一行不拣了');
+
+    // 库存回到「未被占用」，实物仍在货架。
+    expect(await balancesOf(skuId)).toEqual({ onHand: 5, reserved: 0, picked: 0 });
+
+    // 订单没被取消，行回到待分配。
+    const detail = await client.get<{
+      erpStatus: string;
+      items: Array<{ fulfillmentStatus: string }>;
+    }>(`/api/v1/orders/${order.orderId}`);
+    expect(detail.body.data.erpStatus).not.toBe('CANCELLED');
+    expect(['BACKORDERED', 'PARTIALLY_BACKORDERED', 'PENDING', 'READY_TO_PICK']).toContain(
+      detail.body.data.erpStatus,
+    );
+    expect(detail.body.data.items[0]!.fulfillmentStatus).toBe('PENDING');
+
+    // 行已撤销，没有可拣行 → 不能再建任务（需要重新分配后再建）。
+    const again = await client.post(`/api/v1/picking-tasks`, { orderId: order.orderId });
+    expect(again.status).toBe(422);
+    expect(again.body.error?.code).toBe('PICKING_NO_ELIGIBLE_ITEMS');
+  });
+
+  it('已有拣货进度的行拒绝取消：PICKING_ITEM_NOT_CANCELLABLE，库存不动', async () => {
+    const skuId = await newSku('PC5');
+    const barcode = `${PREFIX}-PC5-BAR`;
+    await addBarcode(skuId, barcode);
+    await initialize(skuId, '5');
+    await mapSku(skuId, `${PREFIX}-PC5`);
+    const order = await ingestOrder([{ platformSkuId: `${PREFIX}-PC5`, quantity: '3' }]);
+
+    const created = await client.post<{ tasks: Array<{ id: string }> }>('/api/v1/picking-tasks', {
+      orderId: order.orderId,
+    });
+    const taskId = created.body.data.tasks[0]!.id;
+    await client.post(`/api/v1/picking-tasks/${taskId}/start`, {});
+    await client.post(`/api/v1/picking-tasks/${taskId}/scan`, { barcode });
+    const itemId = (await taskDetail(taskId)).items[0]!.id;
+
+    const before = await balancesOf(skuId);
+    const rejected = await client.post(`/api/v1/picking-tasks/${taskId}/items/${itemId}/cancel`, {
+      reason: '不拣了',
+    });
+    expect(rejected.status).toBe(422);
+    expect(rejected.body.error?.code).toBe('PICKING_ITEM_NOT_CANCELLABLE');
+    expect(await balancesOf(skuId)).toEqual(before);
+
+    // 行仍然可拣/可扫，订单状态不受影响。
+    const scan = await client.post(`/api/v1/picking-tasks/${taskId}/scan`, { barcode });
+    expect(scan.status).toBe(200);
+  });
+});

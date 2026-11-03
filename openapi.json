@@ -7410,6 +7410,63 @@
         "tags": ["picking-tasks"]
       }
     },
+    "/api/v1/picking-tasks/{id}/items/{itemId}/cancel": {
+      "post": {
+        "operationId": "PickingController_cancelItem",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "itemId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelPickingItemRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PickingTaskDetailDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "取消单个拣货行（未拣的行可取消：释放占用、订单行回待分配；已拣行拒绝）",
+        "tags": ["picking-tasks"]
+      }
+    },
     "/api/v1/picking-tasks/{id}/complete": {
       "post": {
         "operationId": "PickingController_complete",
@@ -19415,6 +19472,16 @@
           }
         },
         "required": ["barcode"]
+      },
+      "CancelPickingItemRequestDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "取消原因（写入拣货行与操作日志）",
+            "maxLength": 500
+          }
+        }
       },
       "InterceptionListItemDto": {
         "type": "object",

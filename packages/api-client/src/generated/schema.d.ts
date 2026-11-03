@@ -2110,6 +2110,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/picking-tasks/{id}/items/{itemId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 取消单个拣货行（未拣的行可取消：释放占用、订单行回待分配；已拣行拒绝） */
+        post: operations["PickingController_cancelItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/picking-tasks/{id}/complete": {
         parameters: {
             query?: never;
@@ -6462,6 +6479,10 @@ export interface components {
             binBarcode?: string;
             /** @description 显式指定拣货行（同 SKU 多行时） */
             itemId?: string;
+        };
+        CancelPickingItemRequestDto: {
+            /** @description 取消原因（写入拣货行与操作日志） */
+            reason?: string;
         };
         InterceptionListItemDto: {
             id: string;
@@ -12297,6 +12318,36 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["PickingScanResultDto"];
+                    };
+                };
+            };
+        };
+    };
+    PickingController_cancelItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                itemId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CancelPickingItemRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PickingTaskDetailDto"];
                     };
                 };
             };

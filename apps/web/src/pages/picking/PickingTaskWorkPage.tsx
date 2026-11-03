@@ -6,6 +6,7 @@ import { ArrowLeftOutlined } from '@ant-design/icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiPost, useApiQuery } from '../../api/hooks';
 import {
+  ContextAction,
   ContextMetric,
   ContextSection,
   CopyTextButton,
@@ -58,13 +59,15 @@ interface TaskDetail {
 export function PickingTaskWorkPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { message } = AntdApp.useApp();
+  const { message, modal } = AntdApp.useApp();
   const queryClient = useQueryClient();
   const barcodeRef = useRef<InputRef>(null);
   const [barcode, setBarcode] = useState('');
   const [serialNumber, setSerialNumber] = useState('');
   const [feedback, setFeedback] = useState<ScanFeedbackData | null>(null);
   const [busy, setBusy] = useState(false);
+  /** 工位页选中的拣货行：行级动作（取消该行）只在右栏出现，行内不放按钮。 */
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
 
   const query = useApiQuery<{ data: TaskDetail }>(
     '/api/v1/picking-tasks/{id}',
@@ -121,6 +124,22 @@ export function PickingTaskWorkPage() {
     },
   });
 
+  // 取消单个拣货行（2026-11-03 用户口径）：订单不取消，未拣的行释放占用回待分配。
+  const cancelItemMutation = useMutation({
+    mutationFn: (input: { itemId: string; reason: string }) =>
+      apiPost<TaskDetail>(
+        '/api/v1/picking-tasks/{id}/items/{itemId}/cancel',
+        { reason: input.reason },
+        { id: id as string, itemId: input.itemId },
+      ),
+    onSuccess: () => {
+      message.success('已取消该行：库存占用已释放，订单行回到待分配');
+      setSelectedItemId(null);
+      void queryClient.invalidateQueries({ queryKey: ['picking-task', id] });
+    },
+    onError: (error: Error) => message.error(`取消失败：${error.message}`),
+  });
+
   // Scanner sink contract (task §49): always refocus after every outcome.
   useEffect(() => {
     barcodeRef.current?.focus();
@@ -143,6 +162,11 @@ export function PickingTaskWorkPage() {
       cancelledLines: task.items.length - active.length,
     };
   }, [task]);
+
+  const selectedItem = useMemo(
+    () => task?.items.find((item) => item.id === selectedItemId) ?? null,
+    [task, selectedItemId],
+  );
 
   // Next focus: first unfinished item's first unfinished bin (task §47).
   const nextItem = useMemo(() => task?.items.find((item) => item.status === 'PENDING'), [task]);
@@ -507,9 +531,20 @@ export function PickingTaskWorkPage() {
                 const cancelled = item.status === 'CANCELLED';
                 const remaining = cancelled ? 0 : Number(item.requiredQty) - Number(item.pickedQty);
                 const done = item.status === 'PICKED';
+                const selected = item.id === selectedItemId;
                 return (
                   <div
                     key={item.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={selected}
+                    onClick={() => setSelectedItemId(selected ? null : item.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setSelectedItemId(selected ? null : item.id);
+                      }
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -517,8 +552,11 @@ export function PickingTaskWorkPage() {
                       padding: '12px 20px',
                       borderBottom: `1px solid ${colors.borderSoft}`,
                       opacity: done || cancelled ? 0.6 : 1,
-                      background:
-                        nextItem !== undefined && item.id === nextItem.id && !done
+                      cursor: 'pointer',
+                      boxShadow: selected ? `inset 3px 0 0 ${colors.primary}` : undefined,
+                      background: selected
+                        ? colors.neutralBg
+                        : nextItem !== undefined && item.id === nextItem.id && !done
                           ? colors.primarySoft
                           : undefined,
                     }}
@@ -690,6 +728,63 @@ export function PickingTaskWorkPage() {
             </div>
           )}
         </ContextSection>
+        {selectedItem !== null && (
+          <ContextSection title="所选行">
+            <ContextMetric label="SKU" value={selectedItem.skuCode} />
+            <ContextMetric label="订单" value={selectedItem.orderNo} />
+            <ContextMetric
+              label="已拣 / 需要"
+              value={`${Number(selectedItem.pickedQty)} / ${Number(selectedItem.requiredQty)}`}
+            />
+            <ContextMetric
+              label="状态"
+              value={
+                selectedItem.status === 'PENDING'
+                  ? '待拣'
+                  : selectedItem.status === 'PICKED'
+                    ? '已拣完'
+                    : selectedItem.status === 'CANCELLED'
+                      ? '已撤出'
+                      : selectedItem.status
+              }
+            />
+            {selectedItem.status === 'PENDING' && Number(selectedItem.pickedQty) === 0 ? (
+              <ContextAction>
+                <Button
+                  block
+                  danger
+                  loading={cancelItemMutation.isPending}
+                  onClick={() => {
+                    // 取消行 = 危险动作 L2：modal.confirm + danger ok。
+                    modal.confirm({
+                      title: `取消该行：${selectedItem.skuCode} ×${Number(selectedItem.requiredQty)}？`,
+                      content:
+                        '该行一件都还没拣。取消后释放库存占用、订单行回到待分配（订单不取消），可重新生成拣货任务。',
+                      okText: '取消该行',
+                      okButtonProps: { danger: true },
+                      cancelText: '返回',
+                      onOk: () =>
+                        cancelItemMutation.mutate({
+                          itemId: selectedItem.id,
+                          reason: '拣货行取消（工位页）',
+                        }),
+                    });
+                  }}
+                >
+                  取消该行（未拣）
+                </Button>
+              </ContextAction>
+            ) : (
+              <span style={{ fontSize: 12.5, color: colors.textTertiary }}>
+                {selectedItem.status === 'CANCELLED'
+                  ? '该行已撤出（订单行已回到待分配）'
+                  : Number(selectedItem.pickedQty) > 0
+                    ? '该行已有拣货进度，不能取消；请拣完发货或取消订单走拦截'
+                    : '该行已拣完'}
+              </span>
+            )}
+          </ContextSection>
+        )}
         <ContextSection title="异常">
           <ContextMetric
             label="扫码异常"

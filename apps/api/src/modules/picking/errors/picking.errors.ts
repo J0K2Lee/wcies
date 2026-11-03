@@ -122,3 +122,29 @@ export class PickingOrderCancelledError extends DomainError {
     );
   }
 }
+
+/**
+ * 拣货行不能取消（2026-11-03，用户口径：以拣货行为单位、未拣的行可取消）。
+ *
+ * 只有「一件都还没拣」的行允许取消：取消 = 释放该行占用、订单行回到待分配，
+ * 可以重新生成拣货任务。已经拣过（含部分拣）的行不允许，因为实物已经离开货架，
+ * 只能继续拣完（由拦截/发货流程收口）。
+ */
+export class PickingItemNotCancellableError extends DomainError {
+  readonly code = 'PICKING_ITEM_NOT_CANCELLABLE';
+  readonly httpStatus = 422;
+
+  constructor(details: {
+    pickingTaskItemId: string;
+    status: string;
+    pickedQty: string;
+    requiredQty: string;
+  }) {
+    super(
+      details.pickedQty === '0.000' || details.pickedQty === '0'
+        ? `该行状态为 ${details.status}，不能取消`
+        : `该行已拣 ${details.pickedQty} / ${details.requiredQty} 件，已拣货的行不能取消（请拣完或取消订单）`,
+      details,
+    );
+  }
+}

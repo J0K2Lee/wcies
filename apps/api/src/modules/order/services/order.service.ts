@@ -715,6 +715,100 @@ export class OrderService {
     };
   }
 
+  /**
+   * 拣货行取消后把订单行退回待分配（2026-11-03，用户口径：以拣货行为单位取消，
+   * 未拣的行可取消）。
+   *
+   * 与 `releaseItemReservation` 的区别：这里由拣货域发起，预约已经由拣货域释放
+   * （同一事务语义的先后顺序由此决定），所以**不再校验活动拣货任务**（那个守卫
+   * 正是要求「先取消拣货任务」，否则会形成死结），也不再重复释放预约。订单本身
+   * 不取消：行回到 PENDING，可重新分配/重新生成拣货任务。
+   */
+  async releaseItemAfterPickingCancel(
+    orderItemId: string,
+    operator: OperatorContext,
+    remark: string,
+    options: { recompute?: boolean } = {},
+  ): Promise<{
+    orderId: string;
+    orderNo: string;
+    fulfillmentStatus: string;
+    /** 未重算时为 null（拣货行要先撤出、任务先收口，重算才看得到真实状态）。 */
+    orderErpStatus: string | null;
+  }> {
+    const item = await this.itemRepo.findById(orderItemId);
+    if (item === null) {
+      throw new OrderItemNotFoundError(orderItemId);
+    }
+    const order = await this.getOrderOrThrow(item.orderId);
+    if (order.erpStatus === 'CANCELLED' || order.erpStatus === 'SHIPPED') {
+      throw new OrderInvalidStateError('订单已取消或已发货，不能释放库存占用', {
+        orderId: order.id,
+        erpStatus: order.erpStatus,
+      });
+    }
+    if (item.fulfillmentStatus !== 'RESERVED' || item.reservationId === null) {
+      throw new OrderInvalidStateError('该行当前没有库存占用，无需释放', {
+        orderItemId: item.id,
+        fulfillmentStatus: item.fulfillmentStatus,
+      });
+    }
+    await this.dataSource.transaction(async (runner) => {
+      await this.itemRepo.updateFulfillment(runner, item.id, {
+        fulfillmentStatus: 'PENDING',
+        reservationId: null,
+        warehouseId: null,
+      });
+    });
+    const orderErpStatus =
+      options.recompute === false
+        ? null
+        : await this.statusService.recomputeOrderStatus(
+            order.id,
+            operator,
+            `拣货行取消，第 ${item.lineNo} 行回到待分配：${remark}`,
+          );
+    await this.operationLog.record({
+      entityType: 'ORDER',
+      entityId: order.id,
+      entityCode: order.orderNo,
+      action: 'RELEASE_RESERVATION',
+      changes: {
+        fulfillmentStatus: { from: 'RESERVED', to: 'PENDING' },
+        reservationId: { from: item.reservationId, to: null },
+        orderItemId: { from: null, to: item.id },
+        lineNo: { from: null, to: item.lineNo },
+        source: { from: null, to: 'PICKING_ITEM_CANCEL' },
+      },
+      operator,
+    });
+    return {
+      orderId: order.id,
+      orderNo: order.orderNo,
+      fulfillmentStatus: 'PENDING',
+      orderErpStatus,
+    };
+  }
+
+  /**
+   * 拣货行撤出后的订单状态重算（2026-11-03）。
+   *
+   * 必须等拣货行置 CANCELLED、任务收口之后再调用：`deriveRollupStatus` 会看
+   * 「是否还有活动拣货行」，撤行之前重算会把订单算成 PICKING，然后任务已经
+   * 取消，订单就卡在「拣货中」而实际没有任务。
+   */
+  async recomputeAfterPickingItemCancel(
+    orderId: string,
+    operator: OperatorContext,
+    remark: string,
+  ): Promise<string> {
+    return this.statusService.recomputeOrderStatus(
+      orderId,
+      operator,
+      `拣货行取消，订单重新汇总：${remark}`,
+    );
+  }
+
   // --------------------------------------------------------------------------
   // Cancellation (task §52-§55/§79-§81)
   // --------------------------------------------------------------------------
