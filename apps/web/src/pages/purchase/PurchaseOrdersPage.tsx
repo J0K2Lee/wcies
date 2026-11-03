@@ -1163,6 +1163,21 @@ export function PurchaseOrdersPage() {
                     render: (value: string) => fmtQty(value),
                   },
                   {
+                    // 短装结案数量（2026-11-03）：与「已收货」并列，便于审计核对
+                    // 「订 10 / 收 6 / 结案 4」而不是误以为少收了。
+                    title: '已结案',
+                    dataIndex: 'closedQuantity',
+                    key: 'closedQuantity',
+                    width: 80,
+                    align: 'right' as const,
+                    render: (value: string | null | undefined) =>
+                      Number(value ?? '0') === 0 ? (
+                        <span style={{ color: colors.textTertiary }}>—</span>
+                      ) : (
+                        fmtQty(value ?? '0')
+                      ),
+                  },
+                  {
                     title: '小计',
                     key: 'subtotal',
                     width: 100,
@@ -1531,6 +1546,20 @@ function expandedPoItemColumns(options: {
       width: 70,
       align: 'right' as const,
       render: (value: string) => fmtQty(value),
+    },
+    {
+      // 短装结案数量（2026-11-03）：与已收货并列，审计一眼看出「收 6 / 结案 4」。
+      title: '已结案',
+      dataIndex: 'closedQuantity',
+      key: 'closedQuantity',
+      width: 70,
+      align: 'right' as const,
+      render: (value: string | null | undefined) =>
+        Number(value ?? '0') === 0 ? (
+          <span style={{ color: colors.textTertiary }}>—</span>
+        ) : (
+          fmtQty(value ?? '0')
+        ),
     },
     {
       title: '小计',
