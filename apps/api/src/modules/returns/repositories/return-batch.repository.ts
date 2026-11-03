@@ -71,6 +71,23 @@ export class ReturnBatchRepository {
     };
   }
 
+  /** 平台退货记录是否已被某个批次行消费（建批前预检，给出可读错误）。 */
+  async findItemPlatformReturnIds(platformReturnIds: string[]): Promise<Map<string, string>> {
+    if (platformReturnIds.length === 0) {
+      return new Map();
+    }
+    const rows = await this.dataSource.query<
+      Array<{ platform_return_id: string; batch_no: string }>
+    >(
+      `SELECT i.platform_return_id, b.batch_no
+         FROM return_batch_items i
+         JOIN return_batches b ON b.id = i.batch_id
+        WHERE i.platform_return_id = ANY($1::uuid[])`,
+      [platformReturnIds],
+    );
+    return new Map(rows.map((row) => [row.platform_return_id, row.batch_no]));
+  }
+
   /** 追加一个已扫序列号（SN 退货行），返回追加后的完整列表。 */
   async appendReceivedSerial(
     manager: EntityManager,

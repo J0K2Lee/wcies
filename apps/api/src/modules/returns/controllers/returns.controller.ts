@@ -43,6 +43,7 @@ export class ReturnsController {
         orderId: query.orderId,
         linked: query.linked === undefined ? undefined : query.linked === 'false' ? false : true,
         keyword: query.keyword,
+        stage: query.stage,
       },
       { page: query.page, pageSize: query.pageSize },
     );
@@ -114,6 +115,16 @@ export class ReturnsController {
   @ApiOkEnvelope(ReturnBatchDetailDto)
   async receiveBatch(@Param('id') id: string, @CurrentOperator() operator: OperatorContext) {
     return ok(await this.returnsService.receiveBatch(id, operator));
+  }
+
+  @Post('batches/:id/complete')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '手动完结退货批次：剩余未检验行按「缺失」结案（不入账），批次置 COMPLETED',
+  })
+  @ApiOkEnvelope(ReturnBatchDetailDto)
+  async completeBatch(@Param('id') id: string, @CurrentOperator() operator: OperatorContext) {
+    return ok(await this.returnsService.completeBatch(id, operator));
   }
 
   @Post('batches/:id/cancel')

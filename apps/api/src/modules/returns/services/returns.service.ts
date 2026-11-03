@@ -183,6 +183,22 @@ export class ReturnsService {
       throw new ReturnBatchInvalidStateError('退货批次至少需要一行明细', {});
     }
 
+    // 预检（2026-11-04 用户口径：已生成批次的记录不允许再入新批次）：
+    // 先给出可读错误，而不是等唯一约束报 500/通用 409。
+    const requestedReturnIds = input.items
+      .map((item) => item.platformReturnId)
+      .filter((value): value is string => value !== undefined);
+    if (requestedReturnIds.length > 0) {
+      const existing = await this.batchRepo.findItemPlatformReturnIds(requestedReturnIds);
+      if (existing.size > 0) {
+        const batchNos = [...new Set(existing.values())].slice(0, 5).join('、');
+        throw new ReturnBatchInvalidStateError(
+          `有 ${existing.size} 条平台退货记录已生成退货批次（${batchNos}），不能重复建批`,
+          { platformReturnIds: [...existing.keys()] },
+        );
+      }
+    }
+
     const resolvedItems: Array<{
       platformReturnId: string | null;
       skuId: string;
@@ -255,6 +271,53 @@ export class ReturnsService {
       operator,
     });
     return this.getBatch(created.id);
+  }
+
+  /**
+   * 手动完结退货批次（2026-11-04 用户口径：批次可以手动标记为已完结）。
+   *
+   * 实物不会再到 / 不再处理的待检验行统一按「缺失」结案：**不产生库存动作**，
+   * 关联平台记录的行照既有规则创建 `RETURN_DIFFERENCE`（索赔/申诉），
+   * 然后批次置 COMPLETED。只允许 RECEIVED；DRAFT 应先确认收货或取消。
+   */
+  async completeBatch(
+    id: string,
+    operator: OperatorContext,
+  ): Promise<ReturnBatchView & { items: ReturnBatchItemView[] }> {
+    const batch = await this.getBatchOrThrow(id);
+    if (batch.status === 'COMPLETED') {
+      return this.getBatch(id); // 幂等
+    }
+    if (batch.status !== 'RECEIVED') {
+      throw new ReturnBatchInvalidStateError(
+        `退货批次状态 ${batch.status} 不能手动完结（需 RECEIVED；草稿请先确认收货或取消）`,
+        { batchNo: batch.batchNo, status: batch.status },
+      );
+    }
+    const items = await this.batchRepo.findItemsByBatchId(id);
+    const pending = items.filter((item) => item.condition === 'PENDING');
+    for (const item of pending) {
+      await this.inspectItem({ itemId: item.id, condition: 'LOST' }, operator);
+    }
+    // 全部行落定后 inspectItem 会自动完成；这里兜底（并发/中途失败）。
+    const fresh = await this.getBatchOrThrow(id);
+    if (fresh.status !== 'COMPLETED') {
+      await this.dataSource.transaction(async (runner) => {
+        await this.batchRepo.updateStatus(runner, id, 'COMPLETED');
+      });
+    }
+    await this.operationLog.record({
+      entityType: 'RETURN_BATCH',
+      entityId: id,
+      entityCode: batch.batchNo,
+      action: 'COMPLETE',
+      changes: {
+        status: { from: batch.status, to: 'COMPLETED' },
+        lostLines: { from: null, to: pending.length },
+      },
+      operator,
+    });
+    return this.getBatch(id);
   }
 
   /** Physical goods arrived and were counted - locks the line set. */

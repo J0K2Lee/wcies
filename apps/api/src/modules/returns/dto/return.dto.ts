@@ -65,6 +65,8 @@ export interface PlatformReturnView {
   skuName: string | null;
   /** 已被哪个退货批次消费（对账锚点），未入批次为 null。 */
   batchNo: string | null;
+  /** 所属批次状态（DRAFT / RECEIVED / COMPLETED），未入批次为 null。 */
+  batchStatus: string | null;
   quantity: string;
   platformCreatedAt: Date | null;
   createdAt: Date;
@@ -90,6 +92,12 @@ export class PlatformReturnDto {
   skuName!: string | null;
   @ApiPropertyOptional({ nullable: true, type: String, description: '已消费该记录的对账批次号' })
   batchNo!: string | null;
+  @ApiPropertyOptional({
+    nullable: true,
+    type: String,
+    description: '所属批次状态（DRAFT / RECEIVED / COMPLETED）',
+  })
+  batchStatus!: string | null;
   @ApiProperty({ example: '1' }) quantity!: string;
   @ApiPropertyOptional({ nullable: true, type: String, format: 'date-time' })
   platformCreatedAt!: Date | null;
@@ -176,6 +184,15 @@ export class PlatformReturnListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsIn(['true', 'false'])
   linked?: string;
+
+  @ApiPropertyOptional({
+    enum: ['PENDING', 'PROCESSING', 'COMPLETED'],
+    description:
+      '处理阶段：PENDING 待处理（未入批次）/ PROCESSING 处理中（已入批次未完结）/ COMPLETED 已完结',
+  })
+  @IsOptional()
+  @IsIn(['PENDING', 'PROCESSING', 'COMPLETED'])
+  stage?: 'PENDING' | 'PROCESSING' | 'COMPLETED';
 
   @ApiPropertyOptional({
     description: '搜索：平台退货单号 / 平台订单号 / Offer ID / 平台 SKU',

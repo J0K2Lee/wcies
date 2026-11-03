@@ -2919,6 +2919,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/returns/batches/{id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 手动完结退货批次：剩余未检验行按「缺失」结案（不入账），批次置 COMPLETED */
+        post: operations["ReturnsController_completeBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/returns/batches/{id}/cancel": {
         parameters: {
             query?: never;
@@ -7368,6 +7385,8 @@ export interface components {
             skuName?: string | null;
             /** @description 已消费该记录的对账批次号 */
             batchNo?: string | null;
+            /** @description 所属批次状态（DRAFT / RECEIVED / COMPLETED） */
+            batchStatus?: string | null;
             /** @example 1 */
             quantity: string;
             /** Format: date-time */
@@ -13769,6 +13788,8 @@ export interface operations {
                 orderId?: string;
                 /** @description linked=false：待收货对账视图（尚无退货批次行关联的平台退货记录） */
                 linked?: "true" | "false";
+                /** @description 处理阶段：PENDING 待处理（未入批次）/ PROCESSING 处理中（已入批次未完结）/ COMPLETED 已完结 */
+                stage?: "PENDING" | "PROCESSING" | "COMPLETED";
                 /** @description 搜索：平台退货单号 / 平台订单号 / Offer ID / 平台 SKU */
                 keyword?: string;
             };
@@ -13939,6 +13960,31 @@ export interface operations {
         };
     };
     ReturnsController_receiveBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ReturnBatchDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    ReturnsController_completeBatch: {
         parameters: {
             query?: never;
             header?: never;

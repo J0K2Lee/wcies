@@ -73,6 +73,8 @@ export class PlatformReturnRepository {
     storeId?: string;
     orderId?: string;
     linked?: boolean;
+    /** 处理阶段：PENDING 待处理（未入批次）/ PROCESSING 处理中 / COMPLETED 已完结。 */
+    stage?: 'PENDING' | 'PROCESSING' | 'COMPLETED';
     keyword?: string;
     limit: number;
     offset: number;
@@ -81,7 +83,12 @@ export class PlatformReturnRepository {
     total: number;
     enrichment: Map<
       string,
-      { skuCode: string | null; skuName: string | null; batchNo: string | null }
+      {
+        skuCode: string | null;
+        skuName: string | null;
+        batchNo: string | null;
+        batchStatus: string | null;
+      }
     >;
   }> {
     const qb = this.dataSource
@@ -103,6 +110,25 @@ export class PlatformReturnRepository {
       // 已入批次（2026-11-03）：被某个批次行消费过的记录。
       qb.andWhere(`EXISTS (SELECT 1 FROM return_batch_items i WHERE i.platform_return_id = r.id)`);
     }
+    if (filters.stage !== undefined) {
+      // 三段式（2026-11-04 用户口径）：待处理 = 未入批次；处理中 = 已入批次
+      // 且批次未完结；已完结 = 所属批次已 COMPLETED。
+      if (filters.stage === 'PENDING') {
+        qb.andWhere(
+          `NOT EXISTS (SELECT 1 FROM return_batch_items i WHERE i.platform_return_id = r.id)`,
+        );
+      } else {
+        const status = filters.stage === 'PROCESSING' ? "'DRAFT','RECEIVED'" : "'COMPLETED'";
+        qb.andWhere(
+          `EXISTS (
+             SELECT 1
+               FROM return_batch_items i
+               JOIN return_batches b ON b.id = i.batch_id
+              WHERE i.platform_return_id = r.id AND b.status IN (${status})
+           )`,
+        );
+      }
+    }
     if (filters.keyword !== undefined && filters.keyword.trim() !== '') {
       const kw = `%${filters.keyword.trim()}%`;
       qb.andWhere(
@@ -123,14 +149,25 @@ export class PlatformReturnRepository {
    * 「这条退货是什么货、还要不要处理」。内部 SKU 按店铺解析平台 SKU
    * （与下单同源规则），已入批次取最近一条消费该记录的批次号。
    */
-  private async enrich(
-    rows: PlatformReturnEntity[],
-  ): Promise<
-    Map<string, { skuCode: string | null; skuName: string | null; batchNo: string | null }>
+  private async enrich(rows: PlatformReturnEntity[]): Promise<
+    Map<
+      string,
+      {
+        skuCode: string | null;
+        skuName: string | null;
+        batchNo: string | null;
+        batchStatus: string | null;
+      }
+    >
   > {
     const map = new Map<
       string,
-      { skuCode: string | null; skuName: string | null; batchNo: string | null }
+      {
+        skuCode: string | null;
+        skuName: string | null;
+        batchNo: string | null;
+        batchStatus: string | null;
+      }
     >();
     if (rows.length === 0) {
       return map;
@@ -141,12 +178,14 @@ export class PlatformReturnRepository {
         sku_code: string | null;
         sku_name: string | null;
         batch_no: string | null;
+        batch_status: string | null;
       }>
     >(
       `SELECT r.id,
               sku.sku_code,
               sku.name_zh AS sku_name,
-              bt.batch_no
+              bt.batch_no,
+              bt.batch_status
          FROM platform_returns r
          LEFT JOIN LATERAL (
                 SELECT s.sku_code, s.name_zh
@@ -157,7 +196,7 @@ export class PlatformReturnRepository {
                    AND pls.platform_sku_id = r.platform_sku_id
                  LIMIT 1) sku ON TRUE
          LEFT JOIN LATERAL (
-                SELECT b.batch_no
+                SELECT b.batch_no, b.status AS batch_status
                   FROM return_batch_items i
                   JOIN return_batches b ON b.id = i.batch_id
                  WHERE i.platform_return_id = r.id
@@ -171,6 +210,7 @@ export class PlatformReturnRepository {
         skuCode: row.sku_code,
         skuName: row.sku_name,
         batchNo: row.batch_no,
+        batchStatus: row.batch_status,
       });
     }
     return map;

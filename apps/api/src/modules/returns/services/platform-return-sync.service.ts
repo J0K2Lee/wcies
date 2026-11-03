@@ -130,7 +130,13 @@ export class PlatformReturnSyncService {
   }
 
   async list(
-    filters: { storeId?: string; orderId?: string; linked?: boolean; keyword?: string },
+    filters: {
+      storeId?: string;
+      orderId?: string;
+      linked?: boolean;
+      stage?: 'PENDING' | 'PROCESSING' | 'COMPLETED';
+      keyword?: string;
+    },
     page: { page: number; pageSize: number },
   ): Promise<{ items: PlatformReturnView[]; meta: PageMeta }> {
     const { rows, total, enrichment } = await this.platformReturnRepo.list({
@@ -152,6 +158,7 @@ export class PlatformReturnSyncService {
         skuCode: enrichment.get(row.id)?.skuCode ?? null,
         skuName: enrichment.get(row.id)?.skuName ?? null,
         batchNo: enrichment.get(row.id)?.batchNo ?? null,
+        batchStatus: enrichment.get(row.id)?.batchStatus ?? null,
         quantity: row.quantity,
         platformCreatedAt: row.platformCreatedAt,
         createdAt: row.createdAt,

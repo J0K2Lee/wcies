@@ -9810,6 +9810,16 @@
             }
           },
           {
+            "name": "stage",
+            "required": false,
+            "in": "query",
+            "description": "处理阶段：PENDING 待处理（未入批次）/ PROCESSING 处理中（已入批次未完结）/ COMPLETED 已完结",
+            "schema": {
+              "type": "string",
+              "enum": ["PENDING", "PROCESSING", "COMPLETED"]
+            }
+          },
+          {
             "name": "keyword",
             "required": false,
             "in": "query",
@@ -10146,6 +10156,45 @@
           }
         },
         "summary": "确认收货（实物已到退货仓并清点；此后行不可增删）",
+        "tags": ["returns"]
+      }
+    },
+    "/api/v1/returns/batches/{id}/complete": {
+      "post": {
+        "operationId": "ReturnsController_completeBatch",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ReturnBatchDetailDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "手动完结退货批次：剩余未检验行按「缺失」结案（不入账），批次置 COMPLETED",
         "tags": ["returns"]
       }
     },
@@ -21917,6 +21966,11 @@
             "type": "string",
             "nullable": true,
             "description": "已消费该记录的对账批次号"
+          },
+          "batchStatus": {
+            "type": "string",
+            "nullable": true,
+            "description": "所属批次状态（DRAFT / RECEIVED / COMPLETED）"
           },
           "quantity": {
             "type": "string",

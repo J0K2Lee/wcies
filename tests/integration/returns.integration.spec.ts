@@ -685,3 +685,104 @@ describe('扫码入库（2026-11-04，复用拦截的扫码作业方式）', () 
     expect(again.body.error?.code).toBe('RETURN_SCAN_NO_LINE');
   });
 });
+
+describe('处理阶段筛选 + 手动完结（2026-11-04 用户口径）', () => {
+  it('待处理 / 处理中 / 已完结三态，已入批次的记录不允许重复建批', async () => {
+    const pendingList = await client.get<Array<{ id: string; platformReturnId: string }>>(
+      `/api/v1/returns/platform?storeId=${storeId}&stage=PENDING&pageSize=50`,
+    );
+    const record = pendingList.body.data.find((row) => row.platformReturnId !== '');
+    expect(record).toBeDefined();
+
+    // 建批前：待处理里有它，处理中/已完结没有。
+    const inProgressBefore = await client.get<Array<{ id: string }>>(
+      `/api/v1/returns/platform?storeId=${storeId}&stage=PROCESSING&pageSize=50`,
+    );
+    expect(inProgressBefore.body.data.some((row) => row.id === record!.id)).toBe(false);
+
+    const created = await client.post<{ id: string; batchNo: string }>('/api/v1/returns/batches', {
+      warehouseId,
+      items: [{ platformReturnId: record!.id, quantity: '1' }],
+    });
+    expect([200, 201]).toContain(created.status);
+    const batchId = created.body.data.id;
+
+    // 建批后：处理中里有它；待处理里没有了。
+    const inProgressAfter = await client.get<Array<{ id: string }>>(
+      `/api/v1/returns/platform?storeId=${storeId}&stage=PROCESSING&pageSize=50`,
+    );
+    expect(inProgressAfter.body.data.some((row) => row.id === record!.id)).toBe(true);
+    const pendingAfter = await client.get<Array<{ id: string }>>(
+      `/api/v1/returns/platform?storeId=${storeId}&stage=PENDING&pageSize=50`,
+    );
+    expect(pendingAfter.body.data.some((row) => row.id === record!.id)).toBe(false);
+
+    // 同一条记录再建批 → 明确拒绝（对账锚点单次消费）。
+    const duplicate = await client.post('/api/v1/returns/batches', {
+      warehouseId,
+      items: [{ platformReturnId: record!.id, quantity: '1' }],
+    });
+    expect(duplicate.status).toBe(409);
+    expect(duplicate.body.error?.code).toBe('RETURN_BATCH_INVALID_STATE');
+    expect(duplicate.body.error?.message).toContain('不能重复建批');
+
+    // 手动完结：未检验行按缺失结案 → 批次 COMPLETED → 记录进入已完结。
+    await client.post(`/api/v1/returns/batches/${batchId}/receive`, {});
+    const completed = await client.post<{ status: string }>(
+      `/api/v1/returns/batches/${batchId}/complete`,
+      {},
+    );
+    expect(completed.status).toBe(200);
+    expect(completed.body.data.status).toBe('COMPLETED');
+
+    const closedList = await client.get<Array<{ id: string }>>(
+      `/api/v1/returns/platform?storeId=${storeId}&stage=COMPLETED&pageSize=50`,
+    );
+    expect(closedList.body.data.some((row) => row.id === record!.id)).toBe(true);
+
+    const detail = await client.get<{
+      items: Array<{ condition: string; binId: string | null }>;
+    }>(`/api/v1/returns/batches/${batchId}`);
+    expect(detail.body.data.items.every((row) => row.condition === 'LOST')).toBe(true);
+  });
+
+  it('RECEIVED 批次手动完结：未检验行缺失结案、已回库行保持、批次完结', async () => {
+    const sku = await newMappedSku('MC', 740000010, '0');
+    const barcode = `${PREFIX}-RET-MC-${randomUUID().slice(0, 6)}`;
+    await client.post(`/api/v1/skus/${sku}/barcodes`, {
+      barcode,
+      barcodeType: 'EAN',
+      isPrimary: true,
+    });
+    const other = await newMappedSku('MC2', 740000011, '0');
+
+    const created = await client.post<{ id: string; items: Array<{ id: string }> }>(
+      '/api/v1/returns/batches',
+      {
+        warehouseId,
+        items: [
+          { skuId: sku, quantity: '1' },
+          { skuId: other, quantity: '2' },
+        ],
+      },
+    );
+    const batchId = created.body.data.id;
+    await client.post(`/api/v1/returns/batches/${batchId}/receive`, {});
+
+    // 先扫一行回库，另一行不动。
+    const scan = await client.post(`/api/v1/returns/batches/${batchId}/scan`, { barcode, binId });
+    expect(scan.status).toBe(200);
+    expect((await inventoryOf(sku)).reduce((s, r) => s + Number(r.onHandQty), 0)).toBe(1);
+
+    const completed = await client.post<{
+      status: string;
+      items: Array<{ condition: string; skuId: string }>;
+    }>(`/api/v1/returns/batches/${batchId}/complete`, {});
+    expect(completed.status).toBe(200);
+    expect(completed.body.data.status).toBe('COMPLETED');
+    expect(completed.body.data.items.find((row) => row.skuId === sku)?.condition).toBe('SELLABLE');
+    expect(completed.body.data.items.find((row) => row.skuId === other)?.condition).toBe('LOST');
+    // 缺失行不入账。
+    expect(await inventoryOf(other)).toHaveLength(0);
+  });
+});
