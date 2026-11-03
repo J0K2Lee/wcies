@@ -115,6 +115,30 @@ PENDING → LOST       实物缺失/丢失：不入账，零库存动作
 - 检验前实物在退货临时区（系统外暂存）：**不产生任何库存流水**——
   与采购草稿同理，「平台说退了/货在路上」都不是库存事实。
 
+## 3.3a 扫码入库（2026-11-04，用户确认「复用拦截的扫码办法」）
+
+**为什么不能复用拦截的库存动作**：拦截回库是「拣了没出库」的货——
+`RETURN_PICKED`（Picked −N，OnHand 不变，货从未扣减）；退货是「已出库又回来」，
+必须 `RECEIVE`（OnHand +N）。照搬拦截的流水会让库存永远回不来。可复用、也已
+复用的是**扫码作业方式**。
+
+```text
+扫 SKU 条码
+↓
+命中本批次该 SKU 的待检验行（同 SKU 多行取最早一条；没有 → RETURN_SCAN_NO_LINE）
+├─ 非 SN 商品：一次扫描整行入库（condition=SELLABLE），可指定回库库位
+└─ SN 商品：逐件扫序列号，累积在行上（received_serial_numbers）
+             扫满 quantity 才调用 receiveStockInTx（一件一 SN）
+↓
+行 condition 落定 → 批次全行落定后自动 COMPLETED
+```
+
+- 扫码只做**合格回库**；不合格 / 缺失仍用明细行的显式按钮（保持 §3.3 口径）。
+- 序列号重复扫同一行 → `RETURN_SCAN_SERIAL_DUPLICATE`；同 SKU 无待检验行 →
+  `RETURN_SCAN_NO_LINE`；未确认收货 / 批次已结束 → `RETURN_BATCH_INVALID_STATE`。
+- 回库库位默认该仓 `STAGING`；扫满入库的 SN 与库位一并写入 `RETURN_RECEIPT`
+  的库存流水与 `inventory_serials`（状态 IN_STOCK）。
+
 ## 3.4 批次对单策略（会议纪要核心难点）
 
 > 「退货通常以批次形式返回，无法准确对应到原始订单。」
@@ -170,6 +194,9 @@ OPEN 去重；不自动解决。
   「还需要回库处理」的批次。
 - 组件复用：`FilterBar` + `DataTable(rowSelection)` + `ActionIsland`（与采购页
   同款底部浮岛），不另造交互。
+- 批次详情（RECEIVED）顶部有**扫码入库**面板：条码输入（回车提交）+ SN 输入 +
+  回库库位选择（默认 STAGING），成功/失败用标准扫码反馈组件；SN 行的
+  「SN 进度」列显示已扫/应扫。
 
 ---
 

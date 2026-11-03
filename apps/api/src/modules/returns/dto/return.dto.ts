@@ -35,11 +35,17 @@ export interface ReturnBatchItemView {
   platformReturnId: string | null;
   platformReturnNo: string | null;
   skuId: string;
+  /** 内部 SKU 编码/名称（列表与详情直接可读，不再靠前 100 条本地映射）。 */
+  skuCode: string;
+  skuName: string;
+  serialTracking: boolean;
   quantity: string;
   condition: string;
   binId: string | null;
   /** 回库库位编码（检验后可见；未检验/缺失为 null）。 */
   binCode: string | null;
+  /** 扫码已扫到的序列号（SN 商品；扫满 quantity 才入库）。 */
+  receivedSerialNumbers: string[];
   remark: string | null;
   createdAt: Date;
 }
@@ -107,6 +113,10 @@ export class ReturnBatchItemDto {
   @ApiProperty({ nullable: true, type: String }) platformReturnId!: string | null;
   @ApiProperty({ nullable: true, type: String }) platformReturnNo!: string | null;
   @ApiProperty() skuId!: string;
+  @ApiProperty({ example: 'SKU000012037' }) skuCode!: string;
+  @ApiProperty({ example: '迈从-A7 V3 Ultra+ 黑色' }) skuName!: string;
+  @ApiProperty({ description: '该 SKU 是否启用 SN 管理（决定是否必须扫序列号）' })
+  serialTracking!: boolean;
   @ApiProperty({ example: '1.000' }) quantity!: string;
   @ApiProperty({ enum: RETURN_ITEM_CONDITIONS }) condition!: string;
   @ApiProperty({ nullable: true, type: String }) binId!: string | null;
@@ -116,6 +126,8 @@ export class ReturnBatchItemDto {
     description: '回库库位编码（检验合格/不合格时的落库位置；未检验或缺失为 null）',
   })
   binCode!: string | null;
+  @ApiProperty({ type: [String], description: '扫码入库已扫到的序列号（SN 商品）' })
+  receivedSerialNumbers!: string[];
   @ApiProperty({ nullable: true, type: String }) remark!: string | null;
   @ApiProperty({ type: Date }) createdAt!: Date;
 }
@@ -177,6 +189,43 @@ export class PlatformReturnListQueryDto extends PaginationQueryDto {
 // ---------------------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------------------
+
+/**
+ * 扫码入库（2026-11-04）：扫 SKU 条码 → 命中本批次该 SKU 的待检验行 →
+ * SN 商品逐件扫序列号（扫满才入库），非 SN 商品整行一次入库。
+ */
+export class ReturnBatchScanRequestDto {
+  @ApiProperty({ example: '4601234506789', description: 'SKU 条码（USB/蓝牙扫码器=键盘输入）' })
+  @IsString()
+  @Length(1, 255)
+  barcode!: string;
+
+  @ApiPropertyOptional({ description: 'SN 管理商品必填：本次扫到的序列号' })
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  serialNumber?: string;
+
+  @ApiPropertyOptional({ description: '回库目标库位；省略 = 该仓 STAGING 暂存位' })
+  @IsOptional()
+  @IsUUID()
+  binId?: string;
+}
+
+export class ReturnBatchScanResultDto {
+  @ApiProperty() batchId!: string;
+  @ApiProperty() itemId!: string;
+  @ApiProperty({ example: 'SKU000012037' }) skuCode!: string;
+  @ApiProperty({ example: '迈从-A7 V3 Ultra+ 黑色' }) skuName!: string;
+  @ApiProperty({ example: '1.000' }) quantity!: string;
+  @ApiProperty({ description: '本次扫到的序列号（非 SN 商品为空数组）', type: [String] })
+  serialNumbers!: string[];
+  @ApiProperty({ description: '已扫序列号数（SN 商品）' }) scannedSerials!: number;
+  @ApiProperty({ description: '需要扫的序列号数（= 行数量；非 SN 为 0）' })
+  requiredSerials!: number;
+  @ApiProperty({ description: 'true = 该行已入库（condition 已落定）' }) completed!: boolean;
+  @ApiProperty({ example: 'SELLABLE', nullable: true, type: String }) condition!: string | null;
+}
 
 export class ReturnBatchItemInputDto {
   @ApiPropertyOptional({ description: '人工行必须指定内部 SKU' })

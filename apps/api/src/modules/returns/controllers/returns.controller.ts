@@ -12,6 +12,8 @@ import {
   PlatformReturnSyncDto,
   PlatformReturnSyncResultDto,
   ReturnBatchCreateDto,
+  ReturnBatchScanRequestDto,
+  ReturnBatchScanResultDto,
   ReturnBatchDetailDto,
   ReturnBatchDto,
   ReturnBatchItemDto,
@@ -73,6 +75,20 @@ export class ReturnsController {
       { page: query.page, pageSize: query.pageSize },
     );
     return okPage(result.items, result.meta);
+  }
+
+  @Post('batches/:id/scan')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '扫码入库：扫 SKU 条码命中本批次待检验行；SN 商品逐件扫序列号，扫满入账',
+  })
+  @ApiOkEnvelope(ReturnBatchScanResultDto)
+  async scanBatch(
+    @Param('id') id: string,
+    @Body() input: ReturnBatchScanRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ) {
+    return ok(await this.returnsService.scanReceive(id, input, operator));
   }
 
   @Get('batches/:id')

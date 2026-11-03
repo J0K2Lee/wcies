@@ -71,6 +71,28 @@ export class ReturnBatchRepository {
     };
   }
 
+  /** 追加一个已扫序列号（SN 退货行），返回追加后的完整列表。 */
+  async appendReceivedSerial(
+    manager: EntityManager,
+    itemId: string,
+    serialNumber: string,
+  ): Promise<string[]> {
+    const result: unknown = await manager.query(
+      `UPDATE return_batch_items
+          SET received_serial_numbers = array_append(COALESCE(received_serial_numbers, '{}'), $2),
+              updated_at = now()
+        WHERE id = $1
+        RETURNING received_serial_numbers AS serials`,
+      [itemId, serialNumber],
+    );
+    // TypeORM 的 UPDATE ... RETURNING 在不同驱动下单/双元组返回（见 2026-10-15 经验）。
+    const rows =
+      (Array.isArray(result) && Array.isArray((result as unknown[])[0])
+        ? ((result as unknown[])[0] as Array<{ serials: string[] }>)
+        : (result as Array<{ serials: string[] }>)) ?? [];
+    return rows[0]?.serials ?? [];
+  }
+
   async insertBatch(
     manager: EntityManager,
     header: {

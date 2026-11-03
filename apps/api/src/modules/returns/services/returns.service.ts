@@ -7,6 +7,8 @@ import { ExceptionService } from '../../exception/services/exception.service';
 import { WarehouseBinService } from '../../warehouse/services/warehouse-bin.service';
 import { WarehouseService } from '../../warehouse/services/warehouse.service';
 import { ListingResolverService } from '../../listing/services/listing-resolver.service';
+import { BarcodeService } from '../../product/services/barcode.service';
+import { SkuService } from '../../product/services/sku.service';
 import { BusinessCodeService } from '../../../infrastructure/business-code/business-code.service';
 import { PlatformReturnRepository } from '../repositories/platform-return.repository';
 import { ReturnBatchRepository } from '../repositories/return-batch.repository';
@@ -17,9 +19,13 @@ import {
   ReturnBatchInvalidStateError,
   ReturnItemInvalidConditionError,
   ReturnBinNotFoundError,
+  ReturnScanBarcodeNotFoundError,
+  ReturnScanNoLineError,
+  ReturnScanSerialDuplicateError,
+  ReturnScanSerialRequiredError,
 } from '../errors/return.errors';
 import { formatQty, parseQty } from '../../../common/utils/quantity';
-import { ReturnBatchItemView, ReturnBatchView } from '../dto/return.dto';
+import { ReturnBatchItemView, ReturnBatchScanResultDto, ReturnBatchView } from '../dto/return.dto';
 
 /**
  * Return-batch work service (dual-axis T5, returns.md §3): create → receive
@@ -38,6 +44,8 @@ export class ReturnsService {
     private readonly exceptionService: ExceptionService,
     private readonly binService: WarehouseBinService,
     private readonly warehouseService: WarehouseService,
+    private readonly barcodeService: BarcodeService,
+    private readonly skuService: SkuService,
     private readonly resolver: ListingResolverService,
     private readonly businessCode: BusinessCodeService,
     private readonly operationLog: OperationLogService,
@@ -87,6 +95,19 @@ export class ReturnsService {
         .filter((row): row is NonNullable<typeof row> => row !== null)
         .map((row) => [row.id, row]),
     );
+    // SKU 编码/名称与 SN 标志（2026-11-04）：列表/详情直接可读，避免前端
+    // 只加载前 100 个 SKU 做本地映射时显示「—」。
+    const skus = new Map<string, { skuCode: string; nameZh: string; serialTracking: boolean }>();
+    for (const skuId of [...new Set(items.map((item) => item.skuId))]) {
+      const sku = await this.skuService.getEntityById(skuId);
+      if (sku !== null) {
+        skus.set(skuId, {
+          skuCode: sku.skuCode,
+          nameZh: sku.nameZh,
+          serialTracking: sku.serialTracking,
+        });
+      }
+    }
     // 回库库位编码（检验后可见）：运营要能确认这批货到底落到哪个库位。
     const binCodes = new Map<string, string>();
     for (const binId of [
@@ -114,10 +135,14 @@ export class ReturnsService {
           ? (platformReturns.get(item.platformReturnId)?.platformReturnId ?? null)
           : null,
         skuId: item.skuId,
+        skuCode: skus.get(item.skuId)?.skuCode ?? '',
+        skuName: skus.get(item.skuId)?.nameZh ?? '',
+        serialTracking: skus.get(item.skuId)?.serialTracking ?? false,
         quantity: item.quantity,
         condition: item.condition,
         binId: item.binId,
         binCode: item.binId === null ? null : (binCodes.get(item.binId) ?? null),
+        receivedSerialNumbers: item.receivedSerialNumbers ?? [],
         remark: item.remark,
         createdAt: item.createdAt,
       })),
@@ -301,7 +326,13 @@ export class ReturnsService {
    * All line verdicts terminal => batch COMPLETED automatically.
    */
   async inspectItem(
-    input: { itemId: string; condition: 'SELLABLE' | 'DEFECTIVE' | 'LOST'; binId?: string },
+    input: {
+      itemId: string;
+      condition: 'SELLABLE' | 'DEFECTIVE' | 'LOST';
+      binId?: string;
+      /** SN 商品：到货时扫到的序列号（数量必须与行数量一致）。 */
+      serialNumbers?: string[];
+    },
     operator: OperatorContext,
   ): Promise<ReturnBatchItemView> {
     const item = await this.batchRepo.findItemById(input.itemId);
@@ -360,6 +391,7 @@ export class ReturnsService {
           referenceId: item.id,
           idempotencyKey: returnReceiptKey(item.id),
           remark: `return batch=${batch.batchNo}`,
+          ...(input.serialNumbers === undefined ? {} : { serialNumbers: input.serialNumbers }),
           operator,
         });
         if (outcome.wrote) {
@@ -435,18 +467,157 @@ export class ReturnsService {
     });
     const fresh = await this.batchRepo.findItemById(item.id);
     const bin = fresh!.binId === null ? null : await this.binService.getEntityById(fresh!.binId);
+    const sku = await this.skuService.getEntityById(fresh!.skuId);
     return {
       id: fresh!.id,
       batchId: fresh!.batchId,
       platformReturnId: fresh!.platformReturnId,
       platformReturnNo: null,
       skuId: fresh!.skuId,
+      skuCode: sku?.skuCode ?? '',
+      skuName: sku?.nameZh ?? '',
+      serialTracking: sku?.serialTracking ?? false,
       quantity: fresh!.quantity,
       condition: fresh!.condition,
       binId: fresh!.binId,
       binCode: bin?.binCode ?? null,
+      receivedSerialNumbers: fresh!.receivedSerialNumbers ?? [],
       remark: fresh!.remark,
       createdAt: fresh!.createdAt,
+    };
+  }
+
+  /**
+   * 扫码入库（2026-11-04，用户确认「复用拦截的扫码办法」）。
+   *
+   * 库存动作不能照搬拦截的 `RETURN_PICKED`（拦截是「拣了没出库」：Picked−N、
+   * OnHand 不变），退货是「已出库又回来」：必须 `RECEIVE` + OnHand+N。可复用
+   * 的是**扫码交互**：
+   *
+   * - 扫 SKU 条码 → 命中本批次该 SKU 的待检验行（同 SKU 多行时取最早一条）；
+   * - 非 SN 商品：一次扫描整行入库（condition=SELLABLE），可指定回库库位；
+   * - SN 商品：逐件扫序列号，扫满行数量才入账（inventory 要求一件一 SN）；
+   * - 不合格 / 缺失仍走 inspectItem 的显式判定（扫码只做「合格回库」）。
+   */
+  async scanReceive(
+    batchId: string,
+    input: { barcode: string; serialNumber?: string; binId?: string },
+    operator: OperatorContext,
+  ): Promise<ReturnBatchScanResultDto> {
+    const batch = await this.getBatchOrThrow(batchId);
+    if (batch.status !== 'RECEIVED') {
+      throw new ReturnBatchInvalidStateError(
+        `退货批次状态 ${batch.status} 不能扫码入库（需 RECEIVED）`,
+        { batchNo: batch.batchNo, status: batch.status },
+      );
+    }
+    const barcode = input.barcode.trim();
+    const barcodeRow = await this.barcodeService.findByBarcode(barcode);
+    if (barcodeRow === null) {
+      throw new ReturnScanBarcodeNotFoundError(barcode);
+    }
+    const sku = await this.skuService.getEntityById(barcodeRow.skuId);
+    if (sku === null) {
+      throw new ReturnScanBarcodeNotFoundError(barcode);
+    }
+    const items = await this.batchRepo.findItemsByBatchId(batch.id);
+    const target = items.find((row) => row.condition === 'PENDING' && row.skuId === sku.id);
+    if (target === undefined) {
+      throw new ReturnScanNoLineError({ batchNo: batch.batchNo, skuCode: sku.skuCode });
+    }
+
+    // 非 SN：一次扫描 = 整行入库（逐件扫没有意义，数量由行决定）。
+    if (!sku.serialTracking) {
+      if (input.serialNumber !== undefined && input.serialNumber.trim() !== '') {
+        throw new ReturnBatchInvalidStateError('该 SKU 未启用 SN 管理，无需扫描序列号', {
+          skuCode: sku.skuCode,
+        });
+      }
+      const view = await this.inspectItem(
+        {
+          itemId: target.id,
+          condition: 'SELLABLE',
+          ...(input.binId === undefined || input.binId === '' ? {} : { binId: input.binId }),
+        },
+        operator,
+      );
+      return {
+        batchId: batch.id,
+        itemId: view.id,
+        skuCode: view.skuCode,
+        skuName: view.skuName,
+        quantity: view.quantity,
+        serialNumbers: [],
+        scannedSerials: 0,
+        requiredSerials: 0,
+        completed: view.condition === 'SELLABLE',
+        condition: view.condition,
+      };
+    }
+
+    // SN：逐件累积序列号，扫满才入库。
+    const serialNumber = (input.serialNumber ?? '').trim();
+    if (serialNumber === '') {
+      throw new ReturnScanSerialRequiredError({ skuCode: sku.skuCode });
+    }
+    const requiredQty = parseQty(target.quantity);
+    if (requiredQty % 1000n !== 0n) {
+      throw new ReturnBatchInvalidStateError('SN 商品的退货数量必须为整数件', {
+        itemId: target.id,
+        quantity: target.quantity,
+      });
+    }
+    const already = target.receivedSerialNumbers ?? [];
+    if (already.includes(serialNumber)) {
+      throw new ReturnScanSerialDuplicateError({ serialNumber, itemId: target.id });
+    }
+    const serials = await this.batchRepo.appendReceivedSerial(
+      this.dataSource.manager,
+      target.id,
+      serialNumber,
+    );
+    const requiredSerials = Number(requiredQty / 1000n);
+    if (serials.length > requiredSerials) {
+      throw new ReturnBatchInvalidStateError('已扫序列号超过该行数量', {
+        itemId: target.id,
+        scannedSerials: serials.length,
+        requiredSerials,
+      });
+    }
+    if (serials.length < requiredSerials) {
+      return {
+        batchId: batch.id,
+        itemId: target.id,
+        skuCode: sku.skuCode,
+        skuName: sku.nameZh,
+        quantity: target.quantity,
+        serialNumbers: serials,
+        scannedSerials: serials.length,
+        requiredSerials,
+        completed: false,
+        condition: null,
+      };
+    }
+    const view = await this.inspectItem(
+      {
+        itemId: target.id,
+        condition: 'SELLABLE',
+        serialNumbers: serials,
+        ...(input.binId === undefined || input.binId === '' ? {} : { binId: input.binId }),
+      },
+      operator,
+    );
+    return {
+      batchId: batch.id,
+      itemId: view.id,
+      skuCode: view.skuCode,
+      skuName: view.skuName,
+      quantity: view.quantity,
+      serialNumbers: serials,
+      scannedSerials: serials.length,
+      requiredSerials,
+      completed: true,
+      condition: view.condition,
     };
   }
 

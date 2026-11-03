@@ -7,6 +7,7 @@ import { NotificationModule } from '../notification/notification.module';
 import { WarehouseModule } from '../warehouse/warehouse.module';
 import { ListingModule } from '../listing/listing.module';
 import { OrderModule } from '../order/order.module';
+import { ProductModule } from '../product/product.module';
 import { SyncModule } from '../sync/sync.module';
 import { OperationLogModule } from '../operation-log/operation-log.module';
 import { ReturnsController } from './controllers/returns.controller';
@@ -33,6 +34,7 @@ import { ReturnBatchItemEntity } from './entities/return-batch-item.entity';
     WarehouseModule,
     ListingModule,
     OrderModule,
+    ProductModule,
     SyncModule,
     NotificationModule,
     OperationLogModule,

@@ -25,6 +25,8 @@ import {
   FilterBar,
   PageHeader,
   RailHint,
+  ScanFeedback,
+  ScanFeedbackData,
   RETURN_BATCH_STATUS_META,
   RETURN_CONDITION_META,
   SectionCard,
@@ -75,10 +77,15 @@ interface ReturnBatchItemRow {
   platformReturnId: string | null;
   platformReturnNo: string | null;
   skuId: string;
+  skuCode: string;
+  skuName: string;
+  serialTracking: boolean;
   quantity: string;
   condition: string;
   binId: string | null;
   binCode: string | null;
+  /** 扫码已扫到的序列号（SN 商品，扫满数量才入库）。 */
+  receivedSerialNumbers: string[];
   remark: string | null;
 }
 
@@ -128,6 +135,11 @@ export function ReturnsPage() {
   const [batchKeyword, setBatchKeyword] = useState('');
   const [batchStatus, setBatchStatus] = useState<string | undefined>();
   const [selectedBatchIds, setSelectedBatchIds] = useState<string[]>([]);
+  /** 扫码入库（2026-11-04）：条码 / 序列号 / 目标库位 / 最近一次结果。 */
+  const [scanBarcode, setScanBarcode] = useState('');
+  const [scanSerial, setScanSerial] = useState('');
+  const [scanBinId, setScanBinId] = useState<string | undefined>();
+  const [scanFeedback, setScanFeedback] = useState<ScanFeedbackData | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm] = Form.useForm<{
     warehouseId: string;
@@ -173,15 +185,6 @@ export function ReturnsPage() {
     ['return-batches', page, batchStatus, batchKeyword],
   );
 
-  /** SKU master feed: resolves batch-line skuId (UUID) to seller-facing codes. */
-  const skusLite = useApiQuery<Envelope<Array<{ id: string; skuCode: string; nameZh: string }>>>(
-    '/api/v1/skus',
-    { page: 1, pageSize: 100 },
-    ['skus-for-returns'],
-  );
-  const skuCodeOf = (skuId: string): string =>
-    (skusLite.data?.data ?? []).find((sku) => sku.id === skuId)?.skuCode ?? '—';
-
   /** 人工行录入用：按编码/名称/条码搜索（弹窗打开时才请求）。 */
   const skuSearch = useApiQuery<Envelope<Array<{ id: string; skuCode: string; nameZh: string }>>>(
     '/api/v1/skus',
@@ -203,6 +206,19 @@ export function ReturnsPage() {
     detailId !== null,
   );
   const detail = detailId !== null ? detailQuery.data?.data : undefined;
+
+  /** 扫码落库的库位候选（该批次收货仓库；留空 = STAGING 暂存位）。 */
+  const binsQuery = useApiQuery<Envelope<Array<{ id: string; binCode: string }>>>(
+    '/api/v1/warehouses/{warehouseId}/bins',
+    { page: 1, pageSize: 200 },
+    ['return-batch-bins', detail?.warehouseId],
+    detail === undefined ? undefined : { warehouseId: detail.warehouseId },
+    detail !== undefined,
+  );
+  const binOptions = (binsQuery.data?.data ?? []).map((bin) => ({
+    value: bin.id,
+    label: bin.binCode,
+  }));
 
   const invalidateAll = () => {
     void queryClient.invalidateQueries({ queryKey: ['platform-returns'] });
@@ -335,6 +351,59 @@ export function ReturnsPage() {
     },
     onError: (error: Error) => message.error(`检验失败：${error.message}`),
   });
+
+  /** 扫码入库（2026-11-04）：与拦截页同一套作业手感（扫条码 → 落库位）。 */
+  const scanMutation = useMutation({
+    mutationFn: (input: { barcode: string; serialNumber?: string; binId?: string }) =>
+      apiPost<{
+        itemId: string;
+        skuCode: string;
+        skuName: string;
+        quantity: string;
+        serialNumbers: string[];
+        scannedSerials: number;
+        requiredSerials: number;
+        completed: boolean;
+        condition: string | null;
+      }>(`/api/v1/returns/batches/{id}/scan`, input, { id: detailId as string }),
+    onSuccess: (result) => {
+      setScanFeedback({
+        kind: 'success',
+        title: result.completed ? `已回库：${result.skuCode}` : '序列号已记录，继续扫',
+        detail: result.completed
+          ? `${result.skuName} ×${Number(result.quantity)}${
+              result.serialNumbers.length > 0
+                ? `（SN：${result.serialNumbers.join('、')}）`
+                : '（非 SN 商品）'
+            }`
+          : `${result.skuName}：已扫 ${result.scannedSerials} / ${result.requiredSerials} 件`,
+        progress:
+          result.requiredSerials > 0
+            ? `${result.scannedSerials} / ${result.requiredSerials}`
+            : undefined,
+      });
+      setScanBarcode('');
+      setScanSerial('');
+      void queryClient.invalidateQueries({ queryKey: ['return-batch-detail'] });
+      void queryClient.invalidateQueries({ queryKey: ['return-batches'] });
+    },
+    onError: (error: Error) => {
+      setScanFeedback({ kind: 'error', title: '扫码失败', detail: error.message });
+      setScanBarcode('');
+    },
+  });
+
+  const submitScan = (): void => {
+    const barcode = scanBarcode.trim();
+    if (barcode === '' || scanMutation.isPending) {
+      return;
+    }
+    scanMutation.mutate({
+      barcode,
+      ...(scanSerial.trim() === '' ? {} : { serialNumber: scanSerial.trim() }),
+      ...(scanBinId === undefined ? {} : { binId: scanBinId }),
+    });
+  };
 
   const pendingList = pendingReturns.data?.data ?? [];
   const platformRows = platformReturns.data?.data ?? [];
@@ -917,6 +986,57 @@ export function ReturnsPage() {
                 然后才能逐行检验回库。
               </div>
             )}
+            {detail.status === 'RECEIVED' && (
+              <div
+                style={{
+                  marginBottom: 16,
+                  padding: 12,
+                  borderRadius: 10,
+                  border: `1px solid ${colors.primary}`,
+                  background: colors.container,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <Input
+                    size="large"
+                    autoFocus
+                    placeholder="扫描 SKU 条码（回车提交）"
+                    style={{ flex: 1, minWidth: 260, fontSize: 16 }}
+                    value={scanBarcode}
+                    onChange={(event) => setScanBarcode(event.target.value)}
+                    onPressEnter={submitScan}
+                    disabled={scanMutation.isPending}
+                  />
+                  <Input
+                    placeholder="SN 序列号（SN 商品必填）"
+                    style={{ width: 220 }}
+                    value={scanSerial}
+                    onChange={(event) => setScanSerial(event.target.value)}
+                    onPressEnter={submitScan}
+                    disabled={scanMutation.isPending}
+                  />
+                  <Select
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder="回库库位（默认 STAGING）"
+                    style={{ width: 220 }}
+                    options={binOptions}
+                    value={scanBinId}
+                    onChange={setScanBinId}
+                    loading={binsQuery.isLoading}
+                  />
+                </div>
+                <div style={{ fontSize: 12.5, color: colors.textTertiary }}>
+                  扫 SKU 条码 → 命中本批次的待检验行：非 SN 商品一次整行入库；SN
+                  商品逐件扫序列号，扫满才入账。 不合格 / 缺失仍用下表对应按钮。
+                </div>
+                <ScanFeedback feedback={scanFeedback} />
+              </div>
+            )}
             <DataTable<ReturnBatchItemRow>
               rowKey="id"
               dataSource={detail.items}
@@ -942,10 +1062,17 @@ export function ReturnsPage() {
                 },
                 {
                   title: 'SKU',
-                  dataIndex: 'skuId',
-                  key: 'skuId',
-                  width: 140,
-                  render: (value: string) => skuCodeOf(value),
+                  dataIndex: 'skuCode',
+                  key: 'skuCode',
+                  width: 200,
+                  render: (_: unknown, row: ReturnBatchItemRow) => (
+                    <span>
+                      <span style={{ fontWeight: 550 }}>{row.skuCode}</span>{' '}
+                      <span style={{ fontSize: 12.5, color: colors.textSecondary }}>
+                        {row.skuName}
+                      </span>
+                    </span>
+                  ),
                 },
                 {
                   title: '数量',
@@ -954,6 +1081,28 @@ export function ReturnsPage() {
                   width: 80,
                   align: 'right' as const,
                   render: (value: string) => fmtQty(value),
+                },
+                {
+                  title: 'SN 进度',
+                  key: 'serials',
+                  width: 110,
+                  render: (_: unknown, row: ReturnBatchItemRow) =>
+                    row.serialTracking ? (
+                      <span
+                        style={{
+                          fontVariantNumeric: 'tabular-nums',
+                          color:
+                            row.receivedSerialNumbers.length >= Number(row.quantity)
+                              ? colors.success
+                              : colors.textSecondary,
+                        }}
+                        title={row.receivedSerialNumbers.join('、')}
+                      >
+                        {row.receivedSerialNumbers.length} / {Number(row.quantity)}
+                      </span>
+                    ) : (
+                      <span style={{ color: colors.textTertiary }}>—</span>
+                    ),
                 },
                 {
                   title: '回库库位',

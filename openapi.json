@@ -10022,6 +10022,55 @@
         "tags": ["returns"]
       }
     },
+    "/api/v1/returns/batches/{id}/scan": {
+      "post": {
+        "operationId": "ReturnsController_scanBatch",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReturnBatchScanRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ReturnBatchScanResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "扫码入库：扫 SKU 条码命中本批次待检验行；SN 商品逐件扫序列号，扫满入账",
+        "tags": ["returns"]
+      }
+    },
     "/api/v1/returns/batches/{id}": {
       "get": {
         "operationId": "ReturnsController_getBatch",
@@ -21970,6 +22019,84 @@
           "createdAt"
         ]
       },
+      "ReturnBatchScanResultDto": {
+        "type": "object",
+        "properties": {
+          "batchId": {
+            "type": "string"
+          },
+          "itemId": {
+            "type": "string"
+          },
+          "skuCode": {
+            "type": "string",
+            "example": "SKU000012037"
+          },
+          "skuName": {
+            "type": "string",
+            "example": "迈从-A7 V3 Ultra+ 黑色"
+          },
+          "quantity": {
+            "type": "string",
+            "example": "1.000"
+          },
+          "serialNumbers": {
+            "description": "本次扫到的序列号（非 SN 商品为空数组）",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scannedSerials": {
+            "type": "number",
+            "description": "已扫序列号数（SN 商品）"
+          },
+          "requiredSerials": {
+            "type": "number",
+            "description": "需要扫的序列号数（= 行数量；非 SN 为 0）"
+          },
+          "completed": {
+            "type": "boolean",
+            "description": "true = 该行已入库（condition 已落定）"
+          },
+          "condition": {
+            "type": "string",
+            "example": "SELLABLE",
+            "nullable": true
+          }
+        },
+        "required": [
+          "batchId",
+          "itemId",
+          "skuCode",
+          "skuName",
+          "quantity",
+          "serialNumbers",
+          "scannedSerials",
+          "requiredSerials",
+          "completed",
+          "condition"
+        ]
+      },
+      "ReturnBatchScanRequestDto": {
+        "type": "object",
+        "properties": {
+          "barcode": {
+            "type": "string",
+            "example": "4601234506789",
+            "description": "SKU 条码（USB/蓝牙扫码器=键盘输入）"
+          },
+          "serialNumber": {
+            "type": "string",
+            "description": "SN 管理商品必填：本次扫到的序列号"
+          },
+          "binId": {
+            "type": "string",
+            "description": "回库目标库位；省略 = 该仓 STAGING 暂存位"
+          }
+        },
+        "required": ["barcode"]
+      },
       "ReturnBatchItemDto": {
         "type": "object",
         "properties": {
@@ -21990,6 +22117,18 @@
           "skuId": {
             "type": "string"
           },
+          "skuCode": {
+            "type": "string",
+            "example": "SKU000012037"
+          },
+          "skuName": {
+            "type": "string",
+            "example": "迈从-A7 V3 Ultra+ 黑色"
+          },
+          "serialTracking": {
+            "type": "boolean",
+            "description": "该 SKU 是否启用 SN 管理（决定是否必须扫序列号）"
+          },
           "quantity": {
             "type": "string",
             "example": "1.000"
@@ -22007,6 +22146,13 @@
             "nullable": true,
             "description": "回库库位编码（检验合格/不合格时的落库位置；未检验或缺失为 null）"
           },
+          "receivedSerialNumbers": {
+            "description": "扫码入库已扫到的序列号（SN 商品）",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "remark": {
             "type": "string",
             "nullable": true
@@ -22022,10 +22168,14 @@
           "platformReturnId",
           "platformReturnNo",
           "skuId",
+          "skuCode",
+          "skuName",
+          "serialTracking",
           "quantity",
           "condition",
           "binId",
           "binCode",
+          "receivedSerialNumbers",
           "remark",
           "createdAt"
         ]

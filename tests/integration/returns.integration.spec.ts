@@ -547,3 +547,141 @@ interface ReturnBatchItemShape {
   skuId: string;
   platformReturnId: string | null;
 }
+
+describe('扫码入库（2026-11-04，复用拦截的扫码作业方式）', () => {
+  it('SN 商品：逐件扫序列号，扫满才入账；重复序列号拒绝', async () => {
+    const sku = await client.post<{ id: string }>('/api/v1/skus', {
+      nameZh: `${PREFIX} SN退货SKU`,
+      serialTracking: true,
+    });
+    const skuId = sku.body.data.id;
+    const barcode = `${PREFIX}-RET-SN-${randomUUID().slice(0, 6)}`;
+    await client.post(`/api/v1/skus/${skuId}/barcodes`, {
+      barcode,
+      barcodeType: 'EAN',
+      isPrimary: true,
+    });
+
+    const created = await client.post<{
+      id: string;
+      status: string;
+      items: Array<{ id: string }>;
+    }>('/api/v1/returns/batches', {
+      warehouseId,
+      items: [{ skuId, quantity: '2' }],
+    });
+    const batch = created.body.data;
+
+    // 未确认收货前不能扫码（状态机）。
+    const early = await client.post(`/api/v1/returns/batches/${batch.id}/scan`, {
+      barcode,
+      serialNumber: 'SNR-EARLY',
+    });
+    expect(early.status).toBe(409);
+    expect(early.body.error?.code).toBe('RETURN_BATCH_INVALID_STATE');
+
+    await client.post(`/api/v1/returns/batches/${batch.id}/receive`, {});
+
+    // 序列号跨运行唯一（测试库不清空，固定值会撞上一次运行残留的 SN）。
+    const serial1 = `SNR-${randomUUID().slice(0, 8)}-1`;
+    const serial2 = `SNR-${randomUUID().slice(0, 8)}-2`;
+
+    const noSerial = await client.post(`/api/v1/returns/batches/${batch.id}/scan`, { barcode });
+    expect(noSerial.status).toBe(422);
+    expect(noSerial.body.error?.code).toBe('RETURN_SCAN_SERIAL_REQUIRED');
+
+    const first = await client.post<{
+      completed: boolean;
+      scannedSerials: number;
+      requiredSerials: number;
+    }>(`/api/v1/returns/batches/${batch.id}/scan`, {
+      barcode,
+      serialNumber: serial1,
+    });
+    expect(first.status).toBe(200);
+    expect(first.body.data.completed).toBe(false);
+    expect(first.body.data.scannedSerials).toBe(1);
+    expect(first.body.data.requiredSerials).toBe(2);
+    // 扫一件不产生库存事实。
+    expect(await inventoryOf(skuId)).toHaveLength(0);
+
+    const dup = await client.post(`/api/v1/returns/batches/${batch.id}/scan`, {
+      barcode,
+      serialNumber: serial1,
+    });
+    expect(dup.status).toBe(422);
+    expect(dup.body.error?.code).toBe('RETURN_SCAN_SERIAL_DUPLICATE');
+
+    const second = await client.post<{ completed: boolean; condition: string | null }>(
+      `/api/v1/returns/batches/${batch.id}/scan`,
+      { barcode, serialNumber: serial2 },
+    );
+    expect(second.status, JSON.stringify(second.body.error ?? {})).toBe(200);
+    expect(second.body.data.completed).toBe(true);
+    expect(second.body.data.condition).toBe('SELLABLE');
+
+    // 扫满两件 → OnHand +2（出库时扣过，退货必须回加）。
+    const stock = await inventoryOf(skuId);
+    expect(stock.reduce((sum, row) => sum + Number(row.onHandQty), 0)).toBe(2);
+
+    const detail = await client.get<{
+      status: string;
+      items: Array<{ condition: string; receivedSerialNumbers: string[] }>;
+    }>(`/api/v1/returns/batches/${batch.id}`);
+    expect(detail.body.data.status).toBe('COMPLETED');
+    expect(detail.body.data.items[0]!.receivedSerialNumbers.sort()).toEqual(
+      [serial1, serial2].sort(),
+    );
+
+    // 唯一行落定后批次自动 COMPLETED，再扫被状态机挡住（需要 RECEIVED）。
+    const again = await client.post(`/api/v1/returns/batches/${batch.id}/scan`, { barcode });
+    expect(again.status).toBe(409);
+    expect(again.body.error?.code).toBe('RETURN_BATCH_INVALID_STATE');
+  });
+
+  it('非 SN 商品：一次扫描整行入库，并可指定回库库位', async () => {
+    const skuId = await newMappedSku('SCAN', 730000001, '0');
+    const barcode = `${PREFIX}-RET-NOSN-${randomUUID().slice(0, 6)}`;
+    await client.post(`/api/v1/skus/${skuId}/barcodes`, {
+      barcode,
+      barcodeType: 'EAN',
+      isPrimary: true,
+    });
+
+    // 两行：第一行扫完批次仍是 RECEIVED，用来验证「该 SKU 无待检验行」。
+    const otherSku = await newMappedSku('SCANO', 730000002, '0');
+    const created = await client.post<{ id: string }>('/api/v1/returns/batches', {
+      warehouseId,
+      items: [
+        { skuId, quantity: '3' },
+        { skuId: otherSku, quantity: '1' },
+      ],
+    });
+    const batchId = created.body.data.id;
+    await client.post(`/api/v1/returns/batches/${batchId}/receive`, {});
+
+    const scan = await client.post<{
+      completed: boolean;
+      quantity: string;
+      serialNumbers: string[];
+    }>(`/api/v1/returns/batches/${batchId}/scan`, { barcode, binId });
+    expect(scan.status, JSON.stringify(scan.body.error ?? {})).toBe(200);
+    expect(scan.body.data.completed).toBe(true);
+    expect(scan.body.data.quantity).toBe('3.000');
+    expect(scan.body.data.serialNumbers).toEqual([]);
+
+    const stock = await inventoryOf(skuId);
+    expect(stock.reduce((sum, row) => sum + Number(row.onHandQty), 0)).toBe(3);
+
+    const detail = await client.get<{
+      items: Array<{ condition: string; binId: string | null; binCode: string | null }>;
+    }>(`/api/v1/returns/batches/${batchId}`);
+    const scannedLine = detail.body.data.items.find((row) => row.binId === binId);
+    expect(scannedLine?.condition).toBe('SELLABLE');
+    expect(scannedLine?.binCode).toBeTruthy();
+
+    const again = await client.post(`/api/v1/returns/batches/${batchId}/scan`, { barcode });
+    expect(again.status).toBe(422);
+    expect(again.body.error?.code).toBe('RETURN_SCAN_NO_LINE');
+  });
+});

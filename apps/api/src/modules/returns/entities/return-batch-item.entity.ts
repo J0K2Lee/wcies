@@ -52,6 +52,13 @@ export class ReturnBatchItemEntity {
   @Column({ type: 'uuid', name: 'bin_id', nullable: true })
   binId!: string | null;
 
+  /**
+   * 到货时扫到的序列号（SN 商品专用，2026-11-04）：扫满 quantity 才入库，
+   * 入库时原样传给 inventory（RETURN_RECEIPT 的 SN 明细）。
+   */
+  @Column({ type: 'text', name: 'received_serial_numbers', array: true, nullable: true })
+  receivedSerialNumbers!: string[] | null;
+
   @Column({ type: 'text', nullable: true })
   remark!: string | null;
 

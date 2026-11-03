@@ -2868,6 +2868,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/returns/batches/{id}/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 扫码入库：扫 SKU 条码命中本批次待检验行；SN 商品逐件扫序列号，扫满入账 */
+        post: operations["ReturnsController_scanBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/returns/batches/{id}": {
         parameters: {
             query?: never;
@@ -7382,12 +7399,49 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
+        ReturnBatchScanResultDto: {
+            batchId: string;
+            itemId: string;
+            /** @example SKU000012037 */
+            skuCode: string;
+            /** @example 迈从-A7 V3 Ultra+ 黑色 */
+            skuName: string;
+            /** @example 1.000 */
+            quantity: string;
+            /** @description 本次扫到的序列号（非 SN 商品为空数组） */
+            serialNumbers: string[];
+            /** @description 已扫序列号数（SN 商品） */
+            scannedSerials: number;
+            /** @description 需要扫的序列号数（= 行数量；非 SN 为 0） */
+            requiredSerials: number;
+            /** @description true = 该行已入库（condition 已落定） */
+            completed: boolean;
+            /** @example SELLABLE */
+            condition: string | null;
+        };
+        ReturnBatchScanRequestDto: {
+            /**
+             * @description SKU 条码（USB/蓝牙扫码器=键盘输入）
+             * @example 4601234506789
+             */
+            barcode: string;
+            /** @description SN 管理商品必填：本次扫到的序列号 */
+            serialNumber?: string;
+            /** @description 回库目标库位；省略 = 该仓 STAGING 暂存位 */
+            binId?: string;
+        };
         ReturnBatchItemDto: {
             id: string;
             batchId: string;
             platformReturnId: string | null;
             platformReturnNo: string | null;
             skuId: string;
+            /** @example SKU000012037 */
+            skuCode: string;
+            /** @example 迈从-A7 V3 Ultra+ 黑色 */
+            skuName: string;
+            /** @description 该 SKU 是否启用 SN 管理（决定是否必须扫序列号） */
+            serialTracking: boolean;
             /** @example 1.000 */
             quantity: string;
             /** @enum {string} */
@@ -7395,6 +7449,8 @@ export interface components {
             binId: string | null;
             /** @description 回库库位编码（检验合格/不合格时的落库位置；未检验或缺失为 null） */
             binCode: string | null;
+            /** @description 扫码入库已扫到的序列号（SN 商品） */
+            receivedSerialNumbers: string[];
             remark: string | null;
             /** Format: date-time */
             createdAt: string;
@@ -13823,6 +13879,35 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["ReturnBatchDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    ReturnsController_scanBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReturnBatchScanRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["ReturnBatchScanResultDto"];
                     };
                 };
             };
