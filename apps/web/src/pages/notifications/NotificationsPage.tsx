@@ -99,6 +99,20 @@ export function NotificationsPage() {
   // 深链：通知铃铛条目跳转 /notifications?type=…（Phase 3 T6）。
   const [type, setType] = useState<string | undefined>(() => searchParams.get('type') ?? undefined);
 
+  // 类型筛选来自事件目录（2026-11-03）：此前写死「需要拦截/拦截失败」两项，
+  // 其它事件（webhook 订阅、买家消息、退货…）无法筛选。
+  const catalogQuery = useApiQuery<{
+    data: Array<{ type: string; label: string; level: string }>;
+  }>('/api/v1/notifications/event-catalog', {}, ['notification-event-catalog']);
+  const typeOptions = (catalogQuery.data?.data ?? []).map((event) => ({
+    value: event.type,
+    label: event.label,
+  }));
+  const typeLabel = (value: string): string =>
+    catalogQuery.data?.data.find((event) => event.type === value)?.label ??
+    NOTIFICATION_TYPE_META[value]?.label ??
+    value;
+
   const query = useApiQuery<Envelope<NotificationItem[]>>(
     '/api/v1/notifications',
     {
@@ -199,17 +213,16 @@ export function NotificationsPage() {
       <FilterBar>
         <Select
           allowClear
+          showSearch
+          optionFilterProp="label"
           placeholder="类型"
-          style={{ width: 120 }}
+          style={{ width: 240 }}
           value={type}
           onChange={(value) => {
             setPage(1);
             setType(value);
           }}
-          options={Object.entries(NOTIFICATION_TYPE_META).map(([value, meta]) => ({
-            value,
-            label: meta.label,
-          }))}
+          options={typeOptions}
         />
       </FilterBar>
 
@@ -257,7 +270,7 @@ export function NotificationsPage() {
                           }}
                         />
                       )}
-                      {NOTIFICATION_TYPE_META[row.type]?.label ?? row.type}
+                      {typeLabel(row.type)}
                       <span style={{ fontSize: 12.5, color: colors.textSecondary, marginLeft: 8 }}>
                         {row.title}
                       </span>

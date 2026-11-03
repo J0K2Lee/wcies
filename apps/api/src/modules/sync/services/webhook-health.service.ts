@@ -280,7 +280,15 @@ export class WebhookHealthService {
         referenceId: result.storeId,
       });
 
+    // 只在「状态进入」时通知一次（2026-11-03）：巡检每 6 小时一轮，问题没恢复
+    // 之前不再重复推送。此前靠 30 分钟去重键兜底，实际变成每半小时刷一条，
+    // 通知中心被同一条订阅告警刷屏。异常行本身仍然保持 OPEN 并更新原因。
     if (result.state === 'PAUSED') {
+      const alreadyOpen = await this.exceptionService.hasOpen({
+        exceptionType: 'WEBHOOK_PAUSED',
+        referenceType: 'STORE',
+        referenceId: result.storeId,
+      });
       await this.exceptionService.create({
         exceptionType: 'WEBHOOK_PAUSED',
         severity: 'HIGH',
@@ -291,17 +299,24 @@ export class WebhookHealthService {
         details: { storeCode: result.storeCode, platform: result.platform, reason: result.reason },
       });
       await resolve('WEBHOOK_UNHEALTHY');
-      await this.notification.notifyWebhookHealth({
-        storeId: result.storeId,
-        storeCode: result.storeCode,
-        platform: result.platform,
-        state: 'PAUSED',
-        reason: result.reason,
-      });
+      if (!alreadyOpen) {
+        await this.notification.notifyWebhookHealth({
+          storeId: result.storeId,
+          storeCode: result.storeCode,
+          platform: result.platform,
+          state: 'PAUSED',
+          reason: result.reason,
+        });
+      }
       return;
     }
 
     if (result.state === 'UNHEALTHY') {
+      const alreadyOpen = await this.exceptionService.hasOpen({
+        exceptionType: 'WEBHOOK_UNHEALTHY',
+        referenceType: 'STORE',
+        referenceId: result.storeId,
+      });
       await this.exceptionService.create({
         exceptionType: 'WEBHOOK_UNHEALTHY',
         severity: 'MEDIUM',
@@ -317,13 +332,15 @@ export class WebhookHealthService {
         },
       });
       await resolve('WEBHOOK_PAUSED');
-      await this.notification.notifyWebhookHealth({
-        storeId: result.storeId,
-        storeCode: result.storeCode,
-        platform: result.platform,
-        state: 'UNHEALTHY',
-        reason: result.reason,
-      });
+      if (!alreadyOpen) {
+        await this.notification.notifyWebhookHealth({
+          storeId: result.storeId,
+          storeCode: result.storeCode,
+          platform: result.platform,
+          state: 'UNHEALTHY',
+          reason: result.reason,
+        });
+      }
       return;
     }
 

@@ -20,6 +20,8 @@ function build(options: {
   /** 本机公网自检结果：默认正常（200 + 标准应答）。 */
   selfProbeOk?: boolean;
   wb?: boolean;
+  /** 该 (类型, 店铺) 是否已有 OPEN 异常（用于验证「只通知一次」）。 */
+  alreadyOpen?: boolean;
 }) {
   const store = {
     id: 'store-1',
@@ -56,6 +58,7 @@ function build(options: {
   const exceptionService = {
     create: vi.fn().mockResolvedValue({}),
     resolveByReference: vi.fn().mockResolvedValue(undefined),
+    hasOpen: vi.fn().mockResolvedValue(options.alreadyOpen === true),
   } as unknown as ExceptionService;
   const notification = {
     notifyWebhookHealth: vi.fn().mockResolvedValue(undefined),
@@ -128,6 +131,22 @@ describe('WebhookHealthService.scan', () => {
     expect(notification.notifyWebhookHealth).toHaveBeenCalledWith(
       expect.objectContaining({ state: 'UNHEALTHY' }),
     );
+  });
+
+  it('异常已 OPEN 的店铺不重复发通知（2026-11-03 防刷屏）', async () => {
+    const { service, exceptionService, notification } = build({
+      platformCode: 'OZON',
+      enabled: false,
+      alreadyOpen: true,
+    });
+
+    await service.scan();
+
+    // 异常行保持 OPEN（create 幂等返回原行），但不再重复推送。
+    expect(exceptionService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ exceptionType: 'WEBHOOK_PAUSED' }),
+    );
+    expect(notification.notifyWebhookHealth).not.toHaveBeenCalled();
   });
 
   it('平台仍需窗口里残留旧错误、但入口自检 200 → 判健康（不误报）', async () => {

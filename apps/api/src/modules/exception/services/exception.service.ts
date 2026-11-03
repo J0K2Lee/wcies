@@ -85,6 +85,27 @@ export class ExceptionService {
     return this.toDto(created);
   }
 
+  /**
+   * 是否存在同 (类型, 引用) 的 OPEN 行（2026-11-03）。
+   *
+   * 给「只在状态进入时通知一次」的调用方用：巡检每 6 小时跑一轮，同一个未恢复
+   * 的问题不应该每轮都发通知（此前 webhook 订阅告警靠 30 分钟去重键，实际变成
+   * 每半小时刷一条）。
+   */
+  async hasOpen(input: {
+    exceptionType: string;
+    referenceType: string;
+    referenceId: string;
+  }): Promise<boolean> {
+    return (
+      (await this.repository.findOpenByReference(
+        input.exceptionType,
+        input.referenceType,
+        input.referenceId,
+      )) !== null
+    );
+  }
+
   async resolve(id: string, operator: OperatorContext, remark?: string): Promise<ExceptionDto> {
     return this.close(id, 'RESOLVED', operator, remark);
   }
