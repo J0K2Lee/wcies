@@ -16,7 +16,7 @@ import {
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { ColumnsType } from 'antd/es/table';
-import { apiPost, useApiQuery } from '../../api/hooks';
+import { apiGet, apiPost, useApiQuery } from '../../api/hooks';
 import { apiClient } from '../../api/client';
 import { fmtDateTime, fmtMoney, fmtQty } from '../../utils/format';
 import {
@@ -94,6 +94,18 @@ interface ResolvedBarcode {
 }
 
 /** One editable receipt line (draft stage). */
+/**
+ * 来源采购单某行的「订购 / 已收 / 结案」事实（2026-11-03）。
+ *
+ * 操作员在草稿里填「本次实收」时需要知道还剩多少没收——草稿预填的是全量未收，
+ * 少发时很容易被误认为必须整单收。未收 = 订购 − 已收 − 短装结案。
+ */
+interface PoItemProgress {
+  ordered: number;
+  received: number;
+  closed: number;
+}
+
 interface EditorItem {
   skuId: string;
   label: string;
@@ -211,6 +223,8 @@ export function PurchaseReceiptsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [fromPoOpen, setFromPoOpen] = useState(false);
   const [items, setItems] = useState<EditorItem[]>([]);
+  /** 来源采购单的逐行进度（按 purchaseOrderItemId），仅编辑有来源的草稿时加载。 */
+  const [poProgress, setPoProgress] = useState<Record<string, PoItemProgress>>({});
   const [editing, setEditing] = useState<ReceiptDetail | null>(null);
   const [form] = Form.useForm<{ warehouseId: string; sourceNote?: string; remark?: string }>();
   const [fromPoForm] = Form.useForm<{ poId: string }>();
@@ -638,6 +652,39 @@ export function PurchaseReceiptsPage() {
     onError: (error: Error) => void message.error(error.message),
   });
 
+  /**
+   * 读来源采购单的逐行进度（订购/已收/结案）。只读，一次请求；
+   * 直接收货（无来源采购单）清空即可。
+   */
+  const loadPoProgress = useCallback(async (purchaseOrderId: string | null) => {
+    if (purchaseOrderId === null) {
+      setPoProgress({});
+      return;
+    }
+    try {
+      const detail = await apiGet<{
+        items: Array<{
+          id: string;
+          quantity: string;
+          receivedQuantity: string;
+          closedQuantity: string;
+        }>;
+      }>('/api/v1/purchase-orders/{id}', {}, { id: purchaseOrderId });
+      const next: Record<string, PoItemProgress> = {};
+      for (const item of detail.data.items) {
+        next[item.id] = {
+          ordered: Number(item.quantity),
+          received: Number(item.receivedQuantity),
+          closed: Number(item.closedQuantity ?? 0),
+        };
+      }
+      setPoProgress(next);
+    } catch {
+      // 进度只是辅助信息，读不到不阻断编辑。
+      setPoProgress({});
+    }
+  }, []);
+
   const openEditor = useCallback(
     (receipt: ReceiptDetail) => {
       setItems(
@@ -660,8 +707,9 @@ export function PurchaseReceiptsPage() {
         remark: receipt.remark ?? undefined,
       });
       setEditing(receipt);
+      void loadPoProgress(receipt.purchaseOrderId ?? null);
     },
-    [form],
+    [form, loadPoProgress],
   );
 
   const [checkingReceipt, setCheckingReceipt] = useState(false);
@@ -698,9 +746,58 @@ export function PurchaseReceiptsPage() {
           openEditor(current);
           return;
         }
+        // 本次入账 / 之后剩余未收（2026-11-03）：让操作员在确认前就知道这是一次
+        // 部分收货，以及还差多少——少发的场景不必靠猜。
+        const progress =
+          current.purchaseOrderId === null
+            ? {}
+            : await apiGet<{
+                items: Array<{
+                  id: string;
+                  quantity: string;
+                  receivedQuantity: string;
+                  closedQuantity: string;
+                }>;
+              }>('/api/v1/purchase-orders/{id}', {}, { id: current.purchaseOrderId })
+                .then((detail) => {
+                  const map: Record<string, PoItemProgress> = {};
+                  for (const item of detail.data.items) {
+                    map[item.id] = {
+                      ordered: Number(item.quantity),
+                      received: Number(item.receivedQuantity),
+                      closed: Number(item.closedQuantity ?? 0),
+                    };
+                  }
+                  return map;
+                })
+                .catch((): Record<string, PoItemProgress> => ({}));
+        setPoProgress(progress);
+        let incoming = 0;
+        let remainingAfter = 0;
+        let partialLines = 0;
+        for (const item of current.items) {
+          const qty = Number(item.quantity);
+          incoming += qty;
+          const row =
+            item.purchaseOrderItemId === null ? undefined : progress[item.purchaseOrderItemId];
+          if (row === undefined) {
+            continue;
+          }
+          const rest = Math.max(row.ordered - row.received - row.closed - qty, 0);
+          remainingAfter += rest;
+          if (rest > 0) {
+            partialLines += 1;
+          }
+        }
+        const summary =
+          current.purchaseOrderId === null
+            ? `本次入账 ${incoming} 件。`
+            : `本次入账 ${incoming} 件；确认后该采购单仍有 ${partialLines} 行共 ${Number(
+                remainingAfter.toFixed(3),
+              )} 件未收（可继续等到货，或后续「关闭未收数量」结案）。`;
         modal.confirm({
           title: `确认收货 ${current.receiptNo}？`,
-          content: '确认后库存立即入账且不可撤销。SN 商品的序列号将写入库存序列表。',
+          content: `${summary}确认后库存立即入账且不可撤销，SN 商品的序列号将写入库存序列表。`,
           okText: '确认收货',
           okButtonProps: { danger: true },
           cancelText: '返回',
@@ -1252,7 +1349,12 @@ export function PurchaseReceiptsPage() {
             </Form.Item>
           </div>
         </Form>
-        <ReceiptItemsEditor warehouseId={editorWarehouseId} items={items} setItems={setItems} />
+        <ReceiptItemsEditor
+          warehouseId={editorWarehouseId}
+          items={items}
+          setItems={setItems}
+          poProgress={poProgress}
+        />
       </Modal>
 
       <Modal
@@ -1469,10 +1571,13 @@ function ReceiptItemsEditor({
   warehouseId,
   items,
   setItems,
+  poProgress,
 }: {
   warehouseId: string | undefined;
   items: EditorItem[];
   setItems: (next: EditorItem[]) => void;
+  /** 来源采购单的逐行进度（订购/已收/结案），无来源时为空对象。 */
+  poProgress: Record<string, PoItemProgress>;
 }) {
   const { message } = AntdApp.useApp();
   const queryClient = useQueryClient();
@@ -1660,7 +1765,27 @@ function ReceiptItemsEditor({
                   }
                 />
               ) : (
-                <span style={{ minWidth: 220, fontSize: 13 }}>{item.label}</span>
+                <span style={{ minWidth: 220, fontSize: 13 }}>
+                  {item.label}
+                  {(() => {
+                    const row =
+                      item.purchaseOrderItemId === undefined
+                        ? undefined
+                        : poProgress[item.purchaseOrderItemId];
+                    if (row === undefined) {
+                      return null;
+                    }
+                    const outstanding = Math.max(row.ordered - row.received - row.closed, 0);
+                    const after = Math.max(outstanding - (item.quantity ?? 0), 0);
+                    return (
+                      <span style={{ marginLeft: 8, fontSize: 12, color: colors.textSecondary }}>
+                        订购 {row.ordered} · 已收 {row.received}
+                        {row.closed > 0 ? ` · 已结案 ${row.closed}` : ''} · 未收 {outstanding} →
+                        本次后剩 {Number(after.toFixed(3))}
+                      </span>
+                    );
+                  })()}
+                </span>
               )}
               <InputNumber
                 min={0.001}

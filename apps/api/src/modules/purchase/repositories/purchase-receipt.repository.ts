@@ -362,14 +362,25 @@ export class PurchaseReceiptRepository {
   async findPoItemRemainingInTx(
     runner: QueryRunner,
     purchaseOrderItemId: string,
-  ): Promise<{ skuCode: string; quantity: string; receivedQuantity: string } | null> {
+  ): Promise<{
+    skuCode: string;
+    quantity: string;
+    receivedQuantity: string;
+    closedQuantity: string;
+  } | null> {
+    // 2026-11-03：连 closed_quantity 一起取——短装结案后剩余数量要扣掉结案部分。
     const rows = (await runner.query(
-      `SELECT i.quantity, i.received_quantity, sk.sku_code AS sku_code
+      `SELECT i.quantity, i.received_quantity, i.closed_quantity, sk.sku_code AS sku_code
          FROM purchase_order_items i
          JOIN skus sk ON sk.id = i.sku_id
         WHERE i.id = $1`,
       [purchaseOrderItemId],
-    )) as Array<{ quantity: string; received_quantity: string; sku_code: string }>;
+    )) as Array<{
+      quantity: string;
+      received_quantity: string;
+      closed_quantity: string;
+      sku_code: string;
+    }>;
     const row = rows[0];
     if (row === undefined) {
       return null;
@@ -378,6 +389,7 @@ export class PurchaseReceiptRepository {
       skuCode: row.sku_code,
       quantity: row.quantity,
       receivedQuantity: row.received_quantity,
+      closedQuantity: row.closed_quantity,
     };
   }
 }

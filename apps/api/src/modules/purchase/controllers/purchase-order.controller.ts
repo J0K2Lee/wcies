@@ -16,6 +16,8 @@ import { ApiOkEnvelope, ApiOkPagedEnvelope } from '../../../common/swagger/api-e
 import { CurrentOperator } from '../../../common/decorators/current-operator.decorator';
 import { OperatorContext } from '../../operation-log/operation-log.service';
 import {
+  CloseRemainingRequestDto,
+  CloseRemainingResultDto,
   CreatePurchaseOrderRequestDto,
   PurchaseOrderDetailDto,
   PurchaseOrderListItemDto,
@@ -85,6 +87,20 @@ export class PurchaseOrderController {
     @CurrentOperator() operator: OperatorContext,
   ): Promise<{ success: true; data: PurchaseOrderDetailDto }> {
     return ok(await this.poService.update(id, dto, operator));
+  }
+
+  @Post(':id/close-remaining')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '短装结案（2026-11-03）：把供应商不再发货的剩余数量关掉（不写收货、不碰库存/成本）',
+  })
+  @ApiOkEnvelope(CloseRemainingResultDto)
+  async closeRemaining(
+    @Param('id') id: string,
+    @Body() dto: CloseRemainingRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ): Promise<{ success: true; data: CloseRemainingResultDto }> {
+    return ok(await this.poService.closeRemaining(id, dto, operator));
   }
 
   @Post(':id/cancel')

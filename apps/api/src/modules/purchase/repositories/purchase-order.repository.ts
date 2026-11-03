@@ -23,6 +23,8 @@ export interface PurchaseOrderRowWithRefs {
   firstItemSkuCode: string | null;
   firstItemName: string | null;
   firstItemQuantity: string | null;
+  /** 短装结案数量合计（2026-11-03，列表标签用）。 */
+  closedQuantity: string;
 }
 
 export interface PurchaseOrderItemWithRefs {
@@ -190,6 +192,11 @@ export class PurchaseOrderRepository {
         `(SELECT COALESCE(SUM(i.quantity), 0) FROM purchase_order_items i WHERE i.po_id = po.id)`,
         'total_quantity',
       )
+      // 短装结案标签（2026-11-03）：RECEIVED 且该值 > 0 时列表显示「短装结案」。
+      .addSelect(
+        `(SELECT COALESCE(SUM(i.closed_quantity), 0) FROM purchase_order_items i WHERE i.po_id = po.id)`,
+        'closed_quantity_total',
+      )
       // 列表「采购商品」列（用户指示 2026-10-17）：明细第一行（created_at, id）
       // 的 SKU 名称 / 编码 / 数量。三个相关子查询都走 idx_purchase_order_items_po，
       // 每页 20 行成本可忽略；与详情页 findItemsWithRefs 同一排序口径。
@@ -266,6 +273,7 @@ export class PurchaseOrderRepository {
         firstItemSkuCode: (rawList[index]?.['first_item_sku_code'] as string | null) ?? null,
         firstItemName: (rawList[index]?.['first_item_name'] as string | null) ?? null,
         firstItemQuantity: (rawList[index]?.['first_item_quantity'] as string | null) ?? null,
+        closedQuantity: rawStr(rawList[index]?.['closed_quantity_total']) || '0',
       })),
       total,
     };
@@ -280,13 +288,15 @@ export class PurchaseOrderRepository {
         quantity: string;
         unit_cost: string | null;
         received_quantity: string;
+        closed_quantity: string;
         remark: string | null;
         sku_code: string;
         sku_name: string;
         order_no: string | null;
       }>
     >(
-      `SELECT i.id, i.sku_id, i.order_item_id, i.quantity, i.unit_cost, i.received_quantity, i.remark,
+      `SELECT i.id, i.sku_id, i.order_item_id, i.quantity, i.unit_cost, i.received_quantity,
+              i.closed_quantity, i.remark,
               sk.sku_code, sk.name_zh AS sku_name, o.order_no
        FROM purchase_order_items i
        JOIN skus sk ON sk.id = i.sku_id
@@ -305,6 +315,10 @@ export class PurchaseOrderRepository {
         quantity: row.quantity,
         unitCost: row.unit_cost,
         receivedQuantity: row.received_quantity,
+        closedQuantity: row.closed_quantity,
+        closedAt: null,
+        closedBy: null,
+        closeReason: null,
         remark: row.remark,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -315,19 +329,56 @@ export class PurchaseOrderRepository {
     }));
   }
 
-  /** Recomputes a PO's status from its items' received quantities (T4 calls this). */
+  /**
+   * Recomputes a PO's status from its items (T4 calls this).
+   *
+   * 2026-11-03：计入短装结案 `closed_quantity`——供应商不再发的部分由操作员
+   * 结案后，采购单必须能收口到 RECEIVED，否则会永久停在 PARTIALLY_RECEIVED
+   * 并让在途虚增（补货守卫因此拒绝新采购）。
+   */
   async recomputeStatus(manager: EntityManager, poId: string): Promise<string> {
-    const rows = await manager.query<Array<{ total: string; received: string }>>(
+    const rows = await manager.query<Array<{ total: string; received: string; closed: string }>>(
       `SELECT COALESCE(SUM(quantity), 0)::text AS total,
-              COALESCE(SUM(received_quantity), 0)::text AS received
+              COALESCE(SUM(received_quantity), 0)::text AS received,
+              COALESCE(SUM(closed_quantity), 0)::text AS closed
        FROM purchase_order_items WHERE po_id = $1`,
       [poId],
     );
     const total = Number(rows[0]?.total ?? '0');
     const received = Number(rows[0]?.received ?? '0');
-    if (received <= 0) {
+    const closed = Number(rows[0]?.closed ?? '0');
+    if (received <= 0 && closed <= 0) {
       return 'ORDERED';
     }
-    return received >= total ? 'RECEIVED' : 'PARTIALLY_RECEIVED';
+    return received + closed >= total ? 'RECEIVED' : 'PARTIALLY_RECEIVED';
+  }
+
+  /**
+   * 短装结案：把某行的一部分「不会再发货」的数量关掉（2026-11-03）。
+   *
+   * SQL 层的 `closed_quantity + $2 <= quantity - received_quantity` 是并发兜底
+   * （两个操作员同时结案时只有一个能成功），与 DB CHECK 一起保证不超关。
+   * 返回受影响行数：0 = 条件不满足（已收/已关完或超额）。
+   */
+  async closeRemaining(
+    manager: EntityManager,
+    poItemId: string,
+    quantity: string,
+    reason: string,
+    operatorId: string | null,
+  ): Promise<number> {
+    const result = await manager.query<Array<{ id: string }>>(
+      `UPDATE purchase_order_items
+          SET closed_quantity = closed_quantity + $2::numeric,
+              closed_at = now(),
+              closed_by = $4,
+              close_reason = $3,
+              updated_at = now()
+        WHERE id = $1
+          AND closed_quantity + $2::numeric <= quantity - received_quantity
+        RETURNING id`,
+      [poItemId, quantity, reason, operatorId],
+    );
+    return result.length;
   }
 }

@@ -2387,6 +2387,23 @@ export interface paths {
         patch: operations["PurchaseOrderController_update"];
         trace?: never;
     };
+    "/api/v1/purchase-orders/{id}/close-remaining": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 短装结案（2026-11-03）：把供应商不再发货的剩余数量关掉（不写收货、不碰库存/成本） */
+        post: operations["PurchaseOrderController_closeRemaining"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/purchase-orders/{id}/cancel": {
         parameters: {
             query?: never;
@@ -4059,7 +4076,7 @@ export interface components {
         NotificationDto: {
             id: string;
             /** @enum {string} */
-            type: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
+            type: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
             /** @enum {string} */
             channel: "SYSTEM" | "FEISHU";
             /** @example ORDER_INTERCEPTION */
@@ -4122,7 +4139,7 @@ export interface components {
             /** @enum {string} */
             channel: "FEISHU_DM" | "FEISHU_GROUP";
             /** @enum {string} */
-            eventType: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
+            eventType: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
             /**
              * @example {
              *       "level": [
@@ -4147,7 +4164,7 @@ export interface components {
              * @example ORDER_INTERCEPTION_REQUIRED
              * @enum {string}
              */
-            eventType: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
+            eventType: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
             /**
              * @description AND 组合的过滤条件：键为事件可过滤字段（storeId / warehouseCode / skuCode / level），值为候选集合。空对象 = 该事件全收
              * @example {
@@ -6610,6 +6627,11 @@ export interface components {
              * @example 1.000
              */
             firstItemQuantity?: Record<string, never> | null;
+            /**
+             * @description 短装结案数量合计（2026-11-03）：status=RECEIVED 且该值 > 0 时列表打「短装结案」标签
+             * @example 0.000
+             */
+            closedQuantity: string;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -6631,6 +6653,14 @@ export interface components {
             unitCost?: Record<string, never> | null;
             /** @example 0.000 */
             receivedQuantity: string;
+            /**
+             * @description 短装结案数量（供应商不再发货、操作员显式关闭的数量；不是收货）
+             * @example 0.000
+             */
+            closedQuantity: string;
+            /** Format: date-time */
+            closedAt?: string | null;
+            closeReason?: Record<string, never> | null;
             remark?: Record<string, never> | null;
             /** @description 该 SKU 主图签名 URL（展开明细图片列，2026-10-24）；未上传图片为 null */
             imageUrl?: string | null;
@@ -6739,6 +6769,41 @@ export interface components {
             receivingWarehouseId?: string;
             /** @description 整体替换明细（仅 ORDERED 状态） */
             items?: components["schemas"]["PurchaseOrderItemInputDto"][];
+        };
+        ClosedRemainingItemDto: {
+            itemId: string;
+            skuCode: string;
+            /** @example 2.000 */
+            closedQuantity: string;
+            /** @example 0.000 */
+            remainingQuantity: string;
+        };
+        CloseRemainingResultDto: {
+            /** @example PO000001 */
+            poNo: string;
+            /** @enum {string} */
+            status: "ORDERED" | "PARTIALLY_RECEIVED" | "RECEIVED" | "CANCELLED";
+            /** @example 2.000 */
+            totalClosed: string;
+            items: components["schemas"]["ClosedRemainingItemDto"][];
+        };
+        CloseRemainingItemInputDto: {
+            /** @description 采购单明细 id */
+            itemId: string;
+            /**
+             * @description 本次关闭数量；省略 = 该行全部剩余（允许只关一部分，剩下的继续等货）
+             * @example 2
+             */
+            quantity?: string;
+        };
+        CloseRemainingRequestDto: {
+            /**
+             * @description 结案原因（必填，写入操作日志与行上 close_reason）
+             * @example 供应商确认缺货，不再补发
+             */
+            reason: string;
+            /** @description 要结案的行；省略 = 所有还有未收数量的行 */
+            items?: components["schemas"]["CloseRemainingItemInputDto"][];
         };
         PurchaseReceiptListItemDto: {
             id: string;
@@ -8836,7 +8901,7 @@ export interface operations {
     NotificationController_list: {
         parameters: {
             query?: {
-                type?: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
+                type?: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
                 channel?: "SYSTEM" | "FEISHU";
                 referenceId?: string;
             };
@@ -12808,6 +12873,35 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["PurchaseOrderDetailDto"];
+                    };
+                };
+            };
+        };
+    };
+    PurchaseOrderController_closeRemaining: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CloseRemainingRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["CloseRemainingResultDto"];
                     };
                 };
             };

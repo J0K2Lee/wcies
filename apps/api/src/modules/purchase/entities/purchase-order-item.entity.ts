@@ -43,6 +43,25 @@ export class PurchaseOrderItemEntity {
   @Column({ type: 'numeric', precision: 18, scale: 3, name: 'received_quantity' })
   receivedQuantity!: string;
 
+  /**
+   * 短装结案数量（2026-11-03）：供应商不再发货、由操作员显式关闭的剩余数量。
+   *
+   * **不是收货**：不写 received_quantity、不产生库存流水、不动成本。剩余口径
+   * 统一为 `quantity - received - closed`；`received + closed >= quantity` 时
+   * 采购单重算为 RECEIVED（列表打「短装结案」标签，状态机不新增状态）。
+   */
+  @Column({ type: 'numeric', precision: 18, scale: 3, name: 'closed_quantity', default: '0' })
+  closedQuantity!: string;
+
+  @Column({ type: 'timestamptz', name: 'closed_at', nullable: true })
+  closedAt!: Date | null;
+
+  @Column({ type: 'uuid', name: 'closed_by', nullable: true })
+  closedBy!: string | null;
+
+  @Column({ type: 'varchar', length: 500, name: 'close_reason', nullable: true })
+  closeReason!: string | null;
+
   @Column({ type: 'text', nullable: true })
   remark!: string | null;
 

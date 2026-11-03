@@ -179,7 +179,11 @@ export class PurchaseReceiptService {
     const items = (await this.poRepository.findItemsWithRefs(poId))
       .map((row) => ({
         item: row.item,
-        remaining: parseQty(row.item.quantity) - parseQty(row.item.receivedQuantity),
+        // 2026-11-03：剩余 = 订购 − 已收 − 短装结案（结案部分不会再发货）。
+        remaining:
+          parseQty(row.item.quantity) -
+          parseQty(row.item.receivedQuantity) -
+          parseQty(row.item.closedQuantity ?? '0'),
       }))
       .filter(({ remaining }) => remaining > 0n);
     if (items.length === 0) {
@@ -525,7 +529,11 @@ export class PurchaseReceiptService {
             item.purchaseOrderItemId,
           );
           if (poItem !== null) {
-            const remaining = parseQty(poItem.quantity) - parseQty(poItem.receivedQuantity);
+            // 2026-11-03：超收守卫同样扣除已结案数量。
+            const remaining =
+              parseQty(poItem.quantity) -
+              parseQty(poItem.receivedQuantity) -
+              parseQty(poItem.closedQuantity ?? '0');
             if (parseQty(item.quantity) > remaining) {
               throw new PurchaseReceiptExceedsOrderedError({
                 skuCode: poItem.skuCode,

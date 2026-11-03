@@ -544,6 +544,130 @@ describe('收货默认库位与超收防御（决策 0021）', () => {
     expect(none.body.error?.code).toBe('PURCHASE_ORDER_INVALID_STATE');
   });
 
+  it('短装结案：少发不再补时把剩余关掉，采购单收口且不产生库存（2026-11-03）', async () => {
+    const sku = await newSku('E1');
+    const po = await client.post<{ id: string; poNo: string; items: Array<{ id: string }> }>(
+      '/api/v1/purchase-orders',
+      {
+        sourceNote: `${PREFIX} short-close`,
+        receivingWarehouseId: warehouseId,
+        items: [{ skuId: sku, quantity: '10' }],
+      },
+    );
+    expect(po.status).toBe(200);
+    const poItemId = po.body.data.items[0]?.id as string;
+
+    // 到货 6 件（部分收货）
+    const draft = await client.post<ReceiptDetail>(
+      `/api/v1/purchase-receipts/from-po/${po.body.data.id}`,
+      { warehouseId, defaultBinId: binA01 },
+    );
+    await client.patch(`/api/v1/purchase-receipts/${draft.body.data.id}`, {
+      items: [
+        {
+          skuId: sku,
+          purchaseOrderItemId: draft.body.data.items[0]?.purchaseOrderItemId,
+          quantity: '6',
+          binId: binA01,
+        },
+      ],
+    });
+    const confirmed = await client.post<ReceiptDetail>(
+      `/api/v1/purchase-receipts/${draft.body.data.id}/confirm`,
+    );
+    expect(confirmed.status).toBe(200);
+    expect((await balanceOf(sku))[0]?.onHandQty).toBe('6.000');
+
+    const partial = await client.get<{ status: string }>(
+      `/api/v1/purchase-orders/${po.body.data.id}`,
+    );
+    expect(partial.body.data.status).toBe('PARTIALLY_RECEIVED');
+
+    // 结案剩余 4 件：不是收货，库存不动
+    const closed = await client.post<{
+      status: string;
+      totalClosed: string;
+      items: Array<{ closedQuantity: string; remainingQuantity: string }>;
+    }>(`/api/v1/purchase-orders/${po.body.data.id}/close-remaining`, {
+      reason: `${PREFIX} 供应商确认缺货`,
+      items: [{ itemId: poItemId }],
+    });
+    expect(closed.status).toBe(200);
+    expect(closed.body.data.status).toBe('RECEIVED');
+    expect(closed.body.data.totalClosed).toBe('4.000');
+    expect(closed.body.data.items[0]?.remainingQuantity).toBe('0.000');
+
+    // 库存仍是 6（结案不写库存流水）
+    expect((await balanceOf(sku))[0]?.onHandQty).toBe('6.000');
+
+    const detail = await client.get<{
+      status: string;
+      items: Array<{ receivedQuantity: string; closedQuantity: string }>;
+    }>(`/api/v1/purchase-orders/${po.body.data.id}`);
+    expect(detail.body.data.status).toBe('RECEIVED');
+    expect(detail.body.data.items[0]).toMatchObject({
+      receivedQuantity: '6.000',
+      closedQuantity: '4.000',
+    });
+
+    // 收口后不再生成收货草稿
+    const none = await client.post(`/api/v1/purchase-receipts/from-po/${po.body.data.id}`, {
+      warehouseId,
+    });
+    expect(none.status).toBe(409);
+    expect(none.body.error?.code).toBe('PURCHASE_ORDER_INVALID_STATE');
+  });
+
+  it('短装结案：允许只关一部分、超额与空原因被拒、有草稿时先处理草稿', async () => {
+    const sku = await newSku('E2');
+    const po = await client.post<{ id: string; items: Array<{ id: string }> }>(
+      '/api/v1/purchase-orders',
+      {
+        sourceNote: `${PREFIX} short-close-guards`,
+        receivingWarehouseId: warehouseId,
+        items: [{ skuId: sku, quantity: '5' }],
+      },
+    );
+    const poId = po.body.data.id;
+    const poItemId = po.body.data.items[0]?.id as string;
+
+    // 空原因拒绝
+    const noReason = await client.post(`/api/v1/purchase-orders/${poId}/close-remaining`, {
+      reason: '   ',
+      items: [{ itemId: poItemId }],
+    });
+    expect(noReason.status).toBe(409);
+
+    // 有未取消草稿 → 先处理草稿
+    const draft = await client.post<ReceiptDetail>(`/api/v1/purchase-receipts/from-po/${poId}`, {
+      warehouseId,
+      defaultBinId: binA01,
+    });
+    const blocked = await client.post(`/api/v1/purchase-orders/${poId}/close-remaining`, {
+      reason: `${PREFIX} 短装`,
+      items: [{ itemId: poItemId }],
+    });
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error?.code).toBe('PURCHASE_RECEIPT_DUPLICATE_DRAFT');
+
+    // 取消草稿后：只关 2 件 → 仍 PARTIALLY_RECEIVED，剩余 3
+    await client.post(`/api/v1/purchase-receipts/${draft.body.data.id}/cancel`, {});
+    const part = await client.post<{ status: string; items: Array<{ remainingQuantity: string }> }>(
+      `/api/v1/purchase-orders/${poId}/close-remaining`,
+      { reason: `${PREFIX} 先关 2 件`, items: [{ itemId: poItemId, quantity: '2' }] },
+    );
+    expect(part.status).toBe(200);
+    expect(part.body.data.status).toBe('PARTIALLY_RECEIVED');
+    expect(part.body.data.items[0]?.remainingQuantity).toBe('3.000');
+
+    // 超额关闭被拒
+    const overflow = await client.post(`/api/v1/purchase-orders/${poId}/close-remaining`, {
+      reason: `${PREFIX} 超额`,
+      items: [{ itemId: poItemId, quantity: '99' }],
+    });
+    expect(overflow.status).toBe(409);
+  });
+
   it('rejects a confirm line that exceeds the PO item remaining quantity (no stock booked)', async () => {
     const sku = await newSku('D3');
     const po = await client.post<{ id: string; items: Array<{ id: string }> }>(

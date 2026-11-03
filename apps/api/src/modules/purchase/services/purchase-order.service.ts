@@ -37,6 +37,8 @@ import {
   PurchaseOrderDetailDto,
   PurchaseOrderItemInputDto,
   PurchaseOrderListItemDto,
+  CloseRemainingRequestDto,
+  CloseRemainingResultDto,
   PurchaseOrderListQueryDto,
   UpdatePurchaseOrderRequestDto,
 } from '../dto/purchase-order.dto';
@@ -46,8 +48,23 @@ import {
   PurchaseBatchDeleteItemResultDto,
   PurchaseBatchDeleteResultDto,
 } from '../dto/purchase-batch-delete.dto';
+import { PurchaseReceiptDuplicateDraftError } from '../errors/purchase-errors';
 
 const ENTITY_TYPE = 'PURCHASE_ORDER';
+
+/**
+ * 某行「还没收、还没结案」的数量 = quantity − received − closed（2026-11-03）。
+ * 草稿预填、超收守卫、在途、补货缺口都用这同一个口径。
+ */
+function remainingOf(item: {
+  quantity: string;
+  receivedQuantity: string;
+  closedQuantity?: string | null;
+}): bigint {
+  return (
+    parseQty(item.quantity) - parseQty(item.receivedQuantity) - parseQty(item.closedQuantity ?? '0')
+  );
+}
 
 /**
  * Purchase order registration (Sprint 7 task §10): answers "already
@@ -350,11 +367,167 @@ export class PurchaseOrderService {
         firstItemSkuCode: row.firstItemSkuCode,
         firstItemName: row.firstItemName,
         firstItemQuantity: row.firstItemQuantity,
+        closedQuantity: row.closedQuantity,
         createdAt: row.order.createdAt,
         updatedAt: row.order.updatedAt,
       })),
       meta: { page, pageSize, total },
     };
+  }
+
+  /**
+   * 短装结案（2026-11-03，用户批准）：把「供应商不再发货」的剩余数量关掉。
+   *
+   * 为什么必须有：部分收货本身已支持，但少发且不再补时没有任何出口——采购单
+   * 永久停在 PARTIALLY_RECEIVED，剩余数量永久计入在途，缺口被虚覆盖，
+   * 补货采购被 `PURCHASE_SKU_GAP_COVERED` 拒绝，订单缺货永远补不上。
+   *
+   * 硬性边界：
+   * - **不是收货**：只写 `closed_quantity`，不写 `received_quantity`、不产生
+   *   库存流水、不动移动加权成本（AGENTS §10/§14）；
+   * - 允许**部分关闭**（关 1 件、留 1 件继续等货）；
+   * - 必须填原因，写操作日志与行上 `close_reason`（§39 可追溯）；
+   * - 该采购单还有未取消的草稿时不结案（草稿可能就是这批货，先处理草稿，
+   *   否则草稿确认时会因超收被拒，体验更差）；
+   * - 并发兜底在 SQL：`closed + qty <= quantity - received`，超额返回空集。
+   */
+  async closeRemaining(
+    poId: string,
+    request: CloseRemainingRequestDto,
+    operator: OperatorContext,
+  ): Promise<CloseRemainingResultDto> {
+    const reason = request.reason.trim();
+    if (reason === '') {
+      throw new PurchaseOrderInvalidStateError('请填写结案原因（供应商不再发货/少发/缺货）', {
+        poId,
+      });
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      // 锁采购单头，串行化并发结案/收货/取消。
+      const locked = await manager.query<Array<{ status: string; po_no: string }>>(
+        `SELECT status, po_no FROM purchase_orders WHERE id = $1 FOR UPDATE`,
+        [poId],
+      );
+      const header = locked[0];
+      if (header === undefined) {
+        throw new PurchaseOrderNotFoundError(poId);
+      }
+      if (header.status === 'CANCELLED') {
+        throw new PurchaseOrderInvalidStateError('采购单已取消，不能结案未收数量', { poId });
+      }
+
+      // 有未取消草稿时先处理草稿：否则草稿确认会撞超收守卫。
+      const activeReceipts = await this.receiptRepository.findActiveByPurchaseOrderId(poId);
+      const draft = activeReceipts.find((receipt) => receipt.status === 'DRAFT');
+      if (draft !== undefined) {
+        throw new PurchaseReceiptDuplicateDraftError(header.po_no, draft.receiptNo);
+      }
+
+      const rows = await manager.query<
+        Array<{
+          id: string;
+          sku_code: string;
+          quantity: string;
+          received_quantity: string;
+          closed_quantity: string;
+        }>
+      >(
+        `SELECT i.id, sk.sku_code, i.quantity, i.received_quantity, i.closed_quantity
+           FROM purchase_order_items i
+           JOIN skus sk ON sk.id = i.sku_id
+          WHERE i.po_id = $1
+          ORDER BY i.created_at, i.id
+          FOR UPDATE OF i`,
+        [poId],
+      );
+
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      const requested =
+        request.items ?? rows.map((row) => ({ itemId: row.id, quantity: undefined }));
+      for (const entry of requested) {
+        if (!byId.has(entry.itemId)) {
+          throw new PurchaseOrderInvalidStateError('明细不属于该采购单', { itemId: entry.itemId });
+        }
+      }
+
+      const closed: CloseRemainingResultDto['items'] = [];
+      let totalClosed = 0n;
+      for (const entry of requested) {
+        const row = byId.get(entry.itemId);
+        if (row === undefined) {
+          continue;
+        }
+        const before = remainingOf({
+          quantity: row.quantity,
+          receivedQuantity: row.received_quantity,
+          closedQuantity: row.closed_quantity,
+        });
+        if (before <= 0n) {
+          continue; // 已收完/已结案：静默跳过（整单结案的常见形态）
+        }
+        const target = entry.quantity === undefined ? before : parseQty(entry.quantity);
+        if (target <= 0n) {
+          throw new PurchaseOrderInvalidStateError('结案数量必须为正数', { itemId: row.id });
+        }
+        if (target > before) {
+          throw new PurchaseOrderInvalidStateError(
+            `结案数量超过未收数量（未收 ${formatQty(before)}，本次 ${formatQty(target)}）`,
+            { itemId: row.id, remaining: formatQty(before) },
+          );
+        }
+        const affected = await this.repository.closeRemaining(
+          manager,
+          row.id,
+          formatQty(target),
+          reason.slice(0, 500),
+          operator.userId,
+        );
+        if (affected === 0) {
+          throw new PurchaseOrderInvalidStateError(
+            '结案失败：该行数量已被并发修改（收货或另一次结案），请刷新后重试',
+            { itemId: row.id },
+          );
+        }
+        totalClosed += target;
+        closed.push({
+          itemId: row.id,
+          skuCode: row.sku_code,
+          closedQuantity: formatQty(target),
+          remainingQuantity: formatQty(before - target),
+        });
+      }
+
+      if (closed.length === 0) {
+        throw new PurchaseOrderInvalidStateError('没有可结案的未收数量（全部已收或已结案）', {
+          poId,
+        });
+      }
+
+      const nextStatus = await this.repository.recomputeStatus(manager, poId);
+      await this.repository.updateHeader(manager, poId, {
+        status: nextStatus as PurchaseOrderEntity['status'],
+      });
+
+      await this.operationLog.record({
+        entityType: ENTITY_TYPE,
+        entityId: poId,
+        entityCode: header.po_no,
+        action: 'CLOSE_REMAINING',
+        changes: {
+          closedQuantity: { from: null, to: formatQty(totalClosed) },
+          status: { from: header.status, to: nextStatus },
+        },
+        operator,
+      });
+
+      return {
+        poNo: header.po_no,
+        status: nextStatus,
+        totalClosed: formatQty(totalClosed),
+        items: closed,
+      };
+    });
   }
 
   /**
@@ -453,6 +626,9 @@ export class PurchaseOrderService {
         quantity: row.item.quantity,
         unitCost: row.item.unitCost,
         receivedQuantity: row.item.receivedQuantity,
+        closedQuantity: row.item.closedQuantity,
+        closedAt: null,
+        closeReason: null,
         remark: row.item.remark,
         imageUrl: images.get(row.item.skuId) ?? null,
       })),

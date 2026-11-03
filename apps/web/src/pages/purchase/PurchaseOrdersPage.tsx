@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   App as AntdApp,
   Button,
+  Checkbox,
   Drawer,
   Form,
   Image,
@@ -67,6 +68,8 @@ interface PurchaseOrderRow {
   firstItemSkuCode: string | null;
   firstItemName: string | null;
   firstItemQuantity: string | null;
+  /** 短装结案数量合计（2026-11-03）：RECEIVED 且 > 0 时列表显示「短装结案」。 */
+  closedQuantity: string;
 }
 
 interface PurchaseOrderItem {
@@ -79,6 +82,8 @@ interface PurchaseOrderItem {
   quantity: string;
   unitCost: string | null;
   receivedQuantity: string;
+  /** 短装结案数量（供应商不再发货、操作员显式关闭；不是收货）。 */
+  closedQuantity: string;
   remark: string | null;
   /** SKU 主图签名 URL（详情接口返回；未上传为 null）。 */
   imageUrl?: string | null;
@@ -561,6 +566,72 @@ export function PurchaseOrdersPage() {
     });
   }, [modal, selectedPoIds, batchDeleteMutation]);
 
+  // ---- 短装结案（2026-11-03）---------------------------------------------
+  // 供应商少发且不再补时，把「不会再发货」的剩余数量显式关掉：不写收货、
+  // 不碰库存/成本，只让采购单能收口、在途回落（否则缺口被虚覆盖，补货被拒）。
+  const [closeDetail, setCloseDetail] = useState<PurchaseOrderDetail | null>(null);
+  const [closeLines, setCloseLines] = useState<
+    Record<string, { checked: boolean; quantity: number | null }>
+  >({});
+  const [closeReason, setCloseReason] = useState('');
+
+  const closeRemainingMutation = useMutation({
+    mutationFn: (input: {
+      poId: string;
+      reason: string;
+      items: Array<{ itemId: string; quantity?: string }>;
+    }) =>
+      apiPost(
+        `/api/v1/purchase-orders/{id}/close-remaining`,
+        {
+          reason: input.reason,
+          items: input.items,
+        },
+        { id: input.poId },
+      ),
+    onSuccess: (_result, input) => {
+      void message.success('已结案未收数量（不是收货，不产生库存流水）');
+      setCloseDetail(null);
+      setCloseLines({});
+      setCloseReason('');
+      void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['purchase-order-detail', input.poId] });
+    },
+    onError: (error: Error) => void message.error(error.message),
+  });
+
+  const openCloseRemaining = useCallback(
+    async (po: PurchaseOrderRow) => {
+      try {
+        const detail = await apiGet<PurchaseOrderDetail>(
+          '/api/v1/purchase-orders/{id}',
+          {},
+          { id: po.id },
+        );
+        const lines: Record<string, { checked: boolean; quantity: number | null }> = {};
+        for (const item of detail.data.items) {
+          const outstanding = Math.max(
+            Number(item.quantity) -
+              Number(item.receivedQuantity) -
+              Number(item.closedQuantity ?? 0),
+            0,
+          );
+          if (outstanding > 0) {
+            lines[item.id] = { checked: true, quantity: outstanding };
+          }
+        }
+        setCloseDetail(detail.data);
+        setCloseLines(lines);
+        setCloseReason('');
+      } catch (error) {
+        void message.error(
+          error instanceof Error ? `读取采购单明细失败：${error.message}` : '读取采购单明细失败',
+        );
+      }
+    },
+    [message],
+  );
+
   // ---- Context rail ----
   const railContent = useMemo<ContextRailContent>(() => {
     if (selectedRow === null) {
@@ -619,6 +690,15 @@ export function PurchaseOrdersPage() {
                 生成收货单
               </Button>
             )}
+            {(selectedRow.status === 'ORDERED' || selectedRow.status === 'PARTIALLY_RECEIVED') && (
+              <Button
+                block
+                style={{ marginTop: 8 }}
+                onClick={() => void openCloseRemaining(selectedRow)}
+              >
+                关闭未收数量（短装结案）
+              </Button>
+            )}
             {selectedRow.status === 'ORDERED' && (
               <Button
                 block
@@ -646,7 +726,14 @@ export function PurchaseOrdersPage() {
         </>
       ),
     };
-  }, [selectedRow, list.data, cancelMutation, generateReceiptMutation, requestGenerateReceipt]);
+  }, [
+    selectedRow,
+    list.data,
+    cancelMutation,
+    generateReceiptMutation,
+    requestGenerateReceipt,
+    openCloseRemaining,
+  ]);
   useContextRail(railContent);
 
   return (
@@ -806,10 +893,22 @@ export function PurchaseOrdersPage() {
               dataIndex: 'status',
               key: 'status',
               width: 110,
-              render: (value: string) => {
+              render: (value: string, record: PurchaseOrderRow) => {
                 const meta = STATUS_META[value] ?? { tone: 'neutral' as const, label: value };
+                const shortClosed =
+                  value === 'RECEIVED' && Number(record.closedQuantity ?? '0') > 0;
                 return (
-                  <StatusBadge tone={meta.tone} label={meta.label} hint={value} showDot={false} />
+                  <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                    <StatusBadge tone={meta.tone} label={meta.label} hint={value} showDot={false} />
+                    {shortClosed && (
+                      <StatusBadge
+                        tone="warning"
+                        label="短装结案"
+                        hint={`已结案 ${Number(record.closedQuantity)} 件未收`}
+                        showDot={false}
+                      />
+                    )}
+                  </span>
                 );
               },
             },
@@ -850,6 +949,113 @@ export function PurchaseOrdersPage() {
           ]}
         />
       </SectionCard>
+
+      {/* 短装结案（2026-11-03）：只关「不会再发货」的剩余数量，不写收货。 */}
+      <Modal
+        open={closeDetail !== null}
+        title={`关闭未收数量：${closeDetail?.poNo ?? ''}`}
+        okText="确认结案"
+        cancelText="取消"
+        okButtonProps={{
+          danger: true,
+          loading: closeRemainingMutation.isPending,
+          disabled:
+            closeReason.trim() === '' ||
+            Object.values(closeLines).every((line) => !line.checked || line.quantity === null),
+        }}
+        onCancel={() => setCloseDetail(null)}
+        onOk={() => {
+          if (closeDetail === null) {
+            return;
+          }
+          const items = Object.entries(closeLines)
+            .filter(([, line]) => line.checked && line.quantity !== null && line.quantity > 0)
+            .map(([itemId, line]) => ({ itemId, quantity: String(line.quantity) }));
+          if (items.length === 0) {
+            void message.warning('请至少选择一行要结案的数量');
+            return;
+          }
+          closeRemainingMutation.mutate({
+            poId: closeDetail.id,
+            reason: closeReason.trim(),
+            items,
+          });
+        }}
+        width={640}
+      >
+        <p style={{ fontSize: 13, color: colors.textSecondary, marginTop: 0 }}>
+          结案的是「供应商不会再发货」的数量：<strong>不是收货</strong>，不写库存流水、不改成本；
+          采购单随后可收口，在途回落，需要补货时可以重新登记采购。
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+          {(closeDetail?.items ?? []).map((item) => {
+            const line = closeLines[item.id];
+            const outstanding = Math.max(
+              Number(item.quantity) -
+                Number(item.receivedQuantity) -
+                Number(item.closedQuantity ?? 0),
+              0,
+            );
+            if (outstanding <= 0) {
+              return null;
+            }
+            return (
+              <div
+                key={item.id}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}
+              >
+                <Checkbox
+                  checked={line?.checked ?? false}
+                  onChange={(event) =>
+                    setCloseLines((current) => ({
+                      ...current,
+                      [item.id]: {
+                        checked: event.target.checked,
+                        quantity: current[item.id]?.quantity ?? outstanding,
+                      },
+                    }))
+                  }
+                />
+                <span style={{ minWidth: 240, fontSize: 13 }}>
+                  {item.skuCode} · {item.skuName}
+                </span>
+                <span style={{ fontSize: 12.5, color: colors.textSecondary }}>
+                  订购 {Number(item.quantity)} · 已收 {Number(item.receivedQuantity)}
+                  {Number(item.closedQuantity ?? 0) > 0
+                    ? ` · 已结案 ${Number(item.closedQuantity)}`
+                    : ''}{' '}
+                  · 未收 {outstanding}
+                </span>
+                <InputNumber
+                  min={0.001}
+                  max={outstanding}
+                  precision={3}
+                  value={line?.quantity ?? outstanding}
+                  disabled={line?.checked !== true}
+                  onChange={(value) =>
+                    setCloseLines((current) => ({
+                      ...current,
+                      [item.id]: {
+                        checked: current[item.id]?.checked ?? false,
+                        quantity: typeof value === 'number' ? value : null,
+                      },
+                    }))
+                  }
+                  style={{ width: 110 }}
+                  aria-label="本次结案数量"
+                />
+              </div>
+            );
+          })}
+        </div>
+        <Input.TextArea
+          rows={3}
+          maxLength={500}
+          value={closeReason}
+          onChange={(event) => setCloseReason(event.target.value)}
+          placeholder="结案原因（必填）：例如「供应商确认缺货，不再补发」"
+        />
+      </Modal>
 
       <Drawer
         open={detailId !== null}

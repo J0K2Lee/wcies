@@ -133,6 +133,13 @@ export class PurchaseOrderItemDto {
   @ApiProperty({ example: '2.000' }) quantity!: string;
   @ApiPropertyOptional({ nullable: true, example: '59.9000' }) unitCost!: string | null;
   @ApiProperty({ example: '0.000' }) receivedQuantity!: string;
+  @ApiProperty({
+    example: '0.000',
+    description: '短装结案数量（供应商不再发货、操作员显式关闭的数量；不是收货）',
+  })
+  closedQuantity!: string;
+  @ApiPropertyOptional({ nullable: true, type: Date }) closedAt!: Date | null;
+  @ApiPropertyOptional({ nullable: true }) closeReason!: string | null;
   @ApiPropertyOptional({ nullable: true }) remark!: string | null;
   @ApiPropertyOptional({
     nullable: true,
@@ -178,6 +185,12 @@ export class PurchaseOrderListItemDto {
     description: '明细第一行的数量（列表「采购商品」列）',
   })
   firstItemQuantity!: string | null;
+  @ApiProperty({
+    example: '0.000',
+    description:
+      '短装结案数量合计（2026-11-03）：status=RECEIVED 且该值 > 0 时列表打「短装结案」标签',
+  })
+  closedQuantity!: string;
   @ApiProperty({ type: Date }) createdAt!: Date;
   @ApiProperty({ type: Date }) updatedAt!: Date;
 }
@@ -232,4 +245,58 @@ export class PurchaseOrderListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsDateString()
   orderedTo?: Date;
+}
+
+// ---------------------------------------------------------------------------
+// 短装结案（2026-11-03）
+// ---------------------------------------------------------------------------
+
+export class CloseRemainingItemInputDto {
+  @ApiProperty({ description: '采购单明细 id' })
+  @IsUUID()
+  itemId!: string;
+
+  @ApiPropertyOptional({
+    example: '2',
+    description: '本次关闭数量；省略 = 该行全部剩余（允许只关一部分，剩下的继续等货）',
+  })
+  @IsOptional()
+  @Transform(asQuantityString)
+  @Matches(POSITIVE_QTY_PATTERN, { message: '关闭数量必须为正数（最多3位小数）' })
+  quantity?: string;
+}
+
+export class CloseRemainingRequestDto {
+  @ApiProperty({
+    example: '供应商确认缺货，不再补发',
+    description: '结案原因（必填，写入操作日志与行上 close_reason）',
+  })
+  @IsString()
+  @MaxLength(500)
+  reason!: string;
+
+  @ApiPropertyOptional({
+    type: [CloseRemainingItemInputDto],
+    description: '要结案的行；省略 = 所有还有未收数量的行',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CloseRemainingItemInputDto)
+  items?: CloseRemainingItemInputDto[];
+}
+
+export class ClosedRemainingItemDto {
+  @ApiProperty() itemId!: string;
+  @ApiProperty() skuCode!: string;
+  @ApiProperty({ example: '2.000' }) closedQuantity!: string;
+  @ApiProperty({ example: '0.000' }) remainingQuantity!: string;
+}
+
+export class CloseRemainingResultDto {
+  @ApiProperty({ example: 'PO000001' }) poNo!: string;
+  @ApiProperty({ enum: PURCHASE_ORDER_STATUSES }) status!: string;
+  @ApiProperty({ example: '2.000' }) totalClosed!: string;
+  @ApiProperty({ type: [ClosedRemainingItemDto] }) items!: ClosedRemainingItemDto[];
 }

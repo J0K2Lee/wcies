@@ -46,7 +46,8 @@ export class ReplenishmentRepository {
            FROM inventory_safety_stocks
           GROUP BY sku_id
        ), open_po AS (
-         SELECT pi.sku_id, SUM(pi.quantity - pi.received_quantity) AS open_qty
+         -- 2026-11-03：在途 = 订购 − 已收 − 短装结案（结案的数量不会再到货）
+         SELECT pi.sku_id, SUM(pi.quantity - pi.received_quantity - pi.closed_quantity) AS open_qty
            FROM purchase_order_items pi
            JOIN purchase_orders po ON po.id = pi.po_id
           WHERE po.status IN ('ORDERED', 'PARTIALLY_RECEIVED')

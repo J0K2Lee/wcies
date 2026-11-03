@@ -118,8 +118,11 @@ export function useApiQuery<
 export async function apiGet<TData>(
   path: QueryKey,
   params: Record<string, unknown> = {},
+  pathParams?: Record<string, string>,
 ): Promise<{ data: TData; meta: { total: number } }> {
-  const { data, error } = await apiClient.GET(path, { params: { query: params as never } });
+  const { data, error } = await apiClient.GET(path, {
+    params: buildParams(pathParams, params),
+  });
   if (error !== undefined) {
     throw toApiError(error.error);
   }

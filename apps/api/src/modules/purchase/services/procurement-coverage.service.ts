@@ -121,7 +121,11 @@ export class ProcurementCoverageService {
            AND o.erp_status NOT IN ('CANCELLED', 'SHIPPED')
       ),
       supply AS (
-        SELECT COALESCE(SUM(GREATEST(poi.quantity - poi.received_quantity, 0)), 0) AS qty
+        -- 2026-11-03：在途/待收 = 订购 − 已收 − 短装结案
+        SELECT COALESCE(
+                 SUM(GREATEST(poi.quantity - poi.received_quantity - poi.closed_quantity, 0)),
+                 0
+               ) AS qty
           FROM purchase_order_items poi
           JOIN purchase_orders po ON po.id = poi.po_id
          WHERE poi.sku_id = $1::uuid
@@ -189,7 +193,7 @@ export class ProcurementCoverageService {
       supply AS (
         SELECT poi.sku_id,
                po.receiving_warehouse_id AS warehouse_id,
-               SUM(GREATEST(poi.quantity - poi.received_quantity, 0)) AS outstanding
+               SUM(GREATEST(poi.quantity - poi.received_quantity - poi.closed_quantity, 0)) AS outstanding
           FROM purchase_order_items poi
           JOIN purchase_orders po ON po.id = poi.po_id
          WHERE po.status <> 'CANCELLED'

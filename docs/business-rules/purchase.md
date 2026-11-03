@@ -82,6 +82,10 @@ ORDERED → PARTIALLY_RECEIVED → RECEIVED
    时允许；取消不触碰库存。已 `RECEIVED` 或 `PARTIALLY_RECEIVED` 的单不可取消
    （`PURCHASE_ORDER_INVALID_STATE`）。
 5. 状态迁移由收货确认/取消操作驱动；禁止随意手改状态。
+6. **短装结案（2026-11-03）**：`PARTIALLY_RECEIVED` 的单在「供应商不再发货」时
+   可由操作员结案剩余数量（§4.5），结案后 `received + closed >= quantity` 即
+   重算为 `RECEIVED`。**不新增状态**——短装事实由行上的 `closed_quantity` 与列表
+   「短装结案」标签表达，避免状态机扩散。
 6. 取消采购单时，在**同一事务**内将其关联的全部 `DRAFT` 收货单置为 `CANCELLED`，
    并逐单记录取消日志。草稿从未碰库存，联动取消无库存影响；已 `RECEIVED` 的收货单
    不会被此操作触及（可取消的采购单必然无任何收货）。规则来源：用户 2026-09-17 人工测试建议。
@@ -119,6 +123,10 @@ ORDERED → PARTIALLY_RECEIVED → RECEIVED
     返回 `PURCHASE_RECEIPT_DUPLICATE_DRAFT`（409，消息含已有 `PR` 号），引导操作者编辑
     确认那张草稿；已有 `RECEIVED` 而无 `DRAFT` 时允许（分批到货）；已取消的草稿不计入。
     原因：两张按同一未收数量预填的草稿先后确认会累加超量，撞 DB CHECK 报不可读的 500。
+11. **剩余数量口径（2026-11-03）**：草稿预填、超收守卫、在途与补货缺口统一使用
+    `剩余 = quantity − received_quantity − closed_quantity`。短装结案的数量不会再
+    到货，因此必须从在途里扣掉，否则缺口被虚覆盖、补货采购会被
+    `PURCHASE_SKU_GAP_COVERED` 拒绝。
 
 ## 3.4 防重复采购（SKU × 仓 缺口守卫，2026-10-21 决策 0023）
 
@@ -324,11 +332,49 @@ Operation Log
    为减少这个拦截，生成草稿时已按 §4.1.1 预填默认库位。
 7. 收货**不自动触发任何订单分配**——为哪张订单买的货，由人工点该订单的
    「重试分配」决定归属（系统不猜）。
-8. **超收前置校验（2026-10-15，决策 0021）**：事务内、行锁之后逐行校验本次数量
-   ≤ 来源采购明细未收数量（`quantity - received_quantity`）。超出则抛
+8. **超收前置校验（2026-10-15，决策 0021；2026-11-03 更新口径）**：事务内、
+   行锁之后逐行校验本次数量 ≤ 来源采购明细剩余数量
+   （`quantity - received_quantity - closed_quantity`，已结案的短装数量不可再收）。超出则抛
    `PURCHASE_RECEIPT_EXCEEDS_ORDERED`（409，含 SKU / 采购量 / 已收 / 本次），
    整单回滚、不写库存。这是兜底（正常流程由 §3.3.9 防重挡住），避免撞 DB CHECK
    后回落成不可读的 500。
+
+## 4.5 短装结案（2026-11-03，用户批准）
+
+**问题**：部分收货本身已支持（多张收货单累加 `received_quantity`），但供应商少发
+且不再补时没有任何出口——采购单永久停在 `PARTIALLY_RECEIVED`，剩余数量永久计入
+在途，缺口被虚覆盖，补货采购被 `PURCHASE_SKU_GAP_COVERED` 拒绝，订单缺货永远补不上。
+
+**动作**：`POST /api/v1/purchase-orders/:id/close-remaining`
+
+```json
+{
+  "reason": "供应商确认缺货，不再补发",
+  "items": [{ "itemId": "…", "quantity": "2" }]
+}
+```
+
+- `items` 省略 = 所有还有剩余的行；`quantity` 省略 = 该行全部剩余。
+- **允许部分关闭**（关 2 件、留 3 件继续等货），供应商分批承诺很常见。
+
+**硬性边界**：
+
+1. **不是收货**：只写 `purchase_order_items.closed_quantity`（+ `closed_at/by/reason`），
+   **不写 `received_quantity`、不产生库存流水、不动移动加权成本**（AGENTS §10/§14）。
+2. **原因必填**（≤500 字），写操作日志 `CLOSE_REMAINING` 与行上 `close_reason`（§39）。
+3. **有未取消草稿时拒绝**（`PURCHASE_RECEIPT_DUPLICATE_DRAFT`）：草稿很可能就是这批货，
+   先取消/确认草稿再结案，否则草稿确认会撞超收守卫，体验更差。
+4. **并发兜底在 SQL**：`closed_quantity + qty <= quantity - received_quantity`，
+   并发结案只有一个成功；DB 另有 CHECK `received + closed <= quantity`。
+5. 结案后 `received + closed >= quantity` → 采购单重算为 `RECEIVED`；
+   列表显示「短装结案」标签（`closed_quantity > 0` 且状态 RECEIVED）。
+6. 结案后该行不能再收货；剩余数量 = 0 时「生成收货单」会拒绝（§4.3 前置校验）。
+
+**接口/字段**：`CloseRemainingRequestDto` / `CloseRemainingResultDto`；
+明细 DTO 新增 `closedQuantity / closedAt / closeReason`，列表 DTO 新增
+`closedQuantity`（标签用）。
+
+---
 
 ## 4.4 移动加权平均成本（用户确认 Q2）
 

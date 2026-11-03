@@ -1327,6 +1327,7 @@
                 "STORE_WEBHOOK_UNHEALTHY",
                 "BUYER_MESSAGE_RECEIVED",
                 "REVIEW_CREATED",
+                "BUYER_QUESTION_RECEIVED",
                 "RETURN_REQUESTED",
                 "RETURN_STATE_CHANGED"
               ]
@@ -8436,6 +8437,55 @@
         "tags": ["purchase-orders"]
       }
     },
+    "/api/v1/purchase-orders/{id}/close-remaining": {
+      "post": {
+        "operationId": "PurchaseOrderController_closeRemaining",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseRemainingRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CloseRemainingResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "短装结案（2026-11-03）：把供应商不再发货的剩余数量关掉（不写收货、不碰库存/成本）",
+        "tags": ["purchase-orders"]
+      }
+    },
     "/api/v1/purchase-orders/{id}/cancel": {
       "post": {
         "operationId": "PurchaseOrderController_cancel",
@@ -13309,6 +13359,7 @@
               "STORE_WEBHOOK_UNHEALTHY",
               "BUYER_MESSAGE_RECEIVED",
               "REVIEW_CREATED",
+              "BUYER_QUESTION_RECEIVED",
               "RETURN_REQUESTED",
               "RETURN_STATE_CHANGED"
             ]
@@ -13486,6 +13537,7 @@
               "STORE_WEBHOOK_UNHEALTHY",
               "BUYER_MESSAGE_RECEIVED",
               "REVIEW_CREATED",
+              "BUYER_QUESTION_RECEIVED",
               "RETURN_REQUESTED",
               "RETURN_STATE_CHANGED"
             ]
@@ -13538,6 +13590,7 @@
               "STORE_WEBHOOK_UNHEALTHY",
               "BUYER_MESSAGE_RECEIVED",
               "REVIEW_CREATED",
+              "BUYER_QUESTION_RECEIVED",
               "RETURN_REQUESTED",
               "RETURN_STATE_CHANGED"
             ],
@@ -19780,6 +19833,11 @@
             "example": "1.000",
             "description": "明细第一行的数量（列表「采购商品」列）"
           },
+          "closedQuantity": {
+            "type": "string",
+            "example": "0.000",
+            "description": "短装结案数量合计（2026-11-03）：status=RECEIVED 且该值 > 0 时列表打「短装结案」标签"
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -19796,6 +19854,7 @@
           "orderedAt",
           "itemCount",
           "totalQuantity",
+          "closedQuantity",
           "createdAt",
           "updatedAt"
         ]
@@ -19839,6 +19898,20 @@
             "type": "string",
             "example": "0.000"
           },
+          "closedQuantity": {
+            "type": "string",
+            "example": "0.000",
+            "description": "短装结案数量（供应商不再发货、操作员显式关闭的数量；不是收货）"
+          },
+          "closedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "closeReason": {
+            "type": "object",
+            "nullable": true
+          },
           "remark": {
             "type": "object",
             "nullable": true
@@ -19849,7 +19922,15 @@
             "description": "该 SKU 主图签名 URL（展开明细图片列，2026-10-24）；未上传图片为 null"
           }
         },
-        "required": ["id", "skuId", "skuCode", "skuName", "quantity", "receivedQuantity"]
+        "required": [
+          "id",
+          "skuId",
+          "skuCode",
+          "skuName",
+          "quantity",
+          "receivedQuantity",
+          "closedQuantity"
+        ]
       },
       "PurchaseOrderDetailDto": {
         "type": "object",
@@ -20089,6 +20170,83 @@
             }
           }
         }
+      },
+      "ClosedRemainingItemDto": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string"
+          },
+          "skuCode": {
+            "type": "string"
+          },
+          "closedQuantity": {
+            "type": "string",
+            "example": "2.000"
+          },
+          "remainingQuantity": {
+            "type": "string",
+            "example": "0.000"
+          }
+        },
+        "required": ["itemId", "skuCode", "closedQuantity", "remainingQuantity"]
+      },
+      "CloseRemainingResultDto": {
+        "type": "object",
+        "properties": {
+          "poNo": {
+            "type": "string",
+            "example": "PO000001"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ORDERED", "PARTIALLY_RECEIVED", "RECEIVED", "CANCELLED"]
+          },
+          "totalClosed": {
+            "type": "string",
+            "example": "2.000"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClosedRemainingItemDto"
+            }
+          }
+        },
+        "required": ["poNo", "status", "totalClosed", "items"]
+      },
+      "CloseRemainingItemInputDto": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "description": "采购单明细 id"
+          },
+          "quantity": {
+            "type": "string",
+            "example": "2",
+            "description": "本次关闭数量；省略 = 该行全部剩余（允许只关一部分，剩下的继续等货）"
+          }
+        },
+        "required": ["itemId"]
+      },
+      "CloseRemainingRequestDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "example": "供应商确认缺货，不再补发",
+            "description": "结案原因（必填，写入操作日志与行上 close_reason）"
+          },
+          "items": {
+            "description": "要结案的行；省略 = 所有还有未收数量的行",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CloseRemainingItemInputDto"
+            }
+          }
+        },
+        "required": ["reason"]
       },
       "PurchaseReceiptListItemDto": {
         "type": "object",
