@@ -107,27 +107,37 @@ export class PickingService implements OrderPickingStatePort {
 
     const createdTasks: PickingTaskEntity[] = [];
     for (const [warehouseId, bucket] of byWarehouse) {
-      const task = await this.dataSource.transaction(async (runner) => {
-        const pickingNo = await this.taskRepo.nextPickingNo(runner);
-        const created = await this.taskRepo.insert(runner, {
-          pickingNo,
-          warehouseId,
-          createdBy: operator.userId,
-          createdByName: operator.username,
+      const task = await this.dataSource
+        .transaction(async (runner) => {
+          const pickingNo = await this.taskRepo.nextPickingNo(runner);
+          const created = await this.taskRepo.insert(runner, {
+            pickingNo,
+            warehouseId,
+            createdBy: operator.userId,
+            createdByName: operator.username,
+          });
+          await this.itemRepo.insert(
+            runner,
+            bucket.map(({ item }) => ({
+              pickingTaskId: created.id,
+              orderId: item.orderId,
+              orderItemId: item.id,
+              skuId: item.skuId as string,
+              reservationId: item.reservationId as string,
+              requiredQty: item.quantity,
+            })),
+          );
+          return created;
+        })
+        .catch((error: unknown) => {
+          // 并发建任务时同一订单行被另一请求抢走（部分唯一索引兜底）。
+          if (isPickingItemUniqueViolation(error)) {
+            throw new PickingTaskStateInvalidError('该订单行已在其他拣货任务中（可能并发生成）', {
+              orderId: orderId,
+            });
+          }
+          throw error;
         });
-        await this.itemRepo.insert(
-          runner,
-          bucket.map(({ item }) => ({
-            pickingTaskId: created.id,
-            orderId: item.orderId,
-            orderItemId: item.id,
-            skuId: item.skuId as string,
-            reservationId: item.reservationId as string,
-            requiredQty: item.quantity,
-          })),
-        );
-        return created;
-      });
       createdTasks.push(task);
       await this.operationLog.record({
         entityType: 'PICKING_TASK',
@@ -239,9 +249,11 @@ export class PickingService implements OrderPickingStatePort {
       }
     }
 
-    // 按仓库分组：每仓一个合并任务，任务内行跨订单。
-    const byWarehouse = new Map<string, typeof eligible>();
-    for (const entry of eligible) {
+    // 按仓库分组：每仓一个合并任务，任务内行跨订单。先按订单行去重——
+    // 同一次请求里同一行重复出现（重复候选/并发回读）会直接撞唯一索引。
+    const uniqueEligible = [...new Map(eligible.map((entry) => [entry.item.id, entry])).values()];
+    const byWarehouse = new Map<string, typeof uniqueEligible>();
+    for (const entry of uniqueEligible) {
       const warehouseId = entry.item.warehouseId as string;
       const bucket = byWarehouse.get(warehouseId) ?? [];
       bucket.push(entry);
@@ -251,27 +263,47 @@ export class PickingService implements OrderPickingStatePort {
     const createdTaskNos: string[] = [];
     const createdOrders = new Set<string>();
     for (const [warehouseId, bucket] of byWarehouse) {
-      const task = await this.dataSource.transaction(async (runner) => {
-        const pickingNo = await this.taskRepo.nextPickingNo(runner);
-        const created_ = await this.taskRepo.insert(runner, {
-          pickingNo,
-          warehouseId,
-          createdBy: operator.userId,
-          createdByName: operator.username,
+      const task = await this.dataSource
+        .transaction(async (runner) => {
+          const pickingNo = await this.taskRepo.nextPickingNo(runner);
+          const created_ = await this.taskRepo.insert(runner, {
+            pickingNo,
+            warehouseId,
+            createdBy: operator.userId,
+            createdByName: operator.username,
+          });
+          await this.itemRepo.insert(
+            runner,
+            bucket.map(({ item }) => ({
+              pickingTaskId: created_.id,
+              orderId: item.orderId,
+              orderItemId: item.id,
+              skuId: item.skuId as string,
+              reservationId: item.reservationId as string,
+              requiredQty: item.quantity,
+            })),
+          );
+          return created_;
+        })
+        .catch((error: unknown) => {
+          // 同一订单行被并发任务占用（部分唯一索引兜底）：本仓这批按失败记录，
+          // 不拖垮其它仓库的任务（AGENTS §49 单笔失败不阻塞整批）。
+          if (isPickingItemUniqueViolation(error)) {
+            failed += bucket.length;
+            for (const entry of bucket) {
+              failures.push({
+                orderNo: entry.orderNo,
+                code: 'PICKING_ITEM_IN_ACTIVE_TASK',
+                message: '该订单行已在其他拣货任务中（可能并发生成），请刷新后重试',
+              });
+            }
+            return null;
+          }
+          throw error;
         });
-        await this.itemRepo.insert(
-          runner,
-          bucket.map(({ item }) => ({
-            pickingTaskId: created_.id,
-            orderId: item.orderId,
-            orderItemId: item.id,
-            skuId: item.skuId as string,
-            reservationId: item.reservationId as string,
-            requiredQty: item.quantity,
-          })),
-        );
-        return created_;
-      });
+      if (task === null) {
+        continue;
+      }
       createdTaskNos.push(task.pickingNo);
       for (const entry of bucket) {
         createdOrders.add(entry.item.orderId);
@@ -295,7 +327,7 @@ export class PickingService implements OrderPickingStatePort {
       candidates: orders.length,
       tasks: createdTaskNos.length,
       orders: createdOrders.size,
-      items: eligible.length,
+      items: uniqueEligible.length,
       skipped,
       failed,
     });
@@ -967,4 +999,25 @@ export class PickingService implements OrderPickingStatePort {
       pendingSerialNumbers,
     };
   }
+}
+
+/**
+ * 部分唯一索引冲突判定（2026-11-04）：同一订单行已有非 CANCELLED 拣货行。
+ * 驱动错误可能在顶层或 driverError 上（`23505` + 索引名）。
+ */
+function isPickingItemUniqueViolation(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const candidate = error as {
+    code?: string;
+    constraint?: string;
+    driverError?: { code?: string; constraint?: string };
+  };
+  const driver = candidate.driverError ?? candidate;
+  return (
+    driver.code === '23505' &&
+    (driver.constraint === 'uq_picking_task_items_order_item_active' ||
+      driver.constraint === 'uq_picking_task_items_order_item')
+  );
 }

@@ -18,7 +18,16 @@ import { PickingTaskEntity } from './picking-task.entity';
  * order_item_id is UNIQUE: a line is picked by at most one task.
  */
 @Entity('picking_task_items')
-@Index('uq_picking_task_items_order_item', ['orderItemId'], { unique: true })
+/**
+ * 一个订单行同时只允许一条「有效」拣货行（2026-11-04 改部分唯一）：
+ * CANCELLED 行是撤出审计（订单取消/行取消），保留它们不能再挡住「该行重新
+ * 分配后再次生成拣货任务」——旧的全表唯一约束会让这里 500
+ * (`duplicate key ... uq_picking_task_items_order_item`)。
+ */
+@Index('uq_picking_task_items_order_item_active', ['orderItemId'], {
+  unique: true,
+  where: "status <> 'CANCELLED'",
+})
 @Index('idx_picking_task_items_task', ['pickingTaskId'])
 @Index('idx_picking_task_items_order', ['orderId'])
 @Index('idx_picking_task_items_sku', ['skuId'])

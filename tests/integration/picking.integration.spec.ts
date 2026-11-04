@@ -370,3 +370,53 @@ describe('picking scan workflow (task §74-§78, §85)', () => {
     expect(created.body.error?.code).toBe('PICKING_NO_ELIGIBLE_ITEMS');
   });
 });
+
+describe('取消拣货行后重建任务（2026-11-04 部分唯一索引修复）', () => {
+  it('行取消 → 重新分配 → 同一订单行可以再次生成拣货任务（不再 500）', async () => {
+    const skuId = await newSku('PU88');
+    const barcode = `${PREFIX}-PU88-BAR`;
+    await addBarcode(skuId, barcode);
+    await initialize(skuId, binA01, '5');
+    await mapSku(skuId, `${PREFIX}-PU88`);
+    const order = await ingestOrder([{ platformSkuId: `${PREFIX}-PU88`, quantity: '1' }]);
+
+    const created = await client.post<{ tasks: Array<{ id: string }> }>('/api/v1/picking-tasks', {
+      orderId: order.orderId,
+    });
+    const taskId = created.body.data.tasks[0]!.id;
+    await client.post(`/api/v1/picking-tasks/${taskId}/start`, {});
+    const itemId = (await client.get<TaskDetail>(`/api/v1/picking-tasks/${taskId}`)).body.data
+      .items[0]!.id;
+
+    // 行级取消：释放占用、订单行回待分配，CANCELLED 行保留审计。
+    const cancelled = await client.post(`/api/v1/picking-tasks/${taskId}/items/${itemId}/cancel`, {
+      reason: '测试取消',
+    });
+    expect(cancelled.status).toBe(200);
+
+    // 重新分配（库存仍在）→ 行再次 RESERVED。
+    const retry = await client.post(
+      `/api/v1/orders/items/${order.itemResults[0]!.orderItemId}/retry-allocation`,
+      {},
+    );
+    expect(retry.status, JSON.stringify(retry.body.error ?? {})).toBe(200);
+    const detail = await client.get<{ items: Array<{ fulfillmentStatus: string }> }>(
+      `/api/v1/orders/${order.orderId}`,
+    );
+    expect(detail.body.data.items[0]!.fulfillmentStatus).toBe('RESERVED');
+
+    // 关键回归：历史 CANCELLED 行不能挡住新任务（此前 500 duplicate key）。
+    const again = await client.post<{ tasks: Array<{ id: string; pickingNo: string }> }>(
+      '/api/v1/picking-tasks',
+      { orderId: order.orderId },
+    );
+    expect(again.status, JSON.stringify(again.body.error ?? {})).toBe(201);
+    expect(again.body.data.tasks[0]!.pickingNo).toMatch(/^PCK\d{8}$/);
+
+    const newTask = await client.get<TaskDetail>(
+      `/api/v1/picking-tasks/${again.body.data.tasks[0]!.id}`,
+    );
+    expect(newTask.body.data.items).toHaveLength(1);
+    expect(newTask.body.data.items[0]!.status).toBe('PENDING');
+  });
+});
