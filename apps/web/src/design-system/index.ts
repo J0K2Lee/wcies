@@ -76,6 +76,8 @@ export { RiskIndicator, riskAccentColor } from './components/RiskIndicator';
 export { StatusSwitch } from './components/StatusSwitch';
 export type { StatusSwitchProps } from './components/StatusSwitch';
 export { FilterChips } from './components/FilterChips';
+export { TimeRangeFilter } from './components/TimeRangeFilter';
+export type { TimeRangeFilterProps, TimeRangeChangeValue } from './components/TimeRangeFilter';
 export type { FilterChip, FilterChipsProps } from './components/FilterChips';
 export { KpiRow } from './components/KpiRow';
 export { RailHint } from './components/RailHint';

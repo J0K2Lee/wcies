@@ -248,6 +248,16 @@ header        EntitySummary（title=业务编号，subtitle=名称，badge=Statu
 - 存在任一筛选时，FilterBar `actions` 显示「清除筛选」；点击后重置全部筛选
   （含搜索框文字、URL 参数）并回到第 1 页。
 
+## 6.5 TimeRangeFilter（2026-11-04）
+
+时间范围筛选**禁止**在页面里各写一套「Select + RangePicker」并排：
+
+- 用 DS `TimeRangeFilter`（`Space.Compact` 连体：时间类型下拉 + 区间选择器
+  共享边框/同一高度），一次选择同时决定「按哪个时间轴」和「哪段区间」；
+- 切换时间类型不清空已选区间；清空区间即取消该筛选；
+- 值以 ISO 字符串对外（页面不需要依赖 dayjs）；需要重置时改 `resetKey` 让它
+  重新挂载。
+
 ## 6.4 FilterChips（新组件）
 
 - 二级筛选（订单货物状态等成组互斥标签）用 DS `FilterChips`：
@@ -429,6 +439,7 @@ Phase 3 新增（契约见任务书 T1）：
 | KpiRow | MetricCard 标准网格行 | §2 |
 | RailHint | 右栏空闲态提示文案 | §4.2 |
 | RawDataBlock | 原始报文 pre 块 | §8.4 |
+| TimeRangeFilter | 时间类型 + 区间连体控件（列表筛选唯一实现） | §6.5 |
 
 ---
 

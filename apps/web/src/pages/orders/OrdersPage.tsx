@@ -4,7 +4,6 @@ import {
   App as AntdApp,
   Button,
   Checkbox,
-  DatePicker,
   Drawer,
   Form,
   Image,
@@ -36,6 +35,7 @@ import {
   EntitySummary,
   ERP_STATUS_META,
   FilterChips,
+  TimeRangeFilter,
   FULFILLMENT_STATUS_META,
   FULFILLMENT_MODE_META,
   FilterBar,
@@ -3714,31 +3714,19 @@ export function OrdersPage() {
           }}
           options={fulfillmentModeOptionsFor(platformFilter)}
         />
-        {/* 时间范围（2026-11-04 用户需求）：可切换时间轴（下单/拣货/发货）。 */}
-        <Select
-          style={{ width: 130 }}
-          value={timeField}
-          onChange={(value) => {
-            setPage(1);
-            setTimeField(value);
-          }}
-          options={[
+        {/* 时间范围（2026-11-04）：时间类型与区间是同一个连体控件（DS 组件）。 */}
+        <TimeRangeFilter
+          field={timeField}
+          fieldOptions={[
             { value: 'orderedAt', label: '下单时间' },
             { value: 'pickedAt', label: '拣货时间' },
             { value: 'shippedAt', label: '发货时间' },
           ]}
-        />
-        <DatePicker.RangePicker
-          showTime={{ format: 'HH:mm' }}
-          format="YYYY-MM-DD HH:mm"
-          placeholder={['开始时间', '结束时间']}
-          style={{ width: 340 }}
-          onChange={(dates) => {
+          onChange={(next) => {
             setPage(1);
-            const from = dates?.[0] ?? null;
-            const to = dates?.[1] ?? null;
-            setDateFrom(from === null ? undefined : from.toISOString());
-            setDateTo(to === null ? undefined : to.toISOString());
+            setTimeField(next.field as 'orderedAt' | 'pickedAt' | 'shippedAt');
+            setDateFrom(next.from);
+            setDateTo(next.to);
           }}
         />
       </FilterBar>
