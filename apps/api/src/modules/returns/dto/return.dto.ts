@@ -67,6 +67,10 @@ export interface PlatformReturnView {
   batchNo: string | null;
   /** 所属批次状态（DRAFT / RECEIVED / COMPLETED），未入批次为 null。 */
   batchStatus: string | null;
+  /** 退货记录处理阶段：PENDING / PROCESSING / COMPLETED（2026-11-04）。 */
+  stage: 'PENDING' | 'PROCESSING' | 'COMPLETED';
+  /** 人工标记已完结时间（自动完结为 null）。 */
+  manuallyClosedAt: Date | null;
   quantity: string;
   platformCreatedAt: Date | null;
   createdAt: Date;
@@ -98,6 +102,10 @@ export class PlatformReturnDto {
     description: '所属批次状态（DRAFT / RECEIVED / COMPLETED）',
   })
   batchStatus!: string | null;
+  @ApiProperty({ enum: ['PENDING', 'PROCESSING', 'COMPLETED'], description: '退货记录处理阶段' })
+  stage!: string;
+  @ApiPropertyOptional({ nullable: true, type: Date, description: '人工标记已完结时间' })
+  manuallyClosedAt!: Date | null;
   @ApiProperty({ example: '1' }) quantity!: string;
   @ApiPropertyOptional({ nullable: true, type: String, format: 'date-time' })
   platformCreatedAt!: Date | null;
@@ -211,6 +219,21 @@ export class PlatformReturnListQueryDto extends PaginationQueryDto {
  * 扫码入库（2026-11-04）：扫 SKU 条码 → 命中本批次该 SKU 的待检验行 →
  * SN 商品逐件扫序列号（扫满才入库），非 SN 商品整行一次入库。
  */
+/** 人工标记平台退货记录已完结（2026-11-04）：实物不会再到 / 不再处理。 */
+export class CompletePlatformReturnRequestDto {
+  @ApiPropertyOptional({ description: '完结原因（写入操作日志）', maxLength: 500 })
+  @IsOptional()
+  @IsString()
+  @Length(1, 500)
+  reason?: string;
+}
+
+export class PlatformReturnCompleteResultDto {
+  @ApiProperty() id!: string;
+  @ApiProperty({ example: 'COMPLETED' }) stage!: string;
+  @ApiProperty({ type: Date }) manuallyClosedAt!: Date;
+}
+
 export class ReturnBatchScanRequestDto {
   @ApiProperty({ example: '4601234506789', description: 'SKU 条码（USB/蓝牙扫码器=键盘输入）' })
   @IsString()

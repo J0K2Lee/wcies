@@ -23,6 +23,7 @@ import {
   ReturnScanNoLineError,
   ReturnScanSerialDuplicateError,
   ReturnScanSerialRequiredError,
+  PlatformReturnNotFoundError,
 } from '../errors/return.errors';
 import { formatQty, parseQty } from '../../../common/utils/quantity';
 import { ReturnBatchItemView, ReturnBatchScanResultDto, ReturnBatchView } from '../dto/return.dto';
@@ -273,53 +274,6 @@ export class ReturnsService {
     return this.getBatch(created.id);
   }
 
-  /**
-   * 手动完结退货批次（2026-11-04 用户口径：批次可以手动标记为已完结）。
-   *
-   * 实物不会再到 / 不再处理的待检验行统一按「缺失」结案：**不产生库存动作**，
-   * 关联平台记录的行照既有规则创建 `RETURN_DIFFERENCE`（索赔/申诉），
-   * 然后批次置 COMPLETED。只允许 RECEIVED；DRAFT 应先确认收货或取消。
-   */
-  async completeBatch(
-    id: string,
-    operator: OperatorContext,
-  ): Promise<ReturnBatchView & { items: ReturnBatchItemView[] }> {
-    const batch = await this.getBatchOrThrow(id);
-    if (batch.status === 'COMPLETED') {
-      return this.getBatch(id); // 幂等
-    }
-    if (batch.status !== 'RECEIVED') {
-      throw new ReturnBatchInvalidStateError(
-        `退货批次状态 ${batch.status} 不能手动完结（需 RECEIVED；草稿请先确认收货或取消）`,
-        { batchNo: batch.batchNo, status: batch.status },
-      );
-    }
-    const items = await this.batchRepo.findItemsByBatchId(id);
-    const pending = items.filter((item) => item.condition === 'PENDING');
-    for (const item of pending) {
-      await this.inspectItem({ itemId: item.id, condition: 'LOST' }, operator);
-    }
-    // 全部行落定后 inspectItem 会自动完成；这里兜底（并发/中途失败）。
-    const fresh = await this.getBatchOrThrow(id);
-    if (fresh.status !== 'COMPLETED') {
-      await this.dataSource.transaction(async (runner) => {
-        await this.batchRepo.updateStatus(runner, id, 'COMPLETED');
-      });
-    }
-    await this.operationLog.record({
-      entityType: 'RETURN_BATCH',
-      entityId: id,
-      entityCode: batch.batchNo,
-      action: 'COMPLETE',
-      changes: {
-        status: { from: batch.status, to: 'COMPLETED' },
-        lostLines: { from: null, to: pending.length },
-      },
-      operator,
-    });
-    return this.getBatch(id);
-  }
-
   /** Physical goods arrived and were counted - locks the line set. */
   async receiveBatch(id: string, operator: OperatorContext): Promise<ReturnBatchView> {
     const batch = await this.getBatchOrThrow(id);
@@ -548,6 +502,58 @@ export class ReturnsService {
       remark: fresh!.remark,
       createdAt: fresh!.createdAt,
     };
+  }
+
+  /**
+   * 人工标记平台退货记录「已完结」（2026-11-04 用户修正口径）：
+   * 三种状态（待处理/处理中/已完结）都属于**平台退货记录**，批次只是作业单据。
+   *
+   * - 记录没有批次：直接标记（实物不会再来），不产生库存动作；
+   * - 在 RECEIVED 批次里且该行未落定：先按「缺失」结案该行（不产生库存，
+   *   关联行照规则建 RETURN_DIFFERENCE），再标记；
+   * - 在 DRAFT 批次里：拒绝，先取消草稿批次或确认收货；
+   * - 已完结：幂等返回。
+   *
+   * 自动完结不走这里：批次行扫码收货/检验落定后，列表按 condition 派生已完结。
+   */
+  async completePlatformReturn(
+    id: string,
+    operator: OperatorContext,
+    reason?: string,
+  ): Promise<{ id: string; stage: 'COMPLETED'; manuallyClosedAt: Date }> {
+    const record = await this.platformReturnRepo.findById(id);
+    if (record === null) {
+      throw new PlatformReturnNotFoundError(id);
+    }
+    if (record.manuallyClosedAt !== null) {
+      return { id, stage: 'COMPLETED', manuallyClosedAt: record.manuallyClosedAt };
+    }
+    const found = await this.batchRepo.findItemByPlatformReturnId(id);
+    if (found !== null && found.batchStatus === 'DRAFT') {
+      throw new ReturnBatchInvalidStateError(
+        `该记录在草稿批次 ${found.batchNo} 中：请先确认收货或取消该草稿批次，再标记已完结`,
+        { platformReturnId: id, batchNo: found.batchNo },
+      );
+    }
+    if (found !== null && found.batchStatus !== 'CANCELLED' && found.item.condition === 'PENDING') {
+      // 行还挂着未处理：按缺失结案，避免批次里留下永远待检验的行。
+      await this.inspectItem({ itemId: found.item.id, condition: 'LOST' }, operator);
+    }
+    const closeReason = reason === undefined || reason.trim() === '' ? null : reason.trim();
+    await this.platformReturnRepo.markManuallyClosed(id, operator.userId, closeReason);
+    await this.operationLog.record({
+      entityType: 'PLATFORM_RETURN',
+      entityId: id,
+      entityCode: record.platformReturnId,
+      action: 'COMPLETE',
+      changes: {
+        stage: { from: found === null ? 'PENDING' : 'PROCESSING', to: 'COMPLETED' },
+        batchNo: { from: found?.batchNo ?? null, to: found?.batchNo ?? null },
+        reason: { from: null, to: closeReason },
+      },
+      operator,
+    });
+    return { id, stage: 'COMPLETED', manuallyClosedAt: new Date() };
   }
 
   /**

@@ -68,6 +68,8 @@ interface PlatformReturnRow {
   /** 已消费该记录的对账批次号。 */
   batchNo: string | null;
   batchStatus: string | null;
+  stage: 'PENDING' | 'PROCESSING' | 'COMPLETED';
+  manuallyClosedAt: string | null;
   quantity: string;
   platformCreatedAt: string | null;
   createdAt: string;
@@ -311,15 +313,20 @@ export function ReturnsPage() {
     onError: (error: Error) => message.error(`批量收货失败：${error.message}`),
   });
 
-  /** 手动完结（RECEIVED）：剩余未检验行按「缺失」结案，不产生库存动作。 */
-  const completeMutation = useMutation({
-    mutationFn: (id: string) =>
-      apiPost<ReturnBatchDetail>(`/api/v1/returns/batches/{id}/complete`, {}, { id }),
-    onSuccess: (result) => {
-      message.success(`批次 ${result.batchNo} 已完结（剩余行按缺失结案，未入账）`);
+  /** 标记平台退货记录「已完结」（2026-11-04）：去掉库存不动作的尾单。 */
+  const completeReturnMutation = useMutation({
+    mutationFn: (input: { id: string; reason: string }) =>
+      apiPost<{ id: string; stage: string; manuallyClosedAt: string }>(
+        '/api/v1/returns/platform/{id}/complete',
+        { reason: input.reason },
+        { id: input.id },
+      ),
+    onSuccess: () => {
+      message.success('已标记为已完结');
+      setSelectedReturnId(null);
       invalidateAll();
     },
-    onError: (error: Error) => message.error(`完结失败：${error.message}`),
+    onError: (error: Error) => message.error(`标记失败：${error.message}`),
   });
 
   const cancelMutation = useMutation({
@@ -445,8 +452,39 @@ export function ReturnsPage() {
               />
             </ContextSection>
             <ContextAction>
-              <Button type="primary" block onClick={() => openCreateBatch(selectedReturn)}>
-                用此记录建退货批次
+              <Button
+                type="primary"
+                block
+                disabled={selectedReturn.stage !== 'PENDING'}
+                onClick={() => openCreateBatch(selectedReturn)}
+              >
+                {selectedReturn.stage === 'PENDING'
+                  ? '用此记录建退货批次'
+                  : '已入批次，不能重复建批'}
+              </Button>
+              <Button
+                block
+                danger
+                style={{ marginTop: 8 }}
+                disabled={selectedReturn.stage === 'COMPLETED'}
+                loading={completeReturnMutation.isPending}
+                onClick={() => {
+                  modal.confirm({
+                    title: `把退货记录 ${selectedReturn.platformReturnId} 标记为已完结？`,
+                    content:
+                      '用于实物不会再到 / 不再处理：不产生库存动作。若该记录在收货批次里，剩余未检验行会按「缺失」结案（关联差异异常）。',
+                    okText: '标记已完结',
+                    okButtonProps: { danger: true },
+                    cancelText: '返回',
+                    onOk: () =>
+                      completeReturnMutation.mutate({
+                        id: selectedReturn.id,
+                        reason: '人工确认不再处理',
+                      }),
+                  });
+                }}
+              >
+                标记为已完结
               </Button>
             </ContextAction>
             <RailHint>
@@ -501,26 +539,6 @@ export function ReturnsPage() {
             <Button block onClick={() => setDetailId(selectedBatch.id)}>
               查看详情
             </Button>
-            {selectedBatch.status === 'RECEIVED' && (
-              <Button
-                block
-                style={{ marginTop: 8 }}
-                loading={completeMutation.isPending}
-                onClick={() => {
-                  modal.confirm({
-                    title: `手动完结批次 ${selectedBatch.batchNo}？`,
-                    content:
-                      '剩余未检验行将按「缺失」结案：不产生任何库存动作；关联平台记录的行会创建退货差异异常（索赔/申诉）。',
-                    okText: '完结批次',
-                    okButtonProps: { danger: true },
-                    cancelText: '返回',
-                    onOk: () => completeMutation.mutate(selectedBatch.id),
-                  });
-                }}
-              >
-                手动完结
-              </Button>
-            )}
             {selectedBatch.status === 'DRAFT' && (
               <>
                 <Button
@@ -576,14 +594,14 @@ export function ReturnsPage() {
     selectedReturn,
     storesQuery.data,
     openCreateBatch,
+    completeReturnMutation.isPending,
+    completeReturnMutation.mutate,
     selectedBatch,
     pendingList.length,
     batches.data,
     warehousesQuery.data,
     receiveMutation.isPending,
     receiveMutation.mutate,
-    completeMutation.isPending,
-    completeMutation.mutate,
     cancelMutation.isPending,
     cancelMutation.mutate,
     modal,

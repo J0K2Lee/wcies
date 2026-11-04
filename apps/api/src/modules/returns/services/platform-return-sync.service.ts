@@ -145,24 +145,35 @@ export class PlatformReturnSyncService {
       offset: (page.page - 1) * page.pageSize,
     });
     return {
-      items: rows.map((row) => ({
-        id: row.id,
-        storeId: row.storeId,
-        platformReturnId: row.platformReturnId,
-        platformOrderId: row.platformOrderId,
-        orderId: row.orderId,
-        state: row.state,
-        refundState: row.refundState,
-        platformSkuId: row.platformSkuId,
-        offerId: row.offerId,
-        skuCode: enrichment.get(row.id)?.skuCode ?? null,
-        skuName: enrichment.get(row.id)?.skuName ?? null,
-        batchNo: enrichment.get(row.id)?.batchNo ?? null,
-        batchStatus: enrichment.get(row.id)?.batchStatus ?? null,
-        quantity: row.quantity,
-        platformCreatedAt: row.platformCreatedAt,
-        createdAt: row.createdAt,
-      })),
+      items: rows.map((row) => {
+        const extra = enrichment.get(row.id);
+        const stage =
+          row.manuallyClosedAt !== null || extra?.settled === true
+            ? ('COMPLETED' as const)
+            : extra?.batchNo !== undefined && extra?.batchNo !== null
+              ? ('PROCESSING' as const)
+              : ('PENDING' as const);
+        return {
+          id: row.id,
+          storeId: row.storeId,
+          platformReturnId: row.platformReturnId,
+          platformOrderId: row.platformOrderId,
+          orderId: row.orderId,
+          state: row.state,
+          refundState: row.refundState,
+          platformSkuId: row.platformSkuId,
+          offerId: row.offerId,
+          skuCode: enrichment.get(row.id)?.skuCode ?? null,
+          skuName: enrichment.get(row.id)?.skuName ?? null,
+          batchNo: extra?.batchNo ?? null,
+          batchStatus: extra?.batchStatus ?? null,
+          stage,
+          manuallyClosedAt: row.manuallyClosedAt,
+          quantity: row.quantity,
+          platformCreatedAt: row.platformCreatedAt,
+          createdAt: row.createdAt,
+        };
+      }),
       meta: { page: page.page, pageSize: page.pageSize, total },
     };
   }

@@ -77,3 +77,13 @@ export class ReturnScanSerialDuplicateError extends DomainError {
     super(`序列号 ${details.serialNumber} 已在该退货行扫描过`, details);
   }
 }
+
+/** 平台退货记录不存在。 */
+export class PlatformReturnNotFoundError extends DomainError {
+  readonly code = 'RETURN_NOT_FOUND';
+  readonly httpStatus = 404;
+
+  constructor(id: string) {
+    super(`平台退货记录不存在：${id}`, { id });
+  }
+}

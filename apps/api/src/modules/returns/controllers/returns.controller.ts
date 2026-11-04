@@ -11,6 +11,8 @@ import {
   PlatformReturnListQueryDto,
   PlatformReturnSyncDto,
   PlatformReturnSyncResultDto,
+  CompletePlatformReturnRequestDto,
+  PlatformReturnCompleteResultDto,
   ReturnBatchCreateDto,
   ReturnBatchScanRequestDto,
   ReturnBatchScanResultDto,
@@ -48,6 +50,21 @@ export class ReturnsController {
       { page: query.page, pageSize: query.pageSize },
     );
     return okPage(result.items, result.meta);
+  }
+
+  @Post('platform/:id/complete')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      '人工标记平台退货记录已完结（实物不会再到）：在收货批次里则剩余行按缺失结案，不产生库存',
+  })
+  @ApiOkEnvelope(PlatformReturnCompleteResultDto)
+  async completePlatformReturn(
+    @Param('id') id: string,
+    @Body() input: CompletePlatformReturnRequestDto,
+    @CurrentOperator() operator: OperatorContext,
+  ) {
+    return ok(await this.returnsService.completePlatformReturn(id, operator, input.reason));
   }
 
   @Post('platform/sync')
@@ -115,16 +132,6 @@ export class ReturnsController {
   @ApiOkEnvelope(ReturnBatchDetailDto)
   async receiveBatch(@Param('id') id: string, @CurrentOperator() operator: OperatorContext) {
     return ok(await this.returnsService.receiveBatch(id, operator));
-  }
-
-  @Post('batches/:id/complete')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: '手动完结退货批次：剩余未检验行按「缺失」结案（不入账），批次置 COMPLETED',
-  })
-  @ApiOkEnvelope(ReturnBatchDetailDto)
-  async completeBatch(@Param('id') id: string, @CurrentOperator() operator: OperatorContext) {
-    return ok(await this.returnsService.completeBatch(id, operator));
   }
 
   @Post('batches/:id/cancel')

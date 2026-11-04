@@ -88,6 +88,22 @@ export class ReturnBatchRepository {
     return new Map(rows.map((row) => [row.platform_return_id, row.batch_no]));
   }
 
+  /** 找消费某条平台退货记录的批次行（含批次状态）。 */
+  async findItemByPlatformReturnId(
+    platformReturnId: string,
+  ): Promise<{ item: ReturnBatchItemEntity; batchStatus: string; batchNo: string } | null> {
+    const item = await this.dataSource
+      .getRepository(ReturnBatchItemEntity)
+      .findOneBy({ platformReturnId });
+    if (item === null) {
+      return null;
+    }
+    const batch = await this.dataSource
+      .getRepository(ReturnBatchEntity)
+      .findOneBy({ id: item.batchId });
+    return { item, batchStatus: batch?.status ?? '', batchNo: batch?.batchNo ?? '' };
+  }
+
   /** 追加一个已扫序列号（SN 退货行），返回追加后的完整列表。 */
   async appendReceivedSerial(
     manager: EntityManager,

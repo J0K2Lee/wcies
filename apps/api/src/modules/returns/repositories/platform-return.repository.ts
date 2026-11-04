@@ -88,6 +88,7 @@ export class PlatformReturnRepository {
         skuName: string | null;
         batchNo: string | null;
         batchStatus: string | null;
+        settled: boolean;
       }
     >;
   }> {
@@ -111,22 +112,24 @@ export class PlatformReturnRepository {
       qb.andWhere(`EXISTS (SELECT 1 FROM return_batch_items i WHERE i.platform_return_id = r.id)`);
     }
     if (filters.stage !== undefined) {
-      // 三段式（2026-11-04 用户口径）：待处理 = 未入批次；处理中 = 已入批次
-      // 且批次未完结；已完结 = 所属批次已 COMPLETED。
+      // 三段式（2026-11-04 用户修正口径：三种状态都描述**平台退货记录**）：
+      // - 待处理：未被任何有效批次消费（取消的草稿批次不算）；
+      // - 处理中：已入批次、该行还没收货/检验落定；
+      // - 已完结：批次行已落定（扫码收货即完结）或被人工标记完结。
+      const itemExists = (settled: boolean): string => `
+        EXISTS (SELECT 1 FROM return_batch_items i
+                  JOIN return_batches b ON b.id = i.batch_id
+                 WHERE i.platform_return_id = r.id
+                   AND b.status <> 'CANCELLED'
+                   ${settled ? "AND i.condition <> 'PENDING'" : ''})`;
       if (filters.stage === 'PENDING') {
+        qb.andWhere(`(r.manually_closed_at IS NULL AND NOT ${itemExists(false)})`);
+      } else if (filters.stage === 'PROCESSING') {
         qb.andWhere(
-          `NOT EXISTS (SELECT 1 FROM return_batch_items i WHERE i.platform_return_id = r.id)`,
+          `(r.manually_closed_at IS NULL AND ${itemExists(false)} AND NOT ${itemExists(true)})`,
         );
       } else {
-        const status = filters.stage === 'PROCESSING' ? "'DRAFT','RECEIVED'" : "'COMPLETED'";
-        qb.andWhere(
-          `EXISTS (
-             SELECT 1
-               FROM return_batch_items i
-               JOIN return_batches b ON b.id = i.batch_id
-              WHERE i.platform_return_id = r.id AND b.status IN (${status})
-           )`,
-        );
+        qb.andWhere(`(r.manually_closed_at IS NOT NULL OR ${itemExists(true)})`);
       }
     }
     if (filters.keyword !== undefined && filters.keyword.trim() !== '') {
@@ -157,6 +160,7 @@ export class PlatformReturnRepository {
         skuName: string | null;
         batchNo: string | null;
         batchStatus: string | null;
+        settled: boolean;
       }
     >
   > {
@@ -167,6 +171,7 @@ export class PlatformReturnRepository {
         skuName: string | null;
         batchNo: string | null;
         batchStatus: string | null;
+        settled: boolean;
       }
     >();
     if (rows.length === 0) {
@@ -179,13 +184,15 @@ export class PlatformReturnRepository {
         sku_name: string | null;
         batch_no: string | null;
         batch_status: string | null;
+        settled: boolean;
       }>
     >(
       `SELECT r.id,
               sku.sku_code,
               sku.name_zh AS sku_name,
               bt.batch_no,
-              bt.batch_status
+              bt.batch_status,
+              COALESCE(bt.settled, FALSE) AS settled
          FROM platform_returns r
          LEFT JOIN LATERAL (
                 SELECT s.sku_code, s.name_zh
@@ -196,10 +203,10 @@ export class PlatformReturnRepository {
                    AND pls.platform_sku_id = r.platform_sku_id
                  LIMIT 1) sku ON TRUE
          LEFT JOIN LATERAL (
-                SELECT b.batch_no, b.status AS batch_status
+                SELECT b.batch_no, b.status AS batch_status, (i.condition <> 'PENDING') AS settled
                   FROM return_batch_items i
                   JOIN return_batches b ON b.id = i.batch_id
-                 WHERE i.platform_return_id = r.id
+                 WHERE i.platform_return_id = r.id AND b.status <> 'CANCELLED'
                  ORDER BY b.created_at DESC
                  LIMIT 1) bt ON TRUE
         WHERE r.id = ANY($1::uuid[])`,
@@ -211,6 +218,7 @@ export class PlatformReturnRepository {
         skuName: row.sku_name,
         batchNo: row.batch_no,
         batchStatus: row.batch_status,
+        settled: row.settled,
       });
     }
     return map;
@@ -218,6 +226,21 @@ export class PlatformReturnRepository {
 
   async findById(id: string): Promise<PlatformReturnEntity | null> {
     return this.dataSource.getRepository(PlatformReturnEntity).findOneBy({ id });
+  }
+
+  /** 人工标记已完结（幂等：已标记的不覆盖）。 */
+  async markManuallyClosed(
+    id: string,
+    operatorId: string | null,
+    reason: string | null,
+  ): Promise<void> {
+    await this.dataSource
+      .getRepository(PlatformReturnEntity)
+      .createQueryBuilder()
+      .update()
+      .set({ manuallyClosedAt: new Date(), manuallyClosedBy: operatorId, closeReason: reason })
+      .where('id = :id AND manually_closed_at IS NULL', { id })
+      .execute();
   }
 
   /** Raw shape adapter for sync upserts. */

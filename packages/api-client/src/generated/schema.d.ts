@@ -2833,6 +2833,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/returns/platform/{id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 人工标记平台退货记录已完结（实物不会再到）：在收货批次里则剩余行按缺失结案，不产生库存 */
+        post: operations["ReturnsController_completePlatformReturn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/returns/platform/sync": {
         parameters: {
             query?: never;
@@ -2913,23 +2930,6 @@ export interface paths {
         put?: never;
         /** 确认收货（实物已到退货仓并清点；此后行不可增删） */
         post: operations["ReturnsController_receiveBatch"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/returns/batches/{id}/complete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 手动完结退货批次：剩余未检验行按「缺失」结案（不入账），批次置 COMPLETED */
-        post: operations["ReturnsController_completeBatch"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7387,12 +7387,33 @@ export interface components {
             batchNo?: string | null;
             /** @description 所属批次状态（DRAFT / RECEIVED / COMPLETED） */
             batchStatus?: string | null;
+            /**
+             * @description 退货记录处理阶段
+             * @enum {string}
+             */
+            stage: "PENDING" | "PROCESSING" | "COMPLETED";
+            /**
+             * Format: date-time
+             * @description 人工标记已完结时间
+             */
+            manuallyClosedAt?: string | null;
             /** @example 1 */
             quantity: string;
             /** Format: date-time */
             platformCreatedAt?: string | null;
             /** Format: date-time */
             createdAt: string;
+        };
+        PlatformReturnCompleteResultDto: {
+            id: string;
+            /** @example COMPLETED */
+            stage: string;
+            /** Format: date-time */
+            manuallyClosedAt: string;
+        };
+        CompletePlatformReturnRequestDto: {
+            /** @description 完结原因（写入操作日志） */
+            reason?: string;
         };
         PlatformReturnSyncResultDto: {
             created: number;
@@ -13818,6 +13839,35 @@ export interface operations {
             };
         };
     };
+    ReturnsController_completePlatformReturn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompletePlatformReturnRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["PlatformReturnCompleteResultDto"];
+                    };
+                };
+            };
+        };
+    };
     ReturnsController_syncPlatformReturns: {
         parameters: {
             query?: never;
@@ -13960,31 +14010,6 @@ export interface operations {
         };
     };
     ReturnsController_receiveBatch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        success: true;
-                        data: components["schemas"]["ReturnBatchDetailDto"];
-                    };
-                };
-            };
-        };
-    };
-    ReturnsController_completeBatch: {
         parameters: {
             query?: never;
             header?: never;

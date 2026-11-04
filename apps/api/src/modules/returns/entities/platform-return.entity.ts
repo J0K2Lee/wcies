@@ -60,6 +60,19 @@ export class PlatformReturnEntity {
   @Column({ type: 'jsonb', name: 'raw_data', nullable: true })
   rawData!: Record<string, unknown> | null;
 
+  /**
+   * 人工标记「已完结」（2026-11-04）：实物不会再到 / 不再处理。自动完结（批次
+   * 扫码收货或检验落定）不写这里，而是由批次行 condition 派生。
+   */
+  @Column({ type: 'timestamptz', name: 'manually_closed_at', nullable: true })
+  manuallyClosedAt!: Date | null;
+
+  @Column({ type: 'uuid', name: 'manually_closed_by', nullable: true })
+  manuallyClosedBy!: string | null;
+
+  @Column({ type: 'varchar', length: 500, name: 'close_reason', nullable: true })
+  closeReason!: string | null;
+
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;
 
