@@ -418,5 +418,31 @@ describe('取消拣货行后重建任务（2026-11-04 部分唯一索引修复�
     );
     expect(newTask.body.data.items).toHaveLength(1);
     expect(newTask.body.data.items[0]!.status).toBe('PENDING');
+
+    // 关键回归（2026-11-04 线上：预约状态不允许该操作，当前 RELEASED）：
+    // 重新分配必须拿到**新的 ACTIVE 预约**，不能复用已释放的旧预约。
+    const oldReservationId = order.itemResults[0]!.reservationId;
+    const retried = await client.get<{ id: string; status: string }>(
+      `/api/v1/orders/${order.orderId}`,
+    );
+    const lineReservationId = (
+      retried.body.data as unknown as {
+        items: Array<{ reservationId: string | null }>;
+      }
+    ).items[0]!.reservationId;
+    expect(lineReservationId).toBeTruthy();
+    expect(lineReservationId).not.toBe(oldReservationId);
+    const reservation = await client.get<{ status: string }>(
+      `/api/v1/inventory/reservations/${lineReservationId}`,
+    );
+    expect(reservation.body.data.status).toBe('ACTIVE');
+
+    // 扫描能真正推进（扫不进去 = 预约已释放的旧 bug）。
+    await client.post(`/api/v1/picking-tasks/${again.body.data.tasks[0]!.id}/start`, {});
+    const scan = await client.post(`/api/v1/picking-tasks/${again.body.data.tasks[0]!.id}/scan`, {
+      barcode,
+    });
+    expect(scan.status, JSON.stringify(scan.body.error ?? {})).toBe(200);
+    expect(scan.body.data.itemStatus).toBe('PICKED');
   });
 });

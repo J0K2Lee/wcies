@@ -183,7 +183,8 @@ ORDER BY o.is_urgent DESC, p.priority ASC,
 ```text
 BACKORDERED / PENDING
 ↓
-重新尝试 reserveStock（同一幂等键 ORDER_RESERVE:<orderItemId>）
+重新尝试 reserveStock（业务键 ORDER_RESERVE:<orderItemId>；若该键下只剩
+RELEASED 预约，则用派生键 :r2/:r3… 新建——见下方「释放后重新分配」）
 ↓
 成功 → RESERVED，解决（RESOLVED）对应 OPEN 异常，订单状态重算
 失败 → 行转 BACKORDERED（原 BACKORDERED 保持），创建或保留
@@ -234,6 +235,15 @@ InventoryService.releaseReservation（orderDomain=true，幂等键 ORDER_RELEASE
   （可再次被分配）。
 - 入口位置：**订单行右栏**（行级操作按钮统一放侧边栏，行内只保留状态徽标），
   与「重新尝试分配」并列，仅 `RESERVED` 行可见。
+
+**释放后重新分配（2026-11-04 修复）**：业务幂等键 `ORDER_RESERVE:<orderItemId>`
+在一次「占用 → 释放」后仍指向那张 `RELEASED` 预约。此时再分配**不是重复请求**，
+而是新的占用动作：库存层检测到该键下只有已释放预约时，用派生键
+（`…:r2`）新建预约；并发请求会算出同一派生键，靠唯一约束收敛到同一张。
+
+此前直接 replay 已释放预约，订单行被标成 `RESERVED` 却指向 `RELEASED` 预约，
+拣货扫码报「预约状态不允许该操作（当前: RELEASED）」（2026-11-04 线上实测，
+ORD00000961：未付款取消拣货 → 付款后重新分配 → 重新建任务后扫不进去）。
 
 ### B. 映射失败行（`FAILED`）— 决策 0012；2026-10-14 调整：**先修映射，再决定是否分配**
 

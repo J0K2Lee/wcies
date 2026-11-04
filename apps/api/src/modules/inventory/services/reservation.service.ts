@@ -160,9 +160,15 @@ export class ReservationService {
       throw new WarehouseNotFoundError(input.warehouseId);
     }
 
-    const existing = await this.reservationRepo.findByIdempotencyKey(input.idempotencyKey);
+    // 有效幂等键（2026-11-04）：同一业务键下若只有「已释放」的预约，说明这是
+    // 一次**重新占用**（订单行取消后重新分配），必须用派生键新建预约；否则
+    // replay 会把已释放的预约当成功返回，订单行标 RESERVED 却指向 RELEASED
+    // 预约，扫码拣货报「预约状态不允许该操作（当前: RELEASED）」。
+    const idempotencyKey = await this.resolveReserveIdempotencyKey(input.idempotencyKey);
+
+    const existing = await this.reservationRepo.findByIdempotencyKey(idempotencyKey);
     if (existing !== null) {
-      return this.replayReservation(existing, input);
+      return this.replayReservation(existing, { ...input, idempotencyKey });
     }
 
     const runner = this.dataSource.createQueryRunner();
@@ -180,7 +186,7 @@ export class ReservationService {
 
       // Idempotency re-check AFTER the locks (task §61): concurrent duplicates
       // of this key serialize here and see the winner's committed row.
-      const raced = await this.reservationRepo.findByIdempotencyKeyTx(runner, input.idempotencyKey);
+      const raced = await this.reservationRepo.findByIdempotencyKeyTx(runner, idempotencyKey);
       if (raced !== null) {
         await runner.rollbackTransaction();
         replayed = raced;
@@ -257,7 +263,7 @@ export class ReservationService {
             referenceId: input.referenceId,
             requestedQty: formatQty(qty),
             status: 'ACTIVE',
-            idempotencyKey: input.idempotencyKey,
+            idempotencyKey,
             remark: input.remark ?? null,
           },
           allocations.map(({ balance, alloc }) => ({
@@ -297,7 +303,7 @@ export class ReservationService {
             eventType: 'RESERVE',
             referenceType: input.referenceType,
             referenceId: input.referenceId,
-            idempotencyKey: input.idempotencyKey,
+            idempotencyKey,
             operatorId: input.operator.userId,
             remark: `reservation=${reservationNo}${suffixRemark(input.remark)}`,
           },
@@ -319,9 +325,9 @@ export class ReservationService {
       await runner.rollbackTransaction();
       if (isUniqueViolationOn(error, 'uq_inventory_reservations_idem')) {
         // Same key committed concurrently against a different balance set.
-        const raced = await this.reservationRepo.findByIdempotencyKey(input.idempotencyKey);
+        const raced = await this.reservationRepo.findByIdempotencyKey(idempotencyKey);
         if (raced !== null) {
-          return this.replayReservation(raced, input);
+          return this.replayReservation(raced, { ...input, idempotencyKey });
         }
       }
       throw error;
@@ -330,9 +336,32 @@ export class ReservationService {
     }
 
     if (replayed !== undefined) {
-      return this.replayReservation(replayed, input);
+      return this.replayReservation(replayed, { ...input, idempotencyKey });
     }
     return this.buildDtoWithCodes(committed as InventoryReservationEntity, false);
+  }
+
+  /**
+   * 解析本次占用的有效幂等键（2026-11-04）。
+   *
+   * 业务键（如 `ORDER_RESERVE:<orderItemId>`）在一次「占用 → 释放」循环后仍然
+   * 指向那张已释放的预约。此时再占用属于**新的业务动作**，用派生键
+   * `:r2`、`:r3`… 新建预约；并发重复请求会算出同一个派生键，靠唯一约束收敛
+   * 到同一张预约（幂等性不丢）。
+   */
+  private async resolveReserveIdempotencyKey(base: string): Promise<string> {
+    let key = base;
+    for (let attempt = 2; attempt <= 20; attempt += 1) {
+      const existing = await this.reservationRepo.findByIdempotencyKey(key);
+      if (existing === null) {
+        return key;
+      }
+      if (existing.status !== 'RELEASED') {
+        return key; // 有效预约（ACTIVE/PICKED/CONSUMED）：照常重放
+      }
+      key = `${base}:r${attempt}`;
+    }
+    throw new IdempotencyConflictError(base);
   }
 
   // --------------------------------------------------------------------------
