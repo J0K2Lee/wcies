@@ -203,6 +203,31 @@ describe('one-click 发货 (2026-09-18 flow)', () => {
     );
     expect(shipment.body.data.status).toBe('SHIPPED');
     expect(shipment.body.data.trackingNumber).toBe('OZ-E2E-TRACK-1');
+
+    // 运单号搜索（2026-11-04 用户需求）：平台运单号与发货单物流单号都能命中订单。
+    const byTracking = await client.get<Array<{ id: string; orderNo: string }>>(
+      '/api/v1/orders?keyword=OZ-E2E-TRACK-1&pageSize=10',
+    );
+    expect(byTracking.body.data.some((row) => row.id === orderId)).toBe(true);
+
+    // 时间范围筛选：发货时间轴能命中已发货订单；下单时间轴用未来窗口应查不到。
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const byShipped = await client.get<Array<{ id: string }>>(
+      `/api/v1/orders?timeField=shippedAt&dateFrom=${encodeURIComponent(
+        new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      )}&dateTo=${encodeURIComponent(future)}&pageSize=50`,
+    );
+    expect(byShipped.body.data.some((row) => row.id === orderId)).toBe(true);
+    const noneFuture = await client.get<Array<{ id: string }>>(
+      `/api/v1/orders?timeField=orderedAt&dateFrom=${encodeURIComponent(future)}&pageSize=10`,
+    );
+    expect(noneFuture.body.data.some((row) => row.id === orderId)).toBe(false);
+
+    // 拣货时间轴排序可用（不 500，且该单在结果里）。
+    const byPickedSort = await client.get<Array<{ id: string }>>(
+      '/api/v1/orders?sortBy=pickedAt&sortOrder=desc&pageSize=50',
+    );
+    expect(byPickedSort.body.data.some((row) => row.id === orderId)).toBe(true);
   });
 
   it('replaying 发货 never deducts stock twice (task §27)', async () => {

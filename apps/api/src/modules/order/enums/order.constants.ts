@@ -114,7 +114,13 @@ export type OrderStageFilter = (typeof ORDER_STAGE_FILTERS)[number];
  * 时限）。repository 只按这里的值映射 ORDER BY，防注入；排序语义见
  * order.repository 的 orderSortOf。
  */
-export const ORDER_LIST_SORT_FIELDS = ['orderedAt', 'skuCode', 'shipmentDeadline'] as const;
+export const ORDER_LIST_SORT_FIELDS = [
+  'orderedAt',
+  'pickedAt',
+  'shippedAt',
+  'skuCode',
+  'shipmentDeadline',
+] as const;
 export type OrderListSortField = (typeof ORDER_LIST_SORT_FIELDS)[number];
 
 /**

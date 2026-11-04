@@ -18,7 +18,7 @@ export interface OrdersViewSettings {
   /** 展开行主图缩略图边长（px，方形不裁剪）。 */
   thumbnailSize: number;
   /** 默认排序（2026-10-14 用户指示：在视图设置中配置；排序按钮只切会话态）。 */
-  defaultSortBy: 'orderedAt' | 'skuCode' | 'shipmentDeadline';
+  defaultSortBy: 'orderedAt' | 'pickedAt' | 'shippedAt' | 'skuCode' | 'shipmentDeadline';
   defaultSortOrder: 'asc' | 'desc';
   /** 主表列（数组顺序即显示顺序）。 */
   mainColumns: ColumnSetting[];

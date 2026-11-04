@@ -24,6 +24,10 @@ export interface OrderListFilters {
   storeId?: string;
   /** Hard restriction to these order ids (待采购 filter pipeline, T3). */
   orderIds?: string[];
+  /** 时间轴（2026-11-04）：筛选日期范围时使用；缺省按订单创建时间。 */
+  timeField?: 'orderedAt' | 'pickedAt' | 'shippedAt';
+  dateFrom?: string;
+  dateTo?: string;
   /** 排序字段（白名单，2026-10-14）；缺省 = 下单时间。 */
   sortBy?: OrderListSortField;
   sortOrder?: 'asc' | 'desc';
@@ -64,6 +68,22 @@ const MIN_SKU_CODE_SQL =
 const SKU_CODE_SORT_ALIAS = 'first_sku_code';
 
 /**
+ * 时间轴（2026-11-04 用户需求：按 下单 / 拣货 / 发货 时间筛选与排序）。
+ *
+ * - 下单时间：orders.ordered_at（平台事实）；
+ * - 拣货时间：订单第一次汇总为 PICKED（order_status_history 首次 to_status=PICKED）；
+ * - 发货时间：首个发货单的 shipped_at（仓内正式出库时间）。
+ * 用 SELECT 别名同时喂排序：TypeORM 两段式分页会把 ORDER BY 里的点当别名解析，
+ * 原始子查询必须走别名（2026-10-17 SKU 排序 500 的教训）。
+ */
+const PICKED_AT_ALIAS = 'first_picked_at';
+const SHIPPED_AT_ALIAS = 'first_shipped_at';
+const PICKED_AT_SQL = `(SELECT MIN(h.created_at) FROM order_status_history h
+   WHERE h.order_id = o.id AND h.to_status = 'PICKED')`;
+const SHIPPED_AT_SQL = `(SELECT MIN(sh.shipped_at) FROM shipments sh
+   WHERE sh.order_id = o.id AND sh.shipped_at IS NOT NULL)`;
+
+/**
  * 排序白名单映射（纯函数，可单测）。未列出的 sortBy 回落默认（下单时间
  * 新→旧）；表达式全部来自本文件常量，永不拼接用户输入（防注入）。
  * NULL 统一压最后（发货时限为空 / 全行未映射的订单不打断浏览）。
@@ -85,6 +105,20 @@ export function orderSortOf(
       return [
         urgentKey,
         { expression: SKU_CODE_SORT_ALIAS, direction, nulls: 'NULLS LAST' },
+        { expression: 'o.orderedAt', direction: 'DESC' },
+      ];
+    case 'pickedAt':
+      // 拣货完成时间（未拣的排最后）。
+      return [
+        urgentKey,
+        { expression: PICKED_AT_ALIAS, direction, nulls: 'NULLS LAST' },
+        { expression: 'o.orderedAt', direction: 'DESC' },
+      ];
+    case 'shippedAt':
+      // 首次出库时间（未发货的排最后）。
+      return [
+        urgentKey,
+        { expression: SHIPPED_AT_ALIAS, direction, nulls: 'NULLS LAST' },
         { expression: 'o.orderedAt', direction: 'DESC' },
       ];
     case 'shipmentDeadline':
@@ -120,6 +154,10 @@ export function orderBySqlOf(
   switch (sortBy) {
     case 'skuCode':
       return `${urgent}, ${MIN_SKU_CODE_SQL} ${direction} NULLS LAST, o.ordered_at DESC, o.id ASC`;
+    case 'pickedAt':
+      return `${urgent}, (SELECT MIN(h.created_at) FROM order_status_history h WHERE h.order_id = o.id AND h.to_status = 'PICKED') ${direction} NULLS LAST, o.ordered_at DESC, o.id ASC`;
+    case 'shippedAt':
+      return `${urgent}, (SELECT MIN(sh.shipped_at) FROM shipments sh WHERE sh.order_id = o.id AND sh.shipped_at IS NOT NULL) ${direction} NULLS LAST, o.ordered_at DESC, o.id ASC`;
     case 'shipmentDeadline':
       return `${urgent}, o.shipment_deadline ${direction} NULLS LAST, o.ordered_at DESC, o.id ASC`;
     default:
@@ -601,6 +639,8 @@ export class OrderRepository {
       )
       // SKU 列展示 + SKU 排序键（2026-10-14）：排序与显示用同一个子查询，
       // 两列永不可能矛盾。排序走这个别名（见 SKU_CODE_SORT_ALIAS 注释）。
+      .addSelect(PICKED_AT_SQL, PICKED_AT_ALIAS)
+      .addSelect(SHIPPED_AT_SQL, SHIPPED_AT_ALIAS)
       .addSelect(MIN_SKU_CODE_SQL, SKU_CODE_SORT_ALIAS)
       .addSelect(
         `(SELECT COUNT(DISTINCT sk.sku_code) FROM order_items i
@@ -613,7 +653,13 @@ export class OrderRepository {
       // platform_sku_id 任一命中即入选（EXISTS 仿 goodsStatePredicate）。
       // SKU 名称（中/俄）2026-10-23 补上：运营常只记得名称，搜编码记不住。
       qb.andWhere(
-        `(o.order_no ILIKE :kw OR o.platform_order_id ILIKE :kw OR EXISTS (
+        `(o.order_no ILIKE :kw OR o.platform_order_id ILIKE :kw
+          OR o.platform_tracking_no ILIKE :kw
+          OR EXISTS (
+            SELECT 1 FROM shipments sh
+             WHERE sh.order_id = o.id
+               AND (sh.tracking_number ILIKE :kw OR sh.external_shipment_id ILIKE :kw))
+          OR EXISTS (
            SELECT 1 FROM order_items i
            LEFT JOIN skus sk ON sk.id = i.sku_id
            WHERE i.order_id = o.id
@@ -626,6 +672,21 @@ export class OrderRepository {
          ))`,
         { kw: `%${filters.keyword}%` },
       );
+    }
+    // 时间范围（2026-11-04）：timeField 选择时间轴，dateFrom/dateTo 闭区间过滤。
+    if (filters.dateFrom !== undefined || filters.dateTo !== undefined) {
+      const expression =
+        filters.timeField === 'pickedAt'
+          ? PICKED_AT_SQL
+          : filters.timeField === 'shippedAt'
+            ? SHIPPED_AT_SQL
+            : 'o.ordered_at';
+      if (filters.dateFrom !== undefined) {
+        qb.andWhere(`${expression} >= :dateFrom`, { dateFrom: filters.dateFrom });
+      }
+      if (filters.dateTo !== undefined) {
+        qb.andWhere(`${expression} <= :dateTo`, { dateTo: filters.dateTo });
+      }
     }
     if (filters.platform !== undefined && filters.platform !== '') {
       qb.andWhere('p.code = :platform', { platform: filters.platform });

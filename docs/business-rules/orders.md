@@ -1515,6 +1515,42 @@ RESERVED / PICKED 行的订单逐单拒绝并说明原因。
 
 ---
 
+# 17c. 列表搜索、时间筛选与排序（2026-11-04 用户需求）
+
+## 搜索（单框 `keyword`）
+
+命中任一即入选：订单号、平台订单号、**平台运单号**（`orders.platform_tracking_no`）、
+**发货单物流单号 / 平台发货单号**（`shipments.tracking_number`、
+`external_shipment_id`）、内部 SKU 编码/中俄名称、offer_id、seller_sku、
+platform_sku_id。
+
+## 时间范围筛选
+
+`timeField`（默认 `orderedAt`）+ `dateFrom` / `dateTo`（ISO，闭区间）：
+
+| timeField | 时间事实 | 为空时 |
+|---|---|---|
+| `orderedAt` | `orders.ordered_at`（平台下单时间） | — |
+| `pickedAt` | 订单首次汇总为 `PICKED`（`order_status_history` 首次 `to_status='PICKED'`） | 不参与筛选 |
+| `shippedAt` | 首个发货单 `shipped_at`（仓内正式出库） | 不参与筛选 |
+
+- 页签计数与列表使用同一组时间条件，避免计数与列表不一致。
+- 「拣货时间」用订单汇总状态（全部行拣完）而非某一行扫码时刻；部分拣货的订单
+  在全部拣完前没有拣货时间（排序时这些订单排最后）。
+
+## 排序（`sortBy` + `sortOrder`）
+
+白名单：`orderedAt`（默认）/ `pickedAt` / `shippedAt` / `skuCode` /
+`shipmentDeadline`。加急恒定置顶（ADR 0022）；时间类字段为空（未拣/未发）的
+订单统一 `NULLS LAST`，不打断浏览。
+
+前端排序按钮（2026-11-04 用户口径）：**点一次按该字段排序，再点翻方向**——
+下单时间默认「新订单在上」(`desc`)，再点为「旧订单在上」(`asc`)；拣货/发货
+时间同理；SKU 默认 A→Z。按钮上直接显示当前方向（↓/↑），tooltip 给出人读语义；
+「默认排序」按钮回到视图设置里配置的默认组合。
+
+---
+
 # 18. 错误摄入订单的彻底移除（2026-10-24 用户指示）
 
 「取消」与「移除」是两件事，不能互相替代：

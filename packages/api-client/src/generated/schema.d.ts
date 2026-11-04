@@ -7758,7 +7758,7 @@ export interface components {
              * @description 订单列表当前排序字段（决定合并 PDF 的面单顺序，与列表一致；缺省=下单时间新→旧）
              * @enum {string}
              */
-            sortBy?: "orderedAt" | "skuCode" | "shipmentDeadline";
+            sortBy?: "orderedAt" | "pickedAt" | "shippedAt" | "skuCode" | "shipmentDeadline";
             /**
              * @description 排序方向（与列表一致）
              * @enum {string}
@@ -11793,8 +11793,14 @@ export interface operations {
                 fulfillmentMode?: string;
                 /** @description 待采购视图：存在 MAPPED+BACKORDERED 且无未取消采购单覆盖的订单行 */
                 pendingProcurement?: "true";
-                /** @description 排序字段（2026-10-14）：skuCode=该单最小 SKU 编码（全未映射排最后）；orderedAt=下单时间（默认）；shipmentDeadline=发货时限（无时限排最后） */
-                sortBy?: "orderedAt" | "skuCode" | "shipmentDeadline";
+                /** @description 时间筛选类型（2026-11-04）：orderedAt=下单时间（默认）/ pickedAt=拣货完成时间 / shippedAt=首次出库时间。与 dateFrom/dateTo 组合使用。 */
+                timeField?: "orderedAt" | "pickedAt" | "shippedAt";
+                /** @description 时间范围起（ISO 时间，含） */
+                dateFrom?: string;
+                /** @description 时间范围止（ISO 时间，含） */
+                dateTo?: string;
+                /** @description 排序字段（2026-10-14）：skuCode=该单最小 SKU 编码（全未映射排最后）；orderedAt=下单时间（默认）；pickedAt=拣货完成时间；shippedAt=首次出库时间；shipmentDeadline=发货时限（无时限排最后） */
+                sortBy?: "orderedAt" | "pickedAt" | "shippedAt" | "skuCode" | "shipmentDeadline";
                 /** @description 排序方向；默认 desc */
                 sortOrder?: "asc" | "desc";
             };

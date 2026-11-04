@@ -6295,13 +6295,41 @@
             }
           },
           {
+            "name": "timeField",
+            "required": false,
+            "in": "query",
+            "description": "时间筛选类型（2026-11-04）：orderedAt=下单时间（默认）/ pickedAt=拣货完成时间 / shippedAt=首次出库时间。与 dateFrom/dateTo 组合使用。",
+            "schema": {
+              "type": "string",
+              "enum": ["orderedAt", "pickedAt", "shippedAt"]
+            }
+          },
+          {
+            "name": "dateFrom",
+            "required": false,
+            "in": "query",
+            "description": "时间范围起（ISO 时间，含）",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "dateTo",
+            "required": false,
+            "in": "query",
+            "description": "时间范围止（ISO 时间，含）",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "sortBy",
             "required": false,
             "in": "query",
-            "description": "排序字段（2026-10-14）：skuCode=该单最小 SKU 编码（全未映射排最后）；orderedAt=下单时间（默认）；shipmentDeadline=发货时限（无时限排最后）",
+            "description": "排序字段（2026-10-14）：skuCode=该单最小 SKU 编码（全未映射排最后）；orderedAt=下单时间（默认）；pickedAt=拣货完成时间；shippedAt=首次出库时间；shipmentDeadline=发货时限（无时限排最后）",
             "schema": {
               "type": "string",
-              "enum": ["orderedAt", "skuCode", "shipmentDeadline"]
+              "enum": ["orderedAt", "pickedAt", "shippedAt", "skuCode", "shipmentDeadline"]
             }
           },
           {
@@ -23039,7 +23067,7 @@
           },
           "sortBy": {
             "type": "string",
-            "enum": ["orderedAt", "skuCode", "shipmentDeadline"],
+            "enum": ["orderedAt", "pickedAt", "shippedAt", "skuCode", "shipmentDeadline"],
             "description": "订单列表当前排序字段（决定合并 PDF 的面单顺序，与列表一致；缺省=下单时间新→旧）"
           },
           "sortOrder": {

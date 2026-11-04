@@ -4,6 +4,7 @@ import {
   App as AntdApp,
   Button,
   Checkbox,
+  DatePicker,
   Drawer,
   Form,
   Image,
@@ -375,6 +376,10 @@ const SORT_PRESETS: Array<{
 }> = [
   { value: 'orderedAt:desc', label: '下单时间 新→旧', sortBy: 'orderedAt', sortOrder: 'desc' },
   { value: 'orderedAt:asc', label: '下单时间 旧→新', sortBy: 'orderedAt', sortOrder: 'asc' },
+  { value: 'pickedAt:desc', label: '拣货时间 新→旧', sortBy: 'pickedAt', sortOrder: 'desc' },
+  { value: 'pickedAt:asc', label: '拣货时间 旧→新', sortBy: 'pickedAt', sortOrder: 'asc' },
+  { value: 'shippedAt:desc', label: '发货时间 新→旧', sortBy: 'shippedAt', sortOrder: 'desc' },
+  { value: 'shippedAt:asc', label: '发货时间 旧→新', sortBy: 'shippedAt', sortOrder: 'asc' },
   { value: 'skuCode:asc', label: 'SKU 编码 A→Z', sortBy: 'skuCode', sortOrder: 'asc' },
   { value: 'skuCode:desc', label: 'SKU 编码 Z→A', sortBy: 'skuCode', sortOrder: 'desc' },
   {
@@ -392,24 +397,42 @@ const SORT_PRESETS: Array<{
 ];
 
 /**
- * 列表排序按钮（用户指示 2026-10-14 图示：默认排序 / 下单时间 / 发货时间 /
- * SKU）。字段按钮只切当前会话（方向固定：下单时间新→旧、发货时限近→远、
- * SKU A→Z）；再点已选中的按钮回到默认排序。默认值在视图设置配置。
+ * 列表排序按钮（2026-11-04 用户口径）：**点一次按该字段排序，再点翻方向**。
+ * 首次点击用该字段的默认方向（时间类 新→旧，SKU A→Z）；按钮上直接标明当前
+ * 方向与语义（tooltip），不需要再去视图设置里换方向。
  */
 const SORT_FIELD_BUTTONS: Array<{
   field: OrdersViewSettings['defaultSortBy'];
   label: string;
-  sortBy: OrdersViewSettings['defaultSortBy'];
-  sortOrder: OrdersViewSettings['defaultSortOrder'];
+  /** 首次点击的方向。 */
+  first: OrdersViewSettings['defaultSortOrder'];
+  /** 两个方向的人读文案（tooltip 与按钮后缀）。 */
+  hint: { asc: string; desc: string };
 }> = [
-  { field: 'orderedAt', label: '下单时间排序', sortBy: 'orderedAt', sortOrder: 'desc' },
   {
-    field: 'shipmentDeadline',
-    label: '发货时间排序',
-    sortBy: 'shipmentDeadline',
-    sortOrder: 'asc',
+    field: 'orderedAt',
+    label: '下单时间',
+    first: 'desc',
+    hint: { desc: '按下单时间排序，新订单在上', asc: '按下单时间排序，旧订单在上' },
   },
-  { field: 'skuCode', label: 'SKU排序', sortBy: 'skuCode', sortOrder: 'asc' },
+  {
+    field: 'pickedAt',
+    label: '拣货时间',
+    first: 'desc',
+    hint: { desc: '按拣货完成时间排序，最近拣货的在上', asc: '按拣货完成时间排序，最早拣货的在上' },
+  },
+  {
+    field: 'shippedAt',
+    label: '发货时间',
+    first: 'desc',
+    hint: { desc: '按发货时间排序，最近发货的在上', asc: '按发货时间排序，最早发货的在上' },
+  },
+  {
+    field: 'skuCode',
+    label: 'SKU',
+    first: 'asc',
+    hint: { desc: '按 SKU 编码排序，Z→A', asc: '按 SKU 编码排序，A→Z' },
+  },
 ];
 
 const EXPANDED_COLUMN_LABELS: Record<string, string> = {
@@ -1193,6 +1216,10 @@ export function OrdersPage() {
   /** 展开区被点中的订单行（侧边栏切换到 SKU 信息视图，用户指示 2026-09-17）。 */
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [fulfillmentModeFilter, setFulfillmentModeFilter] = useState<string | undefined>();
+  /** 时间范围筛选（2026-11-04）：时间类型 + 起止 ISO；默认按下单时间。 */
+  const [timeField, setTimeField] = useState<'orderedAt' | 'pickedAt' | 'shippedAt'>('orderedAt');
+  const [dateFrom, setDateFrom] = useState<string | undefined>();
+  const [dateTo, setDateTo] = useState<string | undefined>();
   // 视图设置（用户指示 2026-09-17）：localStorage 持久化。
   const [viewSettings, setViewSettings] = useState<OrdersViewSettings>(loadViewSettings);
   const [viewOpen, setViewOpen] = useState(false);
@@ -1279,6 +1306,13 @@ export function OrdersPage() {
       ...(goodsState ? { goodsState } : {}),
       ...(storeId ? { storeId } : {}),
       ...(fulfillmentModeFilter ? { fulfillmentMode: fulfillmentModeFilter } : {}),
+      ...(dateFrom !== undefined || dateTo !== undefined
+        ? {
+            timeField,
+            ...(dateFrom === undefined ? {} : { dateFrom }),
+            ...(dateTo === undefined ? {} : { dateTo }),
+          }
+        : {}),
       // 列表排序（2026-10-14）：按钮会话态；默认值也显式传，保证查询键稳定。
       sortBy: sessionSort.sortBy,
       sortOrder: sessionSort.sortOrder,
@@ -1296,6 +1330,9 @@ export function OrdersPage() {
       goodsState,
       storeId,
       fulfillmentModeFilter,
+      timeField,
+      dateFrom,
+      dateTo,
       sessionSort.sortBy,
       sessionSort.sortOrder,
     ],
@@ -1310,6 +1347,14 @@ export function OrdersPage() {
     ...(debouncedKeyword ? { keyword: debouncedKeyword } : {}),
     ...(platformFilter ? { platform: platformFilter } : {}),
     ...(storeId ? { storeId } : {}),
+    // 时间范围也参与页签计数，否则计数与列表会各说各话（2026-11-04）。
+    ...(dateFrom !== undefined || dateTo !== undefined
+      ? {
+          timeField,
+          ...(dateFrom === undefined ? {} : { dateFrom }),
+          ...(dateTo === undefined ? {} : { dateTo }),
+        }
+      : {}),
   } as Record<string, unknown>;
   const allCount = useApiQuery<Envelope<OrderListItem[]>>('/api/v1/orders', countFilters, [
     'orders-count',
@@ -3669,6 +3714,33 @@ export function OrdersPage() {
           }}
           options={fulfillmentModeOptionsFor(platformFilter)}
         />
+        {/* 时间范围（2026-11-04 用户需求）：可切换时间轴（下单/拣货/发货）。 */}
+        <Select
+          style={{ width: 130 }}
+          value={timeField}
+          onChange={(value) => {
+            setPage(1);
+            setTimeField(value);
+          }}
+          options={[
+            { value: 'orderedAt', label: '下单时间' },
+            { value: 'pickedAt', label: '拣货时间' },
+            { value: 'shippedAt', label: '发货时间' },
+          ]}
+        />
+        <DatePicker.RangePicker
+          showTime={{ format: 'HH:mm' }}
+          format="YYYY-MM-DD HH:mm"
+          placeholder={['开始时间', '结束时间']}
+          style={{ width: 340 }}
+          onChange={(dates) => {
+            setPage(1);
+            const from = dates?.[0] ?? null;
+            const to = dates?.[1] ?? null;
+            setDateFrom(from === null ? undefined : from.toISOString());
+            setDateTo(to === null ? undefined : to.toISOString());
+          }}
+        />
       </FilterBar>
 
       {/* Axis 2: line-level goods-state chips (§2.2) - single select on top of
@@ -3722,28 +3794,26 @@ export function OrdersPage() {
             默认排序
           </Button>
           {SORT_FIELD_BUTTONS.map((button) => {
-            const active =
-              sessionSort.sortBy === button.sortBy && sessionSort.sortOrder === button.sortOrder;
+            // 2026-11-04：同字段再次点击 = 正序/倒序翻转（不再回默认排序）。
+            const active = sessionSort.sortBy === button.field;
+            const direction = active ? sessionSort.sortOrder : button.first;
             return (
-              <Button
-                key={button.field}
-                size="small"
-                type={active ? 'primary' : 'default'}
-                onClick={() => {
-                  setPage(1);
-                  // 再点已选中的按钮 = 回到默认排序（toggle）。
-                  setSessionSort(
-                    active
-                      ? {
-                          sortBy: viewSettings.defaultSortBy,
-                          sortOrder: viewSettings.defaultSortOrder,
-                        }
-                      : { sortBy: button.sortBy, sortOrder: button.sortOrder },
-                  );
-                }}
-              >
-                {button.label}
-              </Button>
+              <Tooltip key={button.field} title={button.hint[direction]}>
+                <Button
+                  size="small"
+                  type={active ? 'primary' : 'default'}
+                  onClick={() => {
+                    setPage(1);
+                    setSessionSort(
+                      active
+                        ? { sortBy: button.field, sortOrder: direction === 'desc' ? 'asc' : 'desc' }
+                        : { sortBy: button.field, sortOrder: button.first },
+                    );
+                  }}
+                >
+                  {button.label} {direction === 'desc' ? '↓' : '↑'}
+                </Button>
+              </Tooltip>
             );
           })}
         </div>

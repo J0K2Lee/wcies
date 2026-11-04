@@ -75,6 +75,24 @@ describe('orderSortOf (2026-10-14 列表排序白名单；2026-10-16 加急置�
     expect(orderSortOf('skuCode', 'desc')[1]).toMatchObject({ direction: 'DESC' });
   });
 
+  it('maps pickedAt/shippedAt to their SELECT aliases (2026-11-04 时间轴排序)', () => {
+    // 原始子查询不能直接进 ORDER BY（两段式分页按 alias.property 解析），
+    // 必须走 addSelect 的别名。
+    expect(orderSortOf('pickedAt', 'desc')).toEqual([
+      { expression: 'o.isUrgent', direction: 'DESC' },
+      { expression: 'first_picked_at', direction: 'DESC', nulls: 'NULLS LAST' },
+      { expression: 'o.orderedAt', direction: 'DESC' },
+    ]);
+    expect(orderSortOf('shippedAt', 'asc')[1]).toMatchObject({
+      expression: 'first_shipped_at',
+      direction: 'ASC',
+      nulls: 'NULLS LAST',
+    });
+    // 无分页的原始 SQL 版必须写成 snake_case 子查询原文。
+    expect(orderBySqlOf('pickedAt', 'asc')).toContain("to_status = 'PICKED'");
+    expect(orderBySqlOf('shippedAt', 'desc')).toContain('sh.shipped_at');
+  });
+
   it('maps shipmentDeadline with NULLS LAST in both directions', () => {
     expect(orderSortOf('shipmentDeadline', 'asc')[1]).toMatchObject({
       expression: 'o.shipmentDeadline',

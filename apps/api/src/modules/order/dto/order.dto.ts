@@ -240,10 +240,31 @@ export class OrderListQueryDto extends PaginationQueryDto {
   pendingProcurement?: string;
 
   @ApiPropertyOptional({
+    enum: ['orderedAt', 'pickedAt', 'shippedAt'],
+    description:
+      '时间筛选类型（2026-11-04）：orderedAt=下单时间（默认）/ pickedAt=拣货完成时间 / ' +
+      'shippedAt=首次出库时间。与 dateFrom/dateTo 组合使用。',
+  })
+  @IsOptional()
+  @IsIn(['orderedAt', 'pickedAt', 'shippedAt'])
+  timeField?: 'orderedAt' | 'pickedAt' | 'shippedAt';
+
+  @ApiPropertyOptional({ description: '时间范围起（ISO 时间，含）' })
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @ApiPropertyOptional({ description: '时间范围止（ISO 时间，含）' })
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
+
+  @ApiPropertyOptional({
     enum: ORDER_LIST_SORT_FIELDS,
     description:
       '排序字段（2026-10-14）：skuCode=该单最小 SKU 编码（全未映射排最后）；' +
-      'orderedAt=下单时间（默认）；shipmentDeadline=发货时限（无时限排最后）',
+      'orderedAt=下单时间（默认）；pickedAt=拣货完成时间；shippedAt=首次出库时间；' +
+      'shipmentDeadline=发货时限（无时限排最后）',
   })
   @IsOptional()
   @IsIn(ORDER_LIST_SORT_FIELDS)
