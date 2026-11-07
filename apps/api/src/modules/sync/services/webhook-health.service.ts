@@ -4,6 +4,7 @@ import { ExceptionService } from '../../exception/services/exception.service';
 import { NotificationService } from '../../notification/services/notification.service';
 import { PlatformService } from '../../platform/platform.service';
 import { StoreService } from '../../store/services/store.service';
+import { ExternalRawEventRepository } from '../repositories/external-raw-event.repository';
 import { OzonWebhookService } from './ozon-webhook.service';
 import { WbWebhookService } from './wb-webhook.service';
 
@@ -22,6 +23,13 @@ export const WEBHOOK_HEALTH_STORE_GAP_MS = 800;
  * 是外部调用，不能在每次渲染/切行时打一遍；只有「立即体检」才强制刷新。
  */
 export const WEBHOOK_HEALTH_CACHE_MS = 5 * 60 * 1000;
+
+/**
+ * 「静默看门狗」阈值（2026-11-07）：enabled 的 OZON 订阅连续这么久没有任何
+ * 入站推送（连平台探测 PING 都没有）就报异常。平台 PING 约每天 3-4 次，
+ * 24 小时没有 = 链路确实断了，且比平台把订阅暂停更早一天暴露。
+ */
+export const WEBHOOK_SILENCE_ALERT_MS = 24 * 60 * 60 * 1000;
 
 export type WebhookHealthState =
   | 'OK'
@@ -51,6 +59,15 @@ export interface WebhookHealthResult {
    * 自检失败才是真的坏了（隧道/入口/应答格式）。
    */
   selfCheck: { ok: boolean; detail: string } | null;
+  /** 平台投递可用性（OZON；YELLOW/RED = 平台已在记账失败，随时会暂停）。 */
+  availability: {
+    status: string;
+    disableReason: string | null;
+    since: string | null;
+    problematicType: string | null;
+  } | null;
+  /** 最近一次收到该店任何推送的时间（含 PING）；null = 从未收到。 */
+  lastEventAt: string | null;
 }
 
 /**
@@ -78,6 +95,7 @@ export class WebhookHealthService {
     private readonly platformService: PlatformService,
     private readonly ozonWebhook: OzonWebhookService,
     private readonly wbWebhook: WbWebhookService,
+    private readonly rawEvents: ExternalRawEventRepository,
     private readonly exceptionService: ExceptionService,
     private readonly notification: NotificationService,
     private readonly logger: AppLoggerService,
@@ -105,6 +123,14 @@ export class WebhookHealthService {
           continue;
         }
         await this.enforce(result);
+        if (
+          result.platform === 'OZON' &&
+          result.state !== 'PAUSED' &&
+          result.state !== 'NOT_SUBSCRIBED' &&
+          result.state !== 'UNKNOWN'
+        ) {
+          await this.enforceSilence(result);
+        }
         if (result.state === 'PAUSED') {
           paused += 1;
         }
@@ -164,7 +190,19 @@ export class WebhookHealthService {
     knownPlatformCode?: string,
   ): Promise<WebhookHealthResult> {
     const platform = knownPlatformCode ?? (await this.resolvePlatformCode(platformId));
-    const base = { storeId, storeCode, platform, check: null, selfCheck: null };
+    const lastEventAt = await this.rawEvents
+      .findLastReceivedAt(storeId)
+      .catch(() => null)
+      .then((value) => (value === null ? null : value.toISOString()));
+    const base = {
+      storeId,
+      storeCode,
+      platform,
+      check: null,
+      selfCheck: null,
+      availability: null,
+      lastEventAt,
+    };
     const partial =
       platform === 'OZON'
         ? await this.inspectOzon(base)
@@ -180,14 +218,18 @@ export class WebhookHealthService {
     platform: string;
     check: null;
     selfCheck: null;
+    availability: WebhookHealthResult['availability'];
+    lastEventAt: string | null;
   }): Promise<Omit<WebhookHealthResult, 'checkedAt'>> {
     const getStatus = this.ozonWebhook.getStatus.bind(this.ozonWebhook);
     const check = this.ozonWebhook.check.bind(this.ozonWebhook);
     try {
       const status = await getStatus(base.storeId);
+      const availability = status.availability;
       if (!status.subscribed) {
         return {
           ...base,
+          availability,
           state: 'NOT_SUBSCRIBED',
           reason: '该店铺尚未订阅 OZON 推送',
           check: null,
@@ -195,16 +237,46 @@ export class WebhookHealthService {
       }
       if (status.enabled === false) {
         // 平台自动暂停：不再调用 check（订阅停用后探测也可能被平台忽略）。
+        const detail =
+          availability?.problematicType === null || availability?.problematicType === undefined
+            ? ''
+            : `；平台记账的失败事件：${availability.problematicType}`;
         return {
           ...base,
+          availability,
           state: 'PAUSED',
-          reason: '平台已暂停该订阅（enable=false）：连续投递失败会被 OZON 自动停用',
+          reason: `平台已暂停该订阅（enable=false）：连续投递失败会被 OZON 自动停用${detail}`,
           check: null,
         };
       }
       const probe = await check(base.storeId);
       const selfCheck = await this.probeOwnUrl(probe.url);
       const platformErrors = probe.errors.map((error) => error.type).join(' / ');
+
+      // 平台可用性记账（2026-11-07）：enable 还是 true 但状态已经 YELLOW/RED
+      // 时提前报异常——等 enable=false 就晚了（平台已经替我们停了订阅）。
+      if (
+        availability !== null &&
+        (availability.status === 'YELLOW' || availability.status === 'RED')
+      ) {
+        return {
+          ...base,
+          availability,
+          state: 'UNHEALTHY',
+          reason:
+            `平台投递可用性 ${availability.status}` +
+            (availability.problematicType === null
+              ? ''
+              : `（问题事件：${availability.problematicType}）`) +
+            (availability.since === null ? '' : `，自 ${availability.since}`) +
+            '：失败计数接近/超过暂停阈值，请尽快排查公网入口' +
+            (selfCheck.ok
+              ? `；入口自检正常（${selfCheck.detail}）`
+              : `；入口自检失败（${selfCheck.detail}）`),
+          check: probe,
+          selfCheck,
+        };
+      }
       if (!selfCheck.ok) {
         return {
           ...base,
@@ -243,6 +315,8 @@ export class WebhookHealthService {
     platform: string;
     check: null;
     selfCheck: null;
+    availability: WebhookHealthResult['availability'];
+    lastEventAt: string | null;
   }): Promise<Omit<WebhookHealthResult, 'checkedAt'>> {
     try {
       const status = await this.wbWebhook.getStatus(base.storeId);
@@ -347,6 +421,57 @@ export class WebhookHealthService {
     // OK / NOT_SUBSCRIBED：健康或本来就没订阅（轮询兜底），关闭历史异常。
     await resolve('WEBHOOK_PAUSED');
     await resolve('WEBHOOK_UNHEALTHY');
+  }
+
+  /**
+   * 静默看门狗（2026-11-07）：订阅 enabled、平台也没标暂停，但本店 24 小时
+   * 没有收到任何入站推送（连 PING 都没有）→ 链路断了，提前报异常。
+   *
+   * 10-30/10-31 实证：OZON 的 PING 与事件一起消失两天，同期 Yandex 正常；
+   * 那时如果只看 enable，就完全看不到「投递已经断了」。
+   */
+  private async enforceSilence(result: WebhookHealthResult): Promise<void> {
+    const last = result.lastEventAt === null ? null : Date.parse(result.lastEventAt);
+    const silent = last === null || Date.now() - last > WEBHOOK_SILENCE_ALERT_MS;
+    if (!silent) {
+      await this.exceptionService.resolveByReference({
+        exceptionType: 'WEBHOOK_SILENT',
+        referenceType: 'STORE',
+        referenceId: result.storeId,
+      });
+      return;
+    }
+    const alreadyOpen = await this.exceptionService.hasOpen({
+      exceptionType: 'WEBHOOK_SILENT',
+      referenceType: 'STORE',
+      referenceId: result.storeId,
+    });
+    const silentHours =
+      last === null ? 24 : Math.max(1, Math.floor((Date.now() - last) / (60 * 60 * 1000)));
+    await this.exceptionService.create({
+      exceptionType: 'WEBHOOK_SILENT',
+      severity: 'MEDIUM',
+      referenceType: 'STORE',
+      referenceId: result.storeId,
+      storeId: result.storeId,
+      message: `${result.storeCode}（${result.platform}）已连续 ${silentHours} 小时未收到任何平台推送（含探测 ping）——公网回调入口或投递链路中断`,
+      details: {
+        storeCode: result.storeCode,
+        platform: result.platform,
+        lastEventAt: result.lastEventAt,
+        silentHours,
+        availability: result.availability,
+      },
+    });
+    if (!alreadyOpen) {
+      await this.notification.notifyWebhookSilent({
+        storeId: result.storeId,
+        storeCode: result.storeCode,
+        platform: result.platform,
+        silentHours,
+        lastEventAt: result.lastEventAt,
+      });
+    }
   }
 
   /**

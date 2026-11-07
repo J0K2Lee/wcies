@@ -7,6 +7,7 @@ import { WbWebhookService } from './wb-webhook.service';
 import { ExceptionService } from '../../exception/services/exception.service';
 import { NotificationService } from '../../notification/services/notification.service';
 import { AppLoggerService } from '../../../common/logger/app-logger.service';
+import { ExternalRawEventRepository } from '../repositories/external-raw-event.repository';
 
 /**
  * Webhook 订阅巡检（2026-10-27）：平台暂停/体检异常 → 异常中心 + 通知；
@@ -22,6 +23,10 @@ function build(options: {
   wb?: boolean;
   /** 该 (类型, 店铺) 是否已有 OPEN 异常（用于验证「只通知一次」）。 */
   alreadyOpen?: boolean;
+  /** 平台投递可用性（2026-11-07）。 */
+  availability?: { status: string; problematicType?: string | null } | null;
+  /** 最近一次收到推送的时间；undefined = 刚刚（健康），null = 从未收到。 */
+  lastEventAt?: string | null;
 }) {
   const store = {
     id: 'store-1',
@@ -42,6 +47,17 @@ function build(options: {
       enabled: options.enabled ?? true,
       url: 'https://hook/ON-003',
       types: [],
+      availability:
+        options.availability === undefined
+          ? { status: 'GREEN', disableReason: null, since: null, problematicType: null }
+          : options.availability === null
+            ? null
+            : {
+                status: options.availability.status,
+                disableReason: null,
+                since: null,
+                problematicType: options.availability.problematicType ?? null,
+              },
     }),
     check: vi.fn().mockResolvedValue({
       url: 'https://hook/ON-003',
@@ -62,7 +78,17 @@ function build(options: {
   } as unknown as ExceptionService;
   const notification = {
     notifyWebhookHealth: vi.fn().mockResolvedValue(undefined),
+    notifyWebhookSilent: vi.fn().mockResolvedValue(undefined),
   } as unknown as NotificationService;
+  const rawEvents = {
+    findLastReceivedAt: vi.fn().mockImplementation(() => {
+      if (options.lastEventAt === null) {
+        return Promise.resolve(null);
+      }
+      const at = options.lastEventAt === undefined ? new Date() : new Date(options.lastEventAt);
+      return Promise.resolve(at);
+    }),
+  } as unknown as ExternalRawEventRepository;
   const logger = { warn: vi.fn(), info: vi.fn() } as unknown as AppLoggerService;
   const selfProbeOk = options.selfProbeOk ?? true;
   vi.stubGlobal(
@@ -83,6 +109,7 @@ function build(options: {
     platformService,
     ozonWebhook,
     wbWebhook,
+    rawEvents,
     exceptionService,
     notification,
     logger,
@@ -149,6 +176,59 @@ describe('WebhookHealthService.scan', () => {
     expect(notification.notifyWebhookHealth).not.toHaveBeenCalled();
   });
 
+  it('平台可用性 YELLOW/RED（enable 仍 true）→ 提前判 UNHEALTHY 并通知', async () => {
+    const { service, exceptionService, notification } = build({
+      platformCode: 'OZON',
+      availability: { status: 'YELLOW', problematicType: 'TYPE_STATE_CHANGED' },
+    });
+
+    const result = await service.scan();
+
+    expect(result.unhealthy).toBe(1);
+    expect(exceptionService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        exceptionType: 'WEBHOOK_UNHEALTHY',
+        message: expect.stringContaining('YELLOW'),
+      }),
+    );
+    expect(notification.notifyWebhookHealth).toHaveBeenCalledWith(
+      expect.objectContaining({ state: 'UNHEALTHY' }),
+    );
+  });
+
+  it('24h 没有任何入站推送 → WEBHOOK_SILENT（含 PING 都没有）', async () => {
+    const { service, exceptionService, notification } = build({
+      platformCode: 'OZON',
+      lastEventAt: new Date(Date.now() - 30 * 60 * 60 * 1000).toISOString(),
+    });
+
+    await service.scan();
+
+    expect(exceptionService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        exceptionType: 'WEBHOOK_SILENT',
+        severity: 'MEDIUM',
+        message: expect.stringContaining('未收到任何平台推送'),
+      }),
+    );
+    expect(notification.notifyWebhookSilent).toHaveBeenCalledWith(
+      expect.objectContaining({ storeCode: 'ON-003' }),
+    );
+  });
+
+  it('刚收到过推送 → 不报静默', async () => {
+    const { service, exceptionService, notification } = build({ platformCode: 'OZON' });
+
+    await service.scan();
+
+    expect(
+      (exceptionService.create as unknown as { mock: { calls: unknown[][] } }).mock.calls.some(
+        (call) => (call[0] as { exceptionType?: string }).exceptionType === 'WEBHOOK_SILENT',
+      ),
+    ).toBe(false);
+    expect(notification.notifyWebhookSilent).not.toHaveBeenCalled();
+  });
+
   it('平台仍需窗口里残留旧错误、但入口自检 200 → 判健康（不误报）', async () => {
     const { service, exceptionService, notification } = build({
       platformCode: 'OZON',
@@ -164,7 +244,8 @@ describe('WebhookHealthService.scan', () => {
     expect(result.unhealthy).toBe(0);
     expect(exceptionService.create).not.toHaveBeenCalled();
     expect(notification.notifyWebhookHealth).not.toHaveBeenCalled();
-    expect(exceptionService.resolveByReference).toHaveBeenCalledTimes(2);
+    // 暂停/不健康 + 静默看门狗（推送正常 → 关闭 WEBHOOK_SILENT）。
+    expect(exceptionService.resolveByReference).toHaveBeenCalledTimes(3);
   });
 
   it('健康 → 关闭两类异常，不发通知', async () => {
@@ -174,7 +255,7 @@ describe('WebhookHealthService.scan', () => {
 
     expect(exceptionService.create).not.toHaveBeenCalled();
     expect(notification.notifyWebhookHealth).not.toHaveBeenCalled();
-    expect(exceptionService.resolveByReference).toHaveBeenCalledTimes(2);
+    expect(exceptionService.resolveByReference).toHaveBeenCalledTimes(3);
   });
 
   it('未订阅不是故障：不建异常、不发通知', async () => {

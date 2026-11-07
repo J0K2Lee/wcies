@@ -118,6 +118,22 @@ export const NOTIFICATION_EVENTS: Record<string, NotificationEventDefinition> = 
   },
 
   /**
+   * Webhook 静默（2026-11-07）：enabled 的订阅 24h 没有收到任何推送（含 PING）。
+   * 与「被暂停」互补：暂停是平台已经停了，静默是链路已经断了但平台还没停。
+   */
+  STORE_WEBHOOK_SILENT: {
+    type: 'STORE_WEBHOOK_SILENT',
+    label: 'Webhook 停止推送',
+    level: 'WARN',
+    conditionFields: [
+      { key: 'storeId', label: '店铺' },
+      { key: 'platform', label: '平台' },
+    ],
+    cardFields: ['storeCode', 'platform', 'lastEventAt', 'silentHours'],
+    linkPath: '/stores',
+  },
+
+  /**
    * 买家侧提醒（2026-11-02）：买家会话有新消息 / 新差评 / 新退货申请 /
    * 退货状态变化。四个事件都按店铺+平台过滤，运营只订阅自己盯的店。
    *

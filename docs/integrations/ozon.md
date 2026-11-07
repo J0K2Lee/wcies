@@ -515,6 +515,39 @@ REJECTED / 未知瞬时错误）统一返回该应答体；`PLATFORM_BAD_RESPONS
 3. 平台会补送历史失败事件：实测订阅成功后立刻收到了**当天早些时候失败校验**的
    补送（见 §6.6），幂等去重必须按"同 payload 可能重复到达"设计（已是如此）。
 
+### 6.5.1 投递可用性记账与静默看门狗（2026-11-07 实测补充）
+
+`/v1/notification/list` 每条订阅还返回四个字段，直接说明「平台为什么停你」：
+
+```json
+{"availability_status":"RED","disable_reason":"AVAILABILITY",
+ "availability_status_date":"2026-11-04T01:25:08Z","problematic_type":"TYPE_STATE_CHANGED"}
+```
+
+- `availability_status`：`GREEN(0) / YELLOW(1500) / RED(2500)`（括号为平台阈值，
+  单位以平台口径为准，实测会随时间回落，ON-011 从 RED 自己回到 GREEN）；
+- `problematic_type`：记账里失败最多的**事件类型**（如 `TYPE_STATE_CHANGED`、
+  `TYPE_NEW_POSTING`）——它告诉我们哪一类推送在失败；
+- `disable_reason=AVAILABILITY` + `enable=false` 就是自动暂停的原因。
+
+**2026-11-04 事故复盘**：当天 01:22–02:48（UTC）六家 OZON 店在 ~1.5 小时内
+全部被自动停用，`problematic_type` 各不相同（STATE_CHANGED / NEW_POSTING /
+POSTING_CANCELLED），说明是**普遍投递失败**而非某个事件体格式错误。应用侧
+720 次回调全部 200、无畸形载荷；OZON 的 PING 探测在 10-30/10-31 完全消失
+（同期 Yandex 正常），证明失败发生在**请求没到达应用之前**（公网入口/隧道
+边缘），这类失败应用日志永远看不到。
+
+因此巡检增加两层（`WebhookHealthService`）：
+
+1. **可用性预警**：`enable` 仍为 true、但 `availability_status` 已是 YELLOW/RED
+   → 直接判 `UNHEALTHY` 并通知（异常中心 `WEBHOOK_UNHEALTHY`），抢在平台暂停前修；
+2. **静默看门狗**：订阅 enabled、平台也没标红色，但本店 **24 小时**没收到任何
+   入站推送（连 PING 都没有）→ 异常 `WEBHOOK_SILENT`（MEDIUM）+ 通知
+   `STORE_WEBHOOK_SILENT`。恢复收到任意推送后自动关闭。
+
+另：`docker-compose.yml` 为 api-dev / tunnel 显式设置 json-file 10×100MB 轮转，
+避免关键窗口的 cloudflared 日志被裁掉（2026-11-04 排查时 10-29～10-31 的日志已丢失）。
+
 ### 6.6 订阅状态与首批真实投递（2026-09-14）
 
 已订阅（卖家后台，店铺 ON-001）：

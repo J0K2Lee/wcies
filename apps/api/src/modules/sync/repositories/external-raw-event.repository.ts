@@ -14,6 +14,20 @@ export class ExternalRawEventRepository {
     private readonly repository: Repository<ExternalRawEventEntity>,
   ) {}
 
+  /**
+   * 该店铺最近一次收到任何平台推送的时间（含探测 PING，2026-11-07）。
+   * 用于「静默看门狗」：enabled 的订阅长时间没有任何入站请求 = 投递链路中断，
+   * 这比等平台把订阅暂停更早暴露问题（10-30/10-31 的实证）。
+   */
+  async findLastReceivedAt(storeId: string): Promise<Date | null> {
+    const rows = await this.dataSource.query<Array<{ last: Date | null }>>(
+      `SELECT MAX(received_at) AS last FROM external_raw_events WHERE store_id = $1::uuid`,
+      [storeId],
+    );
+    const last = rows[0]?.last ?? null;
+    return last === null ? null : new Date(last);
+  }
+
   /** Stable hash for idempotency (task §27): sorted-key canonical JSON. */
   static payloadHash(payload: Record<string, unknown>): string {
     const canonical = canonicalJson(payload);

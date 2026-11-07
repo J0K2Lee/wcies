@@ -75,6 +75,9 @@ const EXCEPTION_TYPE_META: Record<string, { label: string; category: string }> =
   ORDER_CANCELLED_AFTER_SHIP: { label: '已发货被平台取消', category: '退货/退款' },
   RETURN_ORDER_NOT_FOUND: { label: '退货订单未找到', category: '退货/退款' },
   RETURN_DIFFERENCE: { label: '退货差异', category: '退货/退款' },
+  WEBHOOK_PAUSED: { label: 'Webhook 订阅被暂停', category: '推送订阅' },
+  WEBHOOK_UNHEALTHY: { label: 'Webhook 体检异常', category: '推送订阅' },
+  WEBHOOK_SILENT: { label: 'Webhook 停止推送', category: '推送订阅' },
 };
 
 const EXCEPTION_STATUS_META: Record<

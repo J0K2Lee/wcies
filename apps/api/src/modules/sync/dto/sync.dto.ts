@@ -128,6 +128,26 @@ export class WebhookHealthDto {
       '平台 check.errors 是滚动窗口，修复后仍可能残留旧错误',
   })
   selfCheck!: { ok: boolean; detail: string } | null;
+  @ApiProperty({
+    nullable: true,
+    type: Object,
+    description:
+      '平台投递可用性（OZON 2026-11-07）：status GREEN/YELLOW/RED，YELLOW 起即预警；' +
+      'problematicType 是平台记账的失败事件类型',
+  })
+  availability!: {
+    status: string;
+    disableReason: string | null;
+    since: string | null;
+    problematicType: string | null;
+  } | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    format: 'date-time',
+    description: '最近一次收到该店任何推送（含 PING）；null = 从未收到',
+  })
+  lastEventAt!: string | null;
 }
 
 export class RawEventDto {

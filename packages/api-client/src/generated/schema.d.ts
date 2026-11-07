@@ -925,6 +925,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/skus/exports/columns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 导出可选列目录（含分组与默认勾选） */
+        get: operations["SkuExportController_columns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/skus/exports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 提交 SKU 导出任务（一行一 listing；全量，走队列） */
+        post: operations["SkuExportController_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/skus/exports/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 导出任务状态（COMPLETED 时带 30 分钟签名下载地址） */
+        get: operations["SkuExportController_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/inventory": {
         parameters: {
             query?: never;
@@ -4127,7 +4178,7 @@ export interface components {
         NotificationDto: {
             id: string;
             /** @enum {string} */
-            type: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "PICKING_ORDER_CANCELLED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
+            type: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "STORE_WEBHOOK_SILENT" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "PICKING_ORDER_CANCELLED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
             /** @enum {string} */
             channel: "SYSTEM" | "FEISHU";
             /** @example ORDER_INTERCEPTION */
@@ -4190,7 +4241,7 @@ export interface components {
             /** @enum {string} */
             channel: "FEISHU_DM" | "FEISHU_GROUP";
             /** @enum {string} */
-            eventType: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "PICKING_ORDER_CANCELLED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
+            eventType: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "STORE_WEBHOOK_SILENT" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "PICKING_ORDER_CANCELLED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
             /**
              * @example {
              *       "level": [
@@ -4215,7 +4266,7 @@ export interface components {
              * @example ORDER_INTERCEPTION_REQUIRED
              * @enum {string}
              */
-            eventType: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "PICKING_ORDER_CANCELLED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
+            eventType: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "STORE_WEBHOOK_SILENT" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "PICKING_ORDER_CANCELLED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
             /**
              * @description AND 组合的过滤条件：键为事件可过滤字段（storeId / warehouseCode / skuCode / level），值为候选集合。空对象 = 该事件全收
              * @example {
@@ -4763,6 +4814,100 @@ export interface components {
             suggestedUnitCost: string | null;
             /** @enum {string|null} */
             suggestedUnitCostSource: "MOVING_AVERAGE" | null;
+        };
+        SkuExportColumnDto: {
+            /** @example skuCode */
+            key: string;
+            /** @example SKU编码 */
+            label: string;
+            /** @example BASIC */
+            group: string;
+            /** @example 基础 */
+            groupLabel: string;
+            /**
+             * @description 勾选后按「一行一 listing」展开
+             * @example true
+             */
+            listing: boolean;
+            /** @example true */
+            defaultSelected: boolean;
+        };
+        SkuExportJobCreatedDto: {
+            /** @example 12 */
+            jobId: string;
+            /** @enum {string} */
+            status: "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED";
+        };
+        SkuExportFiltersDto: {
+            /** @description Matches sku_code / name_zh / name_ru / model / barcode */
+            keyword?: string;
+            /** Format: uuid */
+            brandId?: string;
+            /**
+             * Format: uuid
+             * @description 含全部子分类（决策 0005 §9.5）
+             */
+            categoryId?: string;
+            /** @enum {string} */
+            status?: "DRAFT" | "ACTIVE" | "INACTIVE";
+            /** @enum {string} */
+            hasListing?: "true" | "false";
+            /** Format: uuid */
+            platformId?: string;
+            /** Format: uuid */
+            storeId?: string;
+            /** @enum {string} */
+            serialTracking?: "true" | "false";
+        };
+        CreateSkuExportRequestDto: {
+            /**
+             * @description 列 key，必须来自 GET /skus/exports/columns；含平台映射列时一行一 listing
+             * @example [
+             *       "skuCode",
+             *       "nameZh",
+             *       "brand",
+             *       "platform"
+             *     ]
+             */
+            columns: string[];
+            /** @description 不传 = 全部 SKU */
+            filters?: components["schemas"]["SkuExportFiltersDto"];
+            /** @description 只导出这些 SKU（表格多选）；与该字段同时存在时忽略 filters */
+            skuIds?: string[];
+            /**
+             * @default skuCode
+             * @enum {string}
+             */
+            sortBy: "createdAt" | "updatedAt" | "skuCode" | "nameZh";
+            /**
+             * @default asc
+             * @enum {string}
+             */
+            sortOrder: "asc" | "desc";
+            /**
+             * @description 浏览器时区偏移（分钟，东八区 = 480）。时间列按它换算后写入 Excel。
+             * @example 480
+             */
+            tzOffsetMinutes?: number;
+        };
+        SkuExportJobStatusDto: {
+            /** @example 12 */
+            jobId: string;
+            /** @enum {string} */
+            status: "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED";
+            /**
+             * @description 进度百分比 0–100
+             * @example 42
+             */
+            progress: number;
+            /** @example 1234 */
+            rowCount?: number;
+            /** @example SKU导出_20261104_1530.xlsx */
+            fileName?: string;
+            /** @description 签名下载地址（30 分钟有效），仅 COMPLETED 时返回 */
+            downloadUrl?: string;
+            /** @example 导出失败原因 */
+            error?: string;
         };
         InventoryRowDto: {
             id: string;
@@ -6337,7 +6482,7 @@ export interface components {
             /** @example EXC00000001 */
             exceptionNo: string;
             /** @enum {string} */
-            exceptionType: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR" | "SYNC_FAILED" | "ORDER_TRACKING_STALLED" | "ORDER_CANCELLED_AFTER_SHIP" | "RETURN_ORDER_NOT_FOUND" | "RETURN_DIFFERENCE" | "ORDER_PLATFORM_SHIP_FAILED" | "WEBHOOK_PAUSED" | "WEBHOOK_UNHEALTHY";
+            exceptionType: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR" | "SYNC_FAILED" | "ORDER_TRACKING_STALLED" | "ORDER_CANCELLED_AFTER_SHIP" | "RETURN_ORDER_NOT_FOUND" | "RETURN_DIFFERENCE" | "ORDER_PLATFORM_SHIP_FAILED" | "WEBHOOK_PAUSED" | "WEBHOOK_UNHEALTHY" | "WEBHOOK_SILENT";
             /** @enum {string} */
             severity: "LOW" | "MEDIUM" | "HIGH";
             /** @enum {string} */
@@ -7614,6 +7759,13 @@ export interface components {
             check: Record<string, never> | null;
             /** @description 本机公网自检（把平台的探测请求打回自己的回调地址）：ok=true 表示入口现在可用；平台 check.errors 是滚动窗口，修复后仍可能残留旧错误 */
             selfCheck: Record<string, never> | null;
+            /** @description 平台投递可用性（OZON 2026-11-07）：status GREEN/YELLOW/RED，YELLOW 起即预警；problematicType 是平台记账的失败事件类型 */
+            availability: Record<string, never> | null;
+            /**
+             * Format: date-time
+             * @description 最近一次收到该店任何推送（含 PING）；null = 从未收到
+             */
+            lastEventAt: string | null;
         };
         RawEventDto: {
             id: string;
@@ -9036,7 +9188,7 @@ export interface operations {
     NotificationController_list: {
         parameters: {
             query?: {
-                type?: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "PICKING_ORDER_CANCELLED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
+                type?: "ORDER_INTERCEPTION_REQUIRED" | "STORE_CREDENTIAL_EXPIRING" | "STORE_CREDENTIAL_EXPIRED" | "ORDER_INTERCEPTION_FAILED" | "STORE_WEBHOOK_PAUSED" | "STORE_WEBHOOK_UNHEALTHY" | "STORE_WEBHOOK_SILENT" | "BUYER_MESSAGE_RECEIVED" | "REVIEW_CREATED" | "BUYER_QUESTION_RECEIVED" | "PICKING_ORDER_CANCELLED" | "RETURN_REQUESTED" | "RETURN_STATE_CHANGED";
                 channel?: "SYSTEM" | "FEISHU";
                 referenceId?: string;
             };
@@ -10115,6 +10267,81 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["BarcodeResolveDto"];
+                    };
+                };
+            };
+        };
+    };
+    SkuExportController_columns: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SkuExportColumnDto"][];
+                    };
+                };
+            };
+        };
+    };
+    SkuExportController_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSkuExportRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SkuExportJobCreatedDto"];
+                    };
+                };
+            };
+        };
+    };
+    SkuExportController_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["SkuExportJobStatusDto"];
                     };
                 };
             };
@@ -12158,7 +12385,7 @@ export interface operations {
     ExceptionController_list: {
         parameters: {
             query?: {
-                exceptionType?: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR" | "SYNC_FAILED" | "ORDER_TRACKING_STALLED" | "ORDER_CANCELLED_AFTER_SHIP" | "RETURN_ORDER_NOT_FOUND" | "RETURN_DIFFERENCE" | "ORDER_PLATFORM_SHIP_FAILED" | "WEBHOOK_PAUSED" | "WEBHOOK_UNHEALTHY";
+                exceptionType?: "ORDER_SKU_MAPPING_FAILED" | "ORDER_OUT_OF_STOCK" | "ORDER_INVALID_STATE" | "ORDER_INTERCEPTION_FAILED" | "ORDER_SHIPMENT_DEADLINE_NEAR" | "SYNC_FAILED" | "ORDER_TRACKING_STALLED" | "ORDER_CANCELLED_AFTER_SHIP" | "RETURN_ORDER_NOT_FOUND" | "RETURN_DIFFERENCE" | "ORDER_PLATFORM_SHIP_FAILED" | "WEBHOOK_PAUSED" | "WEBHOOK_UNHEALTHY" | "WEBHOOK_SILENT";
                 status?: "OPEN" | "RESOLVED" | "IGNORED";
                 referenceType?: string;
                 referenceId?: string;

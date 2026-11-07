@@ -237,6 +237,40 @@ export class NotificationService {
   }
 
   /**
+   * Webhook 静默（2026-11-07）：enabled 的订阅 24 小时没有任何入站推送。
+   * 与 PAUSED 互补——链路断了但平台还没停；提前一天发现就能抢在暂停前修。
+   */
+  async notifyWebhookSilent(input: {
+    storeId: string;
+    storeCode: string;
+    platform: string;
+    silentHours: number;
+    lastEventAt: string | null;
+  }): Promise<void> {
+    await this.publishEvent({
+      type: 'STORE_WEBHOOK_SILENT',
+      title: `Webhook 停止推送：${input.storeCode}（${input.platform}）`,
+      level: 'WARN',
+      factors: compactFactors({
+        storeId: input.storeId,
+        platform: input.platform,
+        storeCode: input.storeCode,
+      }),
+      lines: [
+        `店铺：${input.storeCode}`,
+        `平台：${input.platform}`,
+        `已连续 ${input.silentHours} 小时没有收到任何平台推送（含探测 ping）`,
+        `最后一次收到：${input.lastEventAt ?? '从未'}`,
+        '说明公网回调入口或投递链路中断：请检查隧道/服务是否可达；平台会把连续失败计入可用性并最终暂停订阅。',
+      ],
+      linkPath: eventDefinition('STORE_WEBHOOK_SILENT').linkPath,
+      dedupeKey: `webhook:${input.storeId}:SILENT`,
+      referenceType: 'STORE',
+      referenceId: input.storeId,
+    });
+  }
+
+  /**
    * 买家新消息（2026-11-02）。一条会话一次提醒：买家连发 N 条也只推一条，
    * 正文取最后一条，去重键带最后消息 id（同一条消息不会重复推）。
    */

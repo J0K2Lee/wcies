@@ -513,6 +513,14 @@ export interface OzonNotificationSubscription {
   readonly enable: boolean;
   readonly types: readonly OzonNotificationTypeInfo[];
   readonly created_at?: string;
+  /**
+   * 投递可用性（2026-11-07 核实）：平台按连续投递失败累计，到阈值自动
+   * disable。GREEN 0 / YELLOW 1500 / RED 2500（平台口径）。
+   */
+  readonly availability_status?: string;
+  readonly disable_reason?: string;
+  readonly availability_status_date?: string;
+  readonly problematic_type?: string;
   readonly [key: string]: unknown;
 }
 

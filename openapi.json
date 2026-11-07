@@ -1325,6 +1325,7 @@
                 "ORDER_INTERCEPTION_FAILED",
                 "STORE_WEBHOOK_PAUSED",
                 "STORE_WEBHOOK_UNHEALTHY",
+                "STORE_WEBHOOK_SILENT",
                 "BUYER_MESSAGE_RECEIVED",
                 "REVIEW_CREATED",
                 "BUYER_QUESTION_RECEIVED",
@@ -3117,6 +3118,118 @@
         },
         "summary": "按条码解析内部 SKU（收货/拣货扫码共用）",
         "tags": ["barcodes"]
+      }
+    },
+    "/api/v1/skus/exports/columns": {
+      "get": {
+        "operationId": "SkuExportController_columns",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SkuExportColumnDto"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "导出可选列目录（含分组与默认勾选）",
+        "tags": ["sku-exports"]
+      }
+    },
+    "/api/v1/skus/exports": {
+      "post": {
+        "operationId": "SkuExportController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSkuExportRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SkuExportJobCreatedDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "提交 SKU 导出任务（一行一 listing；全量，走队列）",
+        "tags": ["sku-exports"]
+      }
+    },
+    "/api/v1/skus/exports/{jobId}": {
+      "get": {
+        "operationId": "SkuExportController_status",
+        "parameters": [
+          {
+            "name": "jobId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SkuExportJobStatusDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "导出任务状态（COMPLETED 时带 30 分钟签名下载地址）",
+        "tags": ["sku-exports"]
       }
     },
     "/api/v1/inventory": {
@@ -6934,7 +7047,8 @@
                 "RETURN_DIFFERENCE",
                 "ORDER_PLATFORM_SHIP_FAILED",
                 "WEBHOOK_PAUSED",
-                "WEBHOOK_UNHEALTHY"
+                "WEBHOOK_UNHEALTHY",
+                "WEBHOOK_SILENT"
               ]
             }
           },
@@ -13570,6 +13684,7 @@
               "ORDER_INTERCEPTION_FAILED",
               "STORE_WEBHOOK_PAUSED",
               "STORE_WEBHOOK_UNHEALTHY",
+              "STORE_WEBHOOK_SILENT",
               "BUYER_MESSAGE_RECEIVED",
               "REVIEW_CREATED",
               "BUYER_QUESTION_RECEIVED",
@@ -13749,6 +13864,7 @@
               "ORDER_INTERCEPTION_FAILED",
               "STORE_WEBHOOK_PAUSED",
               "STORE_WEBHOOK_UNHEALTHY",
+              "STORE_WEBHOOK_SILENT",
               "BUYER_MESSAGE_RECEIVED",
               "REVIEW_CREATED",
               "BUYER_QUESTION_RECEIVED",
@@ -13803,6 +13919,7 @@
               "ORDER_INTERCEPTION_FAILED",
               "STORE_WEBHOOK_PAUSED",
               "STORE_WEBHOOK_UNHEALTHY",
+              "STORE_WEBHOOK_SILENT",
               "BUYER_MESSAGE_RECEIVED",
               "REVIEW_CREATED",
               "BUYER_QUESTION_RECEIVED",
@@ -15016,6 +15133,168 @@
           "suggestedUnitCost",
           "suggestedUnitCostSource"
         ]
+      },
+      "SkuExportColumnDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "example": "skuCode"
+          },
+          "label": {
+            "type": "string",
+            "example": "SKU编码"
+          },
+          "group": {
+            "type": "string",
+            "example": "BASIC"
+          },
+          "groupLabel": {
+            "type": "string",
+            "example": "基础"
+          },
+          "listing": {
+            "type": "boolean",
+            "example": true,
+            "description": "勾选后按「一行一 listing」展开"
+          },
+          "defaultSelected": {
+            "type": "boolean",
+            "example": true
+          }
+        },
+        "required": ["key", "label", "group", "groupLabel", "listing", "defaultSelected"]
+      },
+      "SkuExportJobCreatedDto": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "example": "12"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["QUEUED", "RUNNING", "COMPLETED", "FAILED"]
+          }
+        },
+        "required": ["jobId", "status"]
+      },
+      "SkuExportFiltersDto": {
+        "type": "object",
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "description": "Matches sku_code / name_zh / name_ru / model / barcode"
+          },
+          "brandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "categoryId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "含全部子分类（决策 0005 §9.5）"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["DRAFT", "ACTIVE", "INACTIVE"]
+          },
+          "hasListing": {
+            "type": "string",
+            "enum": ["true", "false"]
+          },
+          "platformId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "storeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serialTracking": {
+            "type": "string",
+            "enum": ["true", "false"]
+          }
+        }
+      },
+      "CreateSkuExportRequestDto": {
+        "type": "object",
+        "properties": {
+          "columns": {
+            "example": ["skuCode", "nameZh", "brand", "platform"],
+            "description": "列 key，必须来自 GET /skus/exports/columns；含平台映射列时一行一 listing",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "filters": {
+            "description": "不传 = 全部 SKU",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SkuExportFiltersDto"
+              }
+            ]
+          },
+          "skuIds": {
+            "description": "只导出这些 SKU（表格多选）；与该字段同时存在时忽略 filters",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sortBy": {
+            "type": "string",
+            "enum": ["createdAt", "updatedAt", "skuCode", "nameZh"],
+            "default": "skuCode"
+          },
+          "sortOrder": {
+            "type": "string",
+            "enum": ["asc", "desc"],
+            "default": "asc"
+          },
+          "tzOffsetMinutes": {
+            "type": "number",
+            "example": 480,
+            "description": "浏览器时区偏移（分钟，东八区 = 480）。时间列按它换算后写入 Excel。"
+          }
+        },
+        "required": ["columns"]
+      },
+      "SkuExportJobStatusDto": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "example": "12"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["QUEUED", "RUNNING", "COMPLETED", "FAILED"]
+          },
+          "progress": {
+            "type": "number",
+            "example": 42,
+            "description": "进度百分比 0–100"
+          },
+          "rowCount": {
+            "type": "number",
+            "example": 1234
+          },
+          "fileName": {
+            "type": "string",
+            "example": "SKU导出_20261104_1530.xlsx"
+          },
+          "downloadUrl": {
+            "type": "string",
+            "description": "签名下载地址（30 分钟有效），仅 COMPLETED 时返回"
+          },
+          "error": {
+            "type": "string",
+            "example": "导出失败原因"
+          }
+        },
+        "required": ["jobId", "status", "progress"]
       },
       "InventoryRowDto": {
         "type": "object",
@@ -19133,7 +19412,8 @@
               "RETURN_DIFFERENCE",
               "ORDER_PLATFORM_SHIP_FAILED",
               "WEBHOOK_PAUSED",
-              "WEBHOOK_UNHEALTHY"
+              "WEBHOOK_UNHEALTHY",
+              "WEBHOOK_SILENT"
             ]
           },
           "severity": {
@@ -22643,6 +22923,17 @@
             "type": "object",
             "nullable": true,
             "description": "本机公网自检（把平台的探测请求打回自己的回调地址）：ok=true 表示入口现在可用；平台 check.errors 是滚动窗口，修复后仍可能残留旧错误"
+          },
+          "availability": {
+            "type": "object",
+            "nullable": true,
+            "description": "平台投递可用性（OZON 2026-11-07）：status GREEN/YELLOW/RED，YELLOW 起即预警；problematicType 是平台记账的失败事件类型"
+          },
+          "lastEventAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "最近一次收到该店任何推送（含 PING）；null = 从未收到"
           }
         },
         "required": [
@@ -22653,7 +22944,9 @@
           "reason",
           "checkedAt",
           "check",
-          "selfCheck"
+          "selfCheck",
+          "availability",
+          "lastEventAt"
         ]
       },
       "RawEventDto": {

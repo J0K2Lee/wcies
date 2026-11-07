@@ -1,5 +1,13 @@
 name: wcies
 
+# 日志保留（2026-11-07）：排查 webhook 投递失败需要更长的历史。默认 json-file
+# 在 Docker Desktop 上会被裁剪，这里显式保留 10×100MB（约 1GB/容器）并轮转。
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: '100m'
+    max-file: '10'
+
 services:
   postgres:
     image: postgres:18-alpine
@@ -116,6 +124,7 @@ services:
       target: dev
     container_name: wcies-api-dev
     profiles: ['dev']
+    logging: *default-logging
     env_file:
       - path: .env
         required: false
@@ -172,6 +181,7 @@ services:
     image: cloudflare/cloudflared:latest
     container_name: wcies-tunnel
     profiles: ['tunnel']
+    logging: *default-logging
     restart: unless-stopped
     command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
     volumes:

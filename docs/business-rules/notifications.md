@@ -108,6 +108,7 @@
 | `RETURN_STATE_CHANGED` | INFO | storeId / platform | `return:<storeId>:<returnNo>:<state>` |
 | `BUYER_QUESTION_RECEIVED` | WARN | storeId / platform / skuCode | `question:<storeId>:<questionId>` |
 | `PICKING_ORDER_CANCELLED` | WARN | storeId / orderNo | `picking-cancel:<storeId>:<orderNo>` |
+| `STORE_WEBHOOK_SILENT` | WARN | storeId / platform | `webhook:<storeId>:SILENT` |
 
 `PICKING_ORDER_CANCELLED`（2026-11-03）：拣货进行中订单被取消时通知仓库——
 内容含店铺、订单号、撤出的未拣行数/件数、已拣待拦截件数，跳转
@@ -139,6 +140,13 @@
 **通知中心的类型筛选由事件目录驱动**：`GET /api/v1/notifications/event-catalog`
 返回的类型/文案直接生成下拉选项，新增事件不再需要改前端（此前写死「需要拦截 /
 拦截失败」两项，其它事件无法筛选）。
+
+**可用性预警与静默看门狗（2026-11-07）**：除 `enable=false`（已被暂停）外，
+巡检还监控两件事——① 平台 `availability_status` 到 YELLOW/RED（说明平台已在
+记账投递失败，随时会暂停）→ `WEBHOOK_UNHEALTHY`；② 订阅 enabled 但 24 小时
+没有任何入站推送（含 PING）→ `WEBHOOK_SILENT`（新异常类型，MEDIUM），对应通知
+`STORE_WEBHOOK_SILENT`。后者覆盖「链路已断但平台还没停」的窗口（10-30/10-31
+实证：OZON 的 PING 与事件同时消失两天）。
 
 **体检判定口径**（沿用 2026-10-27 决策）：只认本机公网自检（`{}` 探测回自己的
 回调入口，要求 200 + `{version,name,time}`）；平台 `notification/check` 的

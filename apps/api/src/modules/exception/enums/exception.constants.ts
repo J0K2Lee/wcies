@@ -68,6 +68,12 @@ export const EXCEPTION_TYPES = [
    */
   'WEBHOOK_PAUSED',
   'WEBHOOK_UNHEALTHY',
+  /**
+   * Webhook 静默（2026-11-07）：订阅 enable=true、平台可用性也没标红，但本店
+   * 连续 24 小时没有收到任何推送（连探测 PING 都没有）——投递链路（公网入口/
+   * 隧道/平台出口）已断。Reference: STORE/storeId，恢复收到推送后自动关闭。
+   */
+  'WEBHOOK_SILENT',
 ] as const;
 export type ExceptionType = (typeof EXCEPTION_TYPES)[number];
 

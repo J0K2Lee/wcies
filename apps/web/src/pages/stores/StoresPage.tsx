@@ -180,6 +180,15 @@ interface WebhookHealthRow {
   checkedAt: string;
   check: { isActive: boolean; errors: Array<{ type: string; description: string }> } | null;
   selfCheck: { ok: boolean; detail: string } | null;
+  /** 平台投递可用性（2026-11-07）：YELLOW 起就要处理。 */
+  availability: {
+    status: string;
+    disableReason: string | null;
+    since: string | null;
+    problematicType: string | null;
+  } | null;
+  /** 最近一次收到任何推送（含 PING）；null = 从未收到。 */
+  lastEventAt: string | null;
 }
 
 interface CredentialRow {
@@ -866,6 +875,40 @@ export function StoresPage() {
             />
             {webhookHealth !== null && (
               <>
+                {webhookHealth.availability !== null && (
+                  <ContextMetric
+                    label="平台可用性"
+                    value={
+                      webhookHealth.availability.status === 'RED' ? (
+                        <span style={{ color: colors.danger }}>
+                          RED
+                          {webhookHealth.availability.problematicType === null
+                            ? ''
+                            : ` · ${webhookHealth.availability.problematicType}`}
+                        </span>
+                      ) : webhookHealth.availability.status === 'YELLOW' ? (
+                        <span style={{ color: colors.warning }}>
+                          YELLOW
+                          {webhookHealth.availability.problematicType === null
+                            ? ''
+                            : ` · ${webhookHealth.availability.problematicType}`}
+                        </span>
+                      ) : (
+                        webhookHealth.availability.status
+                      )
+                    }
+                  />
+                )}
+                <ContextMetric
+                  label="最近推送"
+                  value={
+                    webhookHealth.lastEventAt === null ? (
+                      <span style={{ color: colors.danger }}>从未收到</span>
+                    ) : (
+                      <RelativeTime value={webhookHealth.lastEventAt} />
+                    )
+                  }
+                />
                 {webhookHealth.selfCheck !== null && (
                   <ContextMetric
                     label="入口自检"

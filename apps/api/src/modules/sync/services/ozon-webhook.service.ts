@@ -42,6 +42,16 @@ export interface OzonWebhookSubscriptionView {
   expectedTypes: string[];
   /** 同一 Client-Id 下除本店 URL 外的其他订阅数量（提醒多系统共存）。 */
   otherUrlCount: number;
+  /**
+   * 平台投递可用性（2026-11-07）：平台侧对「连续投递失败」累计到阈值就会
+   * 自动 disable。在 enable 还是 true 时提前看到 YELLOW/RED 才能抢在暂停前修。
+   */
+  availability: {
+    status: string;
+    disableReason: string | null;
+    since: string | null;
+    problematicType: string | null;
+  } | null;
 }
 
 export interface OzonWebhookUnsubscribeResult {
@@ -109,6 +119,7 @@ export class OzonWebhookService {
         types: [],
         expectedTypes: [...OZON_WEBHOOK_EVENT_TYPES],
         otherUrlCount: subscriptions.length,
+        availability: null,
       };
     }
     if (matches.length > 1) {
@@ -126,6 +137,7 @@ export class OzonWebhookService {
         types: [],
         expectedTypes: [...OZON_WEBHOOK_EVENT_TYPES],
         otherUrlCount: subscriptions.length,
+        availability: null,
       };
     }
     return {
@@ -136,6 +148,15 @@ export class OzonWebhookService {
       types: [...match.types],
       expectedTypes: [...OZON_WEBHOOK_EVENT_TYPES],
       otherUrlCount: subscriptions.length - 1,
+      availability: {
+        status: match.availabilityStatus ?? 'UNSPECIFIED',
+        disableReason: match.disableReason ?? null,
+        since: match.availabilityStatusDate ?? null,
+        problematicType:
+          match.problematicType !== undefined && match.problematicType !== ''
+            ? match.problematicType
+            : null,
+      },
     };
   }
 
@@ -291,7 +312,18 @@ export class OzonWebhookService {
   private async listSubscriptions(
     auth: OzonAuth,
     storeId: string,
-  ): Promise<Array<{ id: number; url: string; enable: boolean; types: string[] }>> {
+  ): Promise<
+    Array<{
+      id: number;
+      url: string;
+      enable: boolean;
+      types: string[];
+      availabilityStatus: string | null;
+      disableReason: string | null;
+      availabilityStatusDate: string | null;
+      problematicType: string | null;
+    }>
+  > {
     const response = await this.client.notificationList(auth, storeId);
     // Live shape (2026-10-12): `types` items are `{type, description}` objects,
     // not plain strings (request/response asymmetry) - normalize HERE so every
@@ -303,6 +335,10 @@ export class OzonWebhookService {
       types: row.types
         .map((item) => (typeof item === 'string' ? item : item.type))
         .filter((type): type is string => typeof type === 'string' && type !== ''),
+      availabilityStatus: row.availability_status ?? null,
+      disableReason: row.disable_reason ?? null,
+      availabilityStatusDate: row.availability_status_date ?? null,
+      problematicType: row.problematic_type ?? null,
     }));
   }
 }
