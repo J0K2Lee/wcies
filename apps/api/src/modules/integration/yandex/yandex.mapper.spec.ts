@@ -89,7 +89,7 @@ describe('mapOrderToOrder', () => {
     expect(order.currency).toBeNull();
   });
 
-  it('单价 = payment + cashback（官方口径），subsidy 是卖家奖励不计入', () => {
+  it('单价 = prices 下所有金额项之和（2026-11-07 用户口径）', () => {
     const order = mapOrderToOrder({
       ...base,
       prices: {
@@ -109,8 +109,8 @@ describe('mapOrderToOrder', () => {
         },
       ],
     });
-    // 711 + 5661 = 6372（RUB）；subsidy 2928 不参与
-    expect(order.items[0]?.unitPrice).toBe('6372.00');
+    // 711 + 2928 + 5661 = 9300（RUB）；prices 下每项金额都计入
+    expect(order.items[0]?.unitPrice).toBe('9300.00');
     // Yandex 用历史码 RUR，统一成 ISO 字母码
     expect(order.currency).toBe('RUB');
   });
@@ -124,6 +124,37 @@ describe('mapOrderToOrder', () => {
       ],
     });
     expect(order.items[0]?.unitPrice).toBe('2723.00');
+    expect(order.currency).toBe('RUB');
+  });
+
+  it('多金额项按分累加、忽略 vat 等非金额字段（实际订单 520.01）', () => {
+    const order = mapOrderToOrder({
+      ...base,
+      items: [
+        {
+          offerId: 'SKU-A',
+          count: 1,
+          prices: {
+            vat: 'NO_VAT',
+            payment: { value: 387.61, currencyId: 'CNY' },
+            subsidy: { value: 129.14, currencyId: 'CNY' },
+            cashback: { value: 3.26, currencyId: 'CNY' },
+          },
+        },
+      ],
+    });
+    expect(order.items[0]?.unitPrice).toBe('520.01');
+    expect(order.currency).toBe('CNY');
+  });
+
+  it('只有 subsidy 也能算出金额与币种（payment 缺失不再直接判 null）', () => {
+    const order = mapOrderToOrder({
+      ...base,
+      items: [
+        { offerId: 'SKU-A', count: 1, prices: { subsidy: { value: 1471, currencyId: 'RUR' } } },
+      ],
+    });
+    expect(order.items[0]?.unitPrice).toBe('1471.00');
     expect(order.currency).toBe('RUB');
   });
 

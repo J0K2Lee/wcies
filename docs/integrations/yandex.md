@@ -282,19 +282,19 @@ https://market.yandex.ru/card/slug/5817028070?businessId=193261685
   平台未生成时（400/404/409）映射为“面单未就绪”。
 - FBY（平台仓）订单本就不进拣货（`isExternalFulfillmentMode`），不调用写接口。
 
-## 订单金额（2026-10-24 实现）
+## 订单金额（2026-11-07 修正：prices 各项之和）
 
-官方口径（`docs/yandex-partner-api-openapi.json`，business-orders）：
+**用户口径（2026-11-07，取代 2026-10-24 的 payment+cashback）**：
+`order_items.unit_price` = `prices` 下**所有金额项之和**——`payment`、`cashback`、
+`subsidy`、`delivery` 等凡是 `{value, currencyId}` 形状的字段都计入；`vat`
+这类非对象字段忽略；一个金额项都没有时为 `null`（不猜）。
 
-> Стоимость товаров в заказе складывается из параметров `payment` и `cashback`.
-> Общая сумма вознаграждений продавцу возвращается в параметре `subsidy`.
-> Все суммы указаны в валюте магазина.
+```text
+payment 387.61 + subsidy 129.14 + cashback 3.26 = 520.01
+```
 
-因此：
-
-- `order_items.unit_price = prices.payment.value + prices.cashback.value`
-  （`cashback` 缺失按 0；`payment` 缺失为 null，不猜）；
-- `subsidy` 是**卖家奖励**，不计入商品金额，保留在 `raw_data` 供财务；
-- `orders.currency` 取 `prices.payment.currencyId`，`RUR` 归一化成 `RUB`；
-  `payment` 缺失时退回第一条明细的币种；
+- 实现：按「分」累加避免浮点误差（`yxGoodsAmount`），`total_price = unit_price × quantity`；
+- 迁移 `20261107_001` 已按 `raw_data.prices` 重算全部存量 Yandex 明细；
+- `orders.currency` 取金额项的 `currencyId`（payment 优先，其次 cashback/subsidy），
+  `RUR` 归一化成 `RUB`；`payment` 缺失也能从其它金额项取币种；
 - 金额单位是店铺币种，不做汇率换算（显示原币；最近采购价恒为 CNY）。

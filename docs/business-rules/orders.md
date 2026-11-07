@@ -1626,7 +1626,8 @@ platform_sku_id。
 ## 18b. 订单金额与「最近采购价」的币种口径（2026-10-24 用户指示）
 
 - **存档原数据**：`order_items.unit_price` 存平台**原币**金额（WB 用 `price/100` 的 RUB，
-  Yandex 用 `payment+cashback` 的 RUB，OZON 用其 posting 币种 CNY），
+  Yandex 用 `prices` 下所有金额项之和的 RUB（2026-11-07 起，含 subsidy；
+  旧口径 payment+cashback 已废弃），OZON 用其 posting 币种 CNY），
   `orders.currency` 存归一化后的币种（ISO 字母码，不接受 `643` 这类数字码）。
 - **显示按原币**：单价/小计按 `orders.currency` 显示；订单没有平台币种时回退到
   店铺计价币种 `stores.default_currency`（DTO 字段 `storeCurrency`）。

@@ -130,8 +130,10 @@ export function mapOrderToOrder(order: YxOrder): PlatformOrderRaw {
     }
     return {
       // No marketSku on business-order rows (docs §8.3) - resolution rides on
-      // sellerSku. 单价按官方口径（2026-10-24）：商品金额 = payment + cashback，
-      // subsidy 是卖家奖励、不属于商品金额；缺字段时保持 null，不猜。
+      // sellerSku. 单价 = prices 下**所有金额项之和**（2026-11-07 用户口径，
+      // 取代 2026-10-24 的 payment+cashback）：payment / cashback / subsidy
+      // 等都是商品金额的组成部分；`vat` 等非金额字段忽略；没有任何金额项时为
+      // null，不猜。
       platformProductId: null,
       platformSkuId: null,
       offerId,
@@ -181,14 +183,13 @@ export function mapOrderToOrder(order: YxOrder): PlatformOrderRaw {
  * DBS 的 `tracks[].trackCode` 优先，出现时以它为准。都没有则为 null。
  */
 /**
- * 订单商品金额（官方口径，docs/yandex-partner-api-openapi.json）：
+ * 订单商品金额（2026-11-07 用户口径）：**`prices` 下各项之和**。
  *
- * > Стоимость товаров в заказе складывается из параметров `payment` и `cashback`.
- * > Общая сумма вознаграждений продавцу возвращается в параметре `subsidy`.
- *
- * 即：**商品金额 = payment + cashback**（`subsidy` 是给卖家的奖励，不是商品价）。
- * 实测对账：V9 TURBO 单 payment 711 + cashback 5661 = 6372 RUB，与同款在 WB 的
- * 6754 RUB 同量级。金额单位为店铺币种，不做换算。
+ * 平台文档曾把商品金额描述为 `payment + cashback`（subsidy 是卖家奖励）。
+ * 实测与用户核对后改为求和：平台订单展示的商品金额包含 `prices` 里的每个
+ * 金额项（payment / cashback / subsidy / delivery…），只跳过 `vat` 这类
+ * 非金额字段。例：payment 387.61 + subsidy 129.14 + cashback 3.26 = 520.01。
+ * 金额单位为店铺币种，不做换算。
  */
 interface YxMoney {
   value?: unknown;
@@ -199,6 +200,7 @@ interface YxPrices {
   payment?: YxMoney;
   cashback?: YxMoney;
   subsidy?: YxMoney;
+  [key: string]: unknown;
 }
 
 function readMoneyValue(value: unknown): number | null {
@@ -214,17 +216,29 @@ function readMoneyValue(value: unknown): number | null {
 
 /** 商品金额 = payment + cashback；payment 缺失时返回 null（不猜）。 */
 function asPrices(value: unknown): YxPrices | null {
-  return typeof value === 'object' && value !== null ? value : null;
+  return typeof value === 'object' && value !== null ? (value as YxPrices) : null;
 }
 
 export function yxGoodsAmount(value: unknown): string | null {
   const prices = asPrices(value);
-  const payment = readMoneyValue(prices?.payment?.value);
-  if (payment === null) {
+  if (prices === null) {
     return null;
   }
-  const cashback = readMoneyValue(prices?.cashback?.value) ?? 0;
-  return (payment + cashback).toFixed(2);
+  // 用「分」累加避免浮点误差（387.61 + 129.14 + 3.26 在 IEEE754 下不是 520.01）。
+  let cents = 0;
+  let found = false;
+  for (const entry of Object.values(prices)) {
+    if (typeof entry !== 'object' || entry === null) {
+      continue; // vat: "NO_VAT" 之类的非金额字段
+    }
+    const amount = readMoneyValue((entry as YxMoney).value);
+    if (amount === null) {
+      continue;
+    }
+    cents += Math.round(amount * 100);
+    found = true;
+  }
+  return found ? (cents / 100).toFixed(2) : null;
 }
 
 /**
@@ -232,12 +246,30 @@ export function yxGoodsAmount(value: unknown): string | null {
  * 其它值原样大写（不猜成 CNY）。
  */
 export function yxCurrencyOf(value: unknown): string | null {
-  const raw = asPrices(value)?.payment?.currencyId;
-  if (typeof raw !== 'string' || raw.trim() === '') {
+  const prices = asPrices(value);
+  if (prices === null) {
     return null;
   }
-  const code = raw.trim().toUpperCase();
-  return code === 'RUR' ? 'RUB' : code;
+  // payment 优先，其次 cashback/subsidy，最后任意金额项（同一订单内币种一致）。
+  const order = ['payment', 'cashback', 'subsidy'];
+  const entries: unknown[] = [
+    ...order.map((key) => (prices as Record<string, unknown>)[key]),
+    ...Object.entries(prices)
+      .filter(([key]) => !order.includes(key))
+      .map(([, entry]) => entry),
+  ];
+  for (const entry of entries) {
+    if (typeof entry !== 'object' || entry === null) {
+      continue;
+    }
+    const raw = (entry as YxMoney).currencyId;
+    if (typeof raw !== 'string' || raw.trim() === '') {
+      continue;
+    }
+    const code = raw.trim().toUpperCase();
+    return code === 'RUR' ? 'RUB' : code;
+  }
+  return null;
 }
 
 export function readYxTrackCode(order: {
