@@ -280,6 +280,7 @@ export class WebhookHealthService {
       if (!selfCheck.ok) {
         return {
           ...base,
+          availability,
           state: 'UNHEALTHY',
           reason:
             platformErrors === ''
@@ -291,6 +292,7 @@ export class WebhookHealthService {
       }
       return {
         ...base,
+        availability,
         state: 'OK',
         reason:
           platformErrors === ''
