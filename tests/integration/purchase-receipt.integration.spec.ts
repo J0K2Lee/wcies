@@ -57,6 +57,11 @@ async function skuAverageCost(skuId: string): Promise<string | null> {
   return detail.body.data.movingAverageCost;
 }
 
+async function skuLatestPrice(skuId: string): Promise<number | null> {
+  const detail = await client.get<{ latestPurchasePrice: number | null }>(`/api/v1/skus/${skuId}`);
+  return detail.body.data.latestPurchasePrice;
+}
+
 beforeAll(async () => {
   api = spawnApiEntry('main.js', { PORT: '3111', REDIS_URL: 'redis://localhost:6379/8' });
   await waitForHttp(`${BASE}/health/live`, 60_000);
@@ -701,5 +706,61 @@ describe('收货默认库位与超收防御（决策 0021）', () => {
     expect(failed.status).toBe(409);
     expect(failed.body.error?.code).toBe('PURCHASE_RECEIPT_EXCEEDS_ORDERED');
     expect(await balanceOf(sku)).toEqual([]);
+  });
+});
+
+describe('最近采购价随收货确认更新（2026-11-09 用户口径）', () => {
+  async function createDraft(
+    label: string,
+    unitCost: string,
+  ): Promise<{
+    skuId: string;
+    receiptId: string;
+  }> {
+    const skuId = await newSku(label);
+    const po = await client.post<{ id: string }>('/api/v1/purchase-orders', {
+      orderedAt: '2026-11-01T04:30:00.000Z',
+      sourceNote: `${PREFIX} ${label}`,
+      receivingWarehouseId: warehouseId,
+      receipt: { defaultBinId: binA01 },
+      items: [{ skuId, quantity: '2', unitCost }],
+    });
+    expect(po.status).toBe(200);
+    const list = await client.get<Array<{ id: string }>>(
+      `/api/v1/purchase-receipts?purchaseOrderId=${po.body.data.id}`,
+    );
+    expect(list.body.data).toHaveLength(1);
+    return { skuId, receiptId: list.body.data[0]!.id };
+  }
+
+  it('草稿不更新；确认收货写入本次单价；下一次收货覆盖为最新价', async () => {
+    const first = await createDraft('LPP1', '12.3400');
+    // 草稿收货不动最近采购价。
+    expect(await skuLatestPrice(first.skuId)).toBeNull();
+
+    const confirmed = await client.post(`/api/v1/purchase-receipts/${first.receiptId}/confirm`);
+    expect(confirmed.status).toBe(200);
+    expect(await skuLatestPrice(first.skuId)).toBe(12.34);
+
+    // 第二次采购/收货：最近采购价 = 最近一次确认收货的单价（不做加权）。
+    const second = await createDraft('LPP2', '15.5000');
+    // 同一个 SKU 再建一张采购单 + 收货单
+    const po2 = await client.post<{ id: string }>('/api/v1/purchase-orders', {
+      orderedAt: '2026-11-02T04:30:00.000Z',
+      sourceNote: `${PREFIX} LPP2b`,
+      receivingWarehouseId: warehouseId,
+      receipt: { defaultBinId: binA01 },
+      items: [{ skuId: first.skuId, quantity: '1', unitCost: '15.5000' }],
+    });
+    expect(po2.status).toBe(200);
+    const list2 = await client.get<Array<{ id: string }>>(
+      `/api/v1/purchase-receipts?purchaseOrderId=${po2.body.data.id}`,
+    );
+    const confirmed2 = await client.post(
+      `/api/v1/purchase-receipts/${list2.body.data[0]!.id}/confirm`,
+    );
+    expect(confirmed2.status).toBe(200);
+    expect(await skuLatestPrice(first.skuId)).toBe(15.5);
+    void second;
   });
 });

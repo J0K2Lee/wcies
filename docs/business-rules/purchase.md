@@ -390,7 +390,9 @@ Operation Log
 3. `unit_cost` 为空的明细**不更新成本**（成本未知不能臆造）。
 4. 计算在确认事务内用数据库 NUMERIC 运算完成，结果保留 4 位小数（AGENTS.md §58 禁 FLOAT）。
 5. 未确认收货（DRAFT）不得改变成本。
-6. `skus.latest_purchase_price` 本期不自动维护（仍人工维护，见 master-data.md §4）。
+6. `skus.latest_purchase_price`（最近采购价）**随收货确认更新**（2026-11-09）：
+   确认时用本次明细 `unit_cost` 覆盖为快照值（不等权、不加权），`unit_cost`
+   为空不写；与 `moving_average_cost`（加权成本）互不覆盖。
 
 ---
 

@@ -324,6 +324,28 @@ export class SkuService {
   }
 
   /**
+   * 最近采购价（2026-11-09 用户口径）：**收货确认时**用本次明细 `unit_cost`
+   * 覆盖 `skus.latest_purchase_price`。
+   *
+   * 与移动平均成本的分工：平均成本是加权库存成本（决策 0013 §6），最近采购价
+   * 是「最近一次采购单价」的快照，不做加权。草稿/未确认收货不写（与成本一致）。
+   * 同日多次收货按确认顺序后写覆盖先写 = 最近一次确认生效。
+   */
+  async setLatestPurchasePriceInTx(
+    manager: EntityManager,
+    skuId: string,
+    unitCost: string,
+  ): Promise<void> {
+    await manager.query(
+      `UPDATE skus
+          SET latest_purchase_price = $2::numeric,
+              updated_at = now()
+        WHERE id = $1`,
+      [skuId, unitCost],
+    );
+  }
+
+  /**
    * Cross-module tx participant (Sprint 8 T1; V1 refactor D2/D3/D5): creates
    * the SKU row on the CALLER's transaction with the global code (SKU%09d).
    * Logging stays with the caller (after commit).

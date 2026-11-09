@@ -584,6 +584,13 @@ export class PurchaseReceiptService {
               unitCost: item.unitCost,
               totalOnHand,
             });
+            // 最近采购价（2026-11-09 用户口径）：收货确认时用本次单价覆盖，
+            // 是快照不是加权；草稿/未收货不写。
+            await this.skuService.setLatestPurchasePriceInTx(
+              runner.manager,
+              item.skuId,
+              item.unitCost,
+            );
           }
         }
       }
