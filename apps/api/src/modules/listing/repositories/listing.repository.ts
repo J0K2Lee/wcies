@@ -784,6 +784,56 @@ export class ListingRepository {
   }
 
   /**
+   * 订单行 → 本店**未映射变体**（2026-11-09 修复「映射弹窗预选到同类其它变体」）。
+   *
+   * 严格按标识**精确**匹配，强次序 platform_sku_id > seller_sku > offer_id，
+   * 每条标识单独查、命中即返回（不做模糊包含，避免 GRAVASTAR-MH1 命中
+   * GRAVASTAR-MH1-PRO 这类前缀陷阱）。同标识存在多条链接时取最新创建的
+   * listing（§25 允许同 SKU 多链接）。
+   */
+  async findUnmappedVariantByOrderIdentifiers(input: {
+    storeId: string;
+    platformSkuId?: string;
+    sellerSku?: string;
+    offerId?: string;
+  }): Promise<{
+    listingId: string;
+    variantId: string;
+    matchedBy: 'platformSkuId' | 'sellerSku' | 'offerId';
+  } | null> {
+    const tries: Array<{
+      column: string;
+      key: 'platformSkuId' | 'sellerSku' | 'offerId';
+      value: string | undefined;
+    }> = [
+      { column: 'pls.platform_sku_id', key: 'platformSkuId', value: input.platformSkuId },
+      { column: 'pls.seller_sku', key: 'sellerSku', value: input.sellerSku },
+      { column: 'pls.offer_id', key: 'offerId', value: input.offerId },
+    ];
+    for (const attempt of tries) {
+      const value = attempt.value?.trim();
+      if (value === undefined || value === '') {
+        continue;
+      }
+      const row = await this.mappingRepository
+        .createQueryBuilder('pls')
+        .innerJoin('platform_listings', 'listing', 'listing.id = pls.listing_id')
+        .where('listing.store_id = :storeId', { storeId: input.storeId })
+        .andWhere('listing.status = :listingActive', { listingActive: 'ACTIVE' })
+        .andWhere('pls.status = :mappingActive', { mappingActive: 'ACTIVE' })
+        .andWhere('pls.mapping_status = :unmapped', { unmapped: 'UNMAPPED' })
+        .andWhere(`${attempt.column} = :value`, { value })
+        .orderBy('listing.createdAt', 'DESC')
+        .limit(1)
+        .getOne();
+      if (row !== null) {
+        return { listingId: row.listingId, variantId: row.id, matchedBy: attempt.key };
+      }
+    }
+    return null;
+  }
+
+  /**
    * Store-scoped listing media facts by seller SKU batch (2026-09-28, ERP
    * 建议#2: Yandex 订单行补图). Returns each matching ACTIVE variant's listing
    * url + the listing's raw platform payload; the caller owns any platform

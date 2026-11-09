@@ -36,6 +36,8 @@ import {
   ListingResponseDto,
   ListingSkuResponseDto,
   ResolveSkuRequestDto,
+  FindUnmappedVariantQueryDto,
+  FindUnmappedVariantResponseDto,
   SkuMatchCandidatesDto,
   SkuMatchCandidatesQueryDto,
   ResolveSkuResponseDto,
@@ -119,6 +121,22 @@ export class ListingController {
         },
         operator,
       ),
+    );
+  }
+
+  @Get('unmapped-variant')
+  @ApiOperation({
+    summary: '订单行 → 本店未映射变体（精确匹配，映射弹窗按订单行预选；找不到返回 data=null）',
+  })
+  @ApiOkEnvelope(FindUnmappedVariantResponseDto)
+  async findUnmappedVariant(@Query() query: FindUnmappedVariantQueryDto) {
+    return ok(
+      await this.resolverService.findUnmappedVariant({
+        storeId: query.storeId,
+        platformSkuId: query.platformSkuId,
+        sellerSku: query.sellerSku,
+        offerId: query.offerId,
+      }),
     );
   }
 

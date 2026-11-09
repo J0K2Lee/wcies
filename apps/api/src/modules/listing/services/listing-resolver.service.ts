@@ -81,6 +81,23 @@ export class ListingResolverService {
       matchedPlatformSkuId: match.platformSkuId,
     };
   }
+
+  /**
+   * 订单行 → 本店未映射变体（映射弹窗按订单行预选，2026-11-09）。
+   * 与 resolveInternalSku 的区别：只找 UNMAPPED 行、返回 listing+variant 而不是 SKU。
+   */
+  async findUnmappedVariant(input: {
+    storeId: string;
+    platformSkuId?: string;
+    sellerSku?: string;
+    offerId?: string;
+  }): Promise<{
+    listingId: string;
+    variantId: string;
+    matchedBy: 'platformSkuId' | 'sellerSku' | 'offerId';
+  } | null> {
+    return this.repository.findUnmappedVariantByOrderIdentifiers(input);
+  }
 }
 
 function trimOrUndefined(value: string | undefined): string | undefined {

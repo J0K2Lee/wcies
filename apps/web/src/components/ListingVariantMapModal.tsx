@@ -317,18 +317,35 @@ export function ListingVariantMapModal({
     [listing],
   );
 
-  // Preselect: strong match first, otherwise the first unmapped variant —
-  // same default the SKU映射 page rail modal had.
+  /** 调用方是否给了「订单行标识」——给了就只信精确匹配，不猜变体。 */
+  const hasMatchIdentifiers = useMemo(
+    () =>
+      matchIdentifiers !== null &&
+      matchIdentifiers !== undefined &&
+      [matchIdentifiers.platformSkuId, matchIdentifiers.sellerSku, matchIdentifiers.offerId].some(
+        (value) => value !== null && value !== undefined && value !== '',
+      ),
+    [matchIdentifiers],
+  );
+
+  // Preselect: strong exact match first; 只有**没有**订单行标识时（SKU映射页
+  // 的人工入口）才退回第一个未映射变体。有标识但本链接里找不到完全匹配的
+  // 变体时必须留空——否则会把订单行映射到同类其它型号上（2026-11-09 实际
+  // 事故：GRAVASTAR-MH1 被预选成 GRAVASTAR-MH1-PRO）。
   useEffect(() => {
     if (!open || fixedVariant !== null || listingId === null || variants.length === 0) {
       return;
     }
     const current = form.getFieldValue('mappingId') as string | undefined;
-    const matched = matchVariant(variants, matchIdentifiers) ?? variants[0]!;
+    const matched =
+      matchVariant(variants, matchIdentifiers) ?? (hasMatchIdentifiers ? null : variants[0]!);
+    if (matched === null) {
+      return;
+    }
     if (current !== matched.id && variants.some((variant) => variant.id === current) === false) {
       form.setFieldValue('mappingId', matched.id);
     }
-  }, [open, fixedVariant, listingId, variants, matchIdentifiers, form]);
+  }, [open, fixedVariant, listingId, variants, matchIdentifiers, hasMatchIdentifiers, form]);
 
   const mapMutation = useMutation({
     mutationFn: (input: { mappingId: string; skuId: string }) =>
@@ -410,9 +427,12 @@ export function ListingVariantMapModal({
     }
     const pool = variants.length > 0 ? variants : (listing?.skus ?? []);
     const selected = pool.find((variant) => variant.id === selectedMappingId) ?? null;
-    const target = selected ?? matchVariant(pool, matchIdentifiers) ?? pool[0];
+    const target =
+      selected ??
+      matchVariant(pool, matchIdentifiers) ??
+      (hasMatchIdentifiers ? undefined : pool[0]);
     return target === undefined ? listing?.platformProductId : variantLabel(target);
-  }, [fixedVariant, variants, listing, selectedMappingId, matchIdentifiers]);
+  }, [fixedVariant, variants, listing, selectedMappingId, matchIdentifiers, hasMatchIdentifiers]);
 
   return (
     <Modal
@@ -459,6 +479,18 @@ export function ListingVariantMapModal({
             />
           </Form.Item>
         )}
+        {hasMatchIdentifiers &&
+          !detail.isLoading &&
+          variants.length > 0 &&
+          matchVariant(variants, matchIdentifiers) === null && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message="当前链接里没有与该订单行完全匹配的变体"
+              description="订单行标识（platform_sku_id / 卖家 SKU / offer_id）与下面变体都不一致，通常是该商品的链接镜像尚未同步到本店——请先到「商品链接」同步该商品，再回来映射；不要手工选其它型号。"
+            />
+          )}
         {fixedVariant === null && !detail.isLoading && variants.length === 0 && (
           <Alert
             type="warning"

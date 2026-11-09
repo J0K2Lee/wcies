@@ -5370,6 +5370,74 @@
         "tags": ["listings"]
       }
     },
+    "/api/v1/listings/unmapped-variant": {
+      "get": {
+        "operationId": "ListingController_findUnmappedVariant",
+        "parameters": [
+          {
+            "name": "storeId",
+            "required": true,
+            "in": "query",
+            "description": "MANDATORY store scope (task §52)",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "platformSkuId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maxLength": 255,
+              "type": "string"
+            }
+          },
+          {
+            "name": "sellerSku",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maxLength": 255,
+              "type": "string"
+            }
+          },
+          {
+            "name": "offerId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maxLength": 255,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "data"],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/FindUnmappedVariantResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "订单行 → 本店未映射变体（精确匹配，映射弹窗按订单行预选；找不到返回 data=null）",
+        "tags": ["listings"]
+      }
+    },
     "/api/v1/listings/resolve": {
       "get": {
         "operationId": "ListingController_resolve",
@@ -17070,6 +17138,24 @@
           }
         },
         "required": ["storeId"]
+      },
+      "FindUnmappedVariantResponseDto": {
+        "type": "object",
+        "properties": {
+          "listingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "matchedBy": {
+            "type": "string",
+            "enum": ["platformSkuId", "sellerSku", "offerId"]
+          }
+        },
+        "required": ["listingId", "variantId", "matchedBy"]
       },
       "ResolveSkuResponseDto": {
         "type": "object",

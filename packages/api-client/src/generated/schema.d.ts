@@ -1477,6 +1477,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/listings/unmapped-variant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 订单行 → 本店未映射变体（精确匹配，映射弹窗按订单行预选；找不到返回 data=null） */
+        get: operations["ListingController_findUnmappedVariant"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/listings/resolve": {
         parameters: {
             query?: never;
@@ -5550,6 +5567,14 @@ export interface components {
              * @enum {string}
              */
             source: "PLATFORM" | "ORDER_FACTS";
+        };
+        FindUnmappedVariantResponseDto: {
+            /** Format: uuid */
+            listingId: string;
+            /** Format: uuid */
+            variantId: string;
+            /** @enum {string} */
+            matchedBy: "platformSkuId" | "sellerSku" | "offerId";
         };
         ResolveSkuResponseDto: {
             /** Format: uuid */
@@ -11289,6 +11314,35 @@ export interface operations {
                         /** @enum {boolean} */
                         success: true;
                         data: components["schemas"]["EnsureListingVariantResponseDto"];
+                    };
+                };
+            };
+        };
+    };
+    ListingController_findUnmappedVariant: {
+        parameters: {
+            query: {
+                /** @description MANDATORY store scope (task §52) */
+                storeId: string;
+                platformSkuId?: string;
+                sellerSku?: string;
+                offerId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        success: true;
+                        data: components["schemas"]["FindUnmappedVariantResponseDto"];
                     };
                 };
             };

@@ -2264,28 +2264,56 @@ export function OrdersPage() {
     [message],
   );
 
-  /** 快速建档/SKU映射共用的反查：本地未映射变体 → 按需补链接。 */
+  /**
+   * 订单行 → 本店未映射变体（2026-11-09 修复预选到同类变体）。
+   *
+   * 旧实现用 `keyword=mappingSearchKeyword` 做模糊列表搜索并取第一条：关键词
+   * `GRAVASTAR-MH1` 会同时命中 `GRAVASTAR-MH1-PRO` 的链接，第一条恰好是 PRO，
+   * 弹窗再「找不到精确匹配就选第一个未映射变体」，于是把订单行预选成 PRO。
+   * 现在改走后端精确匹配（platform_sku_id > seller_sku > offer_id，店铺隔离）。
+   */
   const resolveListingForItem = useCallback(
-    async (item: OrderItem, storeId: string): Promise<string | null> => {
-      const keyword = mappingSearchKeyword(item);
-      if (keyword === null || keyword.trim() === '') {
+    async (
+      item: OrderItem,
+      storeId: string,
+    ): Promise<{ listingId: string; variantId: string } | null> => {
+      const hasIdentifier =
+        item.platformSkuId !== null || item.sellerSku !== null || item.offerId !== null;
+      if (!hasIdentifier) {
         void message.warning(
           '该订单行没有任何平台 SKU 标识（platformSkuId / sellerSku / offerId），无法定位',
         );
         return null;
       }
-      const local = await apiGet<Array<{ id: string }>>('/api/v1/listings', {
-        storeId,
-        keyword: keyword.trim(),
-        mappingState: 'UNMAPPED',
-        page: 1,
-        pageSize: 5,
-      });
-      const listing = local.data[0];
-      if (listing !== undefined) {
-        return listing.id;
+      const lookup = async (): Promise<{ listingId: string; variantId: string } | null> => {
+        const result = await apiGet<{ listingId: string; variantId: string } | null>(
+          '/api/v1/listings/unmapped-variant',
+          {
+            storeId,
+            ...(item.platformSkuId === null ? {} : { platformSkuId: item.platformSkuId }),
+            ...(item.sellerSku === null ? {} : { sellerSku: item.sellerSku }),
+            ...(item.offerId === null ? {} : { offerId: item.offerId }),
+          },
+        );
+        return result.data ?? null;
+      };
+      const local = await lookup();
+      if (local !== null) {
+        return local;
       }
-      return ensureVariantListing(item, storeId);
+      // 本地镜像没有这条变体 → 按订单行标识定向补链，再精确查一次。
+      const listingId = await ensureVariantListing(item, storeId);
+      if (listingId === null) {
+        return null;
+      }
+      const refreshed = await lookup();
+      if (refreshed !== null) {
+        return refreshed;
+      }
+      void message.warning(
+        '本店已同步的链接里没有与该订单行完全匹配的变体，请先在「商品链接」同步该商品后再映射',
+      );
+      return null;
     },
     [ensureVariantListing, message],
   );
@@ -2316,12 +2344,13 @@ export function OrdersPage() {
     (item: OrderItem, storeId: string) => {
       setVariantMapLookupPending(true);
       resolveListingForItem(item, storeId)
-        .then((listingId) => {
-          if (listingId === null) {
+        .then((resolved) => {
+          if (resolved === null) {
             return;
           }
           setVariantMap({
-            listingId,
+            listingId: resolved.listingId,
+            variantId: resolved.variantId,
             match: {
               platformSkuId: item.platformSkuId,
               offerId: item.offerId,

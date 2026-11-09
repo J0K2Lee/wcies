@@ -283,6 +283,20 @@ FAILED
    MAPPED，映射异常已关闭，订单汇总状态**同样重算**（分配错误照常返回调用方）
    ——修复映射的事实必须反映到订单状态，操作员可随时再次「重新尝试分配」。
 
+### B1a. 映射弹窗的变体定位（2026-11-09 修复）
+
+订单行点「SKU 映射」时，目标链接与变体必须**按订单行标识精确解析**：
+
+- 新端点 `GET /listings/unmapped-variant?storeId&platformSkuId|sellerSku|offerId`：
+  店铺范围内只找 `UNMAPPED` 变体，强次序 `platform_sku_id > seller_sku >
+  offer_id`，逐条**精确相等**匹配，命中即返回 `listingId + variantId`；
+- 禁止用模糊 keyword 搜链接再取第一条：`GRAVASTAR-MH1` 会命中
+  `GRAVASTAR-MH1-PRO` 的链接（2026-11-09 实际事故：订单行 ORD00001331 的
+  变体被预选成 PRO）；
+- 弹窗在**给了订单行标识**时只接受精确匹配；本链接里找不到完全匹配的变体时
+  留空并提示「链接镜像尚未同步，请先同步该商品」，不得回退到第一个未映射
+  变体（人工入口没有标识时才允许默认第一个）。
+
 ### B2. 映射修复后的批量收敛（2026-10-20）
 
 映射已经建好、订单行却仍停在 FAILED + `ORDER_SKU_MAPPING_FAILED`，需要人工

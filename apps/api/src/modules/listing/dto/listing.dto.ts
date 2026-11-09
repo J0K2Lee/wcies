@@ -575,6 +575,41 @@ export class ResolveSkuRequestDto {
   sellerSku?: string;
 }
 
+/**
+ * 订单行 → 本店未映射变体（2026-11-09）：映射弹窗按订单行预选，
+ * 严格精确匹配（platform_sku_id > seller_sku > offer_id）。
+ */
+export class FindUnmappedVariantQueryDto {
+  @ApiProperty({ format: 'uuid', description: 'MANDATORY store scope (task §52)' })
+  @IsUUID()
+  storeId!: string;
+
+  @ApiPropertyOptional({ maxLength: 255 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  platformSkuId?: string;
+
+  @ApiPropertyOptional({ maxLength: 255 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  sellerSku?: string;
+
+  @ApiPropertyOptional({ maxLength: 255 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  offerId?: string;
+}
+
+export class FindUnmappedVariantResponseDto {
+  @ApiProperty({ format: 'uuid' }) listingId!: string;
+  @ApiProperty({ format: 'uuid' }) variantId!: string;
+  @ApiProperty({ enum: ['platformSkuId', 'sellerSku', 'offerId'] })
+  matchedBy!: string;
+}
+
 export class ResolveSkuResponseDto {
   @ApiProperty({ format: 'uuid' })
   listingId!: string;
