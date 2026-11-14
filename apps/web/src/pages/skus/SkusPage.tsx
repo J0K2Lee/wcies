@@ -23,6 +23,7 @@ import { useSearchParams } from 'react-router';
 import { apiDelete, apiPatch, apiPost, useApiQuery, useDebouncedValue } from '../../api/hooks';
 import { fmtMoney } from '../../utils/format';
 import { SkuCreateModal } from '../../components/SkuCreateModal';
+import { SkuExportModal } from '../../components/SkuExportModal';
 import { CategoryManageModal } from '../../components/CategoryManageModal';
 import { BrandManageModal } from '../../components/BrandManageModal';
 import {
@@ -344,6 +345,9 @@ export function SkusPage() {
   // 编辑表单内的品牌/分类现场快建（G9）。
   const [brandQuickOpen, setBrandQuickOpen] = useState(false);
   const [categoryQuickOpen, setCategoryQuickOpen] = useState(false);
+  // 自定义列导出（2026-11-04）：表格多选 + 弹窗；有勾选时可只导选中行。
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportSelectedIds, setExportSelectedIds] = useState<string[]>([]);
 
   // Deep link from the global palette: focus=<skuId> selects the row and opens
   // its drawer (Phase 2 task §33 — jump straight to the entity).
@@ -1051,6 +1055,8 @@ export function SkusPage() {
             {/* V1（D4）：分类/品牌管理入口（原商品页能力迁入 + 品牌管理补齐）。 */}
             <Button onClick={() => setCategoryManageOpen(true)}>分类管理</Button>
             <Button onClick={() => setBrandManageOpen(true)}>品牌管理</Button>
+            {/* 自定义列导出（2026-11-04）：默认导当前筛选全量；勾选行后可只导选中。 */}
+            <Button onClick={() => setExportOpen(true)}>导出</Button>
           </Space>
         }
       />
@@ -1167,6 +1173,12 @@ export function SkusPage() {
             showTotal: (total) => `共 ${total} 个 SKU`,
           }}
           rowClassName={(record) => (record.id === selectedId ? 'wcies-row-selected' : '')}
+          rowSelection={{
+            // 勾选用于「只导出选中」，不改变点击选中语义（单击仍选中右栏）。
+            selectedRowKeys: exportSelectedIds,
+            onChange: (keys) => setExportSelectedIds(keys.map(String)),
+            preserveSelectedRowKeys: true,
+          }}
           onRow={(record) => ({
             onClick: () => setSelectedId(record.id === selectedId ? null : record.id),
             onDoubleClick: () => setDrawerId(record.id),
@@ -2100,6 +2112,21 @@ export function SkusPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* 自定义列导出（2026-11-04）：列目录来自后端，勾选结果记在 localStorage。 */}
+      <SkuExportModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        filters={{
+          keyword: debouncedKeyword || undefined,
+          brandId,
+          categoryId,
+          status,
+          hasListing: hasListing === 'true' || hasListing === 'false' ? hasListing : undefined,
+        }}
+        selectedSkuIds={exportSelectedIds}
+        totalCount={list.data?.meta.total ?? 0}
+      />
     </div>
   );
 }

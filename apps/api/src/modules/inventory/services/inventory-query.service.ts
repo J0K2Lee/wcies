@@ -40,6 +40,22 @@ function sellableOf(sellableOnHand: bigint, safety: bigint): bigint {
   return net > 0n ? net : 0n;
 }
 
+/**
+ * 单个 SKU 的跨仓库存汇总（2026-11-04，SKU 导出的可选项）。
+ *
+ * 口径与 `getSkuInventory().totals` 完全一致：按仓库先聚合（安全库存是
+ * SKU×仓库 维度，不能在库位粒度重复计入），再把各仓的 SELLABLE 可售相加。
+ */
+export interface SkuStockSummary {
+  skuId: string;
+  onHandQty: string;
+  reservedQty: string;
+  pickedQty: string;
+  safetyQty: string;
+  /** 可售 = Σ max(0, 各仓 SELLABLE 在库 − 该仓安全库存) */
+  availableQty: string;
+}
+
 export interface InventoryRowDto {
   id: string;
   skuId: string;
@@ -282,6 +298,72 @@ export class InventoryQueryService {
       warehouses,
       bins,
     };
+  }
+
+  /**
+   * 批量读取多个 SKU 的跨仓库存汇总（导出等批量场景，2026-11-04）。
+   *
+   * 这是 Inventory 模块对外提供的**只读**能力：其他模块要展示库存数字必须
+   * 走这里，不得直接查 `inventory_balances`（AGENTS.md §10 / §9）。
+   * 没有账面行的 SKU 不出现在返回 Map 里 —— 「没有记录」不等于 0，
+   * 由调用方决定如何呈现（AGENTS.md §20）。
+   */
+  async listSkuStockSummaries(skuIds: readonly string[]): Promise<Map<string, SkuStockSummary>> {
+    const result = new Map<string, SkuStockSummary>();
+    const unique = [...new Set(skuIds)].filter((id) => id !== '');
+    if (unique.length === 0) {
+      return result;
+    }
+
+    // 先按 (sku, 仓库) 聚合：安全库存行是 SKU×仓库 一条，直接 join 到库位行
+    // 会被重复计入，所以必须先压到仓库粒度。
+    const rows = await this.dataSource.query<
+      Array<{
+        sku_id: string;
+        on_hand: string;
+        reserved: string;
+        picked: string;
+        safety: string;
+        available: string;
+      }>
+    >(
+      `WITH per_warehouse AS (
+         SELECT b.sku_id,
+                b.warehouse_id,
+                SUM(b.on_hand_qty) AS on_hand,
+                SUM(b.reserved_qty) AS reserved,
+                SUM(b.picked_qty) AS picked,
+                SUM(CASE WHEN b.inventory_condition = 'SELLABLE' THEN b.on_hand_qty ELSE 0 END)
+                  AS sellable_on_hand,
+                COALESCE(MAX(ss.safety_qty), 0) AS safety
+           FROM inventory_balances b
+           LEFT JOIN inventory_safety_stocks ss
+             ON ss.sku_id = b.sku_id AND ss.warehouse_id = b.warehouse_id
+          WHERE b.sku_id = ANY($1::uuid[])
+          GROUP BY b.sku_id, b.warehouse_id
+       )
+       SELECT sku_id,
+              SUM(on_hand)  AS on_hand,
+              SUM(reserved) AS reserved,
+              SUM(picked)   AS picked,
+              SUM(safety)   AS safety,
+              SUM(GREATEST(sellable_on_hand - safety, 0)) AS available
+         FROM per_warehouse
+        GROUP BY sku_id`,
+      [unique],
+    );
+
+    for (const row of rows) {
+      result.set(row.sku_id, {
+        skuId: row.sku_id,
+        onHandQty: formatQty(parseQty(row.on_hand)),
+        reservedQty: formatQty(parseQty(row.reserved)),
+        pickedQty: formatQty(parseQty(row.picked)),
+        safetyQty: formatQty(parseQty(row.safety)),
+        availableQty: formatQty(parseQty(row.available)),
+      });
+    }
+    return result;
   }
 
   async listTransactions(

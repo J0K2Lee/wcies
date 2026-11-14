@@ -73,6 +73,19 @@ Controller（HTTP、DTO 校验）
 - **推送订阅健康巡检**：`WebhookHealthService` 随调度 tick 每 6h 扫一遍店铺，
   平台侧订阅被暂停 → 异常 + 通知；店铺抽屉可「立即体检」（只读探测）。
   巡检结果只进异常/通知，不改订阅状态（真实写操作仍须人工/运维脚本显式触发）。
+- **大型文件导出通道**（2026-11-04）：`wcies.export` 队列（BullMQ，§50）。
+  首个使用者是 SKU 自定义列导出（`POST /api/v1/skus/exports`）：
+  - 口径：勾选平台映射列 → **一行一个 listing**（同一 SKU 多行）；不勾 → 一 SKU 一行；
+    全量导出，不设行数上限。
+  - 实现：SKU id 先取全量，再按 500 一批取明细；exceljs 流式写入临时文件后上传
+    `exports/sku/<uuid>.xlsx`，签名地址 30 分钟有效；编码/条码列强制文本格式，
+    时间按前端传的 `tzOffsetMinutes` 换算。
+  - 库存列**只经** `InventoryQueryService.listSkuStockSummaries()`（§10），
+    没有账面行的 SKU 留空而不是 0（§20）。
+  - 列目录唯一事实源在后端：`GET /api/v1/skus/exports/columns`，前端不硬编码；
+    未知列 422（`SKU_EXPORT_INVALID_COLUMNS`），不静默丢列。
+  - 任务状态只存 BullMQ（不建表）；只能由提交者查询自己的任务。
+  - 已知缺口：导出文件没有保留期清理（`ObjectStorageService` 尚无按前缀列举能力）。
 
 ## 5. 关键工程约束（与 AGENTS.md 对齐）
 

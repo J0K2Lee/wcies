@@ -17,6 +17,8 @@ export const QUEUE_NAMES = {
   label: 'wcies.label',
   /** 买家侧提醒采集：聊天/评价/退货（2026-11-02）。 */
   buyerFeedback: 'wcies.buyer-feedback',
+  /** 大型文件导出（2026-11-04）：SKU 自定义列导出，后续订单/采购可复用。 */
+  export: 'wcies.export',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];

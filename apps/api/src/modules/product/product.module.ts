@@ -11,6 +11,10 @@ import { SkuImageEntity } from './entities/sku-image.entity';
 import { SkuBundleComponentEntity } from './entities/sku-bundle-component.entity';
 import { SkuRepository } from './repositories/sku.repository';
 import { SkuBarcodeRepository } from './repositories/sku-barcode.repository';
+import { SkuExportService } from './services/sku-export.service';
+import { SkuExportQueueService } from './services/sku-export-queue.service';
+import { SkuExportProcessor } from './processors/sku-export.processor';
+import { SkuExportController } from './controllers/sku-export.controller';
 import { SkuImageRepository } from './repositories/sku-image.repository';
 import { SkuService } from './services/sku.service';
 import { BarcodeService } from './services/barcode.service';
@@ -40,6 +44,8 @@ import { BarcodeController } from './controllers/barcode.controller';
       SkuBundleComponentEntity,
     ]),
     BullModule.registerQueue({ name: QUEUE_NAMES.media }),
+    // 导出队列（2026-11-04）：SKU 全量导出走 BullMQ（AGENTS §50）。
+    BullModule.registerQueue({ name: QUEUE_NAMES.export }),
     CatalogModule,
     OperationLogModule,
     ObjectStorageModule,
@@ -47,7 +53,7 @@ import { BarcodeController } from './controllers/barcode.controller';
     // 互相 forwardRef 是仓库里既有的做法（order↔picking / order↔purchase 同款）。
     forwardRef(() => InventoryModule),
   ],
-  controllers: [SkuController, BarcodeController],
+  controllers: [SkuController, BarcodeController, SkuExportController],
   providers: [
     SkuService,
     BarcodeService,
@@ -58,6 +64,9 @@ import { BarcodeController } from './controllers/barcode.controller';
     SkuReferenceRegistry,
     SkuMergeService,
     SkuDuplicateQueryService,
+    SkuExportService,
+    SkuExportQueueService,
+    SkuExportProcessor,
     SkuRepository,
     SkuBarcodeRepository,
     SkuImageRepository,
